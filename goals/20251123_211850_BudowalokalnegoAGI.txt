@@ -1,0 +1,5 @@
+czas: 2025-11-23 21:18
+nazwa: "Budowa lokalnego AGI"
+opis: "Stworzyć lokalny system myślący z pamięcią, językiem i refleksją"
+priorytet: 10
+status: "aktywny"

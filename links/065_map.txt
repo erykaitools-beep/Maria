@@ -1,0 +1,4 @@
+065 -> percepcja
+065 -> input
+065 -> external
+065 -> ai

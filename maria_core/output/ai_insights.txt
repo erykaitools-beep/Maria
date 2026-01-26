@@ -1,0 +1,2 @@
+[2025-11-29 14:43:23] [z: agent_analysis] Percepcja i refleksja to kluczowe komponenty autonomicznego agenta
+[2025-12-05 21:10:24] [z: agent_analysis] Percepcja i refleksja to kluczowe komponenty autonomicznego agenta

@@ -1,0 +1,15 @@
+SZTUCZNA INTELIGENCJA – HEURYSTYKI I PRZESZUKIWANIE
+
+1. BFS – przeszukiwanie wszerz
+2. DFS – przeszukiwanie wgłąb
+
+3. A* – przeszukiwanie heurystyczne
+f(n)=g(n)+h(n)
+g – koszt dotychczasowy
+h – heurystyka
+
+4. Hill climbing
+5. Beam search
+
+Zastosowanie:
+planowanie, gry, robotyka.

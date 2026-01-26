@@ -1,0 +1,22 @@
+ARCHITEKTURA AI – PĘTLA AGENTA
+
+Główne komponenty:
+1. Percepcja (input)
+2. Pamięć robocza
+3. Pamięć długoterminowa
+4. Graf semantyczny
+5. LLM (mózg)
+6. Akcje (actions)
+7. Meta-controller
+8. Watchdog
+
+Pętla agenta:
+- odbierz percepcję
+- zapis do pamięci
+- aktualizacja grafu
+- myśl (LLM)
+- wykonaj akcję
+- aktualizuj stan
+- powtórz
+
+To fundament samodzielnego systemu AI.

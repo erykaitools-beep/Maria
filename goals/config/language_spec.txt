@@ -1,0 +1,41 @@
+# ====================================
+# FORMAT JEDNEGO ZAPISU PAMIĘCI
+# ====================================
+
+czas: [data i godzina]
+treść: [co chcę zapamiętać?]
+dlaczego: [czemu to jest ważne?]
+powiązania: [lista powiązań, np. "AI, pamięć, logika"]
+priorytet: [1-10]
+
+
+# ====================================
+# KOMENDY WYKONYWALNE (obsługiwane)
+# ====================================
+
+MEM | zapisuje nową pamięć | MEM|treść|dlaczego|tag1,tag2|priorytet
+STATE | zmienia stan systemu | STATE|stan|kontekst
+LINK | tworzy powiązanie | LINK|numer_pamięci|tag
+DEFINE | tworzy nową komendę języka | DEFINE|NAZWA|opis|składnia
+
+
+# ====================================
+# KOMENDY ZDEFINIOWANE (jeszcze nieobsługiwane)
+# ====================================
+
+THINK | tworzy nową pamięć na podstawie istniejących wspomnień | THINK|źródło|opis
+REFLECT | tworzy wniosek z ostatnich kilku rekordów pamięci | REFLECT|zasięg
+ASSOCIATE | szuka powiązań między tagami i pamięciami | ASSOCIATE|tag
+
+
+# ====================================
+# TODO – komendy do przyszłej implementacji
+# ====================================
+
+THINK – NOT IMPLEMENTED
+REFLECT – NOT IMPLEMENTED
+ASSOCIATE – NOT IMPLEMENTED
+
+THINK | tworzy nową pamięć na podstawie istniejących wspomnień | THINK
+REFLECT | tworzy wniosek z ostatnich kilku rekordów pamięci | REFLECT
+ASSOCIATE | szuka powiązań między tagami i pamięciami | ASSOCIATE

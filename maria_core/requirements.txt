@@ -1,0 +1,8 @@
+# DEAMONMARIA V2 - Requirements
+# Python 3.8+
+
+# Ollama API calls
+requests>=2.31.0
+
+# No other dependencies needed - system uses only stdlib + requests!
+# Make sure Ollama is installed locally: https://ollama.ai/

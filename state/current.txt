@@ -1,0 +1,5 @@
+agent: Maria
+czas: 2025-12-05 22:13:31
+cykl: 10
+percepcje: 20
+stan: 'stopped'

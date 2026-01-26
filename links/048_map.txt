@@ -1,0 +1,7 @@
+048 -> percepcja
+048 -> input
+048 -> external
+048 -> foundation
+048 -> memory
+048 -> time_2025
+048 -> language

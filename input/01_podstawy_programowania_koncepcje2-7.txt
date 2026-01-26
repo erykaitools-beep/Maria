@@ -1,0 +1,28 @@
+## 2. Zmienne - Przechowywanie Danych
+
+Zmienna to nazwane "pudełko" w pamięci komputera, w którym przechowujesz wartości.
+
+### Typy danych:
+
+**Liczby całkowite (int):**
+- Przykłady: 5, -10, 1000
+- Użycie: liczniki, indeksy, obliczenia matematyczne
+
+**Liczby zmiennoprzecinkowe (float):**
+- Przykłady: 3.14, -0.5, 2.71828
+- Użycie: precyzyjne obliczenia, ceny, pomiary
+
+**Tekst (string):**
+- Przykłady: "Hello", "Jan Kowalski", "2025"
+- Użycie: nazwy, opisy, komunikaty
+
+**Wartości logiczne (boolean):**
+- Tylko dwie wartości: True (prawda) lub False (fałsz)
+- Użycie: warunki, flagi, decyzje
+
+### Zasady nazewnictwa zmiennych:
+
+- Używaj znaczących nazw: `wiek_uzytkownika` zamiast `x`
+- Małe litery, słowa oddzielone podkreślnikiem (Python style)
+- Nie zaczynaj od cyfry: `user1` OK, `1user` błąd
+- Unikaj polskich znaków w kodzie

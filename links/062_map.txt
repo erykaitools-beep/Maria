@@ -1,0 +1,4 @@
+062 -> percepcja
+062 -> input
+062 -> external
+062 -> foundation

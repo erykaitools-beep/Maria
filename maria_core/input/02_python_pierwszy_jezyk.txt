@@ -1,0 +1,299 @@
+# Python - Twój Pierwszy Język Programowania
+
+## Dlaczego Python?
+
+Python to idealny język dla początkujących z wielu powodów:
+
+### Zalety Pythona:
+
+1. **Prostota składni** - kod czyta się jak angielski
+2. **Wszechstronność** - web, data science, automatyzacja, AI
+3. **Ogromna społeczność** - łatwo znaleźć pomoc
+4. **Bogate biblioteki** - gotowe rozwiązania do wszystkiego
+5. **Wysokie zarobki** - bardzo poszukiwany na rynku pracy
+
+### Wady (dla uczciwości):
+
+1. Wolniejszy niż C/C++ (ale dla 95% zastosowań wystarczający)
+2. Słabszy w aplikacjach mobilnych (lepszy: Kotlin, Swift)
+3. Wymagana znajomość wcięć (może frustrować na początku)
+
+## Instalacja Pythona
+
+### Windows:
+1. Pobierz z python.org
+2. WAŻNE: Zaznacz "Add Python to PATH"!
+3. Zainstaluj
+4. Sprawdź w cmd: `python --version`
+
+### Mac:
+Python często już zainstalowany.
+Sprawdź: `python3 --version`
+
+### Linux:
+Zwykle już jest. Jeśli nie:
+```
+sudo apt install python3
+```
+
+## Twój Pierwszy Program
+
+```python
+print("Hello, World!")
+```
+
+To klasyka! Każdy programista zaczyna od tego.
+
+### Co się dzieje?
+- `print()` to funkcja wypisująca tekst
+- Tekst w cudzysłowach to string
+- Program wyświetli: Hello, World!
+
+## Zmienne w Pythonie
+
+```python
+# Liczby całkowite
+wiek = 25
+rok = 2025
+
+# Liczby zmiennoprzecinkowe
+cena = 19.99
+pi = 3.14159
+
+# Teksty (stringi)
+imie = "Jan"
+nazwisko = 'Kowalski'  # pojedyncze lub podwójne cudzysłowy
+
+# Wartości logiczne
+jest_aktywny = True
+ma_rabat = False
+
+# Python sam rozpoznaje typ!
+```
+
+### Operacje na zmiennych:
+
+```python
+# Matematyka
+suma = 10 + 5          # 15
+roznica = 10 - 5       # 5
+iloczyn = 10 * 5       # 50
+iloraz = 10 / 5        # 2.0 (zawsze float!)
+potega = 2 ** 3        # 8 (2 do potęgi 3)
+reszta = 10 % 3        # 1 (reszta z dzielenia)
+
+# Łączenie stringów
+pelne_imie = imie + " " + nazwisko  # "Jan Kowalski"
+
+# Konwersje typów
+numer = "123"
+liczba = int(numer)    # zamiana string → int
+```
+
+## Instrukcje Warunkowe
+
+```python
+wiek = 18
+
+if wiek >= 18:
+    print("Jesteś pełnoletni")
+    print("Możesz głosować")
+elif wiek >= 13:
+    print("Jesteś nastolatkiem")
+else:
+    print("Jesteś dzieckiem")
+```
+
+**WAŻNE:** Wcięcia (4 spacje) są OBOWIĄZKOWE w Pythonie!
+
+### Warunki złożone:
+
+```python
+wiek = 20
+ma_prawo_jazdy = True
+
+if wiek >= 18 and ma_prawo_jazdy:
+    print("Możesz wynająć samochód")
+elif wiek >= 18 and not ma_prawo_jazdy:
+    print("Zrób prawo jazdy!")
+else:
+    print("Za młody na wynajem")
+```
+
+## Pętle
+
+### Pętla FOR:
+
+```python
+# Powtórz 5 razy
+for i in range(5):
+    print(f"Iteracja numer {i}")
+
+# Wynik:
+# Iteracja numer 0
+# Iteracja numer 1
+# Iteracja numer 2
+# Iteracja numer 3
+# Iteracja numer 4
+
+# Pętla po liście
+owoce = ["jabłko", "banan", "gruszka"]
+for owoc in owoce:
+    print(f"Lubię {owoc}")
+```
+
+### Pętla WHILE:
+
+```python
+licznik = 0
+while licznik < 5:
+    print(f"Licznik: {licznik}")
+    licznik += 1  # licznik = licznik + 1
+
+# UWAGA: bez licznik += 1 to nieskończona pętla!
+```
+
+## Listy - Przechowywanie Wielu Wartości
+
+```python
+# Tworzenie listy
+liczby = [1, 2, 3, 4, 5]
+imiona = ["Anna", "Bartek", "Celina"]
+mix = [1, "tekst", True, 3.14]  # Python pozwala mieszać typy
+
+# Dostęp przez indeks (od 0!)
+pierwszy = liczby[0]     # 1
+ostatni = liczby[-1]     # 5 (ujemny indeks od końca)
+
+# Dodawanie elementu
+imiona.append("Damian")  # ["Anna", "Bartek", "Celina", "Damian"]
+
+# Usuwanie
+imiona.remove("Bartek")  # usuwa pierwszą wartość "Bartek"
+
+# Długość listy
+ile = len(imiona)        # 3
+
+# Sortowanie
+liczby_mix = [5, 2, 8, 1]
+liczby_mix.sort()        # [1, 2, 5, 8]
+```
+
+## Funkcje
+
+```python
+# Definicja funkcji
+def powitaj(imie):
+    print(f"Cześć, {imie}!")
+
+# Wywołanie
+powitaj("Anna")          # Wynik: Cześć, Anna!
+
+# Funkcja z return
+def dodaj(a, b):
+    wynik = a + b
+    return wynik
+
+suma = dodaj(5, 3)       # suma = 8
+
+# Funkcja z wartością domyślną
+def przedstaw_sie(imie, wiek=18):
+    print(f" Jestem {imie}, mam {wiek} lat")
+
+przedstaw_sie("Jan")              # użyje wiek=18
+przedstaw_sie("Anna", 25)         # nadpisze wiek
+```
+
+## Input - Pobieranie Danych od Użytkownika
+
+```python
+imie = input("Jak masz na imię? ")
+print(f"Miło mi Cię poznać, {imie}!")
+
+# UWAGA: input() zawsze zwraca STRING!
+wiek_str = input("Ile masz lat? ")
+wiek = int(wiek_str)  # konwersja na int
+
+if wiek >= 18:
+    print("Pełnoletni")
+```
+
+## Słowniki - Pary Klucz-Wartość
+
+```python
+# Tworzenie słownika
+osoba = {
+    "imie": "Jan",
+    "nazwisko": "Kowalski",
+    "wiek": 30,
+    "miasto": "Warszawa"
+}
+
+# Dostęp do wartości
+print(osoba["imie"])           # Jan
+print(osoba["wiek"])           # 30
+
+# Dodawanie pola
+osoba["email"] = "jan@example.com"
+
+# Sprawdzenie czy klucz istnieje
+if "telefon" in osoba:
+    print(osoba["telefon"])
+else:
+    print("Brak numeru telefonu")
+```
+
+## Praca z Plikami
+
+```python
+# Zapis do pliku
+with open("notatki.txt", "w", encoding="utf-8") as plik:
+    plik.write("To jest moja pierwsza notatka
+")
+    plik.write("Uczę się Pythona!")
+
+# Odczyt z pliku
+with open("notatki.txt", "r", encoding="utf-8") as plik:
+    zawartosc = plik.read()
+    print(zawartosc)
+```
+
+**Tryby otwarcia:**
+- `"r"` - read (odczyt)
+- `"w"` - write (zapis, nadpisuje!)
+- `"a"` - append (dopisywanie na końcu)
+
+## Najczęstsze Błędy Początkujących
+
+1. **Brak wcięć lub złe wcięcia**
+   - Użyj 4 spacji (lub Tab ustawiony na 4 spacje)
+
+2. **Mieszanie typów**
+   - `"5" + 3` → błąd! Użyj `int("5") + 3`
+
+3. **Indeksowanie od 1 zamiast 0**
+   - Lista `[10, 20, 30]`: element pierwszy to `lista[0]` nie `lista[1]`
+
+4. **Nieskończone pętle while**
+   - Zawsze musi być warunek stopu!
+
+5. **Modyfikowanie listy podczas iteracji**
+   - Nie usuwaj elementów z listy w pętli for po tej liście
+
+## Ćwiczenia dla Początkujących
+
+1. **Kalkulator** - dodawanie, odejmowanie, mnożenie, dzielenie
+2. **Zgadywanka** - komputer losuje liczbę, użytkownik zgaduje
+3. **Lista zakupów** - dodawanie, usuwanie, wyświetlanie
+4. **Konwerter jednostek** - celsjusz ↔ fahrenheit
+5. **Walidator hasła** - sprawdza siłę hasła
+
+## Następne Kroki
+
+1. Rozwiązuj ćwiczenia na: Codewars, HackerRank, LeetCode
+2. Buduj małe projekty (aplikacje konsolowe)
+3. Naucz się bibliotek: requests, pandas, matplotlib
+4. Poznaj OOP (programowanie obiektowe)
+5. Zacznij budować portfolio na GitHub
+
+**Pamiętaj:** Programowanie to umiejętność praktyczna. Czytanie to 20%, pisanie kodu to 80%!

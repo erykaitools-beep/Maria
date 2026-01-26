@@ -1,0 +1,7 @@
+# Pierwszy skrypt w języku Eryka dla AI
+
+MEM|Eryk zaczyna tworzyć swój język dla lokalnej AI|To fundament całego projektu pamięci i logiki|eryk,język,pamięć,start|9
+STATE|tworzenie_języka|system uczy się pierwszych komend w nowym języku
+LINK|001|eryk
+LINK|001|język
+LINK|001|start

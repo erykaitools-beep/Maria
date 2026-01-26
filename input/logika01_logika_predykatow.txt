@@ -1,0 +1,27 @@
+LOGIKA PREDYKATÓW – PODSTAWY
+
+Logika predykatów rozszerza logikę zdań o:
+- kwantyfikatory
+- predykaty (właściwości i relacje)
+- zmienne
+- funkcje
+
+1. Kwantyfikatory:
+- ∀x P(x)   – „dla każdego x, P(x)”
+- ∃x P(x)   – „istnieje x takie, że P(x)”
+
+2. Predykaty:
+P(x)     – P jest własnością x
+R(x,y)   – relacja między x i y
+
+3. Zmienne:
+Zmienne mogą być wolne (x) lub związane (x w ∀x).
+
+4. Funkcje:
+f(x) zwraca wartość przypisaną x: np. f(x)=x+1.
+
+5. Wnioskowanie:
+- instancjacja uniwersalna (z ∀ do konkretu)
+- generalizacja egzystencjalna (z ∃ do ogólnego)
+
+Logika predykatów jest fundamentem baz wiedzy AI i grafów semantycznych.

@@ -1,0 +1,6 @@
+044 -> percepcja
+044 -> input
+044 -> external
+044 -> memory
+044 -> foundation
+044 -> language

@@ -1,0 +1,3 @@
+001 -> start_systemu
+start_systemu -> eryk
+eryk -> nadrzędny_operator

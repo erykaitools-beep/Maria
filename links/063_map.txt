@@ -1,0 +1,3 @@
+063 -> percepcja
+063 -> input
+063 -> external

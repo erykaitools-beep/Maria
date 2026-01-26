@@ -1,0 +1,7 @@
+054 -> percepcja
+054 -> input
+054 -> external
+054 -> ai
+054 -> create
+054 -> system
+054 -> project

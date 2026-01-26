@@ -1,0 +1,13 @@
+007 -> INFERRED
+007 -> THINK
+007 <-> 001 (common: ['23', 'dlaczego', 'powiązania', 'treść', '2025', '11', 'czas', 'system'])
+007 <-> 002 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'treść', '2025', 'jest', '11', 'czas', 'system', 'priorytet'])
+007 <-> 003 (common: ['24', 'dlaczego', 'powiązania', 'eryk', 'treść', '2025', 'jest', '11', 'czas', 'system', 'priorytet'])
+007 <-> 004 (common: ['24', 'dlaczego', 'powiązania', 'eryk', 'treść', '2025', '11', 'czas', 'system', 'priorytet'])
+007 <-> 005 (common: ['23', 'dlaczego', 'powiązania', 'eryk', '2025', '11', 'czas', 'treść', 'priorytet'])
+007 <-> 006 (common: ['23', 'dlaczego', 'powiązania', 'eryk', '2025', '11', 'czas', 'treść', 'priorytet'])
+007 <-> 008 (common: ['23', 'dlaczego', '17', 'powiązania', 'eryk', 'inferred', '2025', '11', 'czas', 'elementy', 'treść', 'priorytet'])
+007 <-> 009 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'inferred', '2025', '11', 'czas', 'elementy', 'treść', 'priorytet'])
+007 <-> 010 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'inferred', '2025', '11', 'czas', 'elementy', 'treść', 'priorytet'])
+007 <-> 011 (common: ['jaki', '23', 'dlaczego', 'powiązania', 'wspólny', 'inferred', 'think', 'treść', '2025', 'jest', '11', 'wspólne', 'elementy', 'czas', '4', 'wniosek', 'priorytet'])
+007 <-> 012 (common: ['23', 'dlaczego', 'powiązania', 'inferred', '2025', '11', 'czas', 'elementy', 'treść', 'priorytet'])

@@ -1,0 +1,15 @@
+006 -> eryk
+006 -> język
+006 -> pamięć
+006 -> start
+006 <-> 001 (common: ['23', 'dlaczego', 'powiązania', 'start', 'pamięci', '2025', '11', 'czas', 'treść'])
+006 <-> 002 (common: ['pamięć', '23', 'dlaczego', 'fundament', 'powiązania', 'eryk', 'start', 'to', 'pamięci', '2025', 'i', '11', 'czas', 'dla', 'ai', 'treść', 'lokalnej', 'priorytet'])
+006 <-> 003 (common: ['dlaczego', 'powiązania', 'eryk', 'start', 'swój', 'to', 'pamięci', '2025', 'i', '11', 'czas', '9', 'treść', 'priorytet'])
+006 <-> 004 (common: ['dlaczego', 'powiązania', 'eryk', 'to', 'pamięci', '2025', 'i', '11', 'czas', 'ai', 'treść', 'lokalnej', 'priorytet'])
+006 <-> 005 (common: ['23', '16', 'powiązania', '2025', '9', 'dla', 'priorytet', 'pamięć', 'logiki', 'dlaczego', 'eryk', 'język', 'zaczyna', 'i', 'projektu', 'swój', 'to', 'czas', 'ai', 'fundament', 'start', 'całego', 'tworzyć', 'pamięci', '11', 'treść', 'lokalnej'])
+006 <-> 007 (common: ['23', 'dlaczego', 'powiązania', 'eryk', '2025', '11', 'czas', 'treść', 'priorytet'])
+006 <-> 008 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'pamięci', '2025', '11', 'czas', 'treść', 'priorytet'])
+006 <-> 009 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'pamięci', '2025', '11', 'czas', 'treść', 'priorytet'])
+006 <-> 010 (common: ['23', 'dlaczego', 'powiązania', 'eryk', 'pamięci', '2025', '11', 'czas', 'treść', 'priorytet'])
+006 <-> 011 (common: ['23', 'dlaczego', 'powiązania', '2025', '11', 'czas', 'treść', 'priorytet'])
+006 <-> 012 (common: ['23', 'dlaczego', 'powiązania', 'pamięci', '2025', '11', 'czas', 'treść', 'priorytet'])

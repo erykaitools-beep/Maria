@@ -1,0 +1,388 @@
+# Struktury Danych i Algorytmy - Fundamenty Efektywnego Kodu
+
+## Dlaczego Struktury Danych i Algorytmy?
+
+Wybór właściwej struktury danych i algorytmu to różnica między programem działającym 1 sekundę a programem działającym 10 minut. W rozmowach kwalifikacyjnych (Google, Meta, Amazon) 80% czasu to pytania o algorytmy.
+
+## 1. Big O Notation - Ocena Wydajności
+
+Big O opisuje jak szybko rośnie czas wykonania wraz ze wzrostem danych.
+
+### Podstawowe klasy złożoności (od najszybszej):
+
+**O(1) - Stała:**
+- Czas niezależny od rozmiaru danych
+- Przykład: dostęp do elementu tablicy przez indeks
+- `lista[5]` zajmuje tyle samo czasu dla listy 10 i 1000000 elementów
+
+**O(log n) - Logarytmiczna:**
+- Czas rośnie bardzo wolno
+- Przykład: wyszukiwanie binarne w posortowanej liście
+- Dla 1000 elementów: ~10 operacji, dla 1000000: ~20 operacji
+
+**O(n) - Liniowa:**
+- Czas proporcjonalny do rozmiaru danych
+- Przykład: szukanie elementu w nieposortowanej liście
+- 1000 elementów = max 1000 operacji
+
+**O(n log n) - Liniowo-logarytmiczna:**
+- Przykład: efektywne sortowanie (merge sort, quick sort)
+- Najlepsze możliwe sortowanie przez porównania
+
+**O(n²) - Kwadratowa:**
+- Czas rośnie bardzo szybko
+- Przykład: zagnieżdżone pętle, bubble sort
+- 1000 elementów = 1000000 operacji (!)
+
+**O(2ⁿ) - Wykładnicza:**
+- Katastrofalnie wolne dla większych danych
+- Przykład: niektóre rozwiązania rekurencyjne
+- Unikaj za wszelką cenę!
+
+### Praktyczna zasada:
+
+Dla 1000000 elementów:
+- O(1): świetnie ✅
+- O(log n): świetnie ✅
+- O(n): OK ✅
+- O(n log n): OK ✅
+- O(n²): 1000000000000 operacji ❌
+- O(2ⁿ): komputer zapewne zawiesi się ❌
+
+## 2. Tablice i Listy
+
+### Tablica (Array):
+
+**Zalety:**
+- O(1) dostęp przez indeks
+- Ciągły blok pamięci (cache-friendly)
+- Niski narzut pamięciowy
+
+**Wady:**
+- Stały rozmiar (w większości języków)
+- O(n) wstawianie/usuwanie w środku
+- Kosztowne powiększanie
+
+### Lista Dynamiczna (Python list, Java ArrayList):
+
+**Zalety:**
+- Dynamiczny rozmiar
+- O(1) dodawanie na końcu (amortyzowane)
+- Elastyczność
+
+**Wady:**
+- O(n) wstawianie/usuwanie w środku
+- Więcej pamięci niż tablica
+
+### Kiedy używać?
+
+- **Dostęp losowy** (indeks) → tablica/lista
+- **Znany rozmiar** → tablica
+- **Dynamiczny rozmiar** → lista
+- **Częste dodawanie na końcu** → lista
+
+## 3. Listy Wiązane (Linked Lists)
+
+### Struktura:
+
+Każdy element (węzeł) zawiera:
+- Wartość
+- Wskaźnik do następnego elementu
+
+### Zalety:
+
+- O(1) wstawianie/usuwanie na początku
+- O(1) wstawianie/usuwanie jeśli masz referencję
+- Dynamiczny rozmiar bez kopiowania
+
+### Wady:
+
+- O(n) dostęp przez indeks
+- Więcej pamięci (wskaźniki)
+- Nie cache-friendly
+
+### Kiedy używać?
+
+- Częste wstawianie/usuwanie w środku
+- Nieznany rozmiar końcowy
+- Implementacja stosu/kolejki
+
+## 4. Stos (Stack) - LIFO
+
+**Last In, First Out** - ostatni wchodzi, pierwszy wychodzi (jak stos talerzy)
+
+### Operacje:
+
+- `push(element)` - dodaj na górę: O(1)
+- `pop()` - zdejmij z góry: O(1)
+- `peek()` - sprawdź górny bez usuwania: O(1)
+
+### Zastosowania:
+
+- **Cofnij (Undo)** w edytorach
+- **Historia przeglądarki** (wstecz)
+- **Wywołania funkcji** (call stack)
+- **Sprawdzanie nawiasów** w wyrażeniach
+- **DFS** (algorytm przeszukiwania grafu)
+
+### Implementacja w Pythonie:
+
+```python
+stos = []
+stos.append(1)      # push
+stos.append(2)
+element = stos.pop()  # 2
+```
+
+## 5. Kolejka (Queue) - FIFO
+
+**First In, First Out** - pierwszy wchodzi, pierwszy wychodzi (jak kolejka w sklepie)
+
+### Operacje:
+
+- `enqueue(element)` - dodaj na koniec: O(1)
+- `dequeue()` - zdejmij z początku: O(1)
+- `peek()` - sprawdź pierwszy: O(1)
+
+### Zastosowania:
+
+- **Obsługa zadań** (task queue)
+- **BFS** (algorytm przeszukiwania grafu)
+- **Buforowanie** (buffer)
+- **Drukarki** - kolejka wydruku
+
+### Implementacja w Pythonie:
+
+```python
+from collections import deque
+
+kolejka = deque()
+kolejka.append(1)        # enqueue
+kolejka.append(2)
+element = kolejka.popleft()  # dequeue: 1
+```
+
+## 6. Słownik/Mapa (Hash Map/Dictionary)
+
+### Zasada działania:
+
+Funkcja hash przekształca klucz na indeks tablicy.
+
+**Przykład:**
+- Klucz: "Jan"
+- Hash: hash("Jan") = 12345
+- Indeks: 12345 % rozmiar_tablicy = 45
+- Wartość zapisana pod indeksem 45
+
+### Wydajność:
+
+- Dostęp: O(1) średnio
+- Wstawianie: O(1) średnio
+- Usuwanie: O(1) średnio
+
+**UWAGA:** W najgorszym przypadku (kolizje) może być O(n)!
+
+### Zastosowania:
+
+- **Liczenie wystąpień** (word count)
+- **Cache/Memoization**
+- **Szybkie wyszukiwanie** po kluczu
+- **Unikalne elementy** (set)
+
+### Python:
+
+```python
+slownik = {}
+slownik["Jan"] = 25        # O(1)
+wiek = slownik["Jan"]      # O(1)
+del slownik["Jan"]         # O(1)
+
+# Sprawdzenie czy klucz istnieje
+if "Anna" in slownik:      # O(1)
+    print(slownik["Anna"])
+```
+
+## 7. Zbiór (Set)
+
+Słownik bez wartości - tylko klucze (unikalne elementy).
+
+### Operacje:
+
+- Dodawanie: O(1)
+- Usuwanie: O(1)
+- Sprawdzenie czy element istnieje: O(1)
+- Suma zbiorów (union): O(n+m)
+- Część wspólna (intersection): O(min(n,m))
+
+### Zastosowania:
+
+- **Usuwanie duplikatów**
+- **Sprawdzanie członkostwa** (czy element należy)
+- **Operacje matematyczne** na zbiorach
+
+### Python:
+
+```python
+zbior = {1, 2, 3}
+zbior.add(4)           # {1, 2, 3, 4}
+zbior.add(2)           # {1, 2, 3, 4} - duplikat zignorowany
+
+if 3 in zbior:         # O(1) - bardzo szybko!
+    print("Znaleziono")
+
+# Z listy (usuń duplikaty)
+lista = [1, 2, 2, 3, 3, 3]
+unikalne = list(set(lista))  # [1, 2, 3]
+```
+
+## 8. Algorytmy Wyszukiwania
+
+### Wyszukiwanie Liniowe:
+
+**Idea:** Sprawdź każdy element po kolei
+
+**Złożoność:** O(n)
+
+**Użycie:** Listy nieposortowane
+
+```python
+def szukaj_liniowo(lista, szukana):
+    for i, element in enumerate(lista):
+        if element == szukana:
+            return i
+    return -1  # nie znaleziono
+```
+
+### Wyszukiwanie Binarne:
+
+**Idea:** Dziel na pół, porównuj ze środkiem, powtarzaj
+
+**Wymóg:** Lista MUSI być posortowana!
+
+**Złożoność:** O(log n)
+
+**Przykład:** Zgadywanie liczby 1-100
+- Próba 1: 50 (za dużo)
+- Próba 2: 25 (za mało)
+- Próba 3: 37 (za mało)
+- Próba 4: 43 (trafiono!)
+- Max 7 prób dla 1-100!
+
+```python
+def szukaj_binarnie(lista, szukana):
+    lewo = 0
+    prawo = len(lista) - 1
+
+    while lewo <= prawo:
+        srodek = (lewo + prawo) // 2
+
+        if lista[srodek] == szukana:
+            return srodek
+        elif lista[srodek] < szukana:
+            lewo = srodek + 1
+        else:
+            prawo = srodek - 1
+
+    return -1
+```
+
+## 9. Algorytmy Sortowania
+
+### Bubble Sort (Sortowanie Bąbelkowe):
+
+**Idea:** Porównuj sąsiadów, zamieniaj jeśli źle
+
+**Złożoność:** O(n²) - WOLNE
+
+**Użycie:** Edukacyjne, małe dane
+
+### Quick Sort:
+
+**Idea:** Wybierz pivot, podziel na mniejsze/większe, rekurencja
+
+**Złożoność:** O(n log n) średnio
+
+**Użycie:** Ogólnego przeznaczenia, bardzo szybkie
+
+### Merge Sort:
+
+**Idea:** Dziel na pół, sortuj połówki, scalaj
+
+**Złożoność:** O(n log n) zawsze
+
+**Użycie:** Stabilne sortowanie, duże dane
+
+### Python - wbudowane:
+
+```python
+lista = [5, 2, 8, 1, 9]
+lista.sort()              # sortuje w miejscu: [1, 2, 5, 8, 9]
+
+posortowana = sorted(lista)  # nowa lista
+```
+
+**Ciekawostka:** Python używa Timsort (hybrid merge+insertion) - O(n log n)
+
+## 10. Rekurencja
+
+**Rekurencja:** Funkcja wywołująca samą siebie.
+
+### Warunki:
+
+1. **Przypadek bazowy** - kiedy zakończyć
+2. **Krok rekurencyjny** - zmniejszanie problemu
+
+### Przykład - Silnia:
+
+```python
+def silnia(n):
+    if n == 0:           # przypadek bazowy
+        return 1
+    return n * silnia(n - 1)  # krok rekurencyjny
+
+# silnia(5) = 5 * silnia(4) = 5 * 4 * 3 * 2 * 1 = 120
+```
+
+### Ciąg Fibonacciego:
+
+```python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+```
+
+**UWAGA:** Ta implementacja to O(2ⁿ) - BARDZO wolna!
+
+### Memoizacja (cache wyników):
+
+```python
+cache = {}
+
+def fibonacci_memo(n):
+    if n in cache:
+        return cache[n]
+
+    if n <= 1:
+        return n
+
+    cache[n] = fibonacci_memo(n-1) + fibonacci_memo(n-2)
+    return cache[n]
+```
+
+Teraz: O(n) - OGROMNA różnica!
+
+## Podsumowanie - Kiedy Co Używać?
+
+| Potrzebujesz | Użyj |
+|--------------|------|
+| Dostęp przez indeks | Lista/Tablica |
+| Szybkie wyszukiwanie | Słownik/Set |
+| Kolejność LIFO | Stos |
+| Kolejność FIFO | Kolejka |
+| Częste wstawianie w środku | Lista wiązana |
+| Unikalne elementy | Set |
+| Sortowanie | Wbudowane sorted() |
+| Wyszukiwanie w posortowanej | Wyszukiwanie binarne |
+
+**Złota zasada:** Najpierw zadziałaj (correctness), potem optymalizuj (performance)!

@@ -1,0 +1,18 @@
+PROGRAMOWANIE FUNKCYJNE – PODSTAWY
+
+1. Funkcje czyste:
+brak efektów ubocznych
+
+2. Immutability:
+brak mutacji danych
+
+3. Silne operatory:
+- map
+- filter
+- reduce
+
+4. Rekurencja
+5. Lambda funkcje
+
+Zastosowanie:
+przetwarzanie danych, AI, strumienie.

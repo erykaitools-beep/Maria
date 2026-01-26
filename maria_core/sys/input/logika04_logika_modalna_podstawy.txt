@@ -1,0 +1,20 @@
+LOGIKA MODALNA – PODSTAWY
+
+Operatory modalne:
+- □P  – „koniecznie P”
+- ◇P  – „możliwie P”
+
+Aksjomaty:
+K:  □(P→Q) → (□P→□Q)
+T:  □P → P
+4:  □P → □□P
+
+Interpretacja:
+Stany świata połączone relacją R.
+□P – P jest prawdziwe we wszystkich stanach osiągalnych.
+◇P – P jest prawdziwe w co najmniej jednym stanie.
+
+Zastosowanie w AI:
+- planowanie
+- analiza możliwych stanów
+- reguły pewności

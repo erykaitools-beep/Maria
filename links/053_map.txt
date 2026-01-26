@@ -1,0 +1,9 @@
+053 -> percepcja
+053 -> input
+053 -> external
+053 -> project
+053 -> create
+053 -> ai
+053 -> language
+053 -> system
+053 -> init

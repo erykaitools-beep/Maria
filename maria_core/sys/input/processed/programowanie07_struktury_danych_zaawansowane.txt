@@ -1,0 +1,20 @@
+STRUKTURY DANYCH – ZAAWANSOWANE
+
+1. Drzewa:
+- BST
+- AVL
+- Red-Black
+- Trie
+
+2. Grafy:
+- nieskierowane
+- skierowane
+- ważone
+
+3. Hashmapy:
+O(1) przeciętnie
+
+4. Stos, kolejka, kolejka priorytetowa
+
+5. Heap (kopiec):
+Struktura pod priorytety.

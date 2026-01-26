@@ -1,0 +1,5 @@
+
+    Dziś rano przeczytałem artykuł o AI memory systems.
+    Główna idea: agenty potrzebują persistent, queryable memory.
+    To mi dało pomysł na projekt Maria Ver.1.
+    

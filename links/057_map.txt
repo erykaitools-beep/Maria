@@ -1,0 +1,6 @@
+057 -> percepcja
+057 -> input
+057 -> external
+057 -> foundation
+057 -> memory
+057 -> language

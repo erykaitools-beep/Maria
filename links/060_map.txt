@@ -1,0 +1,3 @@
+060 -> percepcja
+060 -> input
+060 -> external

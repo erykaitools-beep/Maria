@@ -1,0 +1,14 @@
+{
+  "version": "1.5",
+  "system_start_time": 1764980361.0390918,
+  "current_session_start": 1765232666.338949,
+  "total_uptime_hours": 70.08480520168935,
+  "total_reward": 0.0,
+  "total_penalty": 0.0,
+  "current_mode": "learning",
+  "current_goal": "expand_technical_vocabulary",
+  "crash_streak": 0,
+  "trauma_events": [],
+  "last_decision": "learning_cycle_completed",
+  "last_decision_reason": "run_maria.py zakończył cykl bez crasha"
+}

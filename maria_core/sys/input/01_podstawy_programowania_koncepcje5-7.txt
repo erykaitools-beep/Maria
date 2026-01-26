@@ -1,0 +1,22 @@
+## 5. Funkcje - Organizacja Kodu
+
+Funkcja to nazwany blok kodu, który wykonuje konkretne zadanie.
+
+### Zalety funkcji:
+
+1. **Reużywalność** - napisz raz, używaj wielokrotnie
+2. **Czytelność** - kod podzielony na logiczne bloki
+3. **Łatwiejsza naprawa** - błąd w jednym miejscu
+4. **Testowanie** - każda funkcja testowana osobno
+
+### Parametry i zwracanie wartości:
+
+- **Parametry** - dane wejściowe funkcji
+- **Return** - wynik działania funkcji
+
+Przykład myślowy:
+```
+funkcja oblicz_pole_prostokata(dlugosc, szerokosc):
+    pole = dlugosc * szerokosc
+    zwróć pole
+```

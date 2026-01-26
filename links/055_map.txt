@@ -1,0 +1,7 @@
+055 -> percepcja
+055 -> input
+055 -> external
+055 -> foundation
+055 -> memory
+055 -> time_2025
+055 -> language

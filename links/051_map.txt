@@ -1,0 +1,7 @@
+051 -> percepcja
+051 -> input
+051 -> external
+051 -> ai
+051 -> project
+051 -> time_2025
+051 -> language

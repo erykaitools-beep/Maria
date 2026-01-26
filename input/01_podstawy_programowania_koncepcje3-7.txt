@@ -1,0 +1,28 @@
+
+Instrukcje warunkowe pozwalają programowi reagować na różne sytuacje.
+
+### Struktura if-elif-else:
+
+```
+jeśli (warunek jest prawdziwy):
+    wykonaj to
+w przeciwnym razie jeśli (inny warunek):
+    wykonaj tamto
+w przeciwnym razie:
+    wykonaj coś innego
+```
+
+### Operatory porównania:
+
+- `==` równe
+- `!=` różne
+- `>` większe
+- `<` mniejsze
+- `>=` większe lub równe
+- `<=` mniejsze lub równe
+
+### Operatory logiczne:
+
+- `AND` (i) - oba warunki muszą być prawdziwe
+- `OR` (lub) - przynajmniej jeden warunek prawdziwy
+- `NOT` (nie) - odwrócenie warunku

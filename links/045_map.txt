@@ -1,0 +1,7 @@
+045 -> percepcja
+045 -> input
+045 -> external
+045 -> time_2025
+045 -> system
+045 -> ai
+045 -> project
