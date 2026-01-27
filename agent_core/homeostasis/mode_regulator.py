@@ -259,6 +259,10 @@ class ModeRegulator:
         if new_mode == self.current_mode:
             return TransitionResult.ALREADY_IN_MODE
 
+        # Check forbidden transitions
+        if (self.current_mode, new_mode) in self.FORBIDDEN_TRANSITIONS:
+            return TransitionResult.FORBIDDEN
+
         # Record transition
         self.current_mode = new_mode
         self.mode_change_time = time.time()

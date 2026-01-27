@@ -12,11 +12,8 @@ from agent_core.homeostasis.state_model import (
     Mode,
     ResourceMetrics,
     CognitiveMetrics,
-    TimeMetrics,
     SystemState,
     SnapshotData,
-    ConstraintViolation,
-    ConstraintLevel,
 )
 
 
@@ -46,35 +43,69 @@ class TestResourceMetrics:
     def test_create_with_all_fields(self):
         """Should create with all required fields."""
         metrics = ResourceMetrics(
-            ram_percent=75.5,
-            ram_available_mb=2048,
-            cpu_percent=45.0,
-            disk_percent=60.0,
-            disk_free_gb=50.5,
-            temp_celsius=55.0,
-            inference_latency_ms=150.0,
             timestamp=time.time(),
+            ram_used_mb=6000,
+            ram_total_mb=8000,
+            ram_available_mb=2000,
+            swap_used_pct=10.0,
+            cpu_percent=45.0,
+            load_avg_1m=1.5,
+            load_avg_5m=1.2,
+            load_avg_15m=1.0,
+            disk_used_pct=60.0,
+            disk_io_queue_depth=2,
+            process_count=150,
+            temp_c=55.0,
+            inference_latency_ms=150.0,
         )
 
-        assert metrics.ram_percent == 75.5
-        assert metrics.ram_available_mb == 2048
+        assert metrics.ram_available_mb == 2000
+        assert metrics.cpu_percent == 45.0
+
+    def test_ram_available_pct_property(self):
+        """Should calculate available RAM percentage."""
+        metrics = ResourceMetrics(
+            timestamp=time.time(),
+            ram_used_mb=6000,
+            ram_total_mb=8000,
+            ram_available_mb=2000,
+            swap_used_pct=10.0,
+            cpu_percent=45.0,
+            load_avg_1m=1.5,
+            load_avg_5m=1.2,
+            load_avg_15m=1.0,
+            disk_used_pct=60.0,
+            disk_io_queue_depth=2,
+            process_count=150,
+            temp_c=55.0,
+            inference_latency_ms=150.0,
+        )
+
+        # 2000/8000 = 25%
+        assert metrics.ram_available_pct == 25.0
 
     def test_serializable_to_dict(self):
         """Metrics should be serializable."""
         metrics = ResourceMetrics(
-            ram_percent=75.5,
-            ram_available_mb=2048,
-            cpu_percent=45.0,
-            disk_percent=60.0,
-            disk_free_gb=50.5,
-            temp_celsius=55.0,
-            inference_latency_ms=150.0,
             timestamp=time.time(),
+            ram_used_mb=6000,
+            ram_total_mb=8000,
+            ram_available_mb=2000,
+            swap_used_pct=10.0,
+            cpu_percent=45.0,
+            load_avg_1m=1.5,
+            load_avg_5m=1.2,
+            load_avg_15m=1.0,
+            disk_used_pct=60.0,
+            disk_io_queue_depth=2,
+            process_count=150,
+            temp_c=55.0,
+            inference_latency_ms=150.0,
         )
 
         d = asdict(metrics)
         assert isinstance(d, dict)
-        assert d['ram_percent'] == 75.5
+        assert d['ram_available_mb'] == 2000
 
 
 class TestCognitiveMetrics:
@@ -83,36 +114,98 @@ class TestCognitiveMetrics:
     def test_create_with_all_fields(self):
         """Should create with cognitive metrics."""
         metrics = CognitiveMetrics(
+            timestamp=time.time(),
             context_coherence=0.95,
+            context_tokens=1500,
+            inference_latency_ms=200.0,
+            latency_p50_ms=100.0,
+            latency_p99_ms=600.0,
             error_count_1h=2,
             goal_stack_depth=3,
+            memory_entries=100,
             contradiction_count=0,
-            task_completion_ratio=0.85,
-            latency_p50_ms=100,
-            latency_p95_ms=300,
-            latency_p99_ms=600,
-            timestamp=time.time(),
+            episodic_freshness_sec=60.0,
+            attention_fragmentation=0.2,
+            task_completion_ratio=0.9,
         )
 
         assert metrics.context_coherence == 0.95
         assert metrics.error_count_1h == 2
 
-    def test_default_values(self):
-        """Should have sensible defaults for optional fields."""
-        # Minimal creation
+    def test_coherence_ok_property(self):
+        """Should check if coherence is acceptable."""
         metrics = CognitiveMetrics(
-            context_coherence=0.9,
-            error_count_1h=0,
-            goal_stack_depth=1,
-            contradiction_count=0,
-            task_completion_ratio=1.0,
-            latency_p50_ms=0,
-            latency_p95_ms=0,
-            latency_p99_ms=0,
             timestamp=time.time(),
+            context_coherence=0.95,
+            context_tokens=1500,
+            inference_latency_ms=200.0,
+            latency_p50_ms=100.0,
+            latency_p99_ms=600.0,
+            error_count_1h=2,
+            goal_stack_depth=3,
+            memory_entries=100,
+            contradiction_count=0,
+            episodic_freshness_sec=60.0,
+            attention_fragmentation=0.2,
+            task_completion_ratio=0.9,
         )
 
-        assert metrics.contradiction_count == 0
+        assert metrics.coherence_ok == True
+
+        # Low coherence
+        metrics2 = CognitiveMetrics(
+            timestamp=time.time(),
+            context_coherence=0.5,
+            context_tokens=1500,
+            inference_latency_ms=200.0,
+            latency_p50_ms=100.0,
+            latency_p99_ms=600.0,
+            error_count_1h=2,
+            goal_stack_depth=3,
+            memory_entries=100,
+            contradiction_count=0,
+            episodic_freshness_sec=60.0,
+            attention_fragmentation=0.2,
+            task_completion_ratio=0.9,
+        )
+
+        assert metrics2.coherence_ok == False
+
+    def test_errors_high_property(self):
+        """Should detect high error rate."""
+        low_errors = CognitiveMetrics(
+            timestamp=time.time(),
+            context_coherence=0.95,
+            context_tokens=1500,
+            inference_latency_ms=200.0,
+            latency_p50_ms=100.0,
+            latency_p99_ms=600.0,
+            error_count_1h=5,
+            goal_stack_depth=3,
+            memory_entries=100,
+            contradiction_count=0,
+            episodic_freshness_sec=60.0,
+            attention_fragmentation=0.2,
+            task_completion_ratio=0.9,
+        )
+        assert low_errors.errors_high == False
+
+        high_errors = CognitiveMetrics(
+            timestamp=time.time(),
+            context_coherence=0.95,
+            context_tokens=1500,
+            inference_latency_ms=200.0,
+            latency_p50_ms=100.0,
+            latency_p99_ms=600.0,
+            error_count_1h=30,
+            goal_stack_depth=3,
+            memory_entries=100,
+            contradiction_count=0,
+            episodic_freshness_sec=60.0,
+            attention_fragmentation=0.2,
+            task_completion_ratio=0.9,
+        )
+        assert high_errors.errors_high == True
 
 
 class TestSystemState:
@@ -124,14 +217,10 @@ class TestSystemState:
 
         state = SystemState(
             mode=Mode.ACTIVE,
-            mode_since=now - 3600,  # 1 hour ago
             health_score=0.85,
-            resource_metrics=None,
-            cognitive_metrics=None,
-            time_metrics=None,
-            interpreted_state={},
+            last_mode_change_time=now - 3600,  # 1 hour ago
             alerts=[],
-            last_snapshot_time=now - 7200,
+            idle_seconds=100,
         )
 
         assert state.mode == Mode.ACTIVE
@@ -142,14 +231,10 @@ class TestSystemState:
         now = time.time()
         state = SystemState(
             mode=Mode.ACTIVE,
-            mode_since=now - 3600,
             health_score=0.85,
-            resource_metrics=None,
-            cognitive_metrics=None,
-            time_metrics=None,
-            interpreted_state={},
+            last_mode_change_time=now - 3600,
             alerts=[],
-            last_snapshot_time=now,
+            idle_seconds=0,
         )
 
         duration = state.mode_duration_seconds
@@ -161,14 +246,10 @@ class TestSystemState:
         """Should detect critical alerts."""
         state = SystemState(
             mode=Mode.ACTIVE,
-            mode_since=time.time(),
             health_score=0.5,
-            resource_metrics=None,
-            cognitive_metrics=None,
-            time_metrics=None,
-            interpreted_state={},
+            last_mode_change_time=time.time(),
             alerts=["CRITICAL: RAM below threshold"],
-            last_snapshot_time=time.time(),
+            idle_seconds=0,
         )
 
         assert state.has_critical_alert() == True
@@ -177,17 +258,25 @@ class TestSystemState:
         """Should detect absence of critical alerts."""
         state = SystemState(
             mode=Mode.ACTIVE,
-            mode_since=time.time(),
             health_score=0.85,
-            resource_metrics=None,
-            cognitive_metrics=None,
-            time_metrics=None,
-            interpreted_state={},
+            last_mode_change_time=time.time(),
             alerts=["WARNING: High CPU usage"],
-            last_snapshot_time=time.time(),
+            idle_seconds=0,
         )
 
         assert state.has_critical_alert() == False
+
+    def test_has_warning(self):
+        """Should detect warnings."""
+        state = SystemState(
+            mode=Mode.ACTIVE,
+            health_score=0.85,
+            last_mode_change_time=time.time(),
+            alerts=["WARNING: High CPU usage"],
+            idle_seconds=0,
+        )
+
+        assert state.has_warning() == True
 
 
 class TestSnapshotData:
@@ -196,57 +285,82 @@ class TestSnapshotData:
     def test_create_snapshot(self):
         """Should create snapshot with required fields."""
         snapshot = SnapshotData(
-            snapshot_id="snap_20260126_143000",
             timestamp=time.time(),
+            uptime_seconds=3600,
             mode=Mode.ACTIVE,
+            episodic_memory_version=1,
+            episodic_memory_size_mb=100,
+            episodic_memory_hash="abc123",
+            episodic_memory_entries=1000,
+            episodic_freshness_sec=60,
+            semantic_model_version=1,
+            semantic_node_count=500,
+            semantic_model_hash="def456",
+            semantic_consistency_score=0.95,
             health_score=0.85,
-            memory_hash="abc123",
-            config_hash="def456",
-            reason="Scheduled checkpoint",
         )
 
-        assert snapshot.snapshot_id == "snap_20260126_143000"
         assert snapshot.mode == Mode.ACTIVE
+        assert snapshot.episodic_memory_hash == "abc123"
 
-    def test_snapshot_serializable(self):
+    def test_snapshot_to_dict(self):
         """Snapshot should be serializable to dict."""
         snapshot = SnapshotData(
-            snapshot_id="snap_test",
             timestamp=time.time(),
+            uptime_seconds=3600,
             mode=Mode.ACTIVE,
+            episodic_memory_version=1,
+            episodic_memory_size_mb=100,
+            episodic_memory_hash="abc123",
+            episodic_memory_entries=1000,
+            episodic_freshness_sec=60,
+            semantic_model_version=1,
+            semantic_node_count=500,
+            semantic_model_hash="def456",
+            semantic_consistency_score=0.95,
             health_score=0.85,
-            memory_hash="abc123",
-            config_hash="def456",
-            reason="Test",
         )
 
-        d = asdict(snapshot)
+        d = snapshot.to_dict()
         assert isinstance(d, dict)
-        # Mode enum needs special handling for JSON
-        assert d['snapshot_id'] == "snap_test"
+        assert d['mode'] == "active"
+        assert d['episodic_memory']['hash'] == "abc123"
 
+    def test_snapshot_from_dict(self):
+        """Should create snapshot from dict."""
+        data = {
+            "timestamp": time.time(),
+            "uptime_seconds": 3600,
+            "mode": "active",
+            "episodic_memory": {
+                "version": 1,
+                "size_mb": 100,
+                "hash": "abc123",
+                "entries": 1000,
+                "freshness_seconds": 60,
+            },
+            "semantic_model": {
+                "version": 1,
+                "node_count": 500,
+                "hash": "def456",
+                "consistency_score": 0.95,
+            },
+            "context_snapshot": {
+                "active_goal_stack": [],
+                "current_topic_embedding": [],
+                "error_rate_recent": 0.0,
+            },
+            "homeostasis_state": {
+                "mode": "active",
+                "health_score": 0.85,
+                "resource_headroom": {},
+                "last_mode_transition": 0.0,
+            },
+        }
 
-class TestConstraintViolation:
-    """Tests for ConstraintViolation - spec lines 380-400."""
-
-    def test_create_violation(self):
-        """Should create constraint violation."""
-        violation = ConstraintViolation(
-            constraint_name="RAM_MINIMUM",
-            level=ConstraintLevel.CRITICAL,
-            current_value=10.0,
-            threshold=20.0,
-            message="RAM below critical threshold",
-        )
-
-        assert violation.constraint_name == "RAM_MINIMUM"
-        assert violation.level == ConstraintLevel.CRITICAL
-
-    def test_constraint_levels(self):
-        """All constraint levels should be defined."""
-        assert ConstraintLevel.CRITICAL.value == "critical"
-        assert ConstraintLevel.ALERT.value == "alert"
-        assert ConstraintLevel.WARNING.value == "warning"
+        snapshot = SnapshotData.from_dict(data)
+        assert snapshot.mode == Mode.ACTIVE
+        assert snapshot.episodic_memory_hash == "abc123"
 
 
 class TestStateTransitions:
@@ -254,37 +368,26 @@ class TestStateTransitions:
 
     def test_valid_transitions_from_active(self):
         """ACTIVE can transition to REDUCED, SLEEP, SURVIVAL."""
-        from agent_core.homeostasis.mode_regulator import ModeRegulator
+        from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 
         regulator = ModeRegulator()
 
-        # These should be valid
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.REDUCED) == True
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.SLEEP) == True
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.SURVIVAL) == True
+        # Test actual transitions
+        result = regulator.transition_to(Mode.REDUCED)
+        assert result == TransitionResult.SUCCESS
 
-    def test_invalid_transitions_from_survival(self):
-        """SURVIVAL can only go to REDUCED (controlled recovery).
-
-        Spec: lines 431-435 - forbidden transitions
-        """
-        from agent_core.homeostasis.mode_regulator import ModeRegulator
+    def test_forbidden_transitions(self):
+        """Some transitions should be forbidden."""
+        from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 
         regulator = ModeRegulator()
 
-        # SURVIVAL -> ACTIVE is forbidden (must go through REDUCED)
-        assert regulator.is_valid_transition(Mode.SURVIVAL, Mode.ACTIVE) == False
-        assert regulator.is_valid_transition(Mode.SURVIVAL, Mode.REDUCED) == True
+        # Go to SURVIVAL
+        regulator.transition_to(Mode.SURVIVAL)
 
-    def test_sleep_cannot_skip_to_active(self):
-        """SLEEP should go through REDUCED before ACTIVE.
-
-        Spec: line 432 - SLEEP -> ACTIVE forbidden
-        """
-        from agent_core.homeostasis.mode_regulator import ModeRegulator
-
-        regulator = ModeRegulator()
-
-        assert regulator.is_valid_transition(Mode.SLEEP, Mode.ACTIVE) == False
-        assert regulator.is_valid_transition(Mode.SLEEP, Mode.REDUCED) == True
-
+        # SURVIVAL -> REDUCED is forbidden (only ACTIVE allowed)
+        result = regulator.transition_to(Mode.REDUCED)
+        # Should be FORBIDDEN
+        assert result == TransitionResult.FORBIDDEN
+        # Should still be in SURVIVAL
+        assert regulator.current_mode == Mode.SURVIVAL

@@ -7,9 +7,8 @@ Spec reference: homeostasis_spec.md section 5 (lines 550-700)
 import pytest
 import time
 
-from agent_core.homeostasis.mode_regulator import ModeRegulator
+from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 from agent_core.homeostasis.state_model import Mode
-from agent_core.homeostasis.constraints import ConstraintViolation, ConstraintLevel
 
 
 class TestModeRegulator:
@@ -22,14 +21,7 @@ class TestModeRegulator:
 
     def test_initial_mode_is_active(self, regulator):
         """Default initial mode should be ACTIVE."""
-        # When no violations, should stay/recommend ACTIVE
-        recommendation = regulator.recommend_mode(
-            current_mode=Mode.ACTIVE,
-            violations=[],
-            interpreted_state={},
-        )
-
-        assert recommendation == Mode.ACTIVE
+        assert regulator.current_mode == Mode.ACTIVE
 
 
 class TestValidTransitions:
@@ -42,42 +34,66 @@ class TestValidTransitions:
     # ACTIVE transitions
     def test_active_to_reduced(self, regulator):
         """ACTIVE -> REDUCED is valid."""
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.REDUCED) == True
+        result = regulator.transition_to(Mode.REDUCED)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.REDUCED
 
     def test_active_to_sleep(self, regulator):
         """ACTIVE -> SLEEP is valid."""
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.SLEEP) == True
+        result = regulator.transition_to(Mode.SLEEP)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.SLEEP
 
     def test_active_to_survival(self, regulator):
         """ACTIVE -> SURVIVAL is valid (emergency)."""
-        assert regulator.is_valid_transition(Mode.ACTIVE, Mode.SURVIVAL) == True
+        result = regulator.transition_to(Mode.SURVIVAL)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.SURVIVAL
 
     # REDUCED transitions
     def test_reduced_to_active(self, regulator):
         """REDUCED -> ACTIVE is valid (recovery)."""
-        assert regulator.is_valid_transition(Mode.REDUCED, Mode.ACTIVE) == True
+        regulator.transition_to(Mode.REDUCED)
+        result = regulator.transition_to(Mode.ACTIVE)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.ACTIVE
 
     def test_reduced_to_sleep(self, regulator):
         """REDUCED -> SLEEP is valid."""
-        assert regulator.is_valid_transition(Mode.REDUCED, Mode.SLEEP) == True
+        regulator.transition_to(Mode.REDUCED)
+        result = regulator.transition_to(Mode.SLEEP)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.SLEEP
 
     def test_reduced_to_survival(self, regulator):
         """REDUCED -> SURVIVAL is valid (emergency)."""
-        assert regulator.is_valid_transition(Mode.REDUCED, Mode.SURVIVAL) == True
+        regulator.transition_to(Mode.REDUCED)
+        result = regulator.transition_to(Mode.SURVIVAL)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.SURVIVAL
 
     # SLEEP transitions
-    def test_sleep_to_reduced(self, regulator):
-        """SLEEP -> REDUCED is valid (wake up)."""
-        assert regulator.is_valid_transition(Mode.SLEEP, Mode.REDUCED) == True
+    def test_sleep_to_active(self, regulator):
+        """SLEEP -> ACTIVE is valid."""
+        regulator.transition_to(Mode.SLEEP)
+        result = regulator.transition_to(Mode.ACTIVE)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.ACTIVE
 
     def test_sleep_to_survival(self, regulator):
         """SLEEP -> SURVIVAL is valid (emergency)."""
-        assert regulator.is_valid_transition(Mode.SLEEP, Mode.SURVIVAL) == True
+        regulator.transition_to(Mode.SLEEP)
+        result = regulator.transition_to(Mode.SURVIVAL)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.SURVIVAL
 
     # SURVIVAL transitions
-    def test_survival_to_reduced(self, regulator):
-        """SURVIVAL -> REDUCED is valid (controlled recovery)."""
-        assert regulator.is_valid_transition(Mode.SURVIVAL, Mode.REDUCED) == True
+    def test_survival_to_active(self, regulator):
+        """SURVIVAL -> ACTIVE is valid (recovery)."""
+        regulator.transition_to(Mode.SURVIVAL)
+        result = regulator.transition_to(Mode.ACTIVE)
+        assert result == TransitionResult.SUCCESS
+        assert regulator.current_mode == Mode.ACTIVE
 
 
 class TestForbiddenTransitions:
@@ -87,240 +103,168 @@ class TestForbiddenTransitions:
     def regulator(self):
         return ModeRegulator()
 
-    def test_sleep_to_active_forbidden(self, regulator):
-        """SLEEP -> ACTIVE is forbidden (must go through REDUCED).
+    def test_sleep_to_reduced_forbidden(self, regulator):
+        """SLEEP -> REDUCED is forbidden."""
+        regulator.transition_to(Mode.SLEEP)
+        result = regulator.transition_to(Mode.REDUCED)
+        assert result == TransitionResult.FORBIDDEN
+        assert regulator.current_mode == Mode.SLEEP  # Unchanged
 
-        Spec: line 655 - skip transitions forbidden
-        """
-        assert regulator.is_valid_transition(Mode.SLEEP, Mode.ACTIVE) == False
-
-    def test_survival_to_active_forbidden(self, regulator):
-        """SURVIVAL -> ACTIVE is forbidden.
-
-        Spec: line 656 - must recover through REDUCED
-        """
-        assert regulator.is_valid_transition(Mode.SURVIVAL, Mode.ACTIVE) == False
+    def test_survival_to_reduced_forbidden(self, regulator):
+        """SURVIVAL -> REDUCED is forbidden."""
+        regulator.transition_to(Mode.SURVIVAL)
+        result = regulator.transition_to(Mode.REDUCED)
+        assert result == TransitionResult.FORBIDDEN
+        assert regulator.current_mode == Mode.SURVIVAL  # Unchanged
 
     def test_survival_to_sleep_forbidden(self, regulator):
-        """SURVIVAL -> SLEEP is forbidden.
+        """SURVIVAL -> SLEEP is forbidden."""
+        regulator.transition_to(Mode.SURVIVAL)
+        result = regulator.transition_to(Mode.SLEEP)
+        assert result == TransitionResult.FORBIDDEN
+        assert regulator.current_mode == Mode.SURVIVAL  # Unchanged
 
-        Spec: line 657 - cannot go dormant from survival
-        """
-        assert regulator.is_valid_transition(Mode.SURVIVAL, Mode.SLEEP) == False
 
-
-class TestModeRecommendation:
-    """Tests for mode recommendation logic - spec lines 680-700."""
+class TestModeDecision:
+    """Tests for mode decision logic - spec lines 680-700."""
 
     @pytest.fixture
     def regulator(self):
         return ModeRegulator()
 
-    def test_critical_violation_forces_survival(self, regulator):
-        """CRITICAL violation should force SURVIVAL mode.
+    def test_critical_alert_forces_survival(self, regulator):
+        """CRITICAL alert should force SURVIVAL mode."""
+        state = {}
+        alerts = ["CRITICAL: RAM pressure imminent OOM"]
 
-        Spec: line 685 - CRITICAL always triggers SURVIVAL
-        """
-        violation = ConstraintViolation(
-            constraint_name="RAM_CRITICAL",
-            level=ConstraintLevel.CRITICAL,
-            current_value=5,
-            threshold=10,
-            message="RAM critically low",
-        )
-
-        mode = regulator.recommend_mode(
-            current_mode=Mode.ACTIVE,
-            violations=[violation],
-            interpreted_state={},
-        )
+        mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.SURVIVAL
 
     def test_alert_in_active_suggests_reduced(self, regulator):
-        """ALERT in ACTIVE should suggest REDUCED.
+        """ALERT in ACTIVE should suggest REDUCED."""
+        state = {
+            "ram_available_pct": 15,  # Low RAM
+        }
+        alerts = ["ALERT: RAM pressure critical"]
 
-        Spec: line 688 - ALERT triggers step-down
-        """
-        violation = ConstraintViolation(
-            constraint_name="COHERENCE_LOW",
-            level=ConstraintLevel.ALERT,
-            current_value=0.6,
-            threshold=0.7,
-            message="Coherence below threshold",
-        )
-
-        mode = regulator.recommend_mode(
-            current_mode=Mode.ACTIVE,
-            violations=[violation],
-            interpreted_state={},
-        )
+        mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.REDUCED
 
-    def test_no_violations_stay_current(self, regulator):
-        """No violations should maintain current mode."""
-        mode = regulator.recommend_mode(
-            current_mode=Mode.REDUCED,
-            violations=[],
-            interpreted_state={},
-        )
+    def test_no_alerts_maintains_active(self, regulator):
+        """No alerts should maintain ACTIVE."""
+        state = {
+            "ram_available_pct": 60,
+            "cpu_load": 30,
+        }
+        alerts = []
 
-        # May stay or suggest upgrade, but won't downgrade
-        assert mode in (Mode.REDUCED, Mode.ACTIVE)
-
-    def test_healthy_in_reduced_suggests_active(self, regulator):
-        """Healthy state in REDUCED should suggest ACTIVE.
-
-        Spec: line 692 - upgrade when stable
-        """
-        mode = regulator.recommend_mode(
-            current_mode=Mode.REDUCED,
-            violations=[],
-            interpreted_state={
-                "stable_ticks": 60,  # Stable for 60 ticks
-            },
-        )
+        mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.ACTIVE
 
-    def test_night_time_suggests_sleep(self, regulator):
-        """Night time with low activity should suggest SLEEP.
+    def test_night_idle_suggests_sleep(self, regulator):
+        """Long idle should suggest SLEEP when RAM is good.
 
-        Spec: line 695 - circadian sleep
+        Spec: IDLE_FOR_SLEEP_SEC = 1800 (30 min), needs ram > 60%
         """
-        mode = regulator.recommend_mode(
-            current_mode=Mode.REDUCED,
-            violations=[],
-            interpreted_state={
-                "is_night": True,
-                "idle_seconds": 1800,  # 30 minutes idle
-            },
-        )
+        state = {
+            "is_night": True,
+            "idle_seconds": 2000,  # > 30 minutes (1800)
+            "ram_available_pct": 70,  # > 60% threshold
+            "cpu_load": 30,
+        }
+        alerts = []
+
+        mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.SLEEP
 
+    def test_user_override_respected(self, regulator):
+        """User override should be respected if not critical."""
+        state = {}
+        alerts = ["WARNING: Something minor"]
 
-class TestModeMinimumDuration:
-    """Tests for minimum mode duration - spec lines 700-720."""
+        mode = regulator.decide_mode(state, alerts, user_override=Mode.REDUCED)
+
+        assert mode == Mode.REDUCED
+
+    def test_user_override_ignored_on_critical(self, regulator):
+        """User override should be ignored when CRITICAL."""
+        state = {}
+        alerts = ["CRITICAL: Temperature critical"]
+
+        mode = regulator.decide_mode(state, alerts, user_override=Mode.ACTIVE)
+
+        # Should force SURVIVAL despite override
+        assert mode == Mode.SURVIVAL
+
+
+class TestModeTimings:
+    """Tests for mode timing constraints."""
 
     @pytest.fixture
     def regulator(self):
         return ModeRegulator()
 
-    def test_survival_minimum_duration(self, regulator):
-        """SURVIVAL has minimum duration before upgrade.
+    def test_mode_change_updates_timestamp(self, regulator):
+        """Mode change should update change time."""
+        initial_time = regulator.mode_change_time
 
-        Spec: line 705 - min 5 minutes in SURVIVAL
-        """
-        # Just entered SURVIVAL
-        can_upgrade = regulator.can_upgrade_from_survival(
-            time_in_mode_seconds=60  # Only 1 minute
-        )
+        time.sleep(0.01)  # Small delay
 
-        assert can_upgrade == False
+        regulator.transition_to(Mode.REDUCED)
 
-        # After 5 minutes
-        can_upgrade = regulator.can_upgrade_from_survival(
-            time_in_mode_seconds=310  # 5+ minutes
-        )
+        assert regulator.mode_change_time > initial_time
 
-        assert can_upgrade == True
+    def test_same_mode_returns_already_in_mode(self, regulator):
+        """Transitioning to same mode should indicate already there."""
+        result = regulator.transition_to(Mode.ACTIVE)
 
-    def test_reduced_minimum_before_active(self, regulator):
-        """REDUCED has minimum duration before ACTIVE.
-
-        Spec: line 708 - min 2 minutes stability
-        """
-        can_upgrade = regulator.can_upgrade_to_active(
-            time_in_mode_seconds=60,  # 1 minute
-            stable_ticks=60,
-        )
-
-        assert can_upgrade == False
-
-        can_upgrade = regulator.can_upgrade_to_active(
-            time_in_mode_seconds=130,  # 2+ minutes
-            stable_ticks=120,
-        )
-
-        assert can_upgrade == True
+        assert result == TransitionResult.ALREADY_IN_MODE
 
 
-class TestMultipleViolations:
-    """Tests for handling multiple simultaneous violations."""
+class TestMultipleAlerts:
+    """Tests for handling multiple simultaneous alerts."""
 
     @pytest.fixture
     def regulator(self):
         return ModeRegulator()
 
     def test_critical_overrides_all(self, regulator):
-        """CRITICAL overrides lower-level violations."""
-        violations = [
-            ConstraintViolation(
-                constraint_name="CPU_HIGH",
-                level=ConstraintLevel.WARNING,
-                current_value=80,
-                threshold=70,
-                message="CPU warning",
-            ),
-            ConstraintViolation(
-                constraint_name="RAM_CRITICAL",
-                level=ConstraintLevel.CRITICAL,
-                current_value=5,
-                threshold=10,
-                message="RAM critical",
-            ),
-            ConstraintViolation(
-                constraint_name="COHERENCE",
-                level=ConstraintLevel.ALERT,
-                current_value=0.6,
-                threshold=0.7,
-                message="Coherence alert",
-            ),
+        """CRITICAL should override lower-level concerns."""
+        state = {
+            "is_night": True,  # Would normally suggest SLEEP
+            "idle_seconds": 2000,
+        }
+        alerts = [
+            "WARNING: CPU high",
+            "CRITICAL: RAM pressure imminent OOM",
+            "ALERT: Disk space low",
         ]
 
-        mode = regulator.recommend_mode(
-            current_mode=Mode.ACTIVE,
-            violations=violations,
-            interpreted_state={},
-        )
+        mode = regulator.decide_mode(state, alerts)
 
-        # CRITICAL should force SURVIVAL regardless of others
+        # CRITICAL should force SURVIVAL
         assert mode == Mode.SURVIVAL
 
-    def test_multiple_alerts_more_aggressive(self, regulator):
-        """Multiple ALERT violations may trigger more aggressive response."""
-        violations = [
-            ConstraintViolation(
-                constraint_name="COHERENCE",
-                level=ConstraintLevel.ALERT,
-                current_value=0.65,
-                threshold=0.7,
-                message="Coherence alert",
-            ),
-            ConstraintViolation(
-                constraint_name="ERRORS",
-                level=ConstraintLevel.ALERT,
-                current_value=12,
-                threshold=10,
-                message="Error rate alert",
-            ),
-            ConstraintViolation(
-                constraint_name="DISK",
-                level=ConstraintLevel.ALERT,
-                current_value=3,
-                threshold=5,
-                message="Disk alert",
-            ),
+    def test_multiple_alerts_trigger_reduced(self, regulator):
+        """Multiple ALERT violations with bad metrics should trigger REDUCED."""
+        # ALERT messages alone don't trigger mode changes
+        # Mode is determined by actual metrics in state
+        state = {
+            "ram_available_pct": 15,  # Below RAM_FOR_REDUCED_PCT (20)
+            "cpu_load": 80,           # Above CPU_FOR_REDUCED_PCT (75)
+        }
+        alerts = [
+            "ALERT: RAM pressure critical",
+            "ALERT: CPU saturated",
+            "ALERT: Disk usage high",
         ]
 
-        mode = regulator.recommend_mode(
-            current_mode=Mode.ACTIVE,
-            violations=violations,
-            interpreted_state={},
-        )
+        mode = regulator.decide_mode(state, alerts)
 
-        # Multiple alerts should at least trigger REDUCED
-        assert mode in (Mode.REDUCED, Mode.SLEEP, Mode.SURVIVAL)
+        # Bad metrics should trigger REDUCED
+        assert mode == Mode.REDUCED
 

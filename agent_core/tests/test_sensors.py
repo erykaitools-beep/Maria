@@ -8,11 +8,12 @@ import pytest
 import time
 from unittest.mock import Mock, patch, MagicMock
 
-from agent_core.homeostasis.sensors.resource_sensor import ResourceSensor, ResourceMetrics
-from agent_core.homeostasis.sensors.cognitive_sensor import CognitiveSensor, CognitiveMetrics
+from agent_core.homeostasis.sensors.resource_sensor import ResourceSensor
+from agent_core.homeostasis.sensors.cognitive_sensor import CognitiveSensor
 from agent_core.homeostasis.sensors.thermal_sensor import ThermalSensor
 from agent_core.homeostasis.sensors.power_sensor import PowerSensor
 from agent_core.homeostasis.sensors.time_sensor import TimeSensor
+from agent_core.homeostasis.state_model import ResourceMetrics, CognitiveMetrics
 
 
 class TestResourceSensor:
@@ -27,12 +28,16 @@ class TestResourceSensor:
         assert isinstance(metrics, ResourceMetrics)
 
     def test_ram_metrics_in_valid_range(self):
-        """RAM metrics should be in valid percentage range."""
+        """RAM metrics should be in valid range."""
         sensor = ResourceSensor()
         metrics = sensor.read_metrics()
 
-        assert 0 <= metrics.ram_percent <= 100
+        # ram_available_mb should be positive
         assert metrics.ram_available_mb >= 0
+        # ram_used_mb should be positive
+        assert metrics.ram_used_mb >= 0
+        # ram_total_mb should be positive
+        assert metrics.ram_total_mb >= 0
 
     def test_cpu_metrics_in_valid_range(self):
         """CPU metrics should be in valid percentage range."""
@@ -46,8 +51,7 @@ class TestResourceSensor:
         sensor = ResourceSensor()
         metrics = sensor.read_metrics()
 
-        assert 0 <= metrics.disk_percent <= 100
-        assert metrics.disk_free_gb >= 0
+        assert 0 <= metrics.disk_used_pct <= 100
 
     def test_fallback_on_psutil_failure(self):
         """Sensor should return worst-case values on failure.
@@ -59,11 +63,14 @@ class TestResourceSensor:
         with patch('psutil.virtual_memory', side_effect=Exception("Test error")):
             with patch('psutil.cpu_percent', side_effect=Exception("Test error")):
                 with patch('psutil.disk_usage', side_effect=Exception("Test error")):
-                    metrics = sensor.read_metrics()
+                    with patch('psutil.swap_memory', side_effect=Exception("Test error")):
+                        metrics = sensor.read_metrics()
 
         # Should return fallback values, not None
-        # Note: actual behavior depends on implementation handling partial failures
-        assert metrics is not None or True  # May be None if total failure
+        assert metrics is not None
+        # Fallback values indicate worst case
+        assert metrics.cpu_percent == 100
+        assert metrics.disk_used_pct == 100
 
     def test_sensor_has_timestamp(self):
         """Metrics should include timestamp."""
@@ -73,6 +80,13 @@ class TestResourceSensor:
         assert hasattr(metrics, 'timestamp')
         assert metrics.timestamp > 0
         assert metrics.timestamp <= time.time()
+
+    def test_get_memory_pressure(self):
+        """Should calculate memory pressure."""
+        sensor = ResourceSensor()
+        pressure = sensor.get_memory_pressure()
+
+        assert 0 <= pressure <= 100
 
 
 class TestCognitiveSensor:
@@ -84,18 +98,14 @@ class TestCognitiveSensor:
 
         # Mock managers
         memory_manager = Mock()
-        memory_manager.get_stats.return_value = {
-            'coherence_score': 0.95,
-            'error_count_1h': 2,
-            'total_memories': 100,
-        }
+        memory_manager.get_semantic_coherence.return_value = 0.95
+        memory_manager.get_total_entries.return_value = 100
+        memory_manager.get_contradiction_count.return_value = 0
+        memory_manager.get_episodic_freshness.return_value = 60
 
         llm_manager = Mock()
-        llm_manager.get_latency_percentiles.return_value = {
-            'p50': 150,
-            'p95': 400,
-            'p99': 800,
-        }
+        llm_manager.get_last_latency_ms.return_value = 150.0
+        llm_manager.get_context_tokens.return_value = 1000
 
         metrics = sensor.read_metrics(memory_manager, llm_manager)
 
@@ -107,10 +117,14 @@ class TestCognitiveSensor:
         sensor = CognitiveSensor()
 
         memory_manager = Mock()
-        memory_manager.get_stats.return_value = {'coherence_score': 0.85}
+        memory_manager.get_semantic_coherence.return_value = 0.85
+        memory_manager.get_total_entries.return_value = 0
+        memory_manager.get_contradiction_count.return_value = 0
+        memory_manager.get_episodic_freshness.return_value = 0
 
         llm_manager = Mock()
-        llm_manager.get_latency_percentiles.return_value = {}
+        llm_manager.get_last_latency_ms.return_value = 100.0
+        llm_manager.get_context_tokens.return_value = 0
 
         metrics = sensor.read_metrics(memory_manager, llm_manager)
 
@@ -123,69 +137,141 @@ class TestCognitiveSensor:
         """
         sensor = CognitiveSensor()
 
-        memory_manager = Mock()
-        memory_manager.get_stats.return_value = {'goal_stack_depth': 15}
+        # Set goal depth manually
+        sensor.set_goal_depth(15)
 
-        llm_manager = Mock()
-        llm_manager.get_latency_percentiles.return_value = {}
-
-        metrics = sensor.read_metrics(memory_manager, llm_manager)
+        metrics = sensor.read_metrics(None, None)
 
         assert metrics.goal_stack_depth == 15
+
+    def test_record_error_tracking(self):
+        """Should track error occurrences."""
+        sensor = CognitiveSensor()
+
+        # Record some errors
+        for _ in range(5):
+            sensor.record_error()
+
+        metrics = sensor.read_metrics(None, None)
+
+        assert metrics.error_count_1h == 5
+
+    def test_task_result_tracking(self):
+        """Should track task completion ratio."""
+        sensor = CognitiveSensor()
+
+        # Record some task results
+        sensor.record_task_result(True)
+        sensor.record_task_result(True)
+        sensor.record_task_result(False)
+        sensor.record_task_result(True)
+
+        metrics = sensor.read_metrics(None, None)
+
+        # 3 success out of 4 = 0.75
+        assert metrics.task_completion_ratio == 0.75
 
 
 class TestThermalSensor:
     """Tests for ThermalSensor - spec lines 201-230."""
 
-    def test_read_temperature(self):
+    def test_read_metrics(self):
+        """Should return ThermalMetrics dataclass."""
+        sensor = ThermalSensor()
+        metrics = sensor.read_metrics()
+
+        assert metrics is not None
+        assert hasattr(metrics, 'cpu_temp_c')
+        assert hasattr(metrics, 'is_throttling')
+
+    def test_get_temperature(self):
         """Should return temperature in Celsius."""
         sensor = ThermalSensor()
-        temp = sensor.read_temperature()
+        temp = sensor.get_temperature()
 
-        # Temperature should be reasonable (0-100C for most systems)
-        assert temp is None or (0 <= temp <= 150)
+        # Temperature should be reasonable (0-150C for most systems)
+        assert 0 <= temp <= 150
 
     def test_cross_platform_fallback(self):
         """Should handle different platforms gracefully."""
         sensor = ThermalSensor()
 
         # This should not raise, even on unsupported platforms
-        temp = sensor.read_temperature()
+        temp = sensor.get_temperature()
 
-        # May be None if no temperature available
-        assert temp is None or isinstance(temp, (int, float))
+        # May return default if no temp available
+        assert isinstance(temp, (int, float))
+
+    def test_is_critical_check(self):
+        """Should detect critical temperature."""
+        sensor = ThermalSensor()
+
+        # Check method exists and returns bool
+        result = sensor.is_critical()
+        assert isinstance(result, bool)
+
+    def test_is_warning_check(self):
+        """Should detect warning temperature."""
+        sensor = ThermalSensor()
+
+        result = sensor.is_warning()
+        assert isinstance(result, bool)
 
 
 class TestPowerSensor:
     """Tests for PowerSensor - spec lines 231-249."""
 
     def test_read_power_metrics(self):
-        """Should return power metrics dictionary."""
+        """Should return PowerMetrics dataclass."""
         sensor = PowerSensor()
         metrics = sensor.read_metrics()
 
-        assert isinstance(metrics, dict)
-        assert 'uptime_seconds' in metrics
+        assert metrics is not None
+        assert hasattr(metrics, 'uptime_seconds')
+        assert hasattr(metrics, 'voltage_v')
+        assert hasattr(metrics, 'is_on_battery')
 
     def test_uptime_positive(self):
         """Uptime should be positive."""
         sensor = PowerSensor()
         metrics = sensor.read_metrics()
 
-        assert metrics['uptime_seconds'] > 0
+        assert metrics.uptime_seconds > 0
+
+    def test_get_uptime(self):
+        """Should return uptime directly."""
+        sensor = PowerSensor()
+        uptime = sensor.get_uptime()
+
+        assert uptime > 0
 
 
 class TestTimeSensor:
     """Tests for TimeSensor - circadian and idle tracking."""
 
-    def test_get_time_context(self):
-        """Should return time context with hour and idle info."""
+    def test_read_metrics(self):
+        """Should return TimeMetrics dataclass."""
         sensor = TimeSensor()
-        context = sensor.get_time_context()
+        metrics = sensor.read_metrics()
 
-        assert 'hour' in context
-        assert 0 <= context['hour'] <= 23
-        assert 'is_night' in context
+        assert metrics is not None
+        assert hasattr(metrics, 'hour_of_day')
+        assert hasattr(metrics, 'day_of_week')
+        assert hasattr(metrics, 'idle_streak_sec')
+
+    def test_hour_in_valid_range(self):
+        """Hour should be 0-23."""
+        sensor = TimeSensor()
+        metrics = sensor.read_metrics()
+
+        assert 0 <= metrics.hour_of_day <= 23
+
+    def test_day_of_week_in_valid_range(self):
+        """Day of week should be 0-6."""
+        sensor = TimeSensor()
+        metrics = sensor.read_metrics()
+
+        assert 0 <= metrics.day_of_week <= 6
 
     def test_idle_seconds_tracking(self):
         """Should track idle seconds since last activity."""
@@ -197,23 +283,45 @@ class TestTimeSensor:
         # Small delay
         time.sleep(0.1)
 
-        context = sensor.get_time_context()
-        assert context['idle_seconds'] >= 0.1
+        idle = sensor.get_idle_streak_seconds()
+        assert idle >= 0.1
 
-    def test_circadian_classification(self):
-        """Should classify day/night periods.
-
-        Night typically 22:00-06:00
-        """
+    def test_record_interaction(self):
+        """Should reset idle on interaction."""
         sensor = TimeSensor()
 
-        # Test night hours
-        assert sensor._is_night_hour(2) == True
-        assert sensor._is_night_hour(23) == True
+        # Wait a bit
+        time.sleep(0.1)
 
-        # Test day hours
-        assert sensor._is_night_hour(12) == False
-        assert sensor._is_night_hour(14) == False
+        # Record interaction
+        sensor.record_interaction()
+
+        # Idle should be reset
+        idle = sensor.get_idle_seconds()
+        assert idle < 0.1
+
+    def test_is_night_hours(self):
+        """Should detect night hours."""
+        sensor = TimeSensor()
+
+        # Method should return bool
+        result = sensor.is_night_hours()
+        assert isinstance(result, bool)
+
+    def test_is_weekend(self):
+        """Should detect weekend."""
+        sensor = TimeSensor()
+
+        result = sensor.is_weekend()
+        assert isinstance(result, bool)
+
+    def test_should_enter_sleep(self):
+        """Should detect when idle threshold for sleep reached."""
+        sensor = TimeSensor()
+
+        # Just after activity, should not suggest sleep
+        sensor.record_interaction()
+        assert sensor.should_enter_sleep() == False
 
 
 class TestSensorIntegration:
@@ -236,8 +344,22 @@ class TestSensorIntegration:
 
         # Even if one has issues, others should work
         r_metrics = resource.read_metrics()
-        t_temp = thermal.read_temperature()
+        t_metrics = thermal.read_metrics()
 
-        # At least one should succeed on any platform
-        assert r_metrics is not None or t_temp is not None or True
+        # Both should succeed on any platform
+        assert r_metrics is not None
+        assert t_metrics is not None
 
+    def test_all_sensors_produce_valid_output(self):
+        """All sensors should produce valid, non-None output."""
+        resource = ResourceSensor()
+        cognitive = CognitiveSensor()
+        thermal = ThermalSensor()
+        power = PowerSensor()
+        time_sensor = TimeSensor()
+
+        assert resource.read_metrics() is not None
+        assert cognitive.read_metrics(None, None) is not None
+        assert thermal.read_metrics() is not None
+        assert power.read_metrics() is not None
+        assert time_sensor.read_metrics() is not None
