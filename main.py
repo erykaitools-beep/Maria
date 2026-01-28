@@ -1,7 +1,7 @@
 # main.py (CORRECTED)
 # Enhanced M.A.R.I.A. Main – integracja wszystkich modułów uczenia
 # Self-Learning, Web Learning, API Bridge, Query Interface
-# VERSION: 1.1 (Fixed bugs + improved + conversation logging)
+# VERSION: 1.2 (Added Homeostasis integration)
 
 import json
 import threading
@@ -13,6 +13,20 @@ from maria_core.utils.conversation_logger import log_message  # 👈 LOGOWANIE R
 from models import ollama_brain
 from maria_core.memory_engine import brain_memory_integration
 from maria_core.memory_engine.semantic.semantic_graph import SemanticGraph
+
+# ====== HOMEOSTASIS INTEGRATION ======
+HOMEOSTASIS_AVAILABLE = True
+homeostasis_core = None
+
+try:
+    from agent_core.homeostasis.core import HomeostasisCore
+    from agent_core.homeostasis.state_model import Mode
+    from agent_core.memory.manager import MemoryManager
+    from agent_core.llm.manager import LLMManager
+    from agent_core.executor.module_executor import ModuleExecutor
+except ImportError as e:
+    HOMEOSTASIS_AVAILABLE = False
+    print(f"[Homeostasis] ⚠ Not available: {e}")
 
 # ====== GLOBALNE STANY ======
 AGENT_RUNNING = False
@@ -73,7 +87,14 @@ def print_help():
     print("🤖 AGENT CONTROL:")
     print("  /start       - uruchom agenta w tle")
     print("  /stop        - zatrzymaj agenta w tle")
-    print("  /reload      - przeładuj kod mózgu i pętli (ollama_brain, brain_memory_integration)\n")
+    print("  /reload      - przeładuj kod mózgu i pętli (ollama_brain, brain_memory_integration)")
+
+    if HOMEOSTASIS_AVAILABLE:
+        print("\n🫀 HOMEOSTASIS:")
+        print("  /homeostasis         - pokaż status homeostazy")
+        print("  /homeostasis start   - uruchom pętlę homeostazy w tle")
+        print("  /homeostasis stop    - zatrzymaj pętlę homeostazy")
+    print()
 
     if SELF_LEARNING_AVAILABLE:
         print("🎓 SELF-LEARNING (Ollama local):")
@@ -107,7 +128,7 @@ def print_help():
 # ====== INICJALIZACJA ======
 def init_brain():
     """Tworzy/odświeża instancję mózgu i pętli pamięci."""
-    global semantic_memory, episodic_memory, maria_brain, brain_loop
+    global semantic_memory, episodic_memory, maria_brain, brain_loop, homeostasis_core
 
     if semantic_memory is None:
         semantic_memory = SemanticGraph()
@@ -124,6 +145,21 @@ def init_brain():
         episodic_memory=episodic_memory,
         maria_brain=maria_brain,
     )
+
+    # Initialize Homeostasis if available
+    if HOMEOSTASIS_AVAILABLE and homeostasis_core is None:
+        try:
+            memory_manager = MemoryManager()
+            llm_manager = LLMManager()
+            # ModuleExecutor is optional - homeostasis works without it
+            homeostasis_core = HomeostasisCore(
+                memory_manager=memory_manager,
+                llm_manager=llm_manager,
+                executor=None
+            )
+            print("[Homeostasis] ✅ Initialized")
+        except Exception as e:
+            print(f"[Homeostasis] ⚠ Init failed: {e}")
 
 
 # ====== HELPER: Setup learning agent ======
@@ -324,6 +360,102 @@ def cmd_report():
 
     except Exception as e:
         print(f"[Report] ❌ Error: {e}")
+
+
+# ====== HOMEOSTASIS COMMANDS ======
+HOMEOSTASIS_THREAD = None
+HOMEOSTASIS_RUNNING = False
+
+
+def cmd_homeostasis(args):
+    """Handle /homeostasis commands."""
+    global HOMEOSTASIS_THREAD, HOMEOSTASIS_RUNNING
+
+    if not HOMEOSTASIS_AVAILABLE:
+        print("[Homeostasis] ❌ Not available - agent_core not found")
+        return
+
+    if not homeostasis_core:
+        print("[Homeostasis] ❌ Not initialized - run init_brain() first")
+        return
+
+    subcommand = args[0].lower() if args else "status"
+
+    if subcommand == "status":
+        # Show homeostasis status
+        state = homeostasis_core.state
+        telemetry = homeostasis_core.get_telemetry()
+
+        print("\n" + "=" * 50)
+        print("🫀 HOMEOSTASIS STATUS")
+        print("=" * 50)
+        print(f"  Mode:         {state.mode.value.upper()}")
+        print(f"  Health Score: {state.health_score:.1%}")
+        print(f"  Mode Duration: {state.mode_duration_seconds:.0f}s")
+        print(f"  Idle Seconds: {state.idle_seconds:.0f}s")
+
+        if state.alerts:
+            print(f"\n  ⚠ Alerts ({len(state.alerts)}):")
+            for alert in state.alerts[-5:]:
+                print(f"    - {alert}")
+        else:
+            print(f"\n  ✅ No alerts")
+
+        # Resource headroom
+        if telemetry.get("resource_headroom"):
+            rh = telemetry["resource_headroom"]
+            print(f"\n  Resources:")
+            print(f"    RAM:  {rh.get('ram_pct', 0):.0f}% available")
+            print(f"    CPU:  {rh.get('cpu_pct', 0):.0f}% available")
+            print(f"    Disk: {rh.get('disk_pct', 0):.0f}% available")
+
+        print(f"\n  Loop Running: {'Yes' if HOMEOSTASIS_RUNNING else 'No'}")
+        print("=" * 50 + "\n")
+
+    elif subcommand == "start":
+        if HOMEOSTASIS_RUNNING:
+            print("[Homeostasis] Already running")
+            return
+
+        def homeostasis_loop():
+            global HOMEOSTASIS_RUNNING
+            HOMEOSTASIS_RUNNING = True
+            print("[Homeostasis] ▶ Starting monitoring loop...")
+
+            while HOMEOSTASIS_RUNNING:
+                try:
+                    homeostasis_core._execute_tick()
+
+                    # Check for mode changes and alert
+                    if homeostasis_core.state.mode != Mode.ACTIVE:
+                        print(f"[Homeostasis] ⚠ Mode: {homeostasis_core.state.mode.value}")
+
+                    time.sleep(1.0)  # 1 Hz tick rate
+                except Exception as e:
+                    print(f"[Homeostasis] ⚠ Error: {e}")
+                    time.sleep(5.0)
+
+            print("[Homeostasis] ⛔ Loop stopped")
+
+        HOMEOSTASIS_THREAD = threading.Thread(
+            target=homeostasis_loop,
+            daemon=True,
+            name="HomeostasisLoop"
+        )
+        HOMEOSTASIS_THREAD.start()
+        print("[Homeostasis] ✅ Monitoring started")
+
+    elif subcommand == "stop":
+        if not HOMEOSTASIS_RUNNING:
+            print("[Homeostasis] Not running")
+            return
+
+        HOMEOSTASIS_RUNNING = False
+        print("[Homeostasis] Stopping...")
+
+    else:
+        print(f"[Homeostasis] Unknown subcommand: {subcommand}")
+        print("  Usage: /homeostasis [status|start|stop]")
 
 
 def cmd_hybrid():
@@ -565,6 +697,9 @@ def main():
                     except Exception as e:
                         print(f"[System] ❌ Error: {e}\n")
 
+            elif command == "/homeostasis":
+                cmd_homeostasis(args)
+
             elif command == "/learn":
                 cmd_learn(args)
 
@@ -593,7 +728,25 @@ def main():
             continue
 
         # ===== NORMALNY TEKST → PERCEPCJA =====
+        # Check homeostasis mode before processing
+        if HOMEOSTASIS_AVAILABLE and homeostasis_core:
+            current_mode = homeostasis_core.state.mode
+            if current_mode == Mode.SURVIVAL:
+                print("[Homeostasis] ⚠ SURVIVAL mode - percepcja wstrzymana")
+                print("  System w trybie awaryjnym. Użyj /homeostasis status")
+                continue
+            elif current_mode == Mode.SLEEP:
+                print("[Homeostasis] 💤 SLEEP mode - budzę system...")
+                # Wake up - record interaction
+                homeostasis_core.time_sensor.record_interaction()
+            elif current_mode == Mode.REDUCED:
+                print("[Homeostasis] ⚡ REDUCED mode - ograniczona wydajność")
+
         last_result = brain_loop.process_perception(user_input)
+
+        # Record successful inference for homeostasis
+        if HOMEOSTASIS_AVAILABLE and homeostasis_core:
+            homeostasis_core.time_sensor.record_interaction()
 
         print("\nMaria [Reasoning]:")
         reasoning = last_result.get("reasoning", "")
