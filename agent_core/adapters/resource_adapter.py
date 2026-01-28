@@ -103,19 +103,22 @@ class ResourceWatchdogAdapter:
             try:
                 metrics = self._sensor.read_metrics()
 
-                if metrics and metrics.ram_percent >= self._limit_percent:
-                    logger.error(
-                        f"[Watchdog] RAM {metrics.ram_percent:.1f}% >= {self._limit_percent}%"
-                    )
-
-                    if self._on_threshold_exceeded:
-                        self._on_threshold_exceeded(metrics.ram_percent)
-                    else:
-                        # Default behavior: log warning but don't kill
-                        # Let homeostasis handle it
-                        logger.warning(
-                            "[Watchdog] Threshold exceeded - reporting to homeostasis"
+                if metrics:
+                    # Use memory_pressure which is 100 - ram_available_pct
+                    # Higher memory_pressure means less RAM available
+                    if metrics.memory_pressure >= self._limit_percent:
+                        logger.error(
+                            f"[Watchdog] RAM pressure {metrics.memory_pressure:.1f}% >= {self._limit_percent}%"
                         )
+
+                        if self._on_threshold_exceeded:
+                            self._on_threshold_exceeded(metrics.memory_pressure)
+                        else:
+                            # Default behavior: log warning but don't kill
+                            # Let homeostasis handle it
+                            logger.warning(
+                                "[Watchdog] Threshold exceeded - reporting to homeostasis"
+                            )
 
             except Exception as e:
                 logger.error(f"[Watchdog] Error in watch loop: {e}")
