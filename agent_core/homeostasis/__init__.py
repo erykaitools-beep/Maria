@@ -21,6 +21,7 @@ Spec reference: homeostasis_spec.md sections 2-9
 from .state_model import Mode, ResourceMetrics, CognitiveMetrics, SystemState
 from .core import HomeostasisCore
 from .api import HomeostasisInterface, HomeostasisEventBus
+from .time_awareness import TimeAwareness
 
 __all__ = [
     "Mode",
@@ -30,4 +31,5 @@ __all__ = [
     "HomeostasisCore",
     "HomeostasisInterface",
     "HomeostasisEventBus",
+    "TimeAwareness",
 ]

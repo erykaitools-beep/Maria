@@ -1,10 +1,19 @@
 # ollama_brain.py
-# M.A.R.I.A. Brain V3.1 – Ulepszona logika z mechanizmem samonaprawy i celami nauki
+# M.A.R.I.A. Brain V3.2 – Ulepszona logika z mechanizmem samonaprawy i celami nauki
+# + Time Awareness (percepcja czasu)
 
 import ollama
 import json
 import re
+from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
+
+# Time awareness - safe import
+try:
+    from agent_core.homeostasis.time_awareness import TimeAwareness
+    TIME_AWARENESS_AVAILABLE = True
+except ImportError:
+    TIME_AWARENESS_AVAILABLE = False
 
 
 class OllamaBrain:
@@ -18,13 +27,21 @@ class OllamaBrain:
         self.model = model
         self.log_fn = log_fn or print
 
-        self.system_prompt = system_prompt or (
-            "Jesteś M.A.R.I.A. – Meta Analysis Recalibration Intelligence Architecture.\n"
-            "Działasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
-            "Odpowiadasz po polsku, chyba że zadanie wymaga inaczej."
+        # Base system prompt (static part)
+        self._base_system_prompt = system_prompt or (
+            "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
+            "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
+            "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
         )
 
-        # Historia rozmowy – używana tylko przez think()
+        # Session tracking for time awareness
+        self._session_start = datetime.now()
+        self._last_interaction = datetime.now()
+
+        # Full system prompt (will include time context)
+        self.system_prompt = self._build_system_prompt()
+
+        # Historia rozmowy - uzywana tylko przez think()
         self.history: List[Dict[str, str]] = [
             {"role": "system", "content": self.system_prompt}
         ]
@@ -32,6 +49,48 @@ class OllamaBrain:
 
         if verify_model:
             self._verify_model_exists()
+
+    def _get_time_context(self) -> str:
+        """Get current time context for Maria's awareness."""
+        now = datetime.now()
+
+        # Calculate session duration
+        session_seconds = (now - self._session_start).total_seconds()
+
+        if TIME_AWARENESS_AVAILABLE:
+            # Use TimeAwareness for rich context
+            day_name = TimeAwareness.DAY_NAMES.get(now.weekday(), "")
+            time_of_day = TimeAwareness.get_time_of_day()
+            date_str = now.strftime("%d.%m.%Y")
+            time_str = now.strftime("%H:%M")
+
+            ctx = f"Teraz jest {day_name}, {date_str}, godzina {time_str} ({time_of_day})."
+
+            if session_seconds > 300:  # > 5 min
+                duration = TimeAwareness.format_duration(session_seconds)
+                ctx += f" Rozmawiamy juz {duration}."
+
+            if TimeAwareness.is_late_night():
+                ctx += " Jest pozna pora."
+
+            return ctx
+        else:
+            # Fallback - basic time info
+            return f"Teraz jest {now.strftime('%A, %d.%m.%Y, %H:%M')}."
+
+    def _build_system_prompt(self) -> str:
+        """Build full system prompt with time context."""
+        time_ctx = self._get_time_context()
+        return f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
+
+    def refresh_time_context(self) -> None:
+        """Refresh time context in system prompt and history."""
+        self._last_interaction = datetime.now()
+        self.system_prompt = self._build_system_prompt()
+
+        # Update system message in history
+        if self.history and self.history[0]["role"] == "system":
+            self.history[0]["content"] = self.system_prompt
 
     def _verify_model_exists(self):
         try:
@@ -44,16 +103,16 @@ class OllamaBrain:
                 name = m.get("name") or m.get("model") or ""
                 available_names.append(name)
 
-            self.log_fn(f"[OllamaBrain] 🔍 Dostępne modele wg ollama.list(): {available_names}")
+            self.log_fn(f"[OllamaBrain] [SCAN] Dostepne modele wg ollama.list(): {available_names}")
 
             # Akceptuj zarówno 'name', jak i 'model'
             available = set(available_names)
             if self.model not in available:
                 self.log_fn(
-                    f"[OllamaBrain] ⚠ UWAGA: Model '{self.model}' nie znaleziony w {available}."
+                    f"[OllamaBrain] [WARN] UWAGA: Model '{self.model}' nie znaleziony w {available}."
                 )
         except Exception as e:
-            self.log_fn(f"[OllamaBrain] ⚠ Błąd podczas verify_model: {e}")
+            self.log_fn(f"[OllamaBrain] [WARN] Blad podczas verify_model: {e}")
             # Nie chcemy, żeby brak połączenia ubił cały mózg
             pass
 
@@ -84,10 +143,14 @@ class OllamaBrain:
 
     def think(self, prompt: str, temperature: float = 0.3, **kwargs) -> str:
         """
-        Myślenie z historią rozmowy (do ogólnego dialogu i rozumowania).
-        NIE używamy tego do strukturalnego JSON (tam jest _ask_once).
+        Myslenie z historia rozmowy (do ogolnego dialogu i rozumowania).
+        NIE uzywamy tego do strukturalnego JSON (tam jest _ask_once).
         """
         self.call_count += 1
+
+        # Refresh time context before each interaction
+        self.refresh_time_context()
+
         self.history.append({"role": "user", "content": prompt})
 
         try:
@@ -95,7 +158,7 @@ class OllamaBrain:
             self.history.append({"role": "assistant", "content": content})
             return content
         except Exception as e:
-            self.log_fn(f"[OllamaBrain] ❌ Błąd krytyczny API: {e}")
+            self.log_fn(f"[OllamaBrain] [ERROR] Blad krytyczny API: {e}")
             return ""
 
     # === JSON HELPER ===
@@ -166,7 +229,7 @@ class OllamaBrain:
             try:
                 response = self._ask_once(prompt, temperature=0.1)
             except Exception as e:
-                self.log_fn(f"[OllamaBrain] ❌ Błąd API przy analizie zadania: {e}")
+                self.log_fn(f"[OllamaBrain] [ERROR] Blad API przy analizie zadania: {e}")
                 break
 
             parsed = self._extract_json(response)
@@ -176,7 +239,7 @@ class OllamaBrain:
 
             # Porażka - prosimy o poprawkę (Samonaprawa)
             self.log_fn(
-                f"[OllamaBrain] ⚠ Próba {attempt + 1}: Zły JSON. Proszę model o poprawkę..."
+                f"[OllamaBrain] [WARN] Proba {attempt + 1}: Zly JSON. Prosze model o poprawke..."
             )
             prompt = (
                 "Twój poprzedni JSON był niepoprawny składniowo. "
