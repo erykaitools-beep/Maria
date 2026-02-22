@@ -1,0 +1,15 @@
+W złożonych systemach przyczyna i skutek rzadko są liniowe.
+Jedno zdarzenie może mieć wiele konsekwencji,
+a jedna konsekwencja może mieć wiele przyczyn.
+
+Jeżeli zmienimy jeden element systemu,
+system często reaguje w sposób nieintuicyjny.
+
+Ludzie mają tendencję do przypisywania winy jednemu czynnikowi,
+ponieważ uproszczenie daje poczucie kontroli.
+
+W rzeczywistości kontrola często jest iluzją,
+a decyzje są podejmowane w warunkach niepełnej informacji.
+
+System nie karze ani nie nagradza.
+System reaguje.

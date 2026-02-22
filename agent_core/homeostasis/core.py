@@ -30,6 +30,7 @@ from .interpreter import StateInterpreter
 from .constraints import ConstraintValidator, Thresholds
 from .mode_regulator import ModeRegulator
 from .actions import CorrectiveActionGenerator, AlarmDispatcher, CorrectiveAction, Urgency
+from .event_logger import HomeostasisEventLogger, get_event_logger
 
 if TYPE_CHECKING:
     from ..memory.manager import MemoryManager
@@ -61,6 +62,7 @@ class HomeostasisCore:
         llm_manager: Optional["LLMManager"] = None,
         executor: Optional["ModuleExecutor"] = None,
         thresholds: Optional[Thresholds] = None,
+        event_logger: Optional[HomeostasisEventLogger] = None,
     ):
         """
         Initialize homeostasis core.
@@ -70,11 +72,15 @@ class HomeostasisCore:
             llm_manager: LLM module interface
             executor: Module signal executor
             thresholds: Custom constraint thresholds
+            event_logger: Event logger for persistent logging (default: global)
         """
         # External dependencies
         self.memory = memory_manager
         self.llm = llm_manager
         self.executor = executor
+
+        # Event logger (persistent JSONL logging)
+        self.event_logger = event_logger or get_event_logger()
 
         # Sensors
         self.resource_sensor = ResourceSensor()
@@ -88,7 +94,7 @@ class HomeostasisCore:
         self.validator = ConstraintValidator(thresholds)
         self.regulator = ModeRegulator()
         self.action_generator = CorrectiveActionGenerator()
-        self.alarm_dispatcher = AlarmDispatcher()
+        self.alarm_dispatcher = AlarmDispatcher(event_logger=self.event_logger)
 
         # State
         self.state = SystemState(
@@ -99,7 +105,7 @@ class HomeostasisCore:
             idle_seconds=0,
         )
 
-        # Audit log
+        # Audit log (in-memory, for backward compatibility)
         self.audit_log: List[Dict[str, Any]] = []
 
         # Control
@@ -275,7 +281,17 @@ class HomeostasisCore:
         self.state.mode = new_mode
         self.state.last_mode_change_time = time.time()
 
-        # Audit log
+        # Persistent event log (JSONL) - with full context
+        self.event_logger.log_mode_change(
+            from_mode=old_mode,
+            to_mode=new_mode,
+            interpreted_state=self.state.interpreted_state or {},
+            alerts=self.state.alerts,
+            health_score=self.state.health_score,
+            tick_count=self._tick_count,
+        )
+
+        # In-memory audit log (backward compatibility)
         self.audit_log.append({
             "timestamp": time.time(),
             "event": "mode_change",
@@ -363,6 +379,16 @@ class HomeostasisCore:
 
         Spec: homeostasis_spec.md lines 1468-1478
         """
+        # Persistent event log (JSONL)
+        self.event_logger.log_state_snapshot(
+            mode=self.state.mode,
+            health_score=self.state.health_score,
+            interpreted_state=state,
+            alerts_count=len(self.state.alerts),
+            tick_count=self._tick_count,
+        )
+
+        # In-memory audit log (backward compatibility)
         self.audit_log.append({
             "timestamp": time.time(),
             "event": "state_snapshot",
@@ -377,9 +403,11 @@ class HomeostasisCore:
         if len(self.audit_log) > 10000:
             self.audit_log = self.audit_log[-5000:]
 
-    def stop(self) -> None:
+    def stop(self, reason: str = "user_request") -> None:
         """Stop the main loop."""
         self._running = False
+        self.event_logger.log_shutdown(reason=reason)
+        self.event_logger.flush()
 
     def is_running(self) -> bool:
         """Check if main loop is running."""

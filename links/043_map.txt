@@ -1,7 +1,0 @@
-043 -> percepcja
-043 -> input
-043 -> external
-043 -> language
-043 -> time_2025
-043 -> ai
-043 -> project

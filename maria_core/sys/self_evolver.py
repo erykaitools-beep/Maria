@@ -6,6 +6,7 @@ import requests
 
 from maria_core.agent.interpreter import MEMORY_DIR, LOGS_DIR, log_line
 from maria_core.meta.meta_controller import meta
+from maria_core.sys.config import OLLAMA_BASE_URL
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
@@ -14,23 +15,23 @@ MAX_LOG_SIZE_MB = 5
 
 def daily_self_check():
     """
-    Główna procedura uruchamiana o 4:00 rano przez heartbeat.
+    Glowna procedura uruchamiana o 4:00 rano przez heartbeat.
     """
-    print(f"\n[{datetime.now().strftime('%H:%M')}] 🛡️ URUCHAMIAM PROTOKÓŁ SELF-EVOLVER...")
+    print(f"\n[{datetime.now().strftime('%H:%M')}] [EVOLVER] URUCHAMIAM PROTOKOL SELF-EVOLVER...")
 
     # 1. Kopia zapasowa (Safety First)
     _create_backup()
 
-    # 2. Higiena dysku (Logi) – opcjonalnie, ale zostawiamy
+    # 2. Higiena dysku (Logi) - opcjonalnie, ale zostawiamy
     _maintain_logs()
 
-    # 3. Spójność pamięci (Sanity Check)
+    # 3. Spojnosc pamieci (Sanity Check)
     health_status = _check_memory_integrity()
 
-    # 4. Refleksja (LLM decyduje o priorytetach na dziś)
+    # 4. Refleksja (LLM decyduje o priorytetach na dzis)
     _morning_reflection(health_status)
 
-    print(f"[{datetime.now().strftime('%H:%M')}] ✅ SELF-EVOLVER ZAKOŃCZONY.\n")
+    print(f"[{datetime.now().strftime('%H:%M')}] [OK] SELF-EVOLVER ZAKONCZONY.\n")
 
 
 def _create_backup():
@@ -44,19 +45,19 @@ def _create_backup():
 
         if os.path.exists(MEMORY_DIR):
             shutil.make_archive(backup_name, "zip", MEMORY_DIR)
-            print(f"[EVOLVER] 💾 Wykonano backup pamięci: {backup_name}.zip")
+            print(f"[EVOLVER] [BACKUP] Wykonano backup pamieci: {backup_name}.zip")
 
             # Usuwamy stare backupy (zostawiamy 7 ostatnich)
             backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "*.zip")))
             while len(backups) > 7:
                 old = backups.pop(0)
                 os.remove(old)
-                print(f"[EVOLVER] 🗑️ Usunięto stary backup: {old}")
+                print(f"[EVOLVER] [CLEANUP] Usunieto stary backup: {old}")
         else:
-            print(f"[EVOLVER] ⚠️ Nie znaleziono katalogu {MEMORY_DIR} do backupu!")
+            print(f"[EVOLVER] [WARN] Nie znaleziono katalogu {MEMORY_DIR} do backupu!")
 
     except Exception as e:
-        print(f"[EVOLVER] ❌ Błąd backupu: {e}")
+        print(f"[EVOLVER] [ERROR] Blad backupu: {e}")
 
 
 def _current_log_file():
@@ -79,9 +80,9 @@ def _maintain_logs():
                 shutil.move(log_file, new_name)
                 with open(log_file, "w", encoding="utf-8") as f:
                     f.write(f"--- NOWY LOG ROZPOCZĘTY: {datetime.now()} ---\n")
-                print(f"[EVOLVER] 📜 Zarchiwizowano logi ({size_mb:.2f} MB). Czysta karta.")
+                print(f"[EVOLVER] [ARCHIVE] Zarchiwizowano logi ({size_mb:.2f} MB). Czysta karta.")
     except Exception as e:
-        print(f"[EVOLVER] ⚠️ Błąd przy logach: {e}")
+        print(f"[EVOLVER] [WARN] Blad przy logach: {e}")
 
 
 def _check_memory_integrity():
@@ -112,7 +113,7 @@ Na czym skupisz się w nadchodzącym dniu? Czy zmieniasz cel?
 
     try:
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": "llama3.2:3b",  # zaktualizuj model
                 "prompt": prompt,
@@ -123,25 +124,25 @@ Na czym skupisz się w nadchodzącym dniu? Czy zmieniasz cel?
 
         if response.status_code == 200:
             result = response.json().get("response", "").strip()
-            print(f"[EVOLVER] 🧠 Poranna refleksja: {result}")
-            
-            # Użyj nowej metody update_goal zamiast nieistniejącej
+            print(f"[EVOLVER] [BRAIN] Poranna refleksja: {result}")
+
+            # Uzyj nowej metody update_goal zamiast nieistniejacej
             meta.update_goal(result)
-            
-            # Wyślij raport
+
+            # Wyslij raport
             meta.raport_do_taty(
-                "Poranny Raport Stanu 🌅",
+                "Poranny Raport Stanu",
                 f"**Status techniczny:** {health_status}\n"
                 f"**Motywacja:** {meta.get_motivation_score()}\n"
-                f"**Plan na dziś:** {result}\n"
+                f"**Plan na dzis:** {result}\n"
                 f"**Uptime:** {meta.state['total_uptime_hours']:.1f}h"
             )
         else:
-            print(f"[EVOLVER] ⚠️ Ollama odpowiedziała kodem {response.status_code}")
-            meta.raport_do_taty("Błąd porannej refleksji", f"Ollama: status {response.status_code}")
+            print(f"[EVOLVER] [WARN] Ollama odpowiedziala kodem {response.status_code}")
+            meta.raport_do_taty("Blad porannej refleksji", f"Ollama: status {response.status_code}")
 
     except Exception as e:
-        print(f"[EVOLVER] ⚠️ Nie udało się przeprowadzić refleksji: {e}")
-        meta.raport_do_taty("Błąd porannej refleksji", str(e))
+        print(f"[EVOLVER] [WARN] Nie udalo sie przeprowadzic refleksji: {e}")
+        meta.raport_do_taty("Blad porannej refleksji", str(e))
 if __name__ == "__main__":
     daily_self_check()

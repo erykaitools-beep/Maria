@@ -1,4 +1,0 @@
-066 -> percepcja
-066 -> input
-066 -> external
-066 -> ai

@@ -1,6 +1,0 @@
-016 -> language
-016 -> eryk
-016 -> memory
-016 -> ai
-016 -> local_ai
-016 -> create

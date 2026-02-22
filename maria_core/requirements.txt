@@ -4,5 +4,7 @@
 # Ollama API calls
 requests>=2.31.0
 
-# No other dependencies needed - system uses only stdlib + requests!
+# Environment configuration from .env files (optional)
+python-dotenv>=0.19.0
+
 # Make sure Ollama is installed locally: https://ollama.ai/

@@ -283,25 +283,25 @@ class MetaController:
         try:
             self._append_jsonl(REPORTS_LOG, raport)
         except Exception as e:
-            print(f"[RAPORT] ⚠️ Nie udało się zapisać do pliku: {e}")
-        
-        # 2. Wyświetl w konsoli
+            print(f"[RAPORT] [WARN] Nie udalo sie zapisac do pliku: {e}")
+
+        # 2. Wyswietl w konsoli
         print(f"\n{'='*60}")
-        print(f"📧 [RAPORT DO TATY] {title}")
+        print(f"[RAPORT DO TATY] {title}")
         print(f"{content}")
         print(f"Motywacja: {raport['motivation']} | Uptime: {raport['uptime_hours']}h")
         print(f"{'='*60}\n")
-    
+
     def update_goal(self, goal_description: str, reason: str = "morning_reflection") -> None:
         """
         Aktualizuje cel jako wolny tekst (nie enum).
-        Używane przez poranną refleksję LLM.
+        Uzywane przez poranna refleksje LLM.
         """
         self.state["current_goal_description"] = goal_description
         self.state["last_decision_reason"] = f"goal updated: {goal_description[:50]}"
         self._log_decision("update_goal", goal_description, reason)
         self._save()
-        print(f"[META] 🎯 Nowy cel: {goal_description}")
+        print(f"[META] [GOAL] Nowy cel: {goal_description}")
 
 
 # Singleton do użycia wszędzie

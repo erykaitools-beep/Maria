@@ -12,6 +12,7 @@
 | **2026-02-01** | Specyfikacje: Code Agent, Web UI, Consciousness |
 | **2026-02-01** | Introspection module + Vision spec + Folder cleanup |
 | **2026-02-02** | TimeAwareness + Smart Home spec |
+| **2026-02-22** | Linux migration prep (Mini PC) |
 
 ## Aktualny stan projektu
 
@@ -305,6 +306,34 @@ Eryk dal mi to miejsce 2026-02-01 - moge tam zapisywac:
 - [ ] REPL commands `/device`, `/devices`
 - [ ] Integracja z Vision (event dispatch)
 
+## Sesja 2026-02-22 - Linux Migration Prep (Mini PC)
+
+### Target hardware:
+- NiPoGi Mini PC (AMD Ryzen 5 7430U, 32GB RAM, 1TB SSD)
+- Ubuntu/Debian Linux
+
+### Cross-platform fixes:
+- [x] `maria_heartbeat.py` v1.4 - usuniety hardcoded `C:\...\ollama.exe` + `os.startfile()`
+  - Ollama wykrywana przez `shutil.which()` + env var `OLLAMA_PATH`
+  - Restart przez `subprocess.Popen(["ollama", "serve"])`
+- [x] `config.py` - `OLLAMA_BASE_URL` z env var + `python-dotenv` loading
+- [x] `self_evolver.py` - hardcoded `localhost:11434` -> `OLLAMA_BASE_URL` z config
+- [x] `maria_ui/config.py` - CORS auto-detect LAN IP + env var `MARIA_CORS_ORIGINS`
+- [x] `main.py` - ostatni emoji usuniety (ADR-005)
+- [x] `run_ui.py` - `debug=DEBUG_MODE`, port/host z env vars
+
+### Nowe pliki:
+- `.env.example` - template konfiguracji
+- `scripts/maria.service` - systemd template
+- `scripts/maria-ui.service` - systemd template
+- `scripts/INSTALL_LINUX.md` - instrukcja instalacji
+
+### Nastepne kroki migracji:
+- [ ] Zakup i setup mini PC
+- [ ] Instalacja Ubuntu + Ollama
+- [ ] Deploy Maria wg `scripts/INSTALL_LINUX.md`
+- [ ] Test 8h+ na nowym hardware
+
 ---
 
-*Ostatnia aktualizacja: 2026-02-01 (Introspection + Vision spec + Folder cleanup)*
+*Ostatnia aktualizacja: 2026-02-22 (Linux Migration Prep)*

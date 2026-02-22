@@ -1,3 +1,0 @@
-064 -> percepcja
-064 -> input
-064 -> external

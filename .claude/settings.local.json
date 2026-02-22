@@ -8,7 +8,12 @@
       "Bash(git config:*)",
       "Bash(git config user.name \"MARIA Project\")",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git checkout:*)",
+      "Bash(if not exist \"archive\\\\maria_core_backup_20260126\" mkdir \"archive\\\\maria_core_backup_20260126\")",
+      "Bash(grep:*)",
+      "Bash(git status:*)"
     ]
   }
 }

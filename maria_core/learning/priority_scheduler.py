@@ -141,7 +141,7 @@ def update_priorities(index_path: Path, base_dir: Path = INPUT_DIR, use_ollama: 
     Returns:
         Liczba zaktualizowanych rekordów
     """
-    logger.info("🎯 Aktualizuję priorytety...")
+    logger.info("[PRIORITY] Aktualizuje priorytety...")
 
     index = load_index(index_path)
 
@@ -164,9 +164,9 @@ def update_priorities(index_path: Path, base_dir: Path = INPUT_DIR, use_ollama: 
 
     if updated > 0:
         save_index(index, index_path)
-        logger.info(f"✅ Zaktualizowano priorytety dla {updated} plików")
+        logger.info(f"[OK] Zaktualizowano priorytety dla {updated} plikow")
     else:
-        logger.info("✅ Brak plików do aktualizacji priorytetów")
+        logger.info("[OK] Brak plikow do aktualizacji priorytetow")
 
     return updated
 
@@ -182,7 +182,7 @@ def reprocess_hard_topics(index_path: Path, files_since_hard: int = 5) -> int:
     Returns:
         Liczba przywróconych plików
     """
-    logger.info("🔄 Sprawdzam czy można przywrócić hard topics...")
+    logger.info("[RETRY] Sprawdzam czy mozna przywrocic hard topics...")
 
     index = load_index(index_path)
 
@@ -191,7 +191,7 @@ def reprocess_hard_topics(index_path: Path, files_since_hard: int = 5) -> int:
     hard_topics = [r for r in index if r['status'] == STATUS_HARD_TOPIC]
 
     if not hard_topics:
-        logger.info("✅ Brak hard topics do przywrócenia")
+        logger.info("[OK] Brak hard topics do przywrocenia")
         return 0
 
     # Jeśli mamy wystarczająco dużo ukończonych, przywróć pierwszy hard topic
@@ -205,7 +205,7 @@ def reprocess_hard_topics(index_path: Path, files_since_hard: int = 5) -> int:
 
         save_index(index, index_path)
 
-        logger.info(f"🔄 Przywrócono hard topic: {target['id']}")
+        logger.info(f"[RETRY] Przywrocono hard topic: {target['id']}")
         return 1
 
     return 0

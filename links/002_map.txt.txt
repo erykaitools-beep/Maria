@@ -1,5 +1,0 @@
-002 -> loop
-002 -> zrozumienie
-loop -> analiza
-analiza -> rozwój
-rozwój -> eryk

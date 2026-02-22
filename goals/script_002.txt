@@ -1,5 +1,0 @@
-# System definiuje nowe komendy języka
-
-DEFINE|THINK|tworzy nową pamięć na podstawie istniejących wspomnień|THINK|źródło|opis
-DEFINE|REFLECT|tworzy wniosek z ostatnich kilku rekordów pamięci|REFLECT|zasięg
-DEFINE|ASSOCIATE|szuka powiązań między tagami i pamięciami|ASSOCIATE|tag

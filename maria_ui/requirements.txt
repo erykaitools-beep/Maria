@@ -1,0 +1,12 @@
+# M.A.R.I.A. Web UI - Requirements
+# Python 3.8+
+
+flask>=2.0.0
+flask-socketio>=5.0.0
+python-socketio>=5.0.0
+psutil>=5.9.0
+
+# For WebSocket support (choose one):
+# eventlet or gevent for production
+# simple-websocket for development
+simple-websocket>=0.5.0

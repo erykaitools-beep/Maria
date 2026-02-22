@@ -99,7 +99,7 @@ def maria_learning_cycle(
         use_ollama_priority: Czy użyć Ollama do priorytetyzacji (wolniejsze)
     """
     logger.info("="*60)
-    logger.info("🚀 DEAMONMARIA V2 - START LEARNING CYCLE")
+    logger.info("[START] DEAMONMARIA V2 - START LEARNING CYCLE")
     logger.info("="*60)
 
     iteration = 0
@@ -108,49 +108,49 @@ def maria_learning_cycle(
     while iteration < max_iterations:
         iteration += 1
         logger.info(f"\n{'='*60}")
-        logger.info(f"📍 ITERACJA {iteration}/{max_iterations}")
+        logger.info(f"[ITER] ITERACJA {iteration}/{max_iterations}")
         logger.info(f"{'='*60}")
 
         # ===== KROK 1: SKANOWANIE =====
-        logger.info("\n[1/5] 🔍 Skanowanie katalogów...")
+        logger.info("\n[1/5] [SCAN] Skanowanie katalogow...")
         stats = scan_input_directory(INPUT_DIR, KNOWLEDGE_INDEX)
 
         if stats['new'] > 0 or stats['changed'] > 0:
             logger.info(f"Znaleziono: {stats['new']} nowych, {stats['changed']} zmienionych")
 
         # ===== KROK 2: PRIORYTETYZACJA =====
-        logger.info("\n[2/5] 🎯 Aktualizacja priorytetów...")
+        logger.info("\n[2/5] [PRIORITY] Aktualizacja priorytetow...")
         updated = update_priorities(KNOWLEDGE_INDEX, INPUT_DIR, use_ollama=use_ollama_priority)
 
         # ===== KROK 3: NAUKA =====
-        logger.info("\n[3/5] 🧠 Uczenie się...")
+        logger.info("\n[3/5] [BRAIN] Uczenie sie...")
         learned_something = learn_next_chunk(INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY)
 
         if learned_something:
             learn_counter += 1
-            logger.info(f"✅ Nauczono chunk (licznik: {learn_counter})")
+            logger.info(f"[OK] Nauczono chunk (licznik: {learn_counter})")
         else:
-            logger.info("ℹ️  Brak chunków do nauki")
+            logger.info("[INFO] Brak chunkow do nauki")
 
         # ===== KROK 4: EGZAMINY =====
-        # Uruchamiaj egzamin co N kroków nauki lub jeśli nie ma już czego uczyć
+        # Uruchamiaj egzamin co N krokow nauki lub jesli nie ma juz czego uczyc
         if learn_counter >= learn_steps_per_exam or not learned_something:
-            logger.info("\n[4/5] 📝 Sprawdzam egzaminy...")
+            logger.info("\n[4/5] [EXAM] Sprawdzam egzaminy...")
             exam_done = run_exam_if_ready(KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS)
 
             if exam_done:
                 learn_counter = 0  # resetuj licznik
-                logger.info("✅ Przeprowadzono egzamin")
+                logger.info("[OK] Przeprowadzono egzamin")
             else:
-                logger.info("ℹ️  Brak plików gotowych na egzamin")
+                logger.info("[INFO] Brak plikow gotowych na egzamin")
         else:
-            logger.info("\n[4/5] 📝 Pomijam egzaminy (za mało nauki)")
+            logger.info("\n[4/5] [EXAM] Pomijam egzaminy (za malo nauki)")
 
         # ===== KROK 5: HARD TOPICS =====
-        logger.info("\n[5/5] 🔄 Sprawdzam hard topics...")
+        logger.info("\n[5/5] [RETRY] Sprawdzam hard topics...")
         restored = reprocess_hard_topics(KNOWLEDGE_INDEX, files_since_hard=5)
 
-        # ===== SPRAWDŹ CZY JEST JESZCZE PRACA =====
+        # ===== SPRAWDZ CZY JEST JESZCZE PRACA =====
         index = load_index(KNOWLEDGE_INDEX)
 
         new_count = sum(1 for r in index if r['status'] == 'new')
@@ -159,26 +159,26 @@ def maria_learning_cycle(
         completed_count = sum(1 for r in index if r['status'] == 'completed')
         hard_count = sum(1 for r in index if r['status'] == 'hard_topic')
 
-        logger.info(f"\n📊 STATUS OGÓLNY:")
+        logger.info(f"\n[STATUS] STATUS OGOLNY:")
         logger.info(f"   New: {new_count}")
         logger.info(f"   Learning: {learning_count}")
         logger.info(f"   Learned: {learned_count}")
         logger.info(f"   Completed: {completed_count}")
         logger.info(f"   Hard Topics: {hard_count}")
 
-        # Jeśli nie ma nic do roboty, zakończ
+        # Jesli nie ma nic do roboty, zakoncz
         if new_count == 0 and learning_count == 0 and learned_count == 0:
             if hard_count > 0:
-                logger.info("\n⚠️  Wszystkie pliki to hard topics - kończę cykl")
+                logger.info("\n[WARN] Wszystkie pliki to hard topics - koncze cykl")
             else:
-                logger.info("\n✅ Wszystkie pliki ukończone!")
+                logger.info("\n[OK] Wszystkie pliki ukonczone!")
             break
 
-        # Krótka pauza między iteracjami (opcjonalne)
+        # Krotka pauza miedzy iteracjami (opcjonalne)
         # time.sleep(1)
 
     logger.info("\n" + "="*60)
-    logger.info("🏁 DEAMONMARIA V2 - KONIEC CYKLU")
+    logger.info("[END] DEAMONMARIA V2 - KONIEC CYKLU")
     logger.info("="*60)
 
 

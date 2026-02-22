@@ -7,6 +7,13 @@ from pathlib import Path
 import sys
 import os
 
+# Load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Windows console UTF-8 fix
 if sys.platform == 'win32':
     # Force UTF-8 output on Windows
@@ -19,7 +26,7 @@ if sys.platform == 'win32':
 
 # ========== ŚCIEŻKI ==========
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]  # Główny folder projektu (nie maria_core/)
 INPUT_DIR = BASE_DIR / "input"
 PROCESSED_DIR = BASE_DIR / "processed"
 MEMORY_DIR = BASE_DIR / "memory"
@@ -46,7 +53,7 @@ ensure_directories()
 
 # ========== OLLAMA ==========
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = "llama3.1:8b"
 OLLAMA_TEMPERATURE = 0.3
 OLLAMA_TIMEOUT = 240  # sekundy

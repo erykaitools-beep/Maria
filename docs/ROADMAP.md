@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Development Roadmap
-> Version: 0.3 | Last updated: 2026-02-02
+> Version: 0.4 | Last updated: 2026-02-22
 
 ## Overview
 
@@ -217,6 +217,7 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | M1 | Faza A complete - stabilny runtime | DONE |
 | M2 | Faza B complete - full homeostasis | DONE |
 | M3 | Faza C - introspection + time awareness | DONE |
+| M3.5 | Linux migration prep (Mini PC) | DONE |
 | M4 | Faza C complete - consciousness | IN PROGRESS |
 | M5 | Faza D complete - vision | PLANNED |
 | M6 | Faza E complete - smart home | PLANNED |
@@ -231,6 +232,7 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | Ollama API niestabilne | Niskie | Sredni | Retry logic juz istnieje |
 | Brak testow | Wysokie | Sredni | Manualne testy na start, unit testy w Fazie C |
 | Niejasne wymagania | Srednie | Sredni | Open questions w DECISIONS.md |
+| Migracja na Linux Mini PC | Niskie | Sredni | Cross-platform prep done, .env config, systemd |
 
 ---
 

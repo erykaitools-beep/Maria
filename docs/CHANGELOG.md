@@ -3,6 +3,200 @@
 
 ---
 
+## [2026-02-22] - Sesja 10: Linux Migration Prep (Mini PC)
+
+### Changed
+- **`maria_core/sys/config.py`** - Dodano `python-dotenv` loading + `OLLAMA_BASE_URL` z env var
+- **`maria_core/sys/maria_heartbeat.py`** (v1.3 -> v1.4):
+  - Usuniety hardcoded `C:\Users\eras-\...\ollama.exe`
+  - `os.startfile()` (Windows-only) -> `subprocess.Popen()` (cross-platform)
+  - Ollama wykrywana przez `shutil.which("ollama")` + env var `OLLAMA_PATH`
+  - Health check uzywa `OLLAMA_BASE_URL` z config
+- **`maria_core/sys/self_evolver.py`** - hardcoded `localhost:11434` -> `OLLAMA_BASE_URL` z config
+- **`maria_ui/config.py`** - CORS auto-wykrywa LAN IP + env var `MARIA_CORS_ORIGINS`
+- **`main.py`** - Ostatni emoji (linia 104) usuniety (ADR-005)
+- **`run_ui.py`** - `debug=True` -> `debug=DEBUG_MODE`, port/host z env vars
+
+### Added
+- **`.env.example`** - Template konfiguracji (OLLAMA_BASE_URL, MARIA_PIN, porty)
+- **`scripts/maria.service`** - Systemd template dla REPL
+- **`scripts/maria-ui.service`** - Systemd template dla Web UI
+- **`scripts/INSTALL_LINUX.md`** - Instrukcja instalacji na Linux
+- **`python-dotenv`** w `maria_core/requirements.txt`
+
+### Target Hardware
+- NiPoGi Mini PC (AMD Ryzen 5 7430U, 32GB RAM, 1TB SSD)
+- Ubuntu/Debian Linux
+
+### Statistics
+- **268 tests passing** (zero regresji)
+- 7 plikow zmodyfikowanych, 4 nowe pliki
+
+---
+
+## [2026-02-01] - Sesja 6 & 7: Emoji Cleanup + Web UI Complete
+
+### Added - Web UI (`maria_ui/`)
+- **Sprint 1:** Minimalny Flask server z podstawowa struktura
+- **Sprint 2:** Integracja z homeostasis (psutil, event_logger)
+- **Sprint 3:** WebSocket chat z OllamaBrain
+- **Sprint 3.5:** Zabezpieczenia:
+  - PIN login (domyslnie: 1234)
+  - Rate limiting (2 msg / 60s)
+  - Input sanitization (XSS protection)
+  - Session management
+- **Sprint 4:** Full status dashboard (`/status`):
+  - System metrics (RAM, CPU, Disk, Uptime)
+  - Homeostasis (mode, health score, alerts)
+  - Brain stats (model, history, API calls)
+  - Memory stats (semantic graph, knowledge index)
+  - Events list (last 10)
+- **Sprint 5:** Proaktywne powiadomienia:
+  - Toast notifications (prawy gorny rog)
+  - Auto-alerty przy zmianie trybu homeostasis
+  - Auto-alerty przy CRITICAL/ALERT severity
+  - Powiadomienia w chacie jako system messages
+  - Background monitor thread (5s interval)
+
+### New Files
+```
+maria_ui/
+├── __init__.py
+├── app.py              # 755 lines - Flask + SocketIO + notifications
+├── config.py           # Centralized configuration
+├── requirements.txt    # flask, flask-socketio, psutil, simple-websocket
+└── templates/
+    ├── login.html      # PIN authentication page
+    ├── index.html      # Chat interface v0.5
+    └── status.html     # Full dashboard
+run_ui.py               # Entry point for Web UI
+```
+
+### Fixed
+- **Emoji cleanup:** Usunieto 94 wystapienia emoji z 13 plikow Python
+  - Zamieniono na tekst ASCII: [OK], [WARN], [ERROR], [INFO], etc.
+  - Naprawiono problemy z PowerShell encoding
+- **Chat history persistence:** Wiadomosci nie znikaja przy nawigacji miedzy stronami
+
+### API Endpoints
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/` | GET | Yes | Chat interface |
+| `/login` | GET/POST | No | PIN login |
+| `/logout` | GET | No | Clear session |
+| `/status` | GET | Yes | Status dashboard |
+| `/api/status` | GET | Yes | Basic status JSON |
+| `/api/status/full` | GET | Yes | Full metrics JSON |
+| `/api/chat/history` | GET | Yes | UI chat history |
+| `/api/notify/test` | POST | Yes | Send test notification |
+| `/api/notify/send` | POST | Yes | Send custom notification |
+| `/api/health` | GET | No | Health check |
+
+### WebSocket Events
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `connect` | Client->Server | Initiate connection |
+| `connected` | Server->Client | Connection confirmed |
+| `chat_message` | Client->Server | User sends message |
+| `chat_response` | Server->Client | Maria's response |
+| `chat_status` | Server->Client | Thinking indicator |
+| `clear_history` | Client->Server | Clear conversation |
+| `history_cleared` | Server->Client | Confirmation |
+| `proactive_notification` | Server->Client | Auto-alerts |
+
+### Configuration (`maria_ui/config.py`)
+```python
+UI_PIN = "1234"                    # Login PIN
+RATE_LIMIT_MESSAGES = 2            # Max messages per window
+RATE_LIMIT_WINDOW_SEC = 60         # Window duration
+MAX_MESSAGE_LENGTH = 2000          # Max chars per message
+MAX_HISTORY_MESSAGES = 20          # Brain history limit
+DEBUG_MODE = False                 # Production mode
+```
+
+---
+
+## [2026-01-31] - Sesja 5: Event Logger (Lab Reports)
+
+### Added
+- `agent_core/homeostasis/event_logger.py` - Persistent event logging system
+  - Logs mode transitions with full trigger context (constraint, value, threshold)
+  - Logs alerts with severity and values
+  - Logs state snapshots periodically
+  - Duration tracking for each mode
+  - Thread-safe buffered writes to JSONL
+- `/homeostasis events N` - Show last N events from log
+- `/homeostasis summary` - Show session summary (uptime, mode changes, alerts)
+- `agent_core/tests/test_event_logger.py` - 16 tests for event logger
+
+### Changed
+- `HomeostasisCore` now integrates with EventLogger
+- `AlarmDispatcher` now logs alerts to JSONL
+- Event log file: `meta_data/homeostasis_events.jsonl`
+
+### Statistics
+- **216 tests passing** (200 previous + 16 new)
+
+### Event Log Format (Lab Report style)
+```jsonl
+{"ts": 1706700000, "event_type": "mode_change", "from_mode": "active", "to_mode": "reduced", "trigger": {"constraint": "ram_low", "value": 18.5, "threshold": 20}, "metrics": {...}, "duration_in_prev_mode_sec": 3600}
+{"ts": 1706700060, "event_type": "alert", "severity": "WARNING", "message": "RAM below 30%", "value": 28.5, "threshold": 30}
+```
+
+---
+
+## [2026-01-28] - Sesja 4: Etap 3 + Etap 4 Complete
+
+### Added
+- `agent_core/tests/test_integration_legacy.py` - 26 integration tests with real legacy modules
+- `/homeostasis` REPL command (status/start/stop)
+- Mode gating in main.py for learning cycle protection
+- Version 1.2 of main.py with full homeostasis integration
+
+### Fixed
+- `ResourceWatchdogAdapter`: Fixed `ram_percent` → `memory_pressure` (ResourceMetrics property)
+- Integration tests API mismatches:
+  - `get_latency_ms()` → `get_last_latency_ms()`
+  - `is_loaded()` → `is_minimized()`
+  - `_tick()` → `_execute_tick()`
+  - `_state` → `state`
+  - `current_hour` → `hour_of_day`
+
+### Integration Tests Results
+| Test Class | Tests | Status |
+|------------|-------|--------|
+| TestMemoryStoreAdapterLegacy | 5 | PASSED |
+| TestSemanticGraphAdapterLegacy | 6 | PASSED |
+| TestResourceWatchdogAdapterLegacy | 3 | PASSED |
+| TestBrainMemoryAdapterLegacy | 5 | PASSED |
+| TestFullIntegration | 5 | PASSED |
+| TestPerformance | 2 | PASSED |
+
+### Statistics
+- **200 tests passing** (174 unit + 26 integration)
+- All 4 adapters verified with real legacy modules
+- HomeostasisCore tick latency < 200ms
+
+### Commits
+- `3d85d04` - Etap 3: Integration tests with real legacy modules
+- `4ec6e28` - Etap 4: Homeostasis integration in main.py with REPL commands
+
+---
+
+## [2026-01-27] - Sesja 3: Etap 1 + Etap 2 Complete
+
+### Added
+- `agent_core/` directory structure (Etap 1)
+- All homeostasis modules with full implementations
+- 174 unit tests covering all modules
+- 4 adapters wrapping legacy maria_core modules
+
+### Commits
+- `5186afb` - Etap 1: agent_core/ skeleton structure with full implementations
+- `9c24a55` - Etap 2: Create adapters wrapping legacy maria_core
+
+---
+
 ## [2026-01-26] - Sesja 2: Mapowanie Homeostazy + Resolved Questions
 
 ### Added

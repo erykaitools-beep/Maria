@@ -1,7 +1,0 @@
-050 -> percepcja
-050 -> input
-050 -> external
-050 -> foundation
-050 -> memory
-050 -> time_2025
-050 -> language

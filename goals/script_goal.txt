@@ -1,1 +1,0 @@
-GOAL|Budowa lokalnego AGI|Stworzyć lokalny system myślący z pamięcią, językiem i refleksją|10

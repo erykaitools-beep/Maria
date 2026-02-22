@@ -1,5 +1,0 @@
-061 -> percepcja
-061 -> input
-061 -> external
-061 -> ai
-061 -> logic

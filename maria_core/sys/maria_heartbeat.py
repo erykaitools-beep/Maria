@@ -1,8 +1,10 @@
-# maria_heartbeat.py – Serce Marii v1.3
+# maria_heartbeat.py -- Serce Marii v1.4
 
 import threading
 import time
 import os
+import shutil
+import subprocess
 import requests
 import psutil
 from datetime import datetime
@@ -14,20 +16,20 @@ from maria_core.learning.learning_agent import learn_next_chunk
 from maria_core.perception import perception
 from maria_core.sys.self_evolver import daily_self_check
 
-# Import ścieżek z config
+# Import sciezek z config
 try:
-    from maria_core.sys.config import INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY
+    from maria_core.sys.config import INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY, OLLAMA_BASE_URL
     INDEX_PATH = KNOWLEDGE_INDEX
     MEMORY_PATH = LONGTERM_MEMORY.parent
 except ImportError:
-    # Fallback jeśli import nie działa
+    # Fallback jesli import nie dziala
     BASE_DIR = Path(__file__).parent.parent.parent
     INPUT_DIR = BASE_DIR / "input"
     INDEX_PATH = BASE_DIR / "memory" / "knowledge_index.jsonl"
     MEMORY_PATH = BASE_DIR / "memory"
+    OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # KONFIGURACJA
-OLLAMA_PATH = r"C:\Users\eras-\AppData\Local\Programs\Ollama\ollama.exe"
 HEARTBEAT_INTERVAL = 30
 
 
@@ -40,7 +42,7 @@ def perceive_new_material():
             return perception.get_next_file()
         return None
     except Exception as e:
-        print(f"[PERCEPTION] ⚠️ Błąd: {e}")
+        print(f"[PERCEPTION] [WARN] Blad: {e}")
         return None
 
 
@@ -63,20 +65,46 @@ threading.Thread(target=immortal_save, daemon=True).start()
 # ==============================
 # 2. Uruchomienie Ollamy (Reanimacja)
 # ==============================
+def _find_ollama_binary():
+    """
+    Find ollama binary path cross-platform.
+
+    Priority:
+    1. OLLAMA_PATH env var (explicit override)
+    2. shutil.which() (finds on PATH)
+    """
+    env_path = os.environ.get("OLLAMA_PATH", "")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    which_path = shutil.which("ollama")
+    if which_path:
+        return which_path
+
+    return None
+
+
 def ensure_ollama():
+    """Check if Ollama is responding, attempt restart if not."""
     try:
-        requests.get("http://localhost:11434", timeout=3)
+        requests.get(OLLAMA_BASE_URL, timeout=3)
     except Exception:
-        print(f"[HEARTBEAT] ⚠️ Ollama nie odpowiada – próbuję reanimacji...")
-        if os.path.exists(OLLAMA_PATH):
+        print("[HEARTBEAT] [WARN] Ollama nie odpowiada - probuje reanimacji...")
+        ollama_bin = _find_ollama_binary()
+        if ollama_bin:
             try:
-                os.startfile(OLLAMA_PATH)
-                print("[HEARTBEAT] ⚡ Wysłano sygnał startu do Ollamy. Czekam 15s...")
+                subprocess.Popen(
+                    [ollama_bin, "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                print("[HEARTBEAT] [START] Wyslano sygnal startu do Ollamy. Czekam 15s...")
                 time.sleep(15)
             except Exception as e:
-                print(f"[HEARTBEAT] ❌ KRYTYCZNE: Nie udało się uruchomić pliku exe: {e}")
+                print(f"[HEARTBEAT] [CRITICAL] Nie udalo sie uruchomic Ollamy: {e}")
         else:
-            print(f"[HEARTBEAT] ❌ KRYTYCZNE: Nie znaleziono pliku Ollamy pod ścieżką: {OLLAMA_PATH}")
+            print("[HEARTBEAT] [CRITICAL] Nie znaleziono Ollamy. "
+                  "Zainstaluj Ollama lub ustaw OLLAMA_PATH.")
 
 
 # Sprawdzamy na starcie
@@ -89,18 +117,18 @@ ensure_ollama()
 def daily_self_healing():
     if 4 <= datetime.now().hour < 5:
         if not getattr(daily_self_healing, "done_today", False):
-            print("\n[MAINTENANCE] 🛠️ Rozpoczynam poranną procedurę naprawczą...")
+            print("\n[MAINTENANCE] [REPAIR] Rozpoczynam poranna procedure naprawcza...")
             try:
                 daily_self_healing.done_today = True
                 meta.raport_do_taty(
-                    "Rozpoczęłam codzienną samo-naprawę",
-                    "Diagnostyka kodu i pamięci w toku.",
+                    "Rozpoczelam codzienna samo-naprawe",
+                    "Diagnostyka kodu i pamieci w toku.",
                 )
                 daily_self_check()
-                print("[MAINTENANCE] ✅ Procedura zakończona sukcesem.")
+                print("[MAINTENANCE] [OK] Procedura zakonczona sukcesem.")
             except Exception as e:
-                print(f"[MAINTENANCE] ❌ Błąd podczas samo-naprawy: {e}")
-                meta.raport_do_taty("Błąd samo-naprawy", str(e))
+                print(f"[MAINTENANCE] [ERROR] Blad podczas samo-naprawy: {e}")
+                meta.raport_do_taty("Blad samo-naprawy", str(e))
 
             threading.Timer(7200, lambda: setattr(daily_self_healing, "done_today", False)).start()
 
@@ -126,34 +154,34 @@ def heartbeat():
             # 0.5. Co 20 cykli skanuj folder input/
             if iteration % 20 == 0:
                 try:
-                    print("[PERCEPTION] 🔍 Skanuję folder input/...")
+                    print("[PERCEPTION] [SCAN] Skanuje folder input/...")
                     stats = perception.scan_for_new_files()
                     if stats['new'] > 0:
-                        print(f"[PERCEPTION] ✨ Znaleziono {stats['new']} nowych plików!")
+                        print(f"[PERCEPTION] [NEW] Znaleziono {stats['new']} nowych plikow!")
                 except Exception as e:
-                    print(f"[PERCEPTION] ⚠️ Błąd skanowania: {e}")
+                    print(f"[PERCEPTION] [WARN] Blad skanowania: {e}")
 
             # 1. Sprawdź czy jest nowy materiał
             new_material = perceive_new_material()
             if new_material:
                 filename = new_material.get('file', 'unknown')
                 priority = new_material.get('priority', 0)
-                print(f"[PERCEPTION] 👀 Znalazłam: {filename} (priorytet: {priority:.1f})")
+                print(f"[PERCEPTION] [FOUND] Znalazlam: {filename} (priorytet: {priority:.1f})")
 
-            # 2. Ucz się (MVP)
+            # 2. Ucz sie (MVP)
             if meta.is_learning_allowed():
                 try:
                     # learn_next_chunk zwraca True/False, nie dict!
                     success = learn_next_chunk(INPUT_DIR, INDEX_PATH, MEMORY_PATH)
-        
+
                     if success:
-                        print("[LEARNING] 🧠 Przetworzono chunk pomyślnie.")
-                        meta.reward(5.0, "chunk learned")  # Nagroda za naukę
+                        print("[LEARNING] [BRAIN] Przetworzono chunk pomyslnie.")
+                        meta.reward(5.0, "chunk learned")  # Nagroda za nauke
                     else:
-                        print("[LEARNING] 💤 Brak plików do nauki.")
-            
+                        print("[LEARNING] [SLEEP] Brak plikow do nauki.")
+
                 except Exception as e:
-                    print(f"[LEARNING] ⚠️ Błąd uczenia: {e}")
+                    print(f"[LEARNING] [WARN] Blad uczenia: {e}")
                     meta.penalty(2.0, "learning error")
                     
             # 3. Samo-naprawa
@@ -172,7 +200,7 @@ def heartbeat():
                 )
 
         except Exception as e:
-            print(f"[HEARTBEAT CRASH PREVENTED] ❌ Wystąpił błąd w głównej pętli: {e}")
+            print(f"[HEARTBEAT CRASH PREVENTED] [ERROR] Wystapil blad w glownej petli: {e}")
             import traceback
             traceback.print_exc()  # Pokaż pełny stack trace
 
@@ -184,7 +212,7 @@ def heartbeat():
 # ==============================
 if __name__ == "__main__":
     try:
-        meta.raport_do_taty("OBUDZIŁAM SIĘ CAŁKOWICIE ❤️", "Systemy nominalne. Zaczynam cykl życia.")
+        meta.raport_do_taty("OBUDZILAM SIE CALKOWICIE", "Systemy nominalne. Zaczynam cykl zycia.")
         print(f"\nMARIA ŻYJE (PID: {os.getpid()}) – serce bije co {HEARTBEAT_INTERVAL}s.")
         print("Nie wyłączaj tego okna.")
         heartbeat()

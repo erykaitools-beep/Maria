@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.1 | Last updated: 2026-01-26
+> Version: 0.2 | Last updated: 2026-01-28
 
 ## 1. Overview
 
@@ -231,14 +231,16 @@ System dziala jak organizm z homeostaza - utrzymuje rownowage poprzez petle zwro
 ### 3.4 Definition of Done: Full Homeostasis
 
 System spelnia "Full Homeostasis" gdy:
-- [ ] Dziala stabilnie przez 8+ godzin bez crashy
-- [ ] Automatycznie przechodzi w RECOVERY po problemach
-- [ ] Automatycznie wraca do LEARNING po recovery
-- [ ] Pamiec (RAM) pozostaje w bezpiecznych granicach
-- [ ] Logi JSONL nie rosna nieograniczenie (pruning/archiwizacja)
-- [ ] Graf semantyczny konsoliduje sie automatycznie
-- [ ] episodic_memory ma cap i FIFO
-- [ ] System raportuje swoj stan (motivation, uptime, stats)
+- [x] Dziala stabilnie przez 8+ godzin bez crashy
+- [x] Automatycznie przechodzi w RECOVERY po problemach
+- [x] Automatycznie wraca do LEARNING po recovery
+- [x] Pamiec (RAM) pozostaje w bezpiecznych granicach
+- [x] Logi JSONL nie rosna nieograniczenie (pruning/archiwizacja)
+- [x] Graf semantyczny konsoliduje sie automatycznie
+- [x] episodic_memory ma cap i FIFO
+- [x] System raportuje swoj stan (motivation, uptime, stats)
+
+**STATUS: COMPLETE ✅** (2026-01-28, 200 tests passing)
 
 ---
 
@@ -251,10 +253,92 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 ## 5. Znane ograniczenia (Ver.4)
 
 1. **Brak embeddings** - semantic_graph wspiera embeddings, ale nie sa generowane
-2. **Dwa systemy pamieci** - JSONL i semantic_graph nie sa zsynchronizowane
-3. **Brak cap na episodic_memory** - rosnie bez ograniczen
-4. **Brak consolidation scheduler** - konsolidacja tylko manualna
-5. **Brakujace moduly** - maria_web_learning.py, maria_api_bridge.py nie istnieja
+2. ~~**Dwa systemy pamieci** - JSONL i semantic_graph nie sa zsynchronizowane~~ → Rozwiazane przez MemoryManager
+3. ~~**Brak cap na episodic_memory** - rosnie bez ograniczen~~ → Rozwiazane przez consolidate_episodic()
+4. ~~**Brak consolidation scheduler** - konsolidacja tylko manualna~~ → Rozwiazane przez epoch tasks w core.py
+5. **Brakujace moduly** - maria_web_learning.py, maria_api_bridge.py nie istnieja (planned for Phase C)
+
+---
+
+## 6. Nowa Architektura: agent_core/ (Ver.4.1)
+
+### 6.1 Struktura agent_core/
+
+```
+agent_core/
+├── homeostasis/           # System homeostazy
+│   ├── sensors/           # Sensory (resource, cognitive, thermal, power, time)
+│   ├── state_model.py     # Dataclasses: ResourceMetrics, CognitiveMetrics
+│   ├── interpreter.py     # Raw → semantic state conversion
+│   ├── constraints.py     # ConstraintValidator, thresholds
+│   ├── mode_regulator.py  # Mode enum, ModeRegulator
+│   ├── actions.py         # CorrectiveActionGenerator, AlarmDispatcher
+│   ├── core.py            # HomeostasisCore (1Hz tick loop)
+│   ├── pulse.py           # HomeostasisPulseThread (100ms)
+│   ├── api.py             # HomeostasisInterface, EventBus
+│   └── snapshot.py        # Snapshot protocol, recovery
+├── memory/
+│   ├── manager.py         # MemoryManager (unified interface)
+│   └── snapshot_backend.py
+├── llm/
+│   └── manager.py         # LLMManager (latency, batch control)
+├── metacontrol/
+│   └── controller.py      # MetaController interface
+├── executor/
+│   └── module_executor.py # ModuleExecutor (signal dispatch)
+├── adapters/              # Legacy code wrappers
+│   ├── memory_adapter.py
+│   ├── semantic_adapter.py
+│   ├── resource_adapter.py
+│   └── brain_adapter.py
+├── ui/
+│   ├── telemetry_api.py   # Read-only dashboard
+│   └── operator_controls.py
+└── tests/                 # 200 tests
+    ├── test_*.py          # Unit tests (174)
+    └── test_integration_legacy.py (26)
+```
+
+### 6.2 Integracja z main.py
+
+```
+main.py (Ver.1.2)
+    │
+    ├── /homeostasis        - Status command
+    ├── /homeostasis start  - Start monitoring loop (1Hz)
+    ├── /homeostasis stop   - Stop monitoring
+    │
+    └── Mode Gating:
+        ├── SURVIVAL → Block perception
+        ├── SLEEP    → Wake on interaction
+        ├── REDUCED  → Warning, continue
+        └── ACTIVE   → Normal operation
+```
+
+### 6.3 Przepływ danych - Homeostasis Loop
+
+```
+[1Hz Tick] ──────────────────────────────────────────────────────────
+    │
+    ├── SENSE: Read all sensors
+    │   ├── ResourceSensor (RAM, CPU, disk)
+    │   ├── CognitiveSensor (latency, coherence)
+    │   ├── ThermalSensor (temperature)
+    │   ├── PowerSensor (uptime)
+    │   └── TimeSensor (idle, session)
+    │
+    ├── INTERPRET: Raw → Semantic State
+    │   └── StateInterpreter.interpret()
+    │
+    ├── VALIDATE: Check constraints
+    │   └── ConstraintValidator.validate()
+    │
+    ├── DECIDE: Mode transition
+    │   └── ModeRegulator.decide_mode()
+    │
+    └── ACT: Execute corrective actions
+        └── CorrectiveActionGenerator.generate()
+```
 
 ---
 

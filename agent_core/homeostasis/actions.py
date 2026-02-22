@@ -12,9 +12,12 @@ Spec reference: homeostasis_spec.md lines 1222-1286, 143-155
 """
 
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from enum import Enum
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from .event_logger import HomeostasisEventLogger
 
 
 class ActionType(Enum):
@@ -215,16 +218,24 @@ class AlarmDispatcher:
     Spec: homeostasis_spec.md lines 143-155
     """
 
-    def __init__(self):
-        """Initialize alarm dispatcher."""
+    def __init__(self, event_logger: Optional["HomeostasisEventLogger"] = None):
+        """
+        Initialize alarm dispatcher.
+
+        Args:
+            event_logger: Optional event logger for persistent logging
+        """
         self._alarm_history: List[Dict[str, Any]] = []
         self._pending_operator_alerts: List[str] = []
+        self._event_logger = event_logger
 
     def dispatch_critical(
         self,
         alarm_type: str,
         message: str,
         recommended_action: str,
+        value: Optional[float] = None,
+        threshold: Optional[float] = None,
     ) -> None:
         """
         Dispatch a critical alarm.
@@ -233,6 +244,8 @@ class AlarmDispatcher:
             alarm_type: Type of alarm (e.g., 'OOM', 'THERMAL', 'LLM_HANG')
             message: Human-readable message
             recommended_action: What should be done
+            value: Current value that triggered alarm
+            threshold: Threshold that was crossed
         """
         alarm = {
             "timestamp": time.time(),
@@ -246,10 +259,22 @@ class AlarmDispatcher:
             f"CRITICAL [{alarm_type}]: {message}"
         )
 
+        # Log to persistent event log
+        if self._event_logger:
+            self._event_logger.log_alert(
+                alert_type=alarm_type,
+                severity="CRITICAL",
+                message=message,
+                value=value,
+                threshold=threshold,
+            )
+
     def dispatch_alert(
         self,
         alarm_type: str,
         message: str,
+        value: Optional[float] = None,
+        threshold: Optional[float] = None,
     ) -> None:
         """
         Dispatch a non-critical alert.
@@ -257,6 +282,8 @@ class AlarmDispatcher:
         Args:
             alarm_type: Type of alert
             message: Human-readable message
+            value: Current value that triggered alert
+            threshold: Threshold that was crossed
         """
         alarm = {
             "timestamp": time.time(),
@@ -266,10 +293,22 @@ class AlarmDispatcher:
         }
         self._alarm_history.append(alarm)
 
+        # Log to persistent event log
+        if self._event_logger:
+            self._event_logger.log_alert(
+                alert_type=alarm_type,
+                severity="ALERT",
+                message=message,
+                value=value,
+                threshold=threshold,
+            )
+
     def dispatch_warning(
         self,
         warning_type: str,
         message: str,
+        value: Optional[float] = None,
+        threshold: Optional[float] = None,
     ) -> None:
         """
         Dispatch a warning.
@@ -277,6 +316,8 @@ class AlarmDispatcher:
         Args:
             warning_type: Type of warning
             message: Human-readable message
+            value: Current value that triggered warning
+            threshold: Threshold that was crossed
         """
         alarm = {
             "timestamp": time.time(),
@@ -285,6 +326,16 @@ class AlarmDispatcher:
             "message": message,
         }
         self._alarm_history.append(alarm)
+
+        # Log to persistent event log
+        if self._event_logger:
+            self._event_logger.log_alert(
+                alert_type=warning_type,
+                severity="WARNING",
+                message=message,
+                value=value,
+                threshold=threshold,
+            )
 
     def prepare_graceful_shutdown(self) -> List[CorrectiveAction]:
         """

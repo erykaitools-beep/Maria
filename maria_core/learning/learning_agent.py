@@ -288,7 +288,7 @@ def learn_next_chunk(
     Returns:
         True jeśli coś przetworzono, False jeśli brak pracy
     """
-    logger.info("🧠 Rozpoczynam naukę następnego chunka...")
+    logger.info("[BRAIN] Rozpoczynam nauke nastepnego chunka...")
 
     # Wczytaj indeks
     index = load_index(index_path)
@@ -296,7 +296,7 @@ def learn_next_chunk(
     # Znajdź plik do nauki
     candidates = [r for r in index if r['status'] in [STATUS_NEW, STATUS_LEARNING, STATUS_EXAM_FAILED]]
     if not candidates:
-        logger.info("✅ Brak plików do nauki")
+        logger.info("[OK] Brak plikow do nauki")
         return False
 
     # Sortuj po priorytecie
@@ -306,7 +306,7 @@ def learn_next_chunk(
     file_id = target['id']
     filepath = base_dir / file_id
 
-    logger.info(f"📖 Uczę się z: {file_id} (priorytet: {target.get('priority', 0):.1f})")
+    logger.info(f"[LEARN] Ucze sie z: {file_id} (priorytet: {target.get('priority', 0):.1f})")
 
     # Wczytaj plik
     try:
@@ -335,7 +335,7 @@ def learn_next_chunk(
             break
 
     if chunk_to_learn is None:
-        logger.info(f"✅ Plik {file_id} całkowicie nauczony ({len(chunks)} chunków)")
+        logger.info(f"[OK] Plik {file_id} calkowicie nauczony ({len(chunks)} chunkow)")
         target['status'] = STATUS_LEARNED
         target['chunks_learned'] = len(chunks)
         save_index(index, index_path)
@@ -374,6 +374,6 @@ def learn_next_chunk(
 
     save_index(index, index_path)
 
-    logger.info(f"✅ Nauczono chunk {chunk_idx + 1}/{len(chunks)} z {file_id}")
+    logger.info(f"[OK] Nauczono chunk {chunk_idx + 1}/{len(chunks)} z {file_id}")
 
     return True

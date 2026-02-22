@@ -65,9 +65,9 @@ def create_memory():
     # update state
     update_state()
 
-    print("\n✅ Pamięć zapisana!")
-    print(f"➡ {filename}")
-    print(f"➡ mapa: {mem_number:03}_map.txt\n")
+    print("\n[OK] Pamiec zapisana!")
+    print(f"-> {filename}")
+    print(f"-> mapa: {mem_number:03}_map.txt\n")
 
 # uruchomienie
 create_memory()

@@ -1,7 +1,0 @@
-042 -> percepcja
-042 -> input
-042 -> external
-042 -> memory
-042 -> foundation
-042 -> time_2025
-042 -> language

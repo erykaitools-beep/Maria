@@ -96,7 +96,7 @@ class BrainMemoryLoop:
                 try:
                     if not isinstance(fact, (list, tuple)) or len(fact) != 3:
                         # ignorujemy błędne rekordy zamiast crasha
-                        self.log_fn(f"[Loop] ⚠ Pomijam niepoprawny fakt: {fact}")
+                        self.log_fn(f"[Loop] [WARN] Pomijam niepoprawny fakt: {fact}")
                         processed_stats["errors"] += 1
                         continue
 
@@ -113,7 +113,7 @@ class BrainMemoryLoop:
                             self.semantic.add_edge(s_id, str(rel), o_id)
                         else:
                             self.log_fn(
-                                "[Loop] ⚠ Brak obsługiwanych metod grafu (add_triple / add_node + add_edge)."
+                                "[Loop] [WARN] Brak obslugiwanych metod grafu (add_triple / add_node + add_edge)."
                             )
                             processed_stats["errors"] += 1
                             continue
@@ -121,7 +121,7 @@ class BrainMemoryLoop:
                     processed_stats["facts"] += 1
 
                 except Exception as e:
-                    self.log_fn(f"[Loop] ⚠ Błąd zapisu do grafu: {e}")
+                    self.log_fn(f"[Loop] [WARN] Blad zapisu do grafu: {e}")
                     processed_stats["errors"] += 1
 
             # Krok 3: Rozumowanie (na pierwszym fragmencie – można rozszerzyć)
@@ -159,7 +159,7 @@ class BrainMemoryLoop:
                     explain_prompt, temperature=0.2
                 )
             except Exception as e:
-                self.log_fn(f"[Auto-Explain] ⚠ Błąd podczas wyjaśniania pojęć: {e}")
+                self.log_fn(f"[Auto-Explain] [WARN] Blad podczas wyjasniania pojec: {e}")
                 learning_explanations = ""
 
         # Krok 5: Epizod i Refleksja
@@ -178,7 +178,7 @@ class BrainMemoryLoop:
 
         if not success_status:
             self.log_fn(
-                "[Auto-Reflection] ⚠ Wykryto problemy w procesie. Zapisuję flagę do pamięci epizodycznej."
+                "[Auto-Reflection] [WARN] Wykryto problemy w procesie. Zapisuje flage do pamieci epizodycznej."
             )
 
         return {

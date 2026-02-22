@@ -35,5 +35,5 @@ def import_kb_to_graph(graph: SemanticGraph):
             kb_node = graph.add_node("Knowledge Base (logic)", node_type="container")
             graph.add_edge(kb_node, "contains", node_id, source="logic_teacher_kb", confidence=0.8)
 
-    print("[KB] ✅ Zaimportowano bazę wiedzy do grafu")
+    print("[KB] [OK] Zaimportowano baze wiedzy do grafu")
 

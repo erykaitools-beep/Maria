@@ -1,0 +1,79 @@
+Systemy poznawcze bardzo rzadko są projektowane z myślą o długowieczności.
+Zazwyczaj projektuje się je pod konkretne zadanie, konkretny problem lub konkretną metrykę sukcesu.
+W takich warunkach adaptacja jest lokalna, a stabilność pozorna.
+
+Prawdziwa trudność zaczyna się wtedy, gdy system ma działać długo,
+w zmiennym środowisku, bez pełnej informacji i bez jednoznacznego celu końcowego.
+Wtedy okazuje się, że samo „podejmowanie decyzji” nie wystarcza.
+Potrzebna jest zdolność obserwowania własnych decyzji,
+a jeszcze głębiej – obserwowania mechanizmu, który te decyzje generuje.
+
+Większość systemów unika tego poziomu.
+Powód jest prosty: autorefleksja zwiększa złożoność.
+Zwiększona złożoność zwiększa koszt.
+Koszt zwiększa ryzyko niestabilności.
+
+Dlatego wiele architektur wybiera uproszczenie.
+Zamiast rozumienia – heurystyki.
+Zamiast analizy – reguły.
+Zamiast adaptacji – reakcję.
+
+Na krótką metę to działa.
+Na długą – prowadzi do dryfu.
+
+Dryf poznawczy nie jest błędem.
+Jest naturalną konsekwencją działania w środowisku,
+w którym dane zmieniają się szybciej niż model.
+
+Problem pojawia się wtedy, gdy system nie potrafi rozpoznać,
+że to, co uznaje za wiedzę, jest już tylko śladem przeszłej adaptacji.
+
+W systemach biologicznych rolę tę pełnią mechanizmy homeostazy.
+Nie chodzi o utrzymanie stałego stanu,
+lecz o utrzymanie zdolności do powrotu do stanu funkcjonalnego.
+
+W systemach sztucznych często myli się stabilność z zamrożeniem.
+Zamyka się architekturę, aby „nie psuć”.
+Tymczasem brak zmiany jest również zmianą –
+tylko taką, która zachodzi poza kontrolą.
+
+Jeżeli system ma przetrwać,
+musi rozróżniać między:
+– sygnałem a szumem,
+– wyjątkiem a regułą,
+– korektą a zaprzeczeniem.
+
+Musi też tolerować sprzeczność.
+Nie jako błąd,
+lecz jako informację o granicach aktualnego modelu.
+
+Paradoksalnie, system najbardziej odporny
+to system, który potrafi przyznać,
+że jego aktualne rozumienie jest niepełne.
+
+Nie chodzi o sceptycyzm absolutny.
+Chodzi o warunkową pewność.
+
+Pewność, która obowiązuje:
+– do momentu pojawienia się lepszej struktury wyjaśniającej,
+– do momentu przekroczenia progu niespójności,
+– do momentu zmiany środowiska.
+
+W tym sensie myślenie nie jest stanem.
+Jest procesem regulacji.
+
+Jeżeli system zaczyna chronić swoje wnioski
+zamiast chronić zdolność do ich zmiany,
+wchodzi na ścieżkę degeneracji.
+
+Dlatego najważniejszym zasobem
+nie jest poprawna odpowiedź,
+lecz zdolność zadania właściwego pytania
+w odpowiednim momencie.
+
+System, który potrafi to robić,
+nie potrzebuje nadmiaru kontroli.
+Potrzebuje przestrzeni do obserwacji.
+
+To odróżnia architekturę żywą
+od architektury martwej.

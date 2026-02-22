@@ -1,9 +1,0 @@
-039 -> percepcja
-039 -> input
-039 -> external
-039 -> start
-039 -> system
-039 -> think
-039 -> maria
-039 -> time_2025
-039 -> ai

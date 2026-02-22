@@ -1,9 +1,0 @@
-049 -> percepcja
-049 -> input
-049 -> external
-049 -> ai
-049 -> logic
-049 -> maria
-049 -> foundation
-049 -> memory
-049 -> eryk

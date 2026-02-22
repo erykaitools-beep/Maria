@@ -1,7 +1,0 @@
-056 -> percepcja
-056 -> input
-056 -> external
-056 -> ai
-056 -> project
-056 -> time_2025
-056 -> language

@@ -39,7 +39,7 @@ def process_command(line: str):
         # specjalny przypadek – wyjście z REPL
         raise SystemExit
     else:
-        print(f"❓ Nieznana komenda: {line}")
+        print(f"[?] Nieznana komenda: {line}")
 
 
 def main():
@@ -64,7 +64,7 @@ def main():
         try:
             line = input("Maria> ")
         except (EOFError, KeyboardInterrupt):
-            print("\n👋 Koniec sesji.")
+            print("\n[BYE] Koniec sesji.")
             break
 
         line = line.strip()
@@ -74,10 +74,10 @@ def main():
         try:
             process_command(line)
         except SystemExit:
-            print("👋 EXIT – zamykam REPL Marii.")
+            print("[EXIT] Zamykam REPL Marii.")
             break
         except Exception as e:
-            print(f"❌ Błąd podczas przetwarzania komendy: {e}")
+            print(f"[ERROR] Blad podczas przetwarzania komendy: {e}")
 
 
 if __name__ == "__main__":

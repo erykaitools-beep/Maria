@@ -1,3 +1,0 @@
-059 -> percepcja
-059 -> input
-059 -> external

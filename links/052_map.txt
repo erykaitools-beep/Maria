@@ -1,6 +1,0 @@
-052 -> percepcja
-052 -> input
-052 -> external
-052 -> foundation
-052 -> memory
-052 -> language

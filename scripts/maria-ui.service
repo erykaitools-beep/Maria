@@ -1,0 +1,27 @@
+# M.A.R.I.A. Web UI - systemd service
+# Copy to /etc/systemd/system/maria-ui.service
+# Then: sudo systemctl daemon-reload && sudo systemctl enable maria-ui
+
+[Unit]
+Description=M.A.R.I.A. Web UI
+After=network.target maria.service
+Wants=maria.service
+
+[Service]
+Type=simple
+User=maria
+WorkingDirectory=/home/maria/maria
+ExecStart=/home/maria/maria/venv/bin/python run_ui.py
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+EnvironmentFile=/home/maria/maria/.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=maria-ui
+
+[Install]
+WantedBy=multi-user.target

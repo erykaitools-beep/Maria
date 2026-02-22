@@ -1,0 +1,173 @@
+Ty >> /homeostasis start
+[Homeostasis] ▶ Starting monitoring loop...
+[Homeostasis] ✅ Monitoring started
+Ty >> /start
+[Agent] ▶ Start pracy w tle...
+
+[M.A.R.I.A.] 👁 Odbieram percepcję (46 znaków), context=None
+[Loop] Przetwarzam fragment 1/1...
+[System] ✅ Agent uruchomiony w tle.
+
+Ty >> /learn 0.7
+[Learn] 🔍 Scanning input/ folder...
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 68: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 216, in cmd_learn
+    stats = scan_input_directory(INPUT_DIR, KNOWLEDGE_INDEX)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\perception\perception.py", line 194, in scan_input_directory
+    logger.info(f"🔍 Skanuję katalog: {base_dir}")
+Message: ' Skanuję katalog: C:\\MariaLocal\\Moja AI. Maria Ver.4\\input'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Skanuję katalog: C:\MariaLocal\Moja AI. Maria Ver.4\input
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception: Znaleziono 7 plików .txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_001_bajka_o_miescie.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_002_logika_codzienna.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_003_system_i_przyczyna.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_004_jezyk_i_rzeczywistosc.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_005_meta_myslenie.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_006_bajka_strukturalna.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Nowy plik: input_007_meta_system_poznawczy.txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Statystyki: nowe=7, zmienione=0, niezmienione=0
+[Learn] 📁 Found: 7 new, 0 changed, 0 unchanged
+[Learn] 🧠 Starting learning (5 iterations)...
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator: ============================================================
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:  DEAMONMARIA V2 - START LEARNING CYCLE
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator: ============================================================
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:
+============================================================
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:  ITERACJA 1/5
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator: ============================================================
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:
+[1/5]  Skanowanie katalogów...
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 68: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 236, in cmd_learn
+    maria_learning_cycle(
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\sys\orchestrator.py", line 116, in maria_learning_cycle
+    stats = scan_input_directory(INPUT_DIR, KNOWLEDGE_INDEX)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\perception\perception.py", line 194, in scan_input_directory
+    logger.info(f"🔍 Skanuję katalog: {base_dir}")
+Message: ' Skanuję katalog: C:\\MariaLocal\\Moja AI. Maria Ver.4\\input'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Skanuję katalog: C:\MariaLocal\Moja AI. Maria Ver.4\input
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception: Znaleziono 7 plików .txt
+2026-02-01 10:09:12 [INFO] maria_core.perception.perception:  Statystyki: nowe=0, zmienione=0, niezmienione=7
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:
+[2/5]  Aktualizacja priorytetów...
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 78: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 236, in cmd_learn
+    maria_learning_cycle(
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\sys\orchestrator.py", line 123, in maria_learning_cycle
+    updated = update_priorities(KNOWLEDGE_INDEX, INPUT_DIR, use_ollama=use_ollama_priority)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\learning\priority_scheduler.py", line 144, in update_priorities
+    logger.info("🎯 Aktualizuję priorytety...")
+Message: ' Aktualizuję priorytety...'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.learning.priority_scheduler:  Aktualizuję priorytety...
+2026-02-01 10:09:12 [INFO] maria_core.learning.priority_scheduler:  Brak plików do aktualizacji priorytetów
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 75: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 236, in cmd_learn
+    maria_learning_cycle(
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\sys\orchestrator.py", line 126, in maria_learning_cycle
+    logger.info("\n[3/5] 🧠 Uczenie się...")
+Message: '\n[3/5]  Uczenie się...'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.sys.orchestrator:
+[3/5]  Uczenie się...
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 80: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 236, in cmd_learn
+    maria_learning_cycle(
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\sys\orchestrator.py", line 127, in maria_learning_cycle
+    learned_something = learn_next_chunk(INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\learning\learning_agent.py", line 291, in learn_next_chunk
+    logger.info("🧠 Rozpoczynam naukę następnego chunka...")
+Message: ' Rozpoczynam naukę następnego chunka...'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.learning.learning_agent:  Rozpoczynam naukę następnego chunka...
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0119' in position 67: character maps to <undefined>
+Call stack:
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 911, in <module>
+    main()
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 838, in main
+    cmd_learn(args)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\main.py", line 236, in cmd_learn
+    maria_learning_cycle(
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\sys\orchestrator.py", line 127, in maria_learning_cycle
+    learned_something = learn_next_chunk(INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY)
+  File "C:\MariaLocal\Moja AI. Maria Ver.4\maria_core\learning\learning_agent.py", line 309, in learn_next_chunk
+    logger.info(f"📖 Uczę się z: {file_id} (priorytet: {target.get('priority', 0):.1f})")
+Message: ' Uczę się z: input_001_bajka_o_miescie.txt (priorytet: 73.0)'
+Arguments: ()
+2026-02-01 10:09:12 [INFO] maria_core.learning.learning_agent:  Uczę się z: input_001_bajka_o_miescie.txt (priorytet: 73.0)
+2026-02-01 10:09:25 [INFO] httpx: HTTP Request: POST http://127.0.0.1:11434/api/chat "HTTP/1.1 200 OK"

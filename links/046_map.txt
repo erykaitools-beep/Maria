@@ -1,5 +1,0 @@
-046 -> percepcja
-046 -> input
-046 -> external
-046 -> memory
-046 -> system

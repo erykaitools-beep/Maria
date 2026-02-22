@@ -315,7 +315,7 @@ def run_exam_if_ready(
     Returns:
         True jeśli przeprowadzono egzamin, False jeśli brak pracy
     """
-    logger.info("📝 Sprawdzam czy jest plik gotowy na egzamin...")
+    logger.info("[EXAM] Sprawdzam czy jest plik gotowy na egzamin...")
 
     # Wczytaj indeks
     index = load_index(index_path)
@@ -327,7 +327,7 @@ def run_exam_if_ready(
             candidates.append(rec)
 
     if not candidates:
-        logger.info("✅ Brak plików gotowych na egzamin")
+        logger.info("[OK] Brak plikow gotowych na egzamin")
         return False
 
     # Wybierz pierwszy (lub najwyższy priorytet)
@@ -335,7 +335,7 @@ def run_exam_if_ready(
     target = candidates[0]
 
     file_id = target['id']
-    logger.info(f"📝 Egzamin z: {file_id}")
+    logger.info(f"[EXAM] Egzamin z: {file_id}")
 
     # Pobierz pamięci
     memories = get_memories_for_file(file_id, memory_path)
@@ -368,7 +368,7 @@ def run_exam_if_ready(
         return False
 
     final_score = grading['final_score']
-    logger.info(f"🎯 Wynik egzaminu: {final_score:.2%}")
+    logger.info(f"[SCORE] Wynik egzaminu: {final_score:.2%}")
 
     # Zapisz wynik
     exam_record = {
@@ -391,18 +391,18 @@ def run_exam_if_ready(
     if final_score >= EXAM_PASS_THRESHOLD:
         # Zaliczony!
         target['status'] = STATUS_COMPLETED
-        logger.info(f"✅ Egzamin ZALICZONY ({final_score:.2%})")
+        logger.info(f"[PASS] Egzamin ZALICZONY ({final_score:.2%})")
     else:
         # Niezaliczony
         if target['exam_attempts'] == 1:
             # Pierwsza próba - daj drugą szansę
             target['status'] = STATUS_EXAM_FAILED
-            logger.warning(f"❌ Egzamin NIEZALICZONY ({final_score:.2%}) - druga szansa")
+            logger.warning(f"[FAIL] Egzamin NIEZALICZONY ({final_score:.2%}) - druga szansa")
         else:
             # Druga próba lub więcej - hard topic
             target['status'] = STATUS_HARD_TOPIC
             target['priority'] -= 30  # obniż priorytet
-            logger.warning(f"⚠️  Egzamin NIEZALICZONY ({final_score:.2%}) - HARD TOPIC")
+            logger.warning(f"[HARD] Egzamin NIEZALICZONY ({final_score:.2%}) - HARD TOPIC")
 
     # Sprawdź zapętlenie
     if check_for_looping(target):

@@ -199,7 +199,7 @@ def handle_GOAL(parts):
         f.write(f"status: \"aktywny\"\n")
 
     log_line(f"[{now.strftime('%H:%M')}] GOAL: dodano cel '{name}' (priorytet={priority})")
-    print(f"🎯 GOAL: zapisano cel '{name}'")
+    print(f"[GOAL] Zapisano cel '{name}'")
 def handle_EVAL_GOAL(parts):
     """
     EVAL_GOAL|nazwa|status|komentarz
@@ -211,16 +211,16 @@ def handle_EVAL_GOAL(parts):
     comment = parts[3] if len(parts) > 3 else ""
 
     if not name:
-        print("❌ EVAL_GOAL: brak nazwy celu")
+        print("[ERROR] EVAL_GOAL: brak nazwy celu")
         return
 
-    # znajdź ostatni plik z tym celem
+    # znajdz ostatni plik z tym celem
     files = sorted(
         [f for f in os.listdir(GOALS_DIR) if name in f],
         reverse=True
     )
     if not files:
-        print(f"❌ EVAL_GOAL: nie znaleziono celu '{name}'")
+        print(f"[ERROR] EVAL_GOAL: nie znaleziono celu '{name}'")
         return
 
     path = os.path.join(GOALS_DIR, files[0])
@@ -232,7 +232,7 @@ def handle_EVAL_GOAL(parts):
         f.write(f"ocena_komentarz: \"{comment}\"\n")
 
     log_line(f"[{now.strftime('%H:%M')}] EVAL_GOAL: cel '{name}' -> {status} ({comment})")
-    print(f"✅ EVAL_GOAL: zaktualizowano cel '{name}' -> {status}")
+    print(f"[OK] EVAL_GOAL: zaktualizowano cel '{name}' -> {status}")
 
 
 def handle_LINK(parts):
@@ -357,8 +357,8 @@ def handle_REFLECT(parts):
         f.write(f"{mem_num:03} -> REFLECT\n")
         f.write(f"{mem_num:03} -> AUTO\n")
 
-    log_line(f"[{now.strftime('%H:%M')}] REFLECT wygenerował nową pamięć ({filename}) z {len(selected)} rekordów")
-    print(f"\n✅ REFLECT utworzył nową pamięć: {filename}")
+    log_line(f"[{now.strftime('%H:%M')}] REFLECT wygenerował nowa pamiec ({filename}) z {len(selected)} rekordow")
+    print(f"\n[OK] REFLECT utworzyl nowa pamiec: {filename}")
 
 
 def handle_QUERY(parts):
@@ -568,7 +568,7 @@ def handle_ASSOCIATE(parts):
             f.write(f"powiązania: ['associate_v2','semantic','relations']\n")
             f.write("priorytet: 6\n")
 
-    print(f"🔗 ASSOCIATE_v2: utworzono {len(associations)} powiązań.")
+    print(f"[LINK] ASSOCIATE_v2: utworzono {len(associations)} powiazan.")
 
 
 
@@ -579,7 +579,7 @@ def run_script(script_path):
         print(f"Nie znaleziono pliku skryptu: {script_path}")
         return
 
-    print(f"▶ Uruchamiam skrypt: {script_path}\n")
+    print(f"[RUN] Uruchamiam skrypt: {script_path}\n")
     with open(script_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -611,10 +611,10 @@ def run_script(script_path):
                 handle_EVAL_GOAL(parts)
        
             else:
-                print(f"❓ Nieznana komenda: {line}")
+                print(f"[?] Nieznana komenda: {line}")
 
 
-    print("\n✅ Zakończono wykonywanie skryptu.")
+    print("\n[OK] Zakonczono wykonywanie skryptu.")
     print(f"Sprawdź foldery 'memory', 'links', 'state' i 'logs' w:\n{BASE_DIR}")
 from maria_core.memory_engine.semantic.semantic_bridge import remember_fact, query_related
 

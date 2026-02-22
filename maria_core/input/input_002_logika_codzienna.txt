@@ -1,0 +1,20 @@
+Ludzie często podejmują decyzje na podstawie jednego przykładu.
+Jeżeli coś zadziałało raz, uznają to za regułę.
+Jeżeli coś się nie udało, traktują to jako dowód, że nigdy się nie uda.
+
+To prowadzi do prostych wniosków, które wydają się logiczne,
+ale nie wytrzymują konfrontacji z rzeczywistością.
+
+Przykład:
+Ktoś mówi: „Znam jedną osobę, która zrobiła X i poniosła porażkę,
+więc X zawsze prowadzi do porażki.”
+
+Inna osoba mówi:
+„U mnie zadziałało, więc to jedyna słuszna droga.”
+
+Obie osoby używają tego samego mechanizmu.
+Różnią się tylko przykładem.
+
+Logika potoczna jest szybka.
+Logika formalna jest wolniejsza.
+Ale to logika potoczna podejmuje większość decyzji w życiu codziennym.

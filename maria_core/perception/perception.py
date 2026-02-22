@@ -191,7 +191,7 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
     Returns:
         Słownik ze statystykami: {new: X, changed: Y, unchanged: Z}
     """
-    logger.info(f"🔍 Skanuję katalog: {base_dir}")
+    logger.info(f"[SCAN] Skanuje katalog: {base_dir}")
 
     # Wczytaj istniejący indeks
     index = load_index(index_path)
@@ -218,7 +218,7 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
                 # Plik już istnieje - sprawdź czy się zmienił
                 existing = index_dict[file_id]
                 if existing.get('hash') != file_hash:
-                    logger.info(f"🔄 Zmieniony plik: {file_id}")
+                    logger.info(f"[CHANGED] Zmieniony plik: {file_id}")
                     # Resetuj status na new (ponowna nauka)
                     existing['hash'] = file_hash
                     existing['status'] = STATUS_NEW
@@ -230,7 +230,7 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
                     stats['unchanged'] += 1
             else:
                 # Nowy plik
-                logger.info(f"✨ Nowy plik: {file_id}")
+                logger.info(f"[NEW] Nowy plik: {file_id}")
                 priority = calculate_initial_priority(filepath, folder, filename)
 
                 new_record = {
@@ -259,7 +259,7 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
     updated_index = list(index_dict.values())
     save_index(updated_index, index_path)
 
-    logger.info(f"📊 Statystyki: nowe={stats['new']}, zmienione={stats['changed']}, niezmienione={stats['unchanged']}")
+    logger.info(f"[STATS] Statystyki: nowe={stats['new']}, zmienione={stats['changed']}, niezmienione={stats['unchanged']}")
 
     return stats
 

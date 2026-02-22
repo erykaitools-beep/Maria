@@ -74,10 +74,10 @@ agent_core/
 Utworzenie snapshotu obecnego dzialajacego kodu przed jakakolwiek zmiana.
 
 ### Zadania
-- [ ] Utworz git tag: `v0.1-pre-refactor`
-- [ ] Utworz branch: `refactor/homeostasis`
-- [ ] Skopiuj caly `maria_core/` do `archive/maria_core_backup_YYYYMMDD/`
-- [ ] Zweryfikuj ze wszystkie importy dzialaja: `python -c "from main import main"`
+- [x] Utworz git tag: `v0.1-pre-refactor`
+- [x] Utworz branch: `refactor/homeostasis`
+- [x] Skopiuj caly `maria_core/` do `archive/maria_core_backup_YYYYMMDD/`
+- [x] Zweryfikuj ze wszystkie importy dzialaja: `python -c "from main import main"`
 
 ### Definicja DONE
 - [x] Tag `v0.1-pre-refactor` istnieje
@@ -96,11 +96,11 @@ NISKIE - tylko backup, zero zmian w kodzie produkcyjnym
 Utworzenie calej struktury katalogow i pustych plikow z docstringami.
 
 ### Zadania
-- [ ] Utworz katalog `agent_core/` w root projektu
-- [ ] Utworz wszystkie podkatalogi zgodnie ze struktura powyzej
-- [ ] Utworz `__init__.py` w kazdym katalogu z odpowiednim docstringiem
-- [ ] Utworz puste pliki `.py` z docstringami opisujacymi cel modulu
-- [ ] Dodaj `agent_core/` do `sys.path` w `config.py`
+- [x] Utworz katalog `agent_core/` w root projektu
+- [x] Utworz wszystkie podkatalogi zgodnie ze struktura powyzej
+- [x] Utworz `__init__.py` w kazdym katalogu z odpowiednim docstringiem
+- [x] Utworz puste pliki `.py` z docstringami opisujacymi cel modulu
+- [x] Dodaj `agent_core/` do `sys.path` w `config.py`
 
 ### Przykladowy plik szkieletowy
 
@@ -309,24 +309,24 @@ Polaczenie wszystkich modulow i uruchomienie pelnego cyklu homeostazy.
 ### Zadania
 
 1. **Integracja z main.py**
-   - [ ] Dodaj import `HomeostasisCore` do main.py
-   - [ ] Uruchom homeostasis w osobnym watku przy starcie REPL
-   - [ ] Dodaj komende `/homeostasis status` do REPL
+   - [x] Dodaj import `HomeostasisCore` do main.py
+   - [x] Uruchom homeostasis w osobnym watku przy starcie REPL
+   - [x] Dodaj komende `/homeostasis status` do REPL
 
 2. **Integracja z run_maria.py**
-   - [ ] Homeostasis kontroluje czy `learning_cycle` moze dzialac
-   - [ ] Jesli tryb REDUCED/SLEEP - pauzuj learning
+   - [x] Homeostasis kontroluje czy `learning_cycle` moze dzialac
+   - [x] Jesli tryb REDUCED/SLEEP - pauzuj learning
 
 3. **Smoke test**
-   - [ ] Uruchom system przez 5 minut
-   - [ ] Zweryfikuj ze logi homeostazy pojawiaja sie co sekunde
-   - [ ] Zweryfikuj ze tryb ACTIVE jest utrzymany przy normalnym obciazeniu
-   - [ ] Zasymuluj memory pressure - sprawdz czy przechodzi do REDUCED
+   - [x] Uruchom system przez 5 minut
+   - [x] Zweryfikuj ze logi homeostazy pojawiaja sie co sekunde
+   - [x] Zweryfikuj ze tryb ACTIVE jest utrzymany przy normalnym obciazeniu
+   - [x] Zasymuluj memory pressure - sprawdz czy przechodzi do REDUCED
 
 4. **Testy integracyjne**
-   - [ ] `test_integration.py`: Pelny cykl sense→interpret→validate→decide→act
-   - [ ] Test mode transitions (ACTIVE↔REDUCED, ACTIVE→SLEEP)
-   - [ ] Test snapshot/recovery
+   - [x] `test_integration.py`: Pelny cykl sense→interpret→validate→decide→act
+   - [x] Test mode transitions (ACTIVE↔REDUCED, ACTIVE→SLEEP)
+   - [x] Test snapshot/recovery
 
 ### Przykladowy smoke test
 
@@ -380,17 +380,21 @@ Usuniecie duplikacji i aktualizacja dokumentacji.
 
 ### Zadania
 - [ ] Usun stary kod ktory jest w 100% zastapiony adapterami
-- [ ] Zaktualizuj `ARCHITECTURE.md` z nowa struktura
-- [ ] Zaktualizuj `MAP_HOMEOSTASIS.md` - zmien statusy na `implemented`/`tested`
+- [x] Zaktualizuj `ARCHITECTURE.md` z nowa struktura
+- [x] Zaktualizuj `MAP_HOMEOSTASIS.md` - zmien statusy na `implemented`/`tested`
 - [ ] Dodaj sekcje "Homeostasis" do `README.md` (jesli istnieje)
 
 ### Definicja DONE
-- [x] Zero duplikacji kodu
+- [ ] Zero duplikacji kodu
 - [x] Dokumentacja zgodna z kodem
 - [x] Wszystkie statusy w MAP_HOMEOSTASIS.md zaktualizowane
 
 ### Ryzyko
 NISKIE - tylko cleanup
+
+### Status: IN PROGRESS
+- Dokumentacja zaktualizowana
+- Usuniecie starego kodu planowane na kolejna sesje
 
 ---
 

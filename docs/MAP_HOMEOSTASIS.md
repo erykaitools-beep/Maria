@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Mapa Wymagan Homeostazy
-> Version: 2.1 | Updated: 2026-01-27
+> Version: 2.2 | Updated: 2026-01-28
 
 ## Cel dokumentu
 
@@ -18,7 +18,9 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 | test_sensors.py | 29 | **PASSED** |
 | test_snapshot.py | 14 | **PASSED** |
 | test_state_model.py | 19 | **PASSED** |
-| **TOTAL** | **174** | **ALL PASSED** |
+| test_adapters.py | 10 | **PASSED** |
+| test_integration_legacy.py | 26 | **PASSED** |
+| **TOTAL** | **200** | **ALL PASSED** |
 
 ---
 
@@ -32,6 +34,7 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 | `adapter` | Nowy modul bedzie wrapperem starego kodu |
 | `implemented` | Zaimplementowane, wymaga review/testow |
 | `tested` | Zaimplementowane i przetestowane |
+| `integrated` | Zintegrowane z main.py i zweryfikowane |
 
 ---
 
@@ -41,44 +44,44 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| RAM monitoring (used, free, swap) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **implemented** | Full psutil integration |
-| CPU monitoring (%, load avg) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **implemented** | Full psutil integration |
-| Disk monitoring (%, I/O) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **implemented** | Disk usage + free GB |
-| Thermal monitoring (temp, throttle) | `agent_core/homeostasis/sensors/thermal_sensor.py` | - | **implemented** | Cross-platform fallback |
-| Power monitoring (voltage, uptime) | `agent_core/homeostasis/sensors/power_sensor.py` | - | **implemented** | Uptime tracking, SBC optional |
+| RAM monitoring (used, free, swap) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **tested** | Full psutil integration |
+| CPU monitoring (%, load avg) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **tested** | Full psutil integration |
+| Disk monitoring (%, I/O) | `agent_core/homeostasis/sensors/resource_sensor.py` | `maria_core/sys/resource_watchdog.py` | **tested** | Disk usage + free GB |
+| Thermal monitoring (temp, throttle) | `agent_core/homeostasis/sensors/thermal_sensor.py` | - | **tested** | Cross-platform fallback |
+| Power monitoring (voltage, uptime) | `agent_core/homeostasis/sensors/power_sensor.py` | - | **tested** | Uptime tracking, SBC optional |
 
 ### A.2 Stany poznawcze (cognitive sensors)
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| LLM context size (tokens) | `agent_core/homeostasis/sensors/cognitive_sensor.py` | `maria_core/brain/ollama_brain.py` | **implemented** | Via LLMManager stats |
-| Response latency (p50, p99) | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **implemented** | Latency percentiles |
-| Memory coherence | `agent_core/homeostasis/sensors/cognitive_sensor.py` | `maria_core/memory/semantic_graph.py` | **implemented** | Via MemoryManager |
-| Contradiction count | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **implemented** | From SemanticStore |
-| Goal stack depth | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **implemented** | Via MetaController |
+| LLM context size (tokens) | `agent_core/homeostasis/sensors/cognitive_sensor.py` | `maria_core/brain/ollama_brain.py` | **tested** | Via LLMManager stats |
+| Response latency (p50, p99) | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **tested** | Latency percentiles |
+| Memory coherence | `agent_core/homeostasis/sensors/cognitive_sensor.py` | `maria_core/memory/semantic_graph.py` | **tested** | Via MemoryManager |
+| Contradiction count | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **tested** | From SemanticStore |
+| Goal stack depth | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **tested** | Via MetaController |
 | Conversation drift | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | partial | Basic tracking |
-| Error density | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **implemented** | Per-hour count |
-| Task completion ratio | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **implemented** | Success/total ratio |
+| Error density | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **tested** | Per-hour count |
+| Task completion ratio | `agent_core/homeostasis/sensors/cognitive_sensor.py` | - | **tested** | Success/total ratio |
 
 ### A.3 Rytmy czasowe
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| Hour of day / Day of week | `agent_core/homeostasis/sensors/time_sensor.py` | - | **implemented** | Circadian tracking |
-| Session duration | `agent_core/homeostasis/sensors/time_sensor.py` | - | **implemented** | Uptime tracking |
-| Last interaction timestamp | `agent_core/homeostasis/sensors/time_sensor.py` | - | **implemented** | Activity recording |
-| Idle streak duration | `agent_core/homeostasis/sensors/time_sensor.py` | - | **implemented** | SLEEP trigger |
+| Hour of day / Day of week | `agent_core/homeostasis/sensors/time_sensor.py` | - | **tested** | Circadian tracking |
+| Session duration | `agent_core/homeostasis/sensors/time_sensor.py` | - | **tested** | Uptime tracking |
+| Last interaction timestamp | `agent_core/homeostasis/sensors/time_sensor.py` | - | **tested** | Activity recording |
+| Idle streak duration | `agent_core/homeostasis/sensors/time_sensor.py` | - | **tested** | SLEEP trigger |
 
 ### A.4 Alerty krytyczne
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| OOM detection (< 200 MB) | `agent_core/homeostasis/constraints.py` | `maria_core/sys/resource_watchdog.py` | **implemented** | CRITICAL threshold |
-| Disk full (> 95%) | `agent_core/homeostasis/constraints.py` | - | **implemented** | CRITICAL threshold |
-| LLM timeout (> 120s) | `agent_core/homeostasis/constraints.py` | - | **implemented** | Latency constraint |
-| Context loss detection | `agent_core/homeostasis/constraints.py` | - | **implemented** | Coherence < 0.5 |
+| OOM detection (< 200 MB) | `agent_core/homeostasis/constraints.py` | `maria_core/sys/resource_watchdog.py` | **tested** | CRITICAL threshold |
+| Disk full (> 95%) | `agent_core/homeostasis/constraints.py` | - | **tested** | CRITICAL threshold |
+| LLM timeout (> 120s) | `agent_core/homeostasis/constraints.py` | - | **tested** | Latency constraint |
+| Context loss detection | `agent_core/homeostasis/constraints.py` | - | **tested** | Coherence < 0.5 |
 | Memory fragmentation | `agent_core/homeostasis/constraints.py` | - | partial | Basic detection |
-| Context degradation | `agent_core/homeostasis/constraints.py` | - | **implemented** | Coherence tracking |
+| Context degradation | `agent_core/homeostasis/constraints.py` | - | **tested** | Coherence tracking |
 
 ---
 
@@ -86,12 +89,12 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| State buffer (exponential smoothing) | `agent_core/homeostasis/state_model.py` | - | **implemented** | EMA in interpreter.py |
-| StateInterpreter | `agent_core/homeostasis/interpreter.py` | - | **implemented** | Raw → semantic state |
-| ConstraintValidator | `agent_core/homeostasis/constraints.py` | `maria_core/sys/resource_watchdog.py` | **implemented** | Full validation logic |
-| ResourceMetrics dataclass | `agent_core/homeostasis/state_model.py` | - | **implemented** | All fields from spec |
-| CognitiveMetrics dataclass | `agent_core/homeostasis/state_model.py` | - | **implemented** | All fields from spec |
-| SystemState dataclass | `agent_core/homeostasis/state_model.py` | - | **implemented** | All fields from spec |
+| State buffer (exponential smoothing) | `agent_core/homeostasis/state_model.py` | - | **tested** | EMA in interpreter.py |
+| StateInterpreter | `agent_core/homeostasis/interpreter.py` | - | **tested** | Raw → semantic state |
+| ConstraintValidator | `agent_core/homeostasis/constraints.py` | `maria_core/sys/resource_watchdog.py` | **tested** | Full validation logic |
+| ResourceMetrics dataclass | `agent_core/homeostasis/state_model.py` | - | **tested** | All fields from spec |
+| CognitiveMetrics dataclass | `agent_core/homeostasis/state_model.py` | - | **tested** | All fields from spec |
+| SystemState dataclass | `agent_core/homeostasis/state_model.py` | - | **tested** | All fields from spec |
 
 ---
 
@@ -99,11 +102,11 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| Mode enum (ACTIVE/REDUCED/SLEEP/SURVIVAL) | `agent_core/homeostasis/mode_regulator.py` | `maria_core/sys/meta_controller.py` | **implemented** | Spec-compliant enum |
-| ModeRegulator.decide_mode() | `agent_core/homeostasis/mode_regulator.py` | `maria_core/sys/meta_controller.py` | **implemented** | Full decision logic |
-| Transition validation | `agent_core/homeostasis/mode_regulator.py` | - | **implemented** | Forbidden transitions |
-| Pre-transition checks | `agent_core/homeostasis/mode_regulator.py` | - | **implemented** | Snapshot, signal |
-| User override handling | `agent_core/homeostasis/mode_regulator.py` | - | **implemented** | Operator requests |
+| Mode enum (ACTIVE/REDUCED/SLEEP/SURVIVAL) | `agent_core/homeostasis/mode_regulator.py` | `maria_core/sys/meta_controller.py` | **integrated** | Spec-compliant enum, in main.py |
+| ModeRegulator.decide_mode() | `agent_core/homeostasis/mode_regulator.py` | `maria_core/sys/meta_controller.py` | **tested** | Full decision logic |
+| Transition validation | `agent_core/homeostasis/mode_regulator.py` | - | **tested** | Forbidden transitions |
+| Pre-transition checks | `agent_core/homeostasis/mode_regulator.py` | - | **tested** | Snapshot, signal |
+| User override handling | `agent_core/homeostasis/mode_regulator.py` | - | **tested** | Operator requests |
 
 ---
 
@@ -111,12 +114,12 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| CorrectiveActionGenerator | `agent_core/homeostasis/actions.py` | - | **implemented** | Full implementation |
-| Memory consolidation signal | `agent_core/homeostasis/actions.py` | - | **implemented** | Via ModuleExecutor |
-| Pause background learning | `agent_core/homeostasis/actions.py` | - | **implemented** | Via ModuleExecutor |
-| Reduce inference batch | `agent_core/homeostasis/actions.py` | - | **implemented** | Via ModuleExecutor |
-| Goal stack interrupt | `agent_core/homeostasis/actions.py` | - | **implemented** | Via ModuleExecutor |
-| AlarmDispatcher | `agent_core/homeostasis/actions.py` | - | **implemented** | Critical alerts |
+| CorrectiveActionGenerator | `agent_core/homeostasis/actions.py` | - | **tested** | Full implementation |
+| Memory consolidation signal | `agent_core/homeostasis/actions.py` | - | **tested** | Via ModuleExecutor |
+| Pause background learning | `agent_core/homeostasis/actions.py` | - | **integrated** | Mode gating in main.py |
+| Reduce inference batch | `agent_core/homeostasis/actions.py` | - | **tested** | Via ModuleExecutor |
+| Goal stack interrupt | `agent_core/homeostasis/actions.py` | - | **tested** | Via ModuleExecutor |
+| AlarmDispatcher | `agent_core/homeostasis/actions.py` | - | **tested** | Critical alerts |
 
 ---
 
@@ -124,12 +127,12 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| HomeostasisCore main_loop() | `agent_core/homeostasis/core.py` | - | **implemented** | 1s tick loop |
-| Pulse thread (100ms) | `agent_core/homeostasis/pulse.py` | - | **implemented** | Emergency detection |
-| Tick evaluation (1s) | `agent_core/homeostasis/core.py` | - | **implemented** | Full phases |
-| Epoch tasks (1h/24h) | `agent_core/homeostasis/core.py` | - | **implemented** | Periodic tasks |
-| Health score computation | `agent_core/homeostasis/core.py` | - | **implemented** | Weighted aggregate |
-| Audit log | `agent_core/homeostasis/core.py` | - | **implemented** | Decision trail |
+| HomeostasisCore main_loop() | `agent_core/homeostasis/core.py` | - | **integrated** | 1s tick loop, in main.py |
+| Pulse thread (100ms) | `agent_core/homeostasis/pulse.py` | - | **tested** | Emergency detection |
+| Tick evaluation (1s) | `agent_core/homeostasis/core.py` | - | **tested** | Full phases |
+| Epoch tasks (1h/24h) | `agent_core/homeostasis/core.py` | - | **tested** | Periodic tasks |
+| Health score computation | `agent_core/homeostasis/core.py` | - | **tested** | Weighted aggregate |
+| Audit log | `agent_core/homeostasis/core.py` | - | **tested** | Decision trail |
 
 ---
 
@@ -137,11 +140,11 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| Snapshot protocol | `agent_core/homeostasis/snapshot.py` | - | **implemented** | Full protocol |
-| Atomic snapshot (CoW) | `agent_core/memory/snapshot_backend.py` | - | **implemented** | Copy-on-write |
-| Recovery procedure | `agent_core/homeostasis/snapshot.py` | - | **implemented** | Full recovery |
-| CRC validation | `agent_core/homeostasis/snapshot.py` | - | **implemented** | JSON validation |
-| Graceful shutdown | `agent_core/homeostasis/snapshot.py` | - | **implemented** | ShutdownManager |
+| Snapshot protocol | `agent_core/homeostasis/snapshot.py` | - | **tested** | Full protocol |
+| Atomic snapshot (CoW) | `agent_core/memory/snapshot_backend.py` | - | **tested** | Copy-on-write |
+| Recovery procedure | `agent_core/homeostasis/snapshot.py` | - | **tested** | Full recovery |
+| CRC validation | `agent_core/homeostasis/snapshot.py` | - | **tested** | JSON validation |
+| Graceful shutdown | `agent_core/homeostasis/snapshot.py` | - | **tested** | ShutdownManager |
 
 ---
 
@@ -149,14 +152,14 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| HomeostasisInterface | `agent_core/homeostasis/api.py` | - | **implemented** | Full interface |
-| get_current_mode() | `agent_core/homeostasis/api.py` | - | **implemented** | Read operation |
-| get_resource_headroom() | `agent_core/homeostasis/api.py` | - | **implemented** | Read operation |
-| get_health_score() | `agent_core/homeostasis/api.py` | - | **implemented** | Read operation |
-| request_resource_allocation() | `agent_core/homeostasis/api.py` | - | **implemented** | Write operation |
-| notify_module_state() | `agent_core/homeostasis/api.py` | - | **implemented** | Module reports |
-| signal_critical_error() | `agent_core/homeostasis/api.py` | - | **implemented** | Urgent signal |
-| request_mode_override() | `agent_core/homeostasis/api.py` | - | **implemented** | Meta request |
+| HomeostasisInterface | `agent_core/homeostasis/api.py` | - | **tested** | Full interface |
+| get_current_mode() | `agent_core/homeostasis/api.py` | - | **integrated** | REPL /homeostasis cmd |
+| get_resource_headroom() | `agent_core/homeostasis/api.py` | - | **integrated** | REPL /homeostasis cmd |
+| get_health_score() | `agent_core/homeostasis/api.py` | - | **integrated** | REPL /homeostasis cmd |
+| request_resource_allocation() | `agent_core/homeostasis/api.py` | - | **tested** | Write operation |
+| notify_module_state() | `agent_core/homeostasis/api.py` | - | **tested** | Module reports |
+| signal_critical_error() | `agent_core/homeostasis/api.py` | - | **tested** | Urgent signal |
+| request_mode_override() | `agent_core/homeostasis/api.py` | - | **tested** | Meta request |
 
 ---
 
@@ -164,11 +167,11 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| HomeostasisEventBus | `agent_core/homeostasis/api.py` | - | **implemented** | Full event bus |
-| event_mode_changed | `agent_core/homeostasis/api.py` | - | **implemented** | Broadcast |
-| event_resource_reduced | `agent_core/homeostasis/api.py` | - | **implemented** | Broadcast |
-| event_alert_raised | `agent_core/homeostasis/api.py` | - | **implemented** | Broadcast |
-| event_health_degraded | `agent_core/homeostasis/api.py` | - | **implemented** | Broadcast |
+| HomeostasisEventBus | `agent_core/homeostasis/api.py` | - | **tested** | Full event bus |
+| event_mode_changed | `agent_core/homeostasis/api.py` | - | **tested** | Broadcast |
+| event_resource_reduced | `agent_core/homeostasis/api.py` | - | **tested** | Broadcast |
+| event_alert_raised | `agent_core/homeostasis/api.py` | - | **tested** | Broadcast |
+| event_health_degraded | `agent_core/homeostasis/api.py` | - | **tested** | Broadcast |
 
 ---
 
@@ -176,11 +179,11 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| Telemetry API (read-only) | `agent_core/ui/telemetry_api.py` | - | **implemented** | Dashboard data |
-| Operator controls | `agent_core/ui/operator_controls.py` | - | **implemented** | Safe writes |
-| Force mode (with validation) | `agent_core/ui/operator_controls.py` | - | **implemented** | Time-limited |
-| Trigger snapshot | `agent_core/ui/operator_controls.py` | - | **implemented** | Manual backup |
-| View audit log | `agent_core/ui/telemetry_api.py` | - | **implemented** | Read-only |
+| Telemetry API (read-only) | `agent_core/ui/telemetry_api.py` | - | **integrated** | REPL /homeostasis cmd |
+| Operator controls | `agent_core/ui/operator_controls.py` | - | **integrated** | /homeostasis start/stop |
+| Force mode (with validation) | `agent_core/ui/operator_controls.py` | - | **tested** | Time-limited |
+| Trigger snapshot | `agent_core/ui/operator_controls.py` | - | **tested** | Manual backup |
+| View audit log | `agent_core/ui/telemetry_api.py` | - | **tested** | Read-only |
 
 ---
 
@@ -188,13 +191,13 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| MemoryManager interface | `agent_core/memory/manager.py` | `maria_core/memory/memory_store.py` | **implemented** | + adapter |
-| Episodic store | `agent_core/memory/episodic_store.py` | `maria_core/memory/brain_memory_integration.py` | **implemented** | + adapter |
-| Semantic store | `agent_core/memory/semantic_store.py` | `maria_core/memory/semantic_graph.py` | **implemented** | + adapter |
-| get_semantic_coherence() | `agent_core/memory/semantic_store.py` | - | **implemented** | Consistency score |
-| get_recent_errors_count() | `agent_core/memory/manager.py` | - | **implemented** | Error aggregation |
-| consolidate_episodic() | `agent_core/memory/episodic_store.py` | - | **implemented** | Compression |
-| semantic_consistency_check() | `agent_core/memory/semantic_store.py` | `maria_core/memory/semantic_graph.py` | **implemented** | Contradiction check |
+| MemoryManager interface | `agent_core/memory/manager.py` | `maria_core/memory/memory_store.py` | **tested** | + adapter, integration tests |
+| Episodic store | `agent_core/memory/episodic_store.py` | `maria_core/memory/brain_memory_integration.py` | **tested** | + adapter |
+| Semantic store | `agent_core/memory/semantic_store.py` | `maria_core/memory/semantic_graph.py` | **tested** | + adapter, integration tests |
+| get_semantic_coherence() | `agent_core/memory/semantic_store.py` | - | **tested** | Consistency score |
+| get_recent_errors_count() | `agent_core/memory/manager.py` | - | **tested** | Error aggregation |
+| consolidate_episodic() | `agent_core/memory/episodic_store.py` | - | **tested** | Compression |
+| semantic_consistency_check() | `agent_core/memory/semantic_store.py` | `maria_core/memory/semantic_graph.py` | **tested** | Contradiction check |
 
 ---
 
@@ -202,11 +205,11 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| LLMManager interface | `agent_core/llm/manager.py` | `maria_core/brain/ollama_brain.py` | **implemented** | + adapter |
-| Latency probe | `agent_core/llm/latency_probe.py` | - | **implemented** | Quick test |
-| reduce_batch_size() | `agent_core/llm/manager.py` | - | **implemented** | Throttle signal |
-| minimize() | `agent_core/llm/manager.py` | - | **implemented** | SURVIVAL mode |
-| health_check() | `agent_core/llm/manager.py` | - | **implemented** | Status report |
+| LLMManager interface | `agent_core/llm/manager.py` | `maria_core/brain/ollama_brain.py` | **integrated** | Used in main.py init |
+| Latency probe | `agent_core/llm/latency_probe.py` | - | **tested** | Quick test |
+| reduce_batch_size() | `agent_core/llm/manager.py` | - | **tested** | Throttle signal |
+| minimize() | `agent_core/llm/manager.py` | - | **tested** | SURVIVAL mode |
+| health_check() | `agent_core/llm/manager.py` | - | **tested** | Status report |
 
 ---
 
@@ -214,10 +217,10 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| MetaController interface | `agent_core/metacontrol/controller.py` | `maria_core/sys/meta_controller.py` | **implemented** | + adapter |
-| Goal stack management | `agent_core/metacontrol/controller.py` | - | **implemented** | Depth tracking |
-| interrupt_goal_refinement() | `agent_core/metacontrol/controller.py` | - | **implemented** | Runaway prevention |
-| request_mode_override() | `agent_core/metacontrol/controller.py` | - | **implemented** | Higher-level request |
+| MetaController interface | `agent_core/metacontrol/controller.py` | `maria_core/sys/meta_controller.py` | **tested** | + adapter |
+| Goal stack management | `agent_core/metacontrol/controller.py` | - | **tested** | Depth tracking |
+| interrupt_goal_refinement() | `agent_core/metacontrol/controller.py` | - | **tested** | Runaway prevention |
+| request_mode_override() | `agent_core/metacontrol/controller.py` | - | **tested** | Higher-level request |
 
 ---
 
@@ -225,9 +228,9 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| ModuleExecutor | `agent_core/executor/module_executor.py` | - | **implemented** | Signal dispatcher |
-| signal_module() | `agent_core/executor/module_executor.py` | - | **implemented** | Full implementation |
-| Module communication contract | `agent_core/executor/module_executor.py` | - | **implemented** | pause/resume/reduce |
+| ModuleExecutor | `agent_core/executor/module_executor.py` | - | **tested** | Signal dispatcher |
+| signal_module() | `agent_core/executor/module_executor.py` | - | **tested** | Full implementation |
+| Module communication contract | `agent_core/executor/module_executor.py` | - | **tested** | pause/resume/reduce |
 
 ---
 
@@ -235,13 +238,13 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Spec Requirement | Docelowy modul | Obecny plik | Status | Notatki |
 |------------------|----------------|-------------|--------|---------|
-| Runaway loop detection | `agent_core/homeostasis/constraints.py` | - | **implemented** | Goal stack depth |
-| Memory bloat handling | `agent_core/homeostasis/actions.py` | - | **implemented** | Emergency consolidation |
-| Thermal runaway | `agent_core/homeostasis/actions.py` | - | **implemented** | Throttle + REDUCED |
-| Identity drift detection | `agent_core/homeostasis/constraints.py` | - | **implemented** | Contradiction rate |
-| Cascading failure circuit breaker | `agent_core/homeostasis/actions.py` | - | **implemented** | Error isolation |
-| Destructive loop prevention | `agent_core/homeostasis/constraints.py` | - | **implemented** | Escalation patterns |
-| Mandatory backoff | `agent_core/homeostasis/actions.py` | - | **implemented** | Exponential pause |
+| Runaway loop detection | `agent_core/homeostasis/constraints.py` | - | **tested** | Goal stack depth |
+| Memory bloat handling | `agent_core/homeostasis/actions.py` | - | **tested** | Emergency consolidation |
+| Thermal runaway | `agent_core/homeostasis/actions.py` | - | **tested** | Throttle + REDUCED |
+| Identity drift detection | `agent_core/homeostasis/constraints.py` | - | **tested** | Contradiction rate |
+| Cascading failure circuit breaker | `agent_core/homeostasis/actions.py` | - | **tested** | Error isolation |
+| Destructive loop prevention | `agent_core/homeostasis/constraints.py` | - | **tested** | Escalation patterns |
+| Mandatory backoff | `agent_core/homeostasis/actions.py` | - | **tested** | Exponential pause |
 
 ---
 
@@ -249,14 +252,14 @@ Przed jakakolwiek refaktoryzacja - kazdy element specyfikacji ma przypisany modu
 
 | Status | Liczba wymagan |
 |--------|----------------|
-| missing | ~3 |
-| partial | ~3 |
+| missing | 0 |
+| partial | ~2 |
 | adapter | 5 (via agent_core/adapters/) |
 | stub | 0 |
-| **implemented** | ~72 |
-| tested | 0 (pending pytest run) |
+| **tested** | ~70 |
+| **integrated** | ~10 (main.py) |
 
-**Postep:** ~85% implemented, ~15% remaining (partial/missing)
+**Postep:** ~97% complete (tested + integrated), ~3% partial
 
 ---
 
@@ -317,7 +320,7 @@ sensor   sensor     state      constraints actions  alarms
 
 ---
 
-*Ostatnia aktualizacja: 2026-01-26 (Etap 1 + Etap 2 complete)*
+*Ostatnia aktualizacja: 2026-01-28 (Etap 1-4 complete, 200 tests passing)*
 
-*Nastepny krok: Uruchomienie pytest i oznaczenie jako `tested`*
+*Nastepny krok: Etap 5 - cleanup starego kodu i opcjonalne testy stabilnosci 30+ minut*
 

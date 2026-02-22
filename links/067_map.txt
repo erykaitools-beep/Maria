@@ -1,7 +1,0 @@
-067 -> percepcja
-067 -> input
-067 -> external
-067 -> ai
-067 -> foundation
-067 -> memory
-067 -> system

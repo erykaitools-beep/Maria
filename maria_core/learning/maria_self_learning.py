@@ -90,7 +90,7 @@ class MariaSelfLearner:
         concepts = list(sorted(set(concepts)))
 
         self.log_fn(
-            f"[MariaSelfLearner] 📚 Extracted concepts: {', '.join(concepts[:10]) or 'none'}"
+            f"[MariaSelfLearner] [EXTRACT] Extracted concepts: {', '.join(concepts[:10]) or 'none'}"
         )
         return concepts
 
@@ -126,10 +126,10 @@ class MariaSelfLearner:
         2. Jeśli nie – pyta Ollamę o krótkie wyjaśnienie
         3. Zapisuje jako node typu 'concept' + relację z kontenerem 'Knowledge Base'
         """
-        self.log_fn(f"\n[MariaSelfLearner] 🤔 Learning concept: '{concept}'")
+        self.log_fn(f"\n[MariaSelfLearner] [THINK] Learning concept: '{concept}'")
 
         if self.check_knowledge(concept):
-            self.log_fn(f"[MariaSelfLearner] ✅ Already knows: {concept}")
+            self.log_fn(f"[MariaSelfLearner] [OK] Already knows: {concept}")
             return {
                 "concept": concept,
                 "status": "already_known",
@@ -143,11 +143,11 @@ Wyjaśnij w maksymalnie 2 zdaniach, co to jest: "{concept}".
 Odpowiedź:
 """
 
-        self.log_fn("[MariaSelfLearner] 🧠 Asking local model (Ollama)...")
+        self.log_fn("[MariaSelfLearner] [BRAIN] Asking local model (Ollama)...")
         definition = self.brain.think(prompt, temperature=temperature).strip()
 
         if not definition:
-            self.log_fn(f"[MariaSelfLearner] ⚠ Empty definition for: {concept}")
+            self.log_fn(f"[MariaSelfLearner] [WARN] Empty definition for: {concept}")
             self.unknown_concepts.add(concept)
             return {
                 "concept": concept,
@@ -157,7 +157,7 @@ Odpowiedź:
             }
 
         if "nie znam" in definition.lower():
-            self.log_fn(f"[MariaSelfLearner] ⚠ Model doesn't know: {concept}")
+            self.log_fn(f"[MariaSelfLearner] [WARN] Model doesn't know: {concept}")
             self.unknown_concepts.add(concept)
             return {
                 "concept": concept,
@@ -204,9 +204,9 @@ Odpowiedź:
                 source="self_learning",
             )
 
-            self.log_fn(f"[MariaSelfLearner] ✅ Learned: {concept}")
+            self.log_fn(f"[MariaSelfLearner] [OK] Learned: {concept}")
             self.log_fn(
-                f"[MariaSelfLearner] 📝 Definition: {definition[:100]}..."
+                f"[MariaSelfLearner] [DEF] Definition: {definition[:100]}..."
             )
 
             return {
@@ -218,7 +218,7 @@ Odpowiedź:
             }
 
         except Exception as e:
-            self.log_fn(f"[MariaSelfLearner] ⚠ Failed to add to graph: {e}")
+            self.log_fn(f"[MariaSelfLearner] [WARN] Failed to add to graph: {e}")
             return {
                 "concept": concept,
                 "status": "error",
@@ -239,14 +239,14 @@ Odpowiedź:
         Automatyczne uczenie się z jednego tekstu (percepcji).
         """
         self.log_fn(
-            f"\n[MariaSelfLearner] 🎓 Auto-learning from text ({len(text)} chars)"
+            f"\n[MariaSelfLearner] [LEARN] Auto-learning from text ({len(text)} chars)"
         )
 
         concepts = self.extract_concepts(text)
         unknown = [c for c in concepts if not self.check_knowledge(c)]
 
-        self.log_fn(f"[MariaSelfLearner] 📚 Extracted: {len(concepts)}")
-        self.log_fn(f"[MariaSelfLearner] 🤷 Unknown: {len(unknown)}")
+        self.log_fn(f"[MariaSelfLearner] [EXTRACT] Extracted: {len(concepts)}")
+        self.log_fn(f"[MariaSelfLearner] [UNKNOWN] Unknown: {len(unknown)}")
 
         if curiosity_override:
             to_learn = unknown[:max_concepts]
@@ -261,7 +261,7 @@ Odpowiedź:
                     break
 
         self.log_fn(
-            f"[MariaSelfLearner] 🎯 Learning {len(to_learn)} concepts "
+            f"[MariaSelfLearner] [TARGET] Learning {len(to_learn)} concepts "
             f"(curiosity={self.curiosity:.0%})"
         )
 
@@ -304,9 +304,9 @@ Odpowiedź:
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            self.log_fn(f"[MariaSelfLearner] 💾 Learning exported: {filepath}")
+            self.log_fn(f"[MariaSelfLearner] [SAVE] Learning exported: {filepath}")
         except Exception as e:
-            self.log_fn(f"[MariaSelfLearner] ⚠ Export failed: {e}")
+            self.log_fn(f"[MariaSelfLearner] [WARN] Export failed: {e}")
 
 
 class SelfLearningMode:
@@ -394,7 +394,7 @@ class SelfLearningMode:
         )
 
         self.log_fn(
-            f"[Self-Learning] ✅ Learned {report['successfully_learned']} "
+            f"[Self-Learning] [OK] Learned {report['successfully_learned']} "
             f"/ {report['attempted_to_learn']} concepts "
             f"(extracted={report['total_concepts_extracted']})"
         )
@@ -408,7 +408,7 @@ class SelfLearningMode:
         report = self.learner.get_learning_report()
 
         print("\n" + "=" * 70)
-        print("📚 MARIA'S LEARNING PROGRESS")
+        print("[PROGRESS] MARIA'S LEARNING PROGRESS")
         print("=" * 70)
         print(f"Concepts Learned (in this session): {report['learned_concepts']}")
         print(f"Concepts in Graph (nodes): {report['known_nodes_in_graph']}")
@@ -424,4 +424,4 @@ class SelfLearningMode:
             print("[Self-Learning] Nic do eksportu.")
             return
         self.learner.export_learning(filepath)
-        self.log_fn(f"[Self-Learning] ✅ Learning exported to {filepath}")
+        self.log_fn(f"[Self-Learning] [OK] Learning exported to {filepath}")

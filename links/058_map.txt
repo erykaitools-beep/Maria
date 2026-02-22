@@ -1,6 +1,0 @@
-058 -> percepcja
-058 -> input
-058 -> external
-058 -> ai
-058 -> foundation
-058 -> logic

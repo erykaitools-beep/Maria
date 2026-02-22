@@ -1,2 +1,0 @@
-[15:10] Dodano trzeci rekord pamięci (003.txt) – pierwszy opis realnego celu systemu
-[15:10] Utworzono mapę powiązań (003_map.txt)

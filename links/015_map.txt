@@ -1,6 +1,0 @@
-015 -> eryk
-015 -> create
-015 -> language
-015 -> ai
-015 -> local_ai
-015 -> memory
