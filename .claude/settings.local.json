@@ -13,7 +13,11 @@
       "Bash(git checkout:*)",
       "Bash(if not exist \"archive\\\\maria_core_backup_20260126\" mkdir \"archive\\\\maria_core_backup_20260126\")",
       "Bash(grep:*)",
-      "Bash(git status:*)"
+      "Bash(git status:*)",
+      "Bash(find:*)",
+      "Bash(python3 -c \" import sys files = [ ''maria_core/sys/self_evolver.py'', ''maria_core/sys/maria_heartbeat.py'', ''maria_core/sys/config.py'', ''models/ollama_brain.py'', ''agent_core/homeostasis/event_logger.py'', ] for f in files: try: with open\\(f, ''r'', encoding=''utf-8''\\) as file: for i, line in enumerate\\(file, 1\\): if any\\(ord\\(c\\) > 127 for c in line\\): print\\(f''{f}:{i}: {repr\\(line[:80]\\)}''\\) except: pass \")",
+      "Bash(python3:*)",
+      "Bash(git log:*)"
     ]
   }
 }
