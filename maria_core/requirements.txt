@@ -4,6 +4,9 @@
 # Ollama API calls
 requests>=2.31.0
 
+# Ollama Python client
+ollama>=0.1.0
+
 # Environment configuration from .env files (optional)
 python-dotenv>=0.19.0
 

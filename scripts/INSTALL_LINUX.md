@@ -43,9 +43,8 @@ cd /home/maria/maria
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
-pip install -r maria_core/requirements.txt
-pip install -r maria_ui/requirements.txt
+# Install all dependencies (single file)
+pip install -r requirements.txt
 ```
 
 ## 4. Configuration
