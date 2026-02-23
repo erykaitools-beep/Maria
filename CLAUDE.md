@@ -23,7 +23,7 @@
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
 | **Testy** | 398 passing |
-| **Faza wg ROADMAP** | B complete, C planned |
+| **Faza wg ROADMAP** | B complete, C in progress |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?

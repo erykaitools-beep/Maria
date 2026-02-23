@@ -1,0 +1,31 @@
+# Normalize line endings (Windows -> Linux migration)
+* text=auto
+
+# Python - always LF
+*.py text eol=lf
+
+# Config - always LF
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.env text eol=lf
+*.service text eol=lf
+*.sh text eol=lf
+
+# HTML/CSS/JS - always LF
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# Binary - don't touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

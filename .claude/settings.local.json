@@ -17,7 +17,17 @@
       "Bash(find:*)",
       "Bash(python3 -c \" import sys files = [ ''maria_core/sys/self_evolver.py'', ''maria_core/sys/maria_heartbeat.py'', ''maria_core/sys/config.py'', ''models/ollama_brain.py'', ''agent_core/homeostasis/event_logger.py'', ] for f in files: try: with open\\(f, ''r'', encoding=''utf-8''\\) as file: for i, line in enumerate\\(file, 1\\): if any\\(ord\\(c\\) > 127 for c in line\\): print\\(f''{f}:{i}: {repr\\(line[:80]\\)}''\\) except: pass \")",
       "Bash(python3:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(systemctl is-active maria-ui ollama)",
+      "Bash(systemctl status:*)",
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(/home/maria/maria/.env:*)",
+      "Bash(git -C /home/maria/maria log --oneline -10)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(git -C /home/maria/maria show --stat a132c4d)",
+      "Bash(test:*)"
     ]
   }
 }

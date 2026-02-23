@@ -38,5 +38,5 @@ if __name__ == '__main__':
         host=host,
         port=port,
         debug=DEBUG_MODE,
-        allow_unsafe_werkzeug=DEBUG_MODE
+        allow_unsafe_werkzeug=True
     )
