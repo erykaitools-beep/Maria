@@ -245,6 +245,39 @@ def maybe_save_chat(role: str, content: str):
 # MARIA BRAIN
 # =============================================================================
 
+def _create_ui_router(brain):
+    """Create LLM Router for Web UI. Returns None if NIM unavailable."""
+    try:
+        from maria_core.sys.config import (
+            NVIDIA_NIM_API_KEY, NVIDIA_NIM_BASE_URL, NVIDIA_NIM_MODEL,
+            NIM_DAILY_TOKEN_LIMIT, NIM_MONTHLY_TOKEN_LIMIT,
+        )
+        if not NVIDIA_NIM_API_KEY:
+            return None
+
+        from agent_core.llm import NIMClient, TokenBudget, LLMRouter
+
+        nim = NIMClient(
+            api_key=NVIDIA_NIM_API_KEY,
+            model=NVIDIA_NIM_MODEL,
+            base_url=NVIDIA_NIM_BASE_URL,
+        )
+        budget = TokenBudget(
+            daily_limit=NIM_DAILY_TOKEN_LIMIT,
+            monthly_limit=NIM_MONTHLY_TOKEN_LIMIT,
+        )
+        router = LLMRouter(
+            ollama_brain=brain,
+            nim_client=nim,
+            token_budget=budget,
+        )
+        print(f"[UI] [OK] LLM Router: hybrid (NIM: {NVIDIA_NIM_MODEL} + Ollama)")
+        return router
+    except Exception as e:
+        print(f"[UI] [WARN] LLM Router disabled: {e}")
+        return None
+
+
 def get_maria_brain():
     """Get or create Maria's brain instance (thread-safe)."""
     global _maria_brain
@@ -252,7 +285,7 @@ def get_maria_brain():
         with _brain_lock:
             if _maria_brain is None and OLLAMA_AVAILABLE:
                 try:
-                    _maria_brain = OllamaBrain(
+                    brain = OllamaBrain(
                         model="llama3.1:8b",
                         system_prompt=(
                             "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture. "
@@ -263,9 +296,12 @@ def get_maria_brain():
                         ),
                         verify_model=False
                     )
-                    print("[UI] [OK] OllamaBrain initialized")
+                    # Wrap with LLM Router if NIM available
+                    router = _create_ui_router(brain)
+                    _maria_brain = router if router else brain
+                    print("[UI] [OK] Brain initialized")
                 except Exception as e:
-                    print(f"[UI] [ERROR] Could not initialize OllamaBrain: {e}")
+                    print(f"[UI] [ERROR] Could not initialize brain: {e}")
     return _maria_brain
 
 

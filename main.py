@@ -16,6 +16,40 @@ BRAIN_MODEL = "llama3.1:8b"
 
 # ====== INICJALIZACJA ======
 
+def _create_router(brain):
+    """Create LLM Router wrapping brain. Returns None if NIM unavailable."""
+    try:
+        from maria_core.sys.config import (
+            NVIDIA_NIM_API_KEY, NVIDIA_NIM_BASE_URL, NVIDIA_NIM_MODEL,
+            NIM_DAILY_TOKEN_LIMIT, NIM_MONTHLY_TOKEN_LIMIT,
+        )
+        if not NVIDIA_NIM_API_KEY:
+            print("[INIT] LLM Router: NIM API key not set, using Ollama only")
+            return None
+
+        from agent_core.llm import NIMClient, TokenBudget, LLMRouter
+
+        nim = NIMClient(
+            api_key=NVIDIA_NIM_API_KEY,
+            model=NVIDIA_NIM_MODEL,
+            base_url=NVIDIA_NIM_BASE_URL,
+        )
+        budget = TokenBudget(
+            daily_limit=NIM_DAILY_TOKEN_LIMIT,
+            monthly_limit=NIM_MONTHLY_TOKEN_LIMIT,
+        )
+        router = LLMRouter(
+            ollama_brain=brain,
+            nim_client=nim,
+            token_budget=budget,
+        )
+        print(f"[INIT] LLM Router: hybrid (NIM: {NVIDIA_NIM_MODEL} + Ollama)")
+        return router
+    except Exception as e:
+        print(f"[INIT] LLM Router disabled: {e}")
+        return None
+
+
 def init_brain():
     """Create SharedContext with brain, brain_loop, and memory."""
     semantic_memory = SemanticGraph()
@@ -26,14 +60,18 @@ def init_brain():
         verify_model=True,
     )
 
+    # Wrap with LLM Router if NIM API available
+    router = _create_router(brain)
+    active_brain = router if router else brain
+
     brain_loop = brain_memory_integration.BrainMemoryLoop(
         semantic_memory=semantic_memory,
         episodic_memory=episodic_memory,
-        maria_brain=brain,
+        maria_brain=active_brain,
     )
 
     return SharedContext(
-        brain=brain,
+        brain=active_brain,
         brain_loop=brain_loop,
         semantic_memory=semantic_memory,
         episodic_memory=episodic_memory,
@@ -70,11 +108,16 @@ def register_modules(registry):
         from agent_core.modules.query_module import QueryModule
         return QueryModule()
 
+    def make_nim():
+        from agent_core.modules.nim_module import NIMModule
+        return NIMModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
     registry.try_register(make_knowledge, "knowledge")
     registry.try_register(make_query, "query")
+    registry.try_register(make_nim, "nim")
 
 
 # ====== POMOC ======

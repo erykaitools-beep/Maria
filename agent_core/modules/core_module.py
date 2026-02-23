@@ -166,14 +166,21 @@ class CoreModule(MariaModule):
             importlib.reload(ollama_brain)
             importlib.reload(brain_memory_integration)
 
-            self.ctx.brain = ollama_brain.OllamaBrain(
+            brain = ollama_brain.OllamaBrain(
                 model=self.ctx.brain_model,
                 verify_model=True,
             )
+
+            # Try to wrap with LLM Router (same as init_brain)
+            from main import _create_router
+            router = _create_router(brain)
+            active_brain = router if router else brain
+
+            self.ctx.brain = active_brain
             self.ctx.brain_loop = brain_memory_integration.BrainMemoryLoop(
                 semantic_memory=self.ctx.semantic_memory,
                 episodic_memory=self.ctx.episodic_memory,
-                maria_brain=self.ctx.brain,
+                maria_brain=active_brain,
             )
             print("[System] [OK] Przeladowano kod mozgu i petli.\n")
         except Exception as e:
