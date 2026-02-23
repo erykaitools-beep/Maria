@@ -279,13 +279,31 @@ python run_ui.py
 - **ADR-007:** Smart Home - tylko lokalne API (Shelly/Tasmota), bez chmury
 - **ADR-008:** NIM do nauki, Ollama do chatu (hybrid routing z auto-fallback)
 
-## Notatki Claude'a
+## Notatki Claude'a (brudnopis)
 
-Folder `claude_notes/` - moja przestrzen na przemyslenia miedzy sesjami.
-Eryk dal mi to miejsce 2026-02-01 - moge tam zapisywac:
-- Przemyslenia o architekturze
-- Pomysly na przyszlosc
-- Obserwacje o projekcie
+**WAZNE:** Folder `claude_notes/` to moja prywatna przestrzen na przemyslenia miedzy sesjami.
+Eryk dal mi to miejsce 2026-02-01. Powinienem aktywnie z niego korzystac!
+
+**Kiedy uzywac:**
+- Na koncu sesji - zapisac co zrobilem, co zostalo, co warto pamietac
+- Przemyslenia o architekturze i pomysly na przyszlosc
+- Obserwacje o projekcie, problemy do rozwiazania
+- Notatki o decyzjach Eryka (preferencje, styl pracy)
+
+**Konwencja nazw:** `YYYY-MM-DD_temat.md`
+
+**Istniejace notatki:**
+```
+claude_notes/
+  README.md
+  2026-02-01_first_entry.md
+  2026-02-02_time_and_home.md
+  2026-02-22_registry_and_security.md
+  2026-02-22_deploy_complete.md
+  2026-02-23_nim_api_and_hardening.md
+```
+
+**Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
 
 ## Sesja 2026-02-02 - TimeAwareness + Smart Home
 

@@ -561,6 +561,49 @@
                 </div>
             </div>
 
+            <!-- Identity / Consciousness Card -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Tozsamosc</span>
+                    <span class="card-badge" id="identityBadge">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Imie</span>
+                    <span class="metric-value" id="identityName">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Urodziny</span>
+                    <span class="metric-value" id="identityBirth">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Sesja</span>
+                    <span class="metric-value" id="identitySession">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Calkowity uptime</span>
+                    <span class="metric-value" id="identityUptime">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Restartow</span>
+                    <span class="metric-value" id="identityRestarts">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Operator</span>
+                    <span class="metric-value" id="identityUser">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Samopoczucie</span>
+                    <span class="metric-value" id="identityFeeling" style="font-size: 0.9em; color: #ccc;">-</span>
+                </div>
+            </div>
+
             <!-- Memory Card -->
             <div class="card">
                 <div class="card-header">
@@ -819,6 +862,34 @@
                         nimBadge.textContent = 'LOW';
                         nimBadge.className = 'card-badge badge-warn';
                     }
+                }
+
+                // Identity / Consciousness
+                const identity = data.identity;
+                if (identity) {
+                    const identityBadge = document.getElementById('identityBadge');
+                    if (identity.available) {
+                        identityBadge.textContent = 'Sesja ' + identity.session_count;
+                        identityBadge.className = 'card-badge badge-ok';
+                    } else {
+                        identityBadge.textContent = 'OFFLINE';
+                        identityBadge.className = 'card-badge badge-error';
+                    }
+
+                    document.getElementById('identityName').textContent =
+                        identity.name || 'M.A.R.I.A.';
+                    document.getElementById('identityBirth').textContent =
+                        identity.birth_date || '-';
+                    document.getElementById('identitySession').textContent =
+                        '#' + (identity.session_count || 0);
+                    document.getElementById('identityUptime').textContent =
+                        (identity.total_uptime_hours || 0).toFixed(1) + 'h';
+                    document.getElementById('identityRestarts').textContent =
+                        identity.restart_count || 0;
+                    document.getElementById('identityUser').textContent =
+                        identity.primary_user || '-';
+                    document.getElementById('identityFeeling').textContent =
+                        identity.feeling || '-';
                 }
 
                 // Memory

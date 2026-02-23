@@ -54,6 +54,16 @@ try:
 except ImportError:
     INTROSPECTION_AVAILABLE = False
 
+# Import consciousness for identity (with fallback)
+try:
+    from agent_core.consciousness import IdentityStore, HumanStateMapper
+    CONSCIOUSNESS_AVAILABLE = True
+except ImportError:
+    CONSCIOUSNESS_AVAILABLE = False
+
+# Global identity store (lazy init)
+_identity_store = None
+
 # Global introspection scheduler (lazy init)
 _introspection_scheduler = None
 
@@ -817,6 +827,9 @@ def api_status_full():
         except Exception as e:
             print(f"[UI] [WARN] Could not get NIM data: {e}")
 
+    # Identity / Consciousness data
+    identity_data = _get_identity_data()
+
     return jsonify({
         "timestamp": time.time(),
         "system": {
@@ -846,6 +859,7 @@ def api_status_full():
         "homeostasis": homeostasis_data,
         "brain": brain_data,
         "nim": nim_data,
+        "identity": identity_data,
         "memory": memory_data,
         "chat_logs_count": chat_logs_count,
         "introspection": introspection_data
@@ -868,6 +882,63 @@ def _get_event_details(event):
         return f"Reason: {event.get('reason', '?')}"
 
     return ""
+
+
+def _get_identity_store():
+    """Get or create identity store (lazy init, read-only for UI)."""
+    global _identity_store
+
+    if _identity_store is None and CONSCIOUSNESS_AVAILABLE:
+        try:
+            _identity_store = IdentityStore(data_dir=str(PROJECT_ROOT / "meta_data"))
+            print("[UI] [OK] Identity store loaded")
+        except Exception as e:
+            print(f"[UI] [WARN] Could not load identity: {e}")
+
+    return _identity_store
+
+
+def _get_identity_data():
+    """Get identity data for API response."""
+    identity_data = {
+        "available": CONSCIOUSNESS_AVAILABLE,
+        "name": "M.A.R.I.A.",
+        "full_name": "Meta Analysis Recalibration Intelligence Architecture",
+        "birth_date": None,
+        "session_count": 0,
+        "total_uptime_hours": 0,
+        "restart_count": 0,
+        "primary_user": None,
+        "last_session_summary": "",
+        "feeling": None,
+    }
+
+    if CONSCIOUSNESS_AVAILABLE:
+        store = _get_identity_store()
+        if store:
+            try:
+                d = store.get_identity_dict()
+                identity_data.update({
+                    "name": d.get("full_name", "M.A.R.I.A."),
+                    "full_name": d.get("full_name_expanded", ""),
+                    "birth_date": d.get("birth_date"),
+                    "session_count": d.get("session_count", 0),
+                    "total_uptime_hours": d.get("total_uptime_hours", 0),
+                    "restart_count": d.get("restart_count", 0),
+                    "primary_user": d.get("primary_user"),
+                    "last_session_summary": d.get("last_session_summary", ""),
+                })
+            except Exception as e:
+                print(f"[UI] [WARN] Could not get identity data: {e}")
+
+        # Get feeling
+        try:
+            mapper = HumanStateMapper()
+            identity_data["feeling"] = mapper.describe_feeling()
+        except Exception:
+            pass
+
+    return identity_data
 
 
 def _get_introspection_scheduler():

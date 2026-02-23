@@ -25,6 +25,8 @@ class SharedContext:
 
     # Subsystems (set by modules during init)
     homeostasis_core: Any = None
+    identity_store: Any = None
+    consciousness: Any = None
 
     # REPL state
     last_result: Any = None

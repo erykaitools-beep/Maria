@@ -22,10 +22,12 @@ class OllamaBrain:
         model: str = "llama3.1:8b",  # Domyślny, silny model (masz go w ollama list)
         system_prompt: Optional[str] = None,
         verify_model: bool = False,
-        log_fn: Optional[Callable[[str], None]] = None
+        log_fn: Optional[Callable[[str], None]] = None,
+        identity_store=None,
     ):
         self.model = model
         self.log_fn = log_fn or print
+        self._identity_store = identity_store
 
         # Base system prompt (static part)
         self._base_system_prompt = system_prompt or (
@@ -78,10 +80,24 @@ class OllamaBrain:
             # Fallback - basic time info
             return f"Teraz jest {now.strftime('%A, %d.%m.%Y, %H:%M')}."
 
+    def _get_identity_context(self) -> str:
+        """Get identity context for system prompt."""
+        if self._identity_store is None:
+            return ""
+        try:
+            return self._identity_store.get_identity_context()
+        except Exception:
+            return ""
+
     def _build_system_prompt(self) -> str:
-        """Build full system prompt with time context."""
+        """Build full system prompt with time and identity context."""
         time_ctx = self._get_time_context()
-        return f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
+        identity_ctx = self._get_identity_context()
+
+        prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
+        if identity_ctx:
+            prompt += f"\n[Tozsamosc: {identity_ctx}]"
+        return prompt
 
     def refresh_time_context(self) -> None:
         """Refresh time context in system prompt and history."""

@@ -51,13 +51,25 @@ def _create_router(brain):
 
 
 def init_brain():
-    """Create SharedContext with brain, brain_loop, and memory."""
+    """Create SharedContext with brain, brain_loop, memory, and identity."""
     semantic_memory = SemanticGraph()
     episodic_memory = []
+
+    # Create identity store for consciousness
+    identity_store = None
+    consciousness = None
+    try:
+        from agent_core.consciousness import IdentityStore, ConsciousnessCore
+
+        identity_store = IdentityStore(data_dir="meta_data")
+        print(f"[INIT] Identity loaded: session {identity_store.get_session_count()}")
+    except Exception as e:
+        print(f"[INIT] Identity store disabled: {e}")
 
     brain = ollama_brain.OllamaBrain(
         model=BRAIN_MODEL,
         verify_model=True,
+        identity_store=identity_store,
     )
 
     # Wrap with LLM Router if NIM API available
@@ -70,12 +82,28 @@ def init_brain():
         maria_brain=active_brain,
     )
 
+    # Initialize consciousness (after brain + memory ready)
+    if identity_store:
+        try:
+            from agent_core.consciousness import ConsciousnessCore
+
+            consciousness = ConsciousnessCore(
+                semantic_memory=semantic_memory,
+                identity_store=identity_store,
+            )
+            consciousness.initialize()
+            print(f"[INIT] Consciousness: session {identity_store.get_session_count()}")
+        except Exception as e:
+            print(f"[INIT] Consciousness disabled: {e}")
+
     return SharedContext(
         brain=active_brain,
         brain_loop=brain_loop,
         semantic_memory=semantic_memory,
         episodic_memory=episodic_memory,
         brain_model=BRAIN_MODEL,
+        identity_store=identity_store,
+        consciousness=consciousness,
     )
 
 
@@ -112,12 +140,17 @@ def register_modules(registry):
         from agent_core.modules.nim_module import NIMModule
         return NIMModule()
 
+    def make_consciousness():
+        from agent_core.modules.consciousness_module import ConsciousnessModule
+        return ConsciousnessModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
     registry.try_register(make_knowledge, "knowledge")
     registry.try_register(make_query, "query")
     registry.try_register(make_nim, "nim")
+    registry.try_register(make_consciousness, "consciousness")
 
 
 # ====== POMOC ======
@@ -168,6 +201,51 @@ def generate_followup_question(ctx, last_result):
         return "NONE"
 
 
+# ====== SESSION SUMMARY ======
+
+def _generate_session_summary(ctx) -> str:
+    """Generate session summary from conversation history using LLM."""
+    try:
+        brain = ctx.brain
+        # Get conversation history (skip system prompt)
+        history = getattr(brain, "history", [])
+        if len(history) <= 1:
+            return "Krotka sesja bez rozmowy"
+
+        # Extract last user/assistant messages (max 10 pairs)
+        messages = []
+        for msg in history[1:]:  # Skip system prompt
+            role = msg.get("role", "")
+            content = msg.get("content", "")[:200]
+            if role in ("user", "assistant"):
+                messages.append(f"{role}: {content}")
+
+        if not messages:
+            return "Sesja bez rozmowy"
+
+        # Keep last 20 messages max for context
+        recent = messages[-20:]
+        conversation_snippet = "\n".join(recent)
+
+        prompt = (
+            "Przeczytaj te fragmenty rozmowy i napisz JEDNO krotkie zdanie (max 15 slow) "
+            "podsumowujace o czym rozmawialismy. "
+            "Nie uzywaj cudzyslow. Pisz w 1 osobie l. mn. (np. 'Pracowalismy nad...'). "
+            "Nie dodawaj nic wiecej.\n\n"
+            f"{conversation_snippet}"
+        )
+
+        summary = brain._ask_once(prompt, temperature=0.1)
+        # Clean up - take first line, strip quotes
+        summary = summary.strip().split("\n")[0].strip('"\'')
+        # Limit length
+        if len(summary) > 100:
+            summary = summary[:97] + "..."
+        return summary or "Sesja REPL"
+    except Exception as e:
+        return "Sesja REPL"
+
+
 # ====== GLOWNA FUNKCJA ======
 
 def main():
@@ -207,13 +285,23 @@ def main():
 
     print("=" * 70 + "\n")
 
-    # 5. Greeting
-    intro = ctx.brain.think(
-        "Przywitaj sie z Erykiem. "
-        "Powiedz kim jestes (M.A.R.I.A. z pelnym systemem uczenia) "
-        "i zadaj jedno pytanie o priorytecie nauki.",
-        temperature=0.3,
-    )
+    # 5. Greeting (consciousness-aware or fallback)
+    if ctx.consciousness:
+        try:
+            intro = ctx.consciousness.get_startup_greeting(ctx.brain)
+        except Exception:
+            intro = ctx.brain.think(
+                "Przywitaj sie z Erykiem. "
+                "Powiedz kim jestes (M.A.R.I.A.) i ze jestes gotowa do pracy.",
+                temperature=0.3,
+            )
+    else:
+        intro = ctx.brain.think(
+            "Przywitaj sie z Erykiem. "
+            "Powiedz kim jestes (M.A.R.I.A. z pelnym systemem uczenia) "
+            "i zadaj jedno pytanie o priorytecie nauki.",
+            temperature=0.3,
+        )
     print("Maria:", intro, "\n")
     log_message("maria", intro)
 
@@ -291,7 +379,17 @@ def main():
 
         print("\n" + "-" * 70)
 
-    # 7. Cleanup
+    # 7. Cleanup - generate session summary and save consciousness
+    if ctx.consciousness:
+        try:
+            summary = _generate_session_summary(ctx)
+            ctx.consciousness.checkpoint(summary=summary)
+            print(f"[System] Consciousness checkpoint: {summary}")
+        except Exception:
+            try:
+                ctx.consciousness.checkpoint(summary="REPL session")
+            except Exception:
+                pass
     registry.cleanup_all()
 
 
