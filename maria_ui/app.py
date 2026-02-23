@@ -766,6 +766,57 @@ def api_status_full():
         except Exception as e:
             print(f"[UI] [WARN] Could not get introspection data: {e}")
 
+    # NIM / LLM Router data
+    nim_data = {
+        "available": False,
+        "backend": "ollama",
+        "nim_model": None,
+        "ollama_model": "llama3.1:8b",
+        "nim_calls": 0,
+        "ollama_calls": 0,
+        "nim_fallbacks": 0,
+        "total_calls": 0,
+        "budget": {
+            "status": "N/A",
+            "daily_used": 0,
+            "daily_limit": 0,
+            "daily_percent": 0,
+            "monthly_used": 0,
+            "monthly_limit": 0,
+            "monthly_percent": 0,
+        }
+    }
+
+    if brain and hasattr(brain, "get_stats") and hasattr(brain, "get_active_backend"):
+        try:
+            stats = brain.get_stats()
+            budget_info = stats.get("budget", {})
+            daily = budget_info.get("daily", {})
+            monthly = budget_info.get("monthly", {})
+            daily_limit = daily.get("limit", 0)
+            monthly_limit = monthly.get("limit", 0)
+
+            nim_data.update({
+                "available": stats.get("nim_available", False),
+                "backend": stats.get("active_backend", "ollama"),
+                "nim_model": stats.get("nim_model"),
+                "nim_calls": stats.get("nim_calls", 0),
+                "ollama_calls": stats.get("ollama_calls", 0),
+                "nim_fallbacks": stats.get("nim_fallbacks", 0),
+                "total_calls": stats.get("total_calls", 0),
+                "budget": {
+                    "status": budget_info.get("status", "N/A"),
+                    "daily_used": daily.get("used", 0),
+                    "daily_limit": daily_limit,
+                    "daily_percent": (daily.get("used", 0) / daily_limit * 100) if daily_limit > 0 else 0,
+                    "monthly_used": monthly.get("used", 0),
+                    "monthly_limit": monthly_limit,
+                    "monthly_percent": (monthly.get("used", 0) / monthly_limit * 100) if monthly_limit > 0 else 0,
+                }
+            })
+        except Exception as e:
+            print(f"[UI] [WARN] Could not get NIM data: {e}")
+
     return jsonify({
         "timestamp": time.time(),
         "system": {
@@ -794,6 +845,7 @@ def api_status_full():
         },
         "homeostasis": homeostasis_data,
         "brain": brain_data,
+        "nim": nim_data,
         "memory": memory_data,
         "chat_logs_count": chat_logs_count,
         "introspection": introspection_data

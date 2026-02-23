@@ -483,7 +483,7 @@
             <!-- Brain Card -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">Brain (Ollama)</span>
+                    <span class="card-title">Brain (LLM)</span>
                     <span class="card-badge" id="brainBadge">-</span>
                 </div>
 
@@ -505,6 +505,59 @@
                 <div class="metric-row">
                     <span class="metric-label">Zapisanych rozmow</span>
                     <span class="metric-value" id="chatLogs">-</span>
+                </div>
+            </div>
+
+            <!-- NIM Token Budget Card -->
+            <div class="card" id="nimCard">
+                <div class="card-header">
+                    <span class="card-title">NIM API / Token Budget</span>
+                    <span class="card-badge" id="nimBadge">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Backend</span>
+                    <span class="metric-value" id="nimBackend">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Model NIM</span>
+                    <span class="metric-value" id="nimModel">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Tokeny dzis</span>
+                    <span class="metric-value" id="nimDailyValue">-</span>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill ok" id="nimDailyBar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Tokeny miesiac</span>
+                    <span class="metric-value" id="nimMonthlyValue">-</span>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill ok" id="nimMonthlyBar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="stats-grid" style="margin-top: 15px;">
+                    <div class="stat-item">
+                        <div class="stat-value" id="nimCalls">0</div>
+                        <div class="stat-label">NIM calls</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="nimOllamaCalls">0</div>
+                        <div class="stat-label">Ollama calls</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="nimFallbacks">0</div>
+                        <div class="stat-label">Fallbacks</div>
+                    </div>
                 </div>
             </div>
 
@@ -692,6 +745,81 @@
                 const brainBadge = document.getElementById('brainBadge');
                 brainBadge.textContent = brain.connected ? 'ONLINE' : 'OFFLINE';
                 brainBadge.className = 'card-badge badge-' + (brain.connected ? 'ok' : 'error');
+
+                // NIM / Token Budget
+                const nim = data.nim;
+                if (nim) {
+                    const nimBadge = document.getElementById('nimBadge');
+                    if (nim.available && nim.backend === 'hybrid') {
+                        nimBadge.textContent = 'HYBRID';
+                        nimBadge.className = 'card-badge badge-ok';
+                    } else if (nim.available) {
+                        nimBadge.textContent = 'NIM';
+                        nimBadge.className = 'card-badge badge-info';
+                    } else {
+                        nimBadge.textContent = 'OLLAMA';
+                        nimBadge.className = 'card-badge badge-warn';
+                    }
+
+                    const backendEl = document.getElementById('nimBackend');
+                    if (nim.backend === 'hybrid') {
+                        backendEl.textContent = 'Hybrid (NIM + Ollama)';
+                        backendEl.className = 'metric-value ok';
+                    } else {
+                        backendEl.textContent = 'Ollama only';
+                        backendEl.className = 'metric-value warn';
+                    }
+
+                    document.getElementById('nimModel').textContent =
+                        nim.nim_model || 'nie skonfigurowany';
+
+                    // Daily budget
+                    const dailyPct = nim.budget.daily_percent;
+                    const dailyUsed = nim.budget.daily_used;
+                    const dailyLimit = nim.budget.daily_limit;
+                    const dailyEl = document.getElementById('nimDailyValue');
+                    if (dailyLimit > 0) {
+                        dailyEl.textContent = dailyUsed.toLocaleString() + ' / ' + dailyLimit.toLocaleString();
+                    } else {
+                        dailyEl.textContent = 'brak limitu';
+                    }
+                    const dailyColor = dailyPct > 90 ? 'error' : dailyPct > 70 ? 'warn' : 'ok';
+                    dailyEl.className = 'metric-value ' + dailyColor;
+                    const dailyBar = document.getElementById('nimDailyBar');
+                    dailyBar.style.width = Math.min(dailyPct, 100) + '%';
+                    dailyBar.className = 'progress-fill ' + dailyColor;
+
+                    // Monthly budget
+                    const monthlyPct = nim.budget.monthly_percent;
+                    const monthlyUsed = nim.budget.monthly_used;
+                    const monthlyLimit = nim.budget.monthly_limit;
+                    const monthlyEl = document.getElementById('nimMonthlyValue');
+                    if (monthlyLimit > 0) {
+                        monthlyEl.textContent = monthlyUsed.toLocaleString() + ' / ' + monthlyLimit.toLocaleString();
+                    } else {
+                        monthlyEl.textContent = 'brak limitu';
+                    }
+                    const monthlyColor = monthlyPct > 90 ? 'error' : monthlyPct > 70 ? 'warn' : 'ok';
+                    monthlyEl.className = 'metric-value ' + monthlyColor;
+                    const monthlyBar = document.getElementById('nimMonthlyBar');
+                    monthlyBar.style.width = Math.min(monthlyPct, 100) + '%';
+                    monthlyBar.className = 'progress-fill ' + monthlyColor;
+
+                    // Routing stats
+                    document.getElementById('nimCalls').textContent = nim.nim_calls;
+                    document.getElementById('nimOllamaCalls').textContent = nim.ollama_calls;
+                    document.getElementById('nimFallbacks').textContent = nim.nim_fallbacks;
+
+                    // Budget status badge color
+                    const budgetStatus = nim.budget.status;
+                    if (budgetStatus === 'DEPLETED') {
+                        nimBadge.textContent = 'DEPLETED';
+                        nimBadge.className = 'card-badge badge-error';
+                    } else if (budgetStatus === 'LOW') {
+                        nimBadge.textContent = 'LOW';
+                        nimBadge.className = 'card-badge badge-warn';
+                    }
+                }
 
                 // Memory
                 const mem = data.memory;
