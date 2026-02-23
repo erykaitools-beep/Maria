@@ -13,6 +13,8 @@
 | **2026-02-01** | Introspection module + Vision spec + Folder cleanup |
 | **2026-02-02** | TimeAwareness + Smart Home spec |
 | **2026-02-22** | Linux migration prep (Mini PC) |
+| **2026-02-22** | **DEPLOY na Mini PC** - Maria dziala produkcyjnie! |
+| **2026-02-23** | SSH hardening + WireGuard VPN + NVIDIA NIM API |
 
 ## Aktualny stan projektu
 
@@ -20,7 +22,7 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 268 passing (243 + 25 time_awareness) |
+| **Testy** | 398 passing |
 | **Faza wg ROADMAP** | B complete, C planned |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
@@ -275,6 +277,7 @@ python run_ui.py
 - **ADR-005:** Brak emoji w kodzie produkcyjnym (kompatybilnosc terminali)
 - **ADR-006:** Introspection tylko READ-ONLY (Maria nie modyfikuje swojego kodu)
 - **ADR-007:** Smart Home - tylko lokalne API (Shelly/Tasmota), bez chmury
+- **ADR-008:** NIM do nauki, Ollama do chatu (hybrid routing z auto-fallback)
 
 ## Notatki Claude'a
 
@@ -329,11 +332,101 @@ Eryk dal mi to miejsce 2026-02-01 - moge tam zapisywac:
 - `scripts/INSTALL_LINUX.md` - instrukcja instalacji
 
 ### Nastepne kroki migracji:
-- [ ] Zakup i setup mini PC
-- [ ] Instalacja Ubuntu + Ollama
-- [ ] Deploy Maria wg `scripts/INSTALL_LINUX.md`
+- [x] ~~Zakup i setup mini PC~~
+- [x] ~~Instalacja Ubuntu + Ollama~~
+- [x] ~~Deploy Maria wg `scripts/INSTALL_LINUX.md`~~
 - [ ] Test 8h+ na nowym hardware
+
+## Sesja 2026-02-22 (2/2) - DEPLOY na Mini PC
+
+### Hardware:
+- NiPoGi Mini PC (AMD Ryzen 5 7430U, 32GB RAM, 1TB SSD)
+- Ubuntu 22.04 LTS
+- IP LAN: 192.168.178.32
+
+### Deploy wykonany:
+- [x] Folder: `/home/maria/maria/` (renamed from maria_v4)
+- [x] Ollama + llama3.1:8b (4.9GB)
+- [x] Python venv + requirements
+- [x] .env (PIN, CORS, secret key)
+- [x] 340 testow passing
+- [x] Web UI: `http://192.168.178.32:5000`
+
+### Security hardening:
+- [x] UFW: deny all incoming, allow SSH + port 5000 only from LAN (192.168.178.0/24)
+- [x] fail2ban: sshd jail (5 prob -> ban 1h)
+- [x] SSH: PermitRootLogin no, MaxAuthTries 3, timeout 5min
+- [x] Automatyczne security updates (unattended-upgrades)
+- [x] User `maria` bez sudo (aplikacja)
+- [x] User `deployadmin` z sudo (administracja)
+- [x] .env chmod 600
+
+### Systemd:
+- [x] `maria-ui.service` - Web UI (active, enabled)
+- [x] `maria.service` - REPL daemon (enabled)
+- [x] Poprawka: `allow_unsafe_werkzeug=True` w run_ui.py (Werkzeug production check)
+- [x] Poprawka: CORS origins w .env (auto-detect zwracal 127.0.1.1)
+
+### Backup:
+- [x] `/home/maria/maria/scripts/backup.sh` -> `/home/maria/maria_backups/`
+- [x] Cron: codziennie o 3:00
+
+### Pozostale do zrobienia:
+- [x] ~~Klucz SSH z laptopa~~ (done 2026-02-23)
+- [x] ~~WireGuard VPN~~ (done 2026-02-23)
+- [x] ~~Test reboot~~ (done 2026-02-23)
+- [x] ~~NVIDIA NIM API~~ (done 2026-02-23)
+- [ ] Fritz!Box: siec gosc (odlozone - czeka na zakup IoT)
+- [ ] Test 8h+ na nowym hardware
+
+### Konta na mini PC:
+| User | Rola | sudo | Uwagi |
+|------|------|------|-------|
+| `maria` | Aplikacja | NIE | Uruchamia Maria, nie ma sudo |
+| `deployadmin` | Admin | TAK | Do systemctl, apt, ufw |
+
+### Czeste komendy (mini PC):
+```bash
+# Jako deployadmin (z sudo):
+sudo systemctl restart maria-ui    # restart Web UI
+sudo systemctl status maria-ui     # status
+sudo journalctl -u maria-ui -n 50  # logi
+
+# Jako maria (bez sudo):
+source ~/maria/venv/bin/activate
+python -m pytest agent_core/tests/ -v  # testy
+python main.py                          # REPL
+```
+
+## Sesja 2026-02-23 - Post-Deploy Hardening + NIM API
+
+### Infrastructure:
+- [x] SSH key auth (ed25519) + PasswordAuthentication no
+- [x] Test reboot - serwisy wstaja automatycznie
+- [x] WireGuard VPN - dostep z telefonu (http:// nie https!)
+
+### NVIDIA NIM API:
+- [x] `agent_core/llm/nim_client.py` - klient OpenAI-compatible
+- [x] `agent_core/llm/token_budget.py` - budzet tokenow (100k/dzien, 2M/miesiac)
+- [x] `agent_core/llm/router.py` - routing: chat->Ollama, nauka->NIM
+- [x] `agent_core/tests/test_nim_client.py` - 58 testow
+- [x] Model: `z-ai/glm5`, zweryfikowany z prawdziwym API
+- [x] `.env` skonfigurowany na mini PC
+- [x] 398 testow passing (340 + 58 nowych)
+
+### NIM Routing:
+- `router.think()` -> **Ollama** (chat, offline, szybko)
+- `router.analyze_task()` -> **NIM** (nauka, mocny model) z fallback na Ollama
+- Gdy budzet wyczerpany -> automatycznie Ollama
+- Maria wie: "Dzis zuzylam X tokenow, zostalo Y"
+
+### Nastepne kroki:
+- [ ] Integracja LLMRouter z main.py i brain_memory_integration.py
+- [ ] REPL `/nim status` command
+- [ ] Web UI panel budzetu tokenow
+- [ ] Consciousness: osobowosc w semantic_graph
+- [ ] Vision: sensor abstraction layer
 
 ---
 
-*Ostatnia aktualizacja: 2026-02-22 (Linux Migration Prep)*
+*Ostatnia aktualizacja: 2026-02-23 (NIM API + Post-Deploy Hardening)*

@@ -3,6 +3,50 @@
 
 ---
 
+## [2026-02-23] - Sesja 11: Post-Deploy Hardening + NVIDIA NIM API
+
+### Infrastructure
+- **SSH key auth:** Klucz ed25519 z laptopa, PasswordAuthentication wylaczone
+- **Reboot test:** Wszystkie serwisy (ollama, maria-ui) wstaja automatycznie
+- **WireGuard VPN:** Dostep do Marii z telefonu przez Fritz!Box VPN
+
+### Added - NVIDIA NIM API (`agent_core/llm/`)
+- **`nim_client.py`** - Klient NVIDIA NIM API (OpenAI-compatible)
+  - Retry z exponential backoff (rate limits)
+  - Token usage tracking per call
+  - Health check i availability detection
+- **`token_budget.py`** - Zarzadzanie budzetem tokenow
+  - Limity dzienne (100k) i miesieczne (2M)
+  - Persistence w `meta_data/nim_token_usage.json`
+  - Status: OK / LOW / DEPLETED
+  - Raport po polsku ("Dzis zuzylam X tokenow...")
+- **`router.py`** - LLM Router (NIM vs Ollama)
+  - `think()` -> Ollama (chat, offline, szybko)
+  - `analyze_task()` -> NIM (nauka, mocny model) z fallback na Ollama
+  - Automatyczne przelaczanie gdy budzet wyczerpany
+- **`agent_core/tests/test_nim_client.py`** - 58 testow (mock-based)
+
+### Changed
+- **`.env.example`** - Dodano sekcje NVIDIA NIM (API key, model, limity)
+- **`maria_core/sys/config.py`** - Nowe env vars NIM
+- **`agent_core/llm/__init__.py`** - Eksporty NIMClient, TokenBudget, LLMRouter
+
+### Configuration
+```
+NVIDIA_NIM_API_KEY=nvapi-...
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_NIM_MODEL=z-ai/glm5
+NIM_DAILY_TOKEN_LIMIT=100000
+NIM_MONTHLY_TOKEN_LIMIT=2000000
+```
+
+### Statistics
+- **398 tests passing** (340 previous + 58 new)
+- NIM API verified: model z-ai/glm5, latency ~2-5s (po cold start)
+- 3 nowe pliki, 3 zmodyfikowane
+
+---
+
 ## [2026-02-22] - Sesja 10: Linux Migration Prep (Mini PC)
 
 ### Changed

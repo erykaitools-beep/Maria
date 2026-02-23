@@ -64,6 +64,19 @@ OLLAMA_HOST = OLLAMA_BASE_URL
 MAX_RETRIES_OLLAMA = OLLAMA_MAX_RETRIES
 
 
+# ========== NVIDIA NIM ==========
+
+NVIDIA_NIM_API_KEY = os.environ.get("NVIDIA_NIM_API_KEY", "")
+NVIDIA_NIM_BASE_URL = os.environ.get(
+    "NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"
+)
+NVIDIA_NIM_MODEL = os.environ.get(
+    "NVIDIA_NIM_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct"
+)
+NIM_DAILY_TOKEN_LIMIT = int(os.environ.get("NIM_DAILY_TOKEN_LIMIT", "100000"))
+NIM_MONTHLY_TOKEN_LIMIT = int(os.environ.get("NIM_MONTHLY_TOKEN_LIMIT", "2000000"))
+
+
 
 # ========== CHUNKING (REDUCED FOR WINDOWS) ==========
 

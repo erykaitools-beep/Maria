@@ -1,140 +1,92 @@
-# Plan nastepnej sesji - Deploy Maria na Mini PC
+# Plan nastepnej sesji - Post NIM API
 
-## Stan poczatkowy
-- [x] Mini PC: Ubuntu zainstalowany
-- [x] Claude Code Desktop: SSH do mini PC dziala
-- [ ] Ollama: jeszcze nie zainstalowana
-- [ ] Maria: jeszcze nie skopiowana
+## Stan po sesji 2026-02-23
+- [x] SSH key auth + PasswordAuthentication no
+- [x] Reboot test - serwisy wstaja automatycznie
+- [x] WireGuard VPN - dostep z telefonu (pamietaj: http:// nie https!)
+- [x] NVIDIA NIM API - klient + router + budzet tokenow
+- [x] 398 testow passing
 
-## Dostep Claude Code
-- **Laptop (Windows):** projekt w `C:\MariaLocal\Moja AI. Maria Ver.4`
-- **Mini PC (Ubuntu):** przez SSH z Claude Code Desktop
+## NIM API - gotowe do uzycia
+| Komponent | Plik | Status |
+|-----------|------|--------|
+| NIM Client | `agent_core/llm/nim_client.py` | Zweryfikowany z API |
+| Token Budget | `agent_core/llm/token_budget.py` | Persistence w JSON |
+| LLM Router | `agent_core/llm/router.py` | Hybrid: NIM+Ollama |
+| Model | `z-ai/glm5` | Dziala, ~2-5s latency |
+| Budzet | 100k/dzien, 2M/miesiac | Konfigurowalny w .env |
 
-## Kroki sesji
+## Nastepne kroki (priorytet)
 
-### Faza 1: Przygotowanie mini PC (przez SSH)
+### 1. Integracja NIM z istniejacym kodem
+- [ ] Podlaczyc LLMRouter do `main.py` (zamienic `ctx.brain` na router)
+- [ ] Podlaczyc do `brain_memory_integration.py` (nauka przez NIM)
+- [ ] REPL command `/nim status` (budzet, stats)
+- [ ] Web UI: panel budzetu tokenow na /status
 
-1. **Zainstaluj podstawowe narzedzia**
-   ```bash
-   sudo apt update && sudo apt install python3 python3-pip python3-venv git curl
-   ```
+### 2. Siec gosc Fritz!Box (odlozone - czeka na zakup IoT)
+- [ ] Siec gosc wlaczona (izolacja IoT)
+- [ ] Test komunikacji Maria <-> IoT przez sieci
 
-2. **Zainstaluj Ollama**
-   ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
-   ollama pull llama3.1:8b
-   ```
+### 3. Consciousness - osobowosc
+- [ ] Self-model w semantic_graph (osobowosc)
+- [ ] Pamiec rozmow z kondensacja
+- [ ] Ciaglosc tozsamosci (birth date, uptime)
+- [ ] SLEEP z "snami"
 
-3. **Utworz usera maria**
-   ```bash
-   sudo useradd -m -s /bin/bash maria
-   sudo passwd maria
-   ```
+### 4. Vision - percepcja wizualna
+- [ ] **Faza 1:** Sensor Abstraction Layer
+- [ ] **Faza 2:** Preprocessing Layer
+- [ ] **Faza 3:** Vision Modules (motion, scene, OCR, face)
+- [ ] **Faza 4:** Vision Cortex + Attention
 
-### Faza 2: Skopiuj projekt na mini PC
+### 5. Smart Home
+- [ ] Implementacja `agent_core/smart_home/`
+- [ ] REPL commands `/device`, `/devices`
+- [ ] Integracja z Vision
 
-Opcja A - SCP z laptopa:
-```bash
-# Z laptopa (w bashu Claude Code):
-scp -r "/c/MariaLocal/Moja AI. Maria Ver.4" eryk@<MINI_PC_IP>:/tmp/maria_transfer/
+### 6. Inne
+- [ ] Test dlugookresowy 8h+ na mini PC
+- [ ] Fritz!Box: WireGuard z laptopa (nie tylko telefon)
 
-# Na mini PC:
-sudo mv /tmp/maria_transfer /home/maria/maria
-sudo chown -R maria:maria /home/maria/maria
-```
+## Konta na mini PC
+| User | Rola | sudo |
+|------|------|------|
+| maria | Aplikacja | NIE |
+| deployadmin | Admin | TAK |
 
-Opcja B - USB:
-```bash
-# Eryk kopiuje recznie na USB -> mini PC
-# Na mini PC:
-sudo cp -r /media/usb/maria /home/maria/maria
-sudo chown -R maria:maria /home/maria/maria
-```
-
-### Faza 3: Security hardening
-
-```bash
-# Na mini PC (jako root/sudo):
-sudo bash /home/maria/maria/scripts/setup_security.sh
-```
-
-### Faza 4: Konfiguracja
+## Przydatne komendy
 
 ```bash
-# Na mini PC jako user maria:
-sudo su - maria
-cd /home/maria/maria
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Status serwisow (jako deployadmin):
+sudo systemctl status maria-ui ollama
 
-# Konfiguracja
-cp .env.example .env
-nano .env
-# Zmienic: MARIA_PIN=<silny-pin>
-```
+# Logi Web UI:
+sudo journalctl -u maria-ui -f
 
-### Faza 5: Test
+# Restart po zmianach w kodzie:
+sudo systemctl restart maria-ui
 
-```bash
-# Testy
+# Testy (jako maria):
+cd ~/maria && source venv/bin/activate
 python -m pytest agent_core/tests/ -v
 
-# REPL
-python main.py
-# /help, /homeostasis, /introspect, /exit
+# Reczny backup:
+bash ~/maria/scripts/backup.sh
 
-# Web UI
-python run_ui.py
-# Otworz http://<MINI_PC_IP>:5000 z laptopa
+# Test NIM API:
+python -c "
+from agent_core.llm.nim_client import NIMClient
+from dotenv import load_dotenv; load_dotenv()
+import os
+c = NIMClient(api_key=os.environ['NVIDIA_NIM_API_KEY'], model='z-ai/glm5')
+print(c.health_check())
+"
+
+# Sprawdz budzet tokenow:
+python -c "
+from agent_core.llm.token_budget import TokenBudget
+b = TokenBudget()
+print(b.get_status_text())
+"
 ```
-
-### Faza 6: Uslugi systemd (auto-start)
-
-```bash
-sudo cp /home/maria/maria/scripts/maria.service /etc/systemd/system/
-sudo cp /home/maria/maria/scripts/maria-ui.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable maria maria-ui
-sudo systemctl start maria maria-ui
-```
-
-### Faza 7: Backup + cron
-
-```bash
-bash /home/maria/maria/scripts/backup.sh
-crontab -e
-# 0 3 * * * /home/maria/maria/scripts/backup.sh >> /home/maria/maria/logs/backup.log 2>&1
-```
-
-### Faza 8: Fritz!Box
-
-Eryk robi recznie (nie przez SSH):
-- [ ] Siec gosc wlaczona
-- [ ] WireGuard VPN skonfigurowany
-- [ ] Test VPN z telefonu
-
-### Faza 9: NVIDIA NIM API (jesli starczy czasu)
-
-- Utworzyc `agent_core/llm/nim_client.py`
-- Dodac env vars: `NVIDIA_NIM_API_KEY`, `NVIDIA_NIM_MODEL`
-- Routing: NIM do nauki, Ollama do chatu
-- Test z prawdziwym kluczem
-
-## Informacje potrzebne na poczatku sesji
-
-Eryk powinien przygotowac:
-1. **IP mini PC** w sieci LAN (np. 192.168.178.X)
-2. **User/haslo SSH** do mini PC
-3. **NVIDIA NIM API key** (jesli chcemy integrowac)
-4. **Nowy PIN** do Web UI (nie "1234"!)
-
-## Weryfikacja sukcesu
-
-- [ ] `python -m pytest` - 340 testow passing na mini PC
-- [ ] Web UI dostepne z laptopa przez LAN
-- [ ] SSH z kluczem (bez hasla)
-- [ ] Firewall aktywny (`sudo ufw status`)
-- [ ] Fail2ban aktywny
-- [ ] Backup dziala
-- [ ] Systemd uslugi dzialaja po reboot
