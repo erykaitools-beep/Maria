@@ -218,9 +218,11 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | M2 | Faza B complete - full homeostasis | DONE |
 | M3 | Faza C - introspection + time awareness | DONE |
 | M3.5 | Linux migration prep (Mini PC) | DONE |
+| M3.6 | NIM API + Token Budget + LLM Router | DONE |
 | M4 | Faza C complete - consciousness | IN PROGRESS |
 | M5 | Faza D complete - vision | PLANNED |
 | M6 | Faza E complete - smart home | PLANNED |
+| M7 | Faza F - multi-source learning (cross-validation) | PLANNED |
 
 ---
 
@@ -233,6 +235,32 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | Brak testow | Wysokie | Sredni | Manualne testy na start, unit testy w Fazie C |
 | Niejasne wymagania | Srednie | Sredni | Open questions w DECISIONS.md |
 | Migracja na Linux Mini PC | Niskie | Sredni | Cross-platform prep done, .env config, systemd |
+
+---
+
+## Faza F: Multi-Source Learning (cross-validation)
+
+> Maria uczy sie z wielu zrodel i porownuje odpowiedzi roznych LLM.
+> Jak czlowiek ktory czyta dwie ksiazki na ten sam temat.
+
+### Koncept
+- Maria zadaje to samo pytanie dwom+ LLM (Ollama + NIM + inne)
+- Porownuje odpowiedzi - szuka rozbieznosci
+- Rozbieznosci -> "fakty do zweryfikowania" (nie od razu blad!)
+- Wielokrotne potwierdzenie -> aktualizacja wiedzy
+
+### Moduly
+- [ ] **CrossValidator** - porownanie odpowiedzi z roznych LLM
+- [ ] **ConfidenceScorer** - ocena pewnosci odpowiedzi
+- [ ] **FactChecker** - sprawdzanie z istniejaca wiedza w semantic_graph
+- [ ] **DisputeLog** - log rozbieznosci do analizy
+
+### Zaleznosci
+- Wymaga: LLM Router (DONE), semantic_graph, analyze_task
+- Wymaga: minimum 2 rozne LLMy (DONE: Ollama + NIM)
+
+### Estymacja
+4-8 sesji pracy
 
 ---
 
