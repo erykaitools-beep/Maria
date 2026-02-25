@@ -264,4 +264,29 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 
 ---
 
+## Faza G: Multi-Agent System (Mentor + Teacher)
+
+> Wyspecjalizowane agenty wspomagajace nauke Marii.
+> Pomysl Eryka z sesji 2026-02-25.
+
+### Koncept
+
+Zamiast jednego LLM do wszystkiego - agenty z rolami:
+
+| Agent | Rola | Model |
+|-------|------|-------|
+| **Mentor** | Planuje co Maria ma sie uczyc, ustawia priorytety, ocenia postep | NIM (mocny) |
+| **Nauczyciel** | Wyjasnia trudne koncepty, generuje przyklady, sprawdza rozumienie | NIM / Ollama |
+| **Egzaminator** | Tworzy pytania, ocenia odpowiedzi (juz jest w exam_agent.py) | Ollama |
+| **Krytyk** | Wskazuje luki w wiedzy, sugeruje uzupelnienia | NIM |
+
+### Zaleznosci
+- Wymaga: LLM Router (DONE), agent_core/registry (DONE)
+- Pasuje do: Fazy F (multi-source learning)
+
+### Estymacja
+6-10 sesji pracy
+
+---
+
 *Ten dokument jest zywym dokumentem - aktualizuj go przy zmianach planow.*

@@ -862,7 +862,8 @@ def api_status_full():
         "identity": identity_data,
         "memory": memory_data,
         "chat_logs_count": chat_logs_count,
-        "introspection": introspection_data
+        "introspection": introspection_data,
+        "learning_queue": _get_learning_queue()
     })
 
 
@@ -1058,6 +1059,49 @@ def api_introspect_refresh():
         "lines": model.total_lines,
         "timestamp": model.analysis_timestamp.isoformat()
     })
+
+
+def _get_learning_queue():
+    """Get learning queue status from knowledge_index.jsonl."""
+    result = {
+        "available": False,
+        "total": 0,
+        "completed": 0,
+        "learning": 0,
+        "new": 0,
+        "hard_topic": 0,
+        "exam_failed": 0,
+        "learned": 0,
+        "files": []
+    }
+
+    try:
+        from agent_core.awareness import ContextBuilder
+        cb = ContextBuilder()
+        files = cb.get_detailed_file_list()
+
+        if not files:
+            return result
+
+        result["available"] = True
+        result["total"] = len(files)
+
+        for f in files:
+            status = f.get("status", "other")
+            if status in result:
+                result[status] += 1
+
+        # Sort: completed first, then learning, then new
+        order = ["completed", "learned", "learning", "new", "hard_topic", "exam_failed"]
+        result["files"] = sorted(
+            files,
+            key=lambda r: order.index(r.get("status", "other"))
+                          if r.get("status", "other") in order else 99
+        )
+    except Exception as e:
+        print(f"[UI] [WARN] Could not get learning queue: {e}")
+
+    return result
 
 
 def _get_memory_stats():
