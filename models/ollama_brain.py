@@ -15,6 +15,15 @@ try:
 except ImportError:
     TIME_AWARENESS_AVAILABLE = False
 
+# Awareness context - safe import
+try:
+    from agent_core.awareness import ContextBuilder
+    _AWARENESS_BUILDER = ContextBuilder()
+    AWARENESS_AVAILABLE = True
+except Exception:
+    _AWARENESS_BUILDER = None
+    AWARENESS_AVAILABLE = False
+
 
 class OllamaBrain:
     def __init__(
@@ -89,14 +98,26 @@ class OllamaBrain:
         except Exception:
             return ""
 
+    def _get_awareness_context(self) -> str:
+        """Get self-awareness context (files, memory, code, system)."""
+        if not AWARENESS_AVAILABLE or _AWARENESS_BUILDER is None:
+            return ""
+        try:
+            return _AWARENESS_BUILDER.build()
+        except Exception:
+            return ""
+
     def _build_system_prompt(self) -> str:
-        """Build full system prompt with time and identity context."""
+        """Build full system prompt with time, identity and awareness context."""
         time_ctx = self._get_time_context()
         identity_ctx = self._get_identity_context()
+        awareness_ctx = self._get_awareness_context()
 
         prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
         if identity_ctx:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
+        if awareness_ctx:
+            prompt += f"\n{awareness_ctx}"
         return prompt
 
     def refresh_time_context(self) -> None:
