@@ -144,6 +144,10 @@ def register_modules(registry):
         from agent_core.modules.consciousness_module import ConsciousnessModule
         return ConsciousnessModule()
 
+    def make_awareness():
+        from agent_core.modules.awareness_module import AwarenessModule
+        return AwarenessModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
@@ -151,6 +155,7 @@ def register_modules(registry):
     registry.try_register(make_query, "query")
     registry.try_register(make_nim, "nim")
     registry.try_register(make_consciousness, "consciousness")
+    registry.try_register(make_awareness, "awareness")
 
 
 # ====== POMOC ======
