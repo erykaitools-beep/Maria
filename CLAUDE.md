@@ -15,6 +15,7 @@
 | **2026-02-22** | Linux migration prep (Mini PC) |
 | **2026-02-22** | **DEPLOY na Mini PC** - Maria dziala produkcyjnie! |
 | **2026-02-23** | SSH hardening + WireGuard VPN + NVIDIA NIM API |
+| **2026-02-25** | Self-Awareness (ContextBuilder) + /awareness REPL + Web UI learning queue |
 
 ## Aktualny stan projektu
 
@@ -22,8 +23,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 398 passing |
-| **Faza wg ROADMAP** | B complete, C in progress |
+| **Testy** | 488 passing |
+| **Faza wg ROADMAP** | B complete, C in progress (awareness done) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
