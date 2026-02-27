@@ -1,0 +1,18 @@
+{
+  "daily_limit": 100000,
+  "monthly_limit": 2000000,
+  "usage": {
+    "2026-02-25": {
+      "prompt_tokens": 288,
+      "completion_tokens": 691,
+      "total_tokens": 979,
+      "calls": 1
+    },
+    "2026-02-27": {
+      "prompt_tokens": 579,
+      "completion_tokens": 987,
+      "total_tokens": 1566,
+      "calls": 2
+    }
+  }
+}
