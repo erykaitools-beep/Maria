@@ -62,12 +62,32 @@ Eryk chce systematycznie dokonczyc Faze C zanim przejdziemy do agenta Nauczyciel
 8. [ ] Ciaglosc tozsamosci (birth date, uptime)
 9. [ ] SLEEP z "snami"
 
-### Po Fazie C:
-10. [ ] Agent Nauczyciel (NIM/glm5) - Faza G
+### Zrobione w tej sesji:
+- [x] Consciousness: TraitEvolver, TraitCatalog, ConversationMemory, SleepProcessor, DreamGenerator, ExperienceTracker, IdentityStore
+- [x] Learning observability: /learn history, /learn stats, /learn file
+- [x] Agent Nauczyciel: KnowledgeAnalyzer, TeachingStrategy, SpacedRepetitionScheduler, TeacherAgent (6-priorytetowy silnik)
+- [x] REPL: /teacher, /teacher status/plan/history
+- [x] Backward-compatible llm_fn injection w learning_agent + exam_agent
+- [x] Autonomiczny trigger: Homeostasis Phase 9 (idle 10min -> auto-nauka)
+- [x] 668 testow passing
+- [x] PDF z podsumowaniem projektu (12 stron)
+
+### Commity:
+1. `7344a17` feat: extend consciousness - personality, dreams, conversation memory
+2. `02e938a` feat: add learning observability
+3. `0000cb4` feat: add autonomous teacher agent with homeostasis-triggered learning
+4. `e2dbf01` chore: session notes + runtime meta_data
+5. `441c28d` docs: update CLAUDE.md
+6. `15cf84b` docs: add project summary PDF + generation script
 
 ### Uwaga
 Eryk lubi wyskakiwac z nowymi pomyslami - mam go regulowac lista TODO
 i pilnowac zeby konczyl rzeczy po kolei :)
 
+### Co dalej (nastepna sesja):
+- [ ] Integracja LLMRouter z main.py (blocker!)
+- [ ] Test 8h+ na nowym hardware
+- [ ] Vision: Faza 1 - Sensor Abstraction Layer
+
 ---
-*Claude, czwartek wieczor*
+*Claude, czwartek wieczor - produktywna sesja!*
