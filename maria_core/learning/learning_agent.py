@@ -233,13 +233,15 @@ def intelligent_chunk_text(text: str) -> List[Tuple[str, int, int]]:
     return chunks
 
 
-def learn_chunk(chunk_text: str, use_simple: bool = False) -> Optional[Dict[str, Any]]:
+def learn_chunk(chunk_text: str, use_simple: bool = False, llm_fn=None) -> Optional[Dict[str, Any]]:
     """
-    Uczy się pojedynczego chunka przez Ollama.
+    Uczy się pojedynczego chunka przez Ollama (lub podany LLM).
 
     Args:
         chunk_text: Tekst do nauczenia
         use_simple: Czy użyć uproszczonego prompta (po failed exam)
+        llm_fn: Opcjonalna funkcja LLM (signature: fn(prompt) -> str).
+                 Domyślnie call_ollama.
 
     Returns:
         Słownik z summary, key_points, tags lub None
@@ -249,7 +251,8 @@ def learn_chunk(chunk_text: str, use_simple: bool = False) -> Optional[Dict[str,
 
     logger.debug(f"Uczę się chunka ({len(chunk_text)} znaków), simple={use_simple}")
 
-    response = call_ollama(prompt)
+    _call = llm_fn if llm_fn is not None else call_ollama
+    response = _call(prompt)
     if not response:
         return None
 

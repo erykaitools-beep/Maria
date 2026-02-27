@@ -1,5 +1,6 @@
 """Homeostasis REPL commands: /homeostasis [status|start|stop|events|summary]."""
 
+import logging
 import threading
 import time
 from datetime import datetime
@@ -10,6 +11,8 @@ from agent_core.homeostasis.state_model import Mode
 from agent_core.homeostasis.event_logger import get_event_logger
 from agent_core.memory.manager import MemoryManager
 from agent_core.llm.manager import LLMManager
+
+logger = logging.getLogger(__name__)
 
 
 class HomeostasisModule(MariaModule):
@@ -39,6 +42,43 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 print(f"[Homeostasis] [WARN] Init failed: {e}")
                 return False
+
+        # Pass semantic_memory to core for sleep processing
+        core = ctx.homeostasis_core
+        if core and ctx.semantic_memory:
+            session_id = 0
+            experience_tracker = None
+            if ctx.consciousness:
+                session_id = ctx.consciousness.identity.get_session_count()
+                experience_tracker = ctx.consciousness.experience_tracker
+            elif ctx.identity_store:
+                session_id = ctx.identity_store.get_session_count()
+            core.set_semantic_memory(
+                ctx.semantic_memory,
+                session_id=session_id,
+                experience_tracker=experience_tracker,
+            )
+
+        # Wire teacher agent for autonomous learning during idle
+        if core and ctx.brain and hasattr(ctx.brain, '_ask_once'):
+            try:
+                from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+                from agent_core.teacher.teacher_agent import TeacherAgent
+                from agent_core.modules.teacher_module import TeacherModule
+
+                analyzer = KnowledgeAnalyzer()
+                teacher = TeacherAgent(router=ctx.brain, knowledge_analyzer=analyzer)
+
+                # Wire learning/exam functions via teacher module helper
+                helper = TeacherModule()
+                helper.init(ctx)
+                teacher.set_learn_fn(helper._learn_chunk_wrapped)
+                teacher.set_exam_fn(helper._run_exam_wrapped)
+
+                core.set_teacher_agent(teacher)
+                print("[Homeostasis] [OK] Teacher agent wired for auto-learning")
+            except Exception as e:
+                logger.debug(f"Teacher agent not wired: {e}")
 
         return True
 

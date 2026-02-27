@@ -72,6 +72,17 @@ def init_brain():
         identity_store=identity_store,
     )
 
+    # Attach conversation memory for persistence
+    conversation_memory = None
+    try:
+        from agent_core.consciousness.conversation_memory import ConversationMemory
+        session_id = identity_store.get_session_count() if identity_store else 0
+        conversation_memory = ConversationMemory(session_id=session_id)
+        brain.set_conversation_memory(conversation_memory)
+        print(f"[INIT] Conversation memory: active (session {session_id})")
+    except Exception as e:
+        print(f"[INIT] Conversation memory disabled: {e}")
+
     # Wrap with LLM Router if NIM API available
     router = _create_router(brain)
     active_brain = router if router else brain
@@ -104,6 +115,7 @@ def init_brain():
         brain_model=BRAIN_MODEL,
         identity_store=identity_store,
         consciousness=consciousness,
+        conversation_memory=conversation_memory,
     )
 
 
@@ -148,6 +160,10 @@ def register_modules(registry):
         from agent_core.modules.awareness_module import AwarenessModule
         return AwarenessModule()
 
+    def make_teacher():
+        from agent_core.modules.teacher_module import TeacherModule
+        return TeacherModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
@@ -156,6 +172,7 @@ def register_modules(registry):
     registry.try_register(make_nim, "nim")
     registry.try_register(make_consciousness, "consciousness")
     registry.try_register(make_awareness, "awareness")
+    registry.try_register(make_teacher, "teacher")
 
 
 # ====== POMOC ======
@@ -323,6 +340,10 @@ def main():
 
         log_message("user", user_input)
 
+        # Record conversation experience
+        if ctx.consciousness:
+            ctx.consciousness.record_experience("conversation_turn")
+
         # ===== COMMANDS =====
         if user_input.startswith("/"):
             parts = user_input.split()
@@ -355,6 +376,17 @@ def main():
 
         ctx.last_result = ctx.brain_loop.process_perception(user_input)
 
+        # Record experience for personality evolution
+        if ctx.consciousness:
+            stats = ctx.last_result.get("stats", {})
+            ctx.consciousness.record_experience("perception_processed", {
+                "facts_count": stats.get("facts", 0),
+            })
+            if ctx.last_result.get("unknown_terms"):
+                ctx.consciousness.record_experience("unknown_terms_found", {
+                    "count": len(ctx.last_result["unknown_terms"]),
+                })
+
         # Record successful inference for homeostasis
         if ctx.homeostasis_core:
             ctx.homeostasis_core.time_sensor.record_interaction()
@@ -381,13 +413,36 @@ def main():
             print("\nMaria [Pytanie]:")
             print(followup)
             log_message("maria", f"[Pytanie] {followup}")
+            if ctx.consciousness:
+                ctx.consciousness.record_experience("followup_asked")
 
         print("\n" + "-" * 70)
 
-    # 7. Cleanup - generate session summary and save consciousness
-    if ctx.consciousness:
+    # 7. Cleanup - condense conversation and save consciousness
+    summary = "REPL session"
+
+    # Condense conversation into structured summary
+    if ctx.conversation_memory and ctx.conversation_memory.get_session_turn_count() > 0:
+        try:
+            # Use raw brain for condensation (not router, to avoid NIM cost for this)
+            condense_brain = getattr(ctx.brain, 'ollama', ctx.brain)
+            condensed = ctx.conversation_memory.condense_session(condense_brain)
+            if condensed:
+                ctx.conversation_memory.save_summary(condensed)
+                summary = condensed.get("summary", summary)
+                print(f"[System] Conversation condensed: {summary}")
+        except Exception as e:
+            print(f"[System] Condensation failed: {e}")
+
+    # Generate session summary as fallback if no condensation happened
+    if summary == "REPL session":
         try:
             summary = _generate_session_summary(ctx)
+        except Exception:
+            pass
+
+    if ctx.consciousness:
+        try:
             ctx.consciousness.checkpoint(summary=summary)
             print(f"[System] Consciousness checkpoint: {summary}")
         except Exception:

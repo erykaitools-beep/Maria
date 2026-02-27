@@ -56,6 +56,11 @@ class HomeostasisCore:
     TICK_WARNING_THRESHOLD_SEC = 0.5  # Warn if tick takes > 500ms
     LOG_INTERVAL_TICKS = 60  # Log state every 60 seconds
 
+    # Teacher auto-trigger configuration
+    TEACHER_IDLE_THRESHOLD = 600   # 10 min idle before triggering
+    TEACHER_COOLDOWN = 900         # 15 min between sessions
+    TEACHER_MAX_ITERATIONS = 3     # Short sessions for auto-trigger
+
     def __init__(
         self,
         memory_manager: Optional["MemoryManager"] = None,
@@ -111,6 +116,43 @@ class HomeostasisCore:
         # Control
         self._running = False
         self._tick_count = 0
+
+        # Sleep processing (set via set_semantic_memory)
+        self._semantic_memory = None
+        self._session_id = 0
+        self._last_sleep_report = None
+        self._experience_tracker = None
+
+        # Teacher auto-trigger (set via set_teacher_agent)
+        self._teacher_agent = None
+        self._teacher_thread: Optional[threading.Thread] = None
+        self._teacher_last_run = 0.0
+
+    def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
+        """
+        Set semantic memory reference for sleep processing.
+
+        Called from HomeostasisModule after init.
+
+        Args:
+            semantic_memory: SemanticGraph instance
+            session_id: Current session number
+            experience_tracker: ExperienceTracker for recording sleep events
+        """
+        self._semantic_memory = semantic_memory
+        self._session_id = session_id
+        self._experience_tracker = experience_tracker
+
+    def set_teacher_agent(self, teacher_agent) -> None:
+        """
+        Set teacher agent for autonomous learning during idle.
+
+        Called from HomeostasisModule after init.
+
+        Args:
+            teacher_agent: TeacherAgent instance (with learn/exam fns already set)
+        """
+        self._teacher_agent = teacher_agent
 
     def main_loop(self) -> None:
         """
@@ -249,6 +291,11 @@ class HomeostasisCore:
         if self._tick_count % self.LOG_INTERVAL_TICKS == 0:
             self._log_state(interpreted_state)
 
+        # ──────────────────────────────────────
+        # PHASE 9: TEACHER AUTO-TRIGGER
+        # ──────────────────────────────────────
+        self._check_teacher_trigger()
+
     def _transition_mode(self, old_mode: Mode, new_mode: Mode) -> None:
         """
         Execute safe mode transition.
@@ -268,13 +315,23 @@ class HomeostasisCore:
         if self.executor:
             if new_mode == Mode.SLEEP:
                 self.executor.signal_module("learning_engine", "pause")
-            elif new_mode == Mode.SURVIVAL:
+            if new_mode == Mode.SURVIVAL:
                 self.executor.signal_module("llm", "minimize")
                 self.executor.signal_module("memory", "readonly")
             elif new_mode == Mode.REDUCED:
                 self.executor.signal_module("learning_engine", "pause")
             elif new_mode == Mode.ACTIVE:
                 self.executor.signal_module("learning_engine", "resume")
+
+        # Stop teacher when leaving ACTIVE mode
+        if old_mode == Mode.ACTIVE and new_mode != Mode.ACTIVE:
+            if self._teacher_agent:
+                self._teacher_agent.stop()
+                logger.info("Teacher session stopped: leaving ACTIVE mode")
+
+        # Run sleep cycle when entering SLEEP mode
+        if new_mode == Mode.SLEEP:
+            self._run_sleep_cycle()
 
         # Update state
         result = self.regulator.transition_to(new_mode)
@@ -322,6 +379,113 @@ class HomeostasisCore:
 
             except Exception as e:
                 logger.warning(f"Action failed: {action.to_dict()} - {e}")
+
+    def _run_sleep_cycle(self) -> None:
+        """
+        Run sleep processing when entering SLEEP mode.
+
+        Phases: NREM1 (stats) -> NREM2 (strengthen) -> NREM3 (cleanup) -> REM (dreams).
+        """
+        if not self._semantic_memory:
+            logger.info("Sleep cycle skipped: no semantic_memory set")
+            return
+
+        try:
+            from agent_core.consciousness.sleep_processor import SleepProcessor
+
+            processor = SleepProcessor(
+                semantic_memory=self._semantic_memory,
+                experience_tracker=self._experience_tracker,
+            )
+            report = processor.process_sleep_cycle()
+            self._last_sleep_report = report
+
+            # Log sleep cycle event
+            dream_count = report.get("rem", {}).get("dreams_generated", 0)
+            self.event_logger._write_event({
+                "timestamp": time.time(),
+                "event": "sleep_cycle",
+                "dream_count": dream_count,
+                "phases_completed": report.get("phases_completed", 0),
+                "session_id": self._session_id,
+            })
+
+            logger.info(
+                f"Sleep cycle completed: {dream_count} dreams, "
+                f"{report.get('phases_completed', 0)} phases"
+            )
+        except Exception as e:
+            logger.warning(f"Sleep cycle failed: {e}")
+
+    def _check_teacher_trigger(self) -> None:
+        """
+        Check if conditions are met for autonomous teacher session.
+
+        Conditions:
+        1. Teacher agent is configured
+        2. Mode is ACTIVE
+        3. Idle >= TEACHER_IDLE_THRESHOLD
+        4. No session currently running
+        5. Cooldown period has passed
+        """
+        if self._teacher_agent is None:
+            return
+
+        if self.state.mode != Mode.ACTIVE:
+            return
+
+        if self.state.idle_seconds < self.TEACHER_IDLE_THRESHOLD:
+            return
+
+        # Already running
+        if self._teacher_thread is not None and self._teacher_thread.is_alive():
+            return
+
+        # Cooldown
+        now = time.time()
+        if now - self._teacher_last_run < self.TEACHER_COOLDOWN:
+            return
+
+        self._start_teacher_session()
+
+    def _start_teacher_session(self) -> None:
+        """Start teacher session in background thread."""
+
+        def _run():
+            try:
+                logger.info("[TEACHER] Auto-session starting (idle trigger)")
+                status = self._teacher_agent.run_session(
+                    max_iterations=self.TEACHER_MAX_ITERATIONS,
+                )
+                stats = status.get("stats", {})
+
+                self.event_logger._write_event({
+                    "timestamp": time.time(),
+                    "event": "teacher_session",
+                    "trigger": "idle_auto",
+                    "iterations": stats.get("strategies_executed", 0),
+                    "chunks_learned": stats.get("chunks_learned", 0),
+                    "exams_run": stats.get("exams_run", 0),
+                })
+
+                logger.info(
+                    f"[TEACHER] Auto-session complete: "
+                    f"{stats.get('strategies_executed', 0)} strategies, "
+                    f"{stats.get('chunks_learned', 0)} chunks"
+                )
+            except Exception as e:
+                logger.warning(f"[TEACHER] Auto-session failed: {e}")
+            finally:
+                self._teacher_last_run = time.time()
+
+        self._teacher_thread = threading.Thread(
+            target=_run, daemon=True, name="TeacherAutoSession"
+        )
+        self._teacher_thread.start()
+
+    def get_last_sleep_report(self) -> Optional[Dict[str, Any]]:
+        """Get report from last sleep cycle (if any)."""
+        return self._last_sleep_report
 
     def _trigger_snapshot(self) -> None:
         """

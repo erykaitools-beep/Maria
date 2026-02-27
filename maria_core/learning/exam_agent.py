@@ -153,13 +153,15 @@ def calculate_num_questions(num_chunks: int) -> int:
     return max(EXAM_MIN_QUESTIONS, min(EXAM_MAX_QUESTIONS, num_questions))
 
 
-def generate_exam(context: str, num_questions: int) -> Optional[List[Dict[str, str]]]:
+def generate_exam(context: str, num_questions: int, llm_fn=None) -> Optional[List[Dict[str, str]]]:
     """
     Generuje egzamin (pytania + odpowiedzi wzorcowe).
 
     Args:
         context: Kontekst nauki
         num_questions: Liczba pytań do wygenerowania
+        llm_fn: Opcjonalna funkcja LLM (signature: fn(prompt) -> str).
+                 Domyślnie call_ollama.
 
     Returns:
         Lista słowników [{"q": "...", "expected": "..."}] lub None
@@ -171,7 +173,8 @@ def generate_exam(context: str, num_questions: int) -> Optional[List[Dict[str, s
 
     logger.debug(f"Generuję egzamin z {num_questions} pytaniami")
 
-    response = call_ollama(prompt, temperature=0.4)  # niższa temperatura dla stabilności
+    _call = llm_fn if llm_fn is not None else call_ollama
+    response = _call(prompt)  # niższa temperatura dla stabilności
     if not response:
         return None
 
@@ -188,13 +191,15 @@ def generate_exam(context: str, num_questions: int) -> Optional[List[Dict[str, s
     return exam
 
 
-def answer_exam(context: str, questions: List[Dict[str, str]]) -> Optional[List[Dict[str, str]]]:
+def answer_exam(context: str, questions: List[Dict[str, str]], llm_fn=None) -> Optional[List[Dict[str, str]]]:
     """
     Odpowiada na pytania egzaminacyjne.
 
     Args:
         context: Kontekst nauki
         questions: Lista pytań [{"q": "...", "expected": "..."}]
+        llm_fn: Opcjonalna funkcja LLM (signature: fn(prompt) -> str).
+                 Domyślnie call_ollama.
 
     Returns:
         Lista odpowiedzi [{"a": "..."}] lub None
@@ -208,7 +213,8 @@ def answer_exam(context: str, questions: List[Dict[str, str]]) -> Optional[List[
 
     logger.debug(f"Odpowiadam na {len(questions)} pytań")
 
-    response = call_ollama(prompt, temperature=0.5)
+    _call = llm_fn if llm_fn is not None else call_ollama
+    response = _call(prompt)
     if not response:
         return None
 
@@ -225,13 +231,15 @@ def answer_exam(context: str, questions: List[Dict[str, str]]) -> Optional[List[
     return answers
 
 
-def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], llm_fn=None) -> Optional[Dict[str, Any]]:
     """
     Ocenia odpowiedzi na egzaminie.
 
     Args:
         questions: Lista pytań z odpowiedziami wzorcowymi
         answers: Lista odpowiedzi ucznia
+        llm_fn: Opcjonalna funkcja LLM (signature: fn(prompt) -> str).
+                 Domyślnie call_ollama.
 
     Returns:
         Słownik z 'graded' (lista ocen) i 'final_score' (średnia) lub None
@@ -250,7 +258,8 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]]) -
 
     logger.debug(f"Oceniam {len(questions)} odpowiedzi")
 
-    response = call_ollama(prompt, temperature=0.2)  # bardzo niska dla konsystencji
+    _call = llm_fn if llm_fn is not None else call_ollama
+    response = _call(prompt)  # bardzo niska temperatura dla konsystencji
     if not response:
         return None
 
