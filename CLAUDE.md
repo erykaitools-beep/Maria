@@ -16,6 +16,8 @@
 | **2026-02-22** | **DEPLOY na Mini PC** - Maria dziala produkcyjnie! |
 | **2026-02-23** | SSH hardening + WireGuard VPN + NVIDIA NIM API |
 | **2026-02-25** | Self-Awareness (ContextBuilder) + /awareness REPL + Web UI learning queue |
+| **2026-02-27** | Consciousness Phase C: personality, dreams, conversation memory |
+| **2026-02-27** | Agent Nauczyciel + autonomiczny trigger w homeostasis |
 
 ## Aktualny stan projektu
 
@@ -23,8 +25,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 488 passing |
-| **Faza wg ROADMAP** | B complete, C in progress (awareness done) |
+| **Testy** | 668 passing |
+| **Faza wg ROADMAP** | B complete, C in progress (consciousness + teacher done) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -107,6 +109,31 @@ System introspekcji (w `agent_core/introspection/`) pozwala Marii rozumiec swoja
   - `GET /api/introspect` - pelne dane samowiedzy
   - `GET /api/introspect/issues` - lista problemow
   - `POST /api/introspect/refresh` - wymus nowa analize
+
+## Consciousness - swiadomosc i osobowosc
+
+System swiadomosci (w `agent_core/consciousness/`) daje Marii osobowosc i ciaglosc:
+
+- **TraitEvolver + TraitCatalog:** 19 cech osobowosci z dynamiczna ewolucja
+- **ConversationMemory:** Rolling context z kondensacja LLM
+- **SleepProcessor + DreamGenerator:** Konsolidacja pamieci podczas SLEEP
+- **ExperienceTracker:** Kontekst emocjonalny z rozmow
+- **IdentityStore:** Ciaglosc miedzy sesjami (session count, uptime, birth date)
+- **REPL:** `/consciousness` - status osobowosci i swiadomosci
+
+## Agent Nauczyciel - autonomiczna nauka
+
+System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
+
+- **TeacherAgent:** 6-priorytetowy silnik decyzyjny (P1-P6)
+- **KnowledgeAnalyzer:** Analiza JSONL, zero wywolan LLM
+- **SpacedRepetitionScheduler:** Interwaly powtórek na bazie wyników
+- **Autonomiczny trigger:** Homeostasis Phase 9 - po 10min idle w ACTIVE
+- **REPL commands:**
+  - `/teacher [N]` - sesja nauki (N iteracji)
+  - `/teacher status` - status agenta
+  - `/teacher plan` - podglad nastepnego kroku
+  - `/teacher history` - historia planow
 
 ## Code Agent (planowany)
 
@@ -448,4 +475,43 @@ python main.py                          # REPL
 
 ---
 
-*Ostatnia aktualizacja: 2026-02-23 (NIM API + Post-Deploy Hardening)*
+## Sesja 2026-02-27 - Consciousness Phase C + Agent Nauczyciel
+
+### Consciousness (osobowosc, sny, pamiec rozmow):
+- [x] TraitEvolver + TraitCatalog (19 cech osobowosci)
+- [x] ConversationMemory (rolling context + kondensacja LLM)
+- [x] SleepProcessor + DreamGenerator (konsolidacja pamieci w SLEEP)
+- [x] ExperienceTracker (emocjonalny kontekst rozmow)
+- [x] SelfModel rozszerzony o trait_snapshot i emocje
+- [x] IdentityStore: session tracking, uptime, birth date
+- [x] ConsciousnessModule: pelny REPL /consciousness
+- [x] Testy: test_personality.py, test_conversation_memory.py, test_sleep.py
+
+### Learning observability:
+- [x] `/learn history [N]` - historia zdarzen nauki
+- [x] `/learn stats` - statystyki bazy wiedzy
+- [x] `/learn file <id>` - szczegoly pliku
+
+### Agent Nauczyciel:
+- [x] KnowledgeAnalyzer - analiza JSONL, zero LLM
+- [x] TeachingStrategy + SpacedRepetitionScheduler
+- [x] TeacherAgent - 6-priorytetowy silnik decyzyjny
+- [x] TeacherModule - REPL `/teacher` commands
+- [x] Backward-compatible `llm_fn` injection w learning_agent + exam_agent
+- [x] **Autonomiczny trigger w homeostasis** - Phase 9 w tick loop
+  - ACTIVE + idle >= 10min -> auto-sesja nauki (3 iteracje)
+  - Cooldown 15min, background thread, auto-stop przy zmianie trybu
+- [x] 75 testow teacher, 668 total passing
+
+### Nowa struktura `agent_core/teacher/`:
+```
+agent_core/teacher/
+├── __init__.py
+├── knowledge_analyzer.py   # JSONL analysis, zero LLM
+├── teacher_agent.py        # Decision engine + session runner
+└── teaching_strategy.py    # Strategy types + spaced repetition
+```
+
+---
+
+*Ostatnia aktualizacja: 2026-02-27 (Consciousness + Agent Nauczyciel + Homeostasis trigger)*
