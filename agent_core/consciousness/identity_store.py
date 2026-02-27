@@ -2,14 +2,15 @@
 IdentityStore - Persistent identity tracking across restarts.
 
 Maria's sense of self persists in meta_data/consciousness_identity.json.
-Tracks: birth date, session count, total uptime, last session summary.
+Tracks: birth date, session count, total uptime, last session summary,
+age, offline duration, conversation stats.
 """
 
 import json
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 
@@ -75,6 +76,8 @@ class IdentityStore:
             "primary_user": DEFAULT_PRIMARY_USER,
             "last_session_summary": "",
             "last_shutdown_timestamp": None,
+            "total_conversations": 0,
+            "longest_session_seconds": 0,
         }
         self._save(data)
         return data
@@ -94,6 +97,9 @@ class IdentityStore:
             "primary_user": DEFAULT_PRIMARY_USER,
             "last_session_summary": "",
             "last_shutdown_timestamp": None,
+            "trait_scores": {},
+            "total_conversations": 0,
+            "longest_session_seconds": 0,
         }
         for key, default in defaults.items():
             if key not in data:
@@ -125,8 +131,8 @@ class IdentityStore:
             self._session_start_time = time.time()
             self._save()
 
-    def end_session(self, summary: str = "") -> None:
-        """Call at shutdown. Updates uptime and summary."""
+    def end_session(self, summary: str = "", conversation_turns: int = 0) -> None:
+        """Call at shutdown. Updates uptime, summary, and stats."""
         with self._lock:
             # Calculate session duration
             session_duration = time.time() - self._session_start_time
@@ -134,6 +140,14 @@ class IdentityStore:
             self._data["last_shutdown_timestamp"] = datetime.now().isoformat()
             if summary:
                 self._data["last_session_summary"] = summary
+            # Track conversation count
+            self._data["total_conversations"] = (
+                self._data.get("total_conversations", 0) + conversation_turns
+            )
+            # Track longest session
+            longest = self._data.get("longest_session_seconds", 0)
+            if session_duration > longest:
+                self._data["longest_session_seconds"] = session_duration
             self._save()
 
     # -------------------------------------------------
@@ -144,8 +158,7 @@ class IdentityStore:
         """
         Human-readable identity context for system prompt.
 
-        Returns:
-            "Jestem Maria (M.A.R.I.A.). Sesja 25. Uptime: 15.8h. Urodziny: 2025-11-14."
+        Includes: name, session, uptime, age, offline duration.
         """
         with self._lock:
             d = self._data
@@ -159,8 +172,18 @@ class IdentityStore:
                 f"Urodziny: {d['birth_date']}",
             ]
 
+            # Age in days
+            age_str = self._get_age_string()
+            if age_str:
+                parts.append(f"Wiek: {age_str}")
+
             if d.get("primary_user"):
                 parts.append(f"Moj operator: {d['primary_user']}")
+
+            # Offline duration
+            offline_str = self._get_offline_string()
+            if offline_str:
+                parts.append(f"Spalam: {offline_str}")
 
             if d.get("last_session_summary"):
                 parts.append(
@@ -185,6 +208,10 @@ class IdentityStore:
             d["total_uptime_hours"] = (
                 d["total_uptime_seconds"] + session_duration
             ) / 3600
+            d["age_days"] = self._get_age_days()
+            d["age_string"] = self._get_age_string()
+            d["offline_string"] = self._get_offline_string()
+            d["offline_seconds"] = self._get_offline_seconds()
             return d
 
     def get_session_count(self) -> int:
@@ -211,3 +238,77 @@ class IdentityStore:
     def get_last_session_summary(self) -> str:
         """Get summary of last session."""
         return self._data.get("last_session_summary", "")
+
+    # -------------------------------------------------
+    # IDENTITY CONTINUITY HELPERS
+    # -------------------------------------------------
+
+    def _get_age_days(self) -> int:
+        """Calculate Maria's age in days since birth."""
+        try:
+            birth = datetime.fromisoformat(MARIA_BIRTH_TIMESTAMP)
+            return (datetime.now() - birth).days
+        except Exception:
+            return 0
+
+    def _get_age_string(self) -> str:
+        """Human-readable age string in Polish."""
+        days = self._get_age_days()
+        if days == 0:
+            return ""
+        if days < 30:
+            return f"{days} dni"
+        months = days // 30
+        remaining_days = days % 30
+        if months < 12:
+            if remaining_days > 0:
+                return f"{months} mies. i {remaining_days} dni"
+            return f"{months} mies."
+        years = days // 365
+        remaining_months = (days % 365) // 30
+        if remaining_months > 0:
+            return f"{years} rok/lat i {remaining_months} mies."
+        return f"{years} rok/lat"
+
+    def _get_offline_seconds(self) -> float:
+        """Calculate seconds between last shutdown and current session start."""
+        shutdown_ts = self._data.get("last_shutdown_timestamp")
+        if not shutdown_ts:
+            return 0.0
+        try:
+            shutdown = datetime.fromisoformat(shutdown_ts)
+            session_start = datetime.fromisoformat(
+                self._data.get("current_session_start", "")
+            )
+            delta = (session_start - shutdown).total_seconds()
+            return max(0.0, delta)
+        except Exception:
+            return 0.0
+
+    def _get_offline_string(self) -> str:
+        """Human-readable offline duration in Polish."""
+        seconds = self._get_offline_seconds()
+        if seconds < 60:
+            return ""
+        minutes = int(seconds // 60)
+        hours = minutes // 60
+        mins = minutes % 60
+        if hours >= 24:
+            days = hours // 24
+            remaining_hours = hours % 24
+            if remaining_hours > 0:
+                return f"{days}d {remaining_hours}h"
+            return f"{days}d"
+        if hours > 0:
+            if mins > 0:
+                return f"{hours}h {mins}min"
+            return f"{hours}h"
+        return f"{mins}min"
+
+    def get_total_conversations(self) -> int:
+        """Get total conversation turns across all sessions."""
+        return self._data.get("total_conversations", 0)
+
+    def get_longest_session_hours(self) -> float:
+        """Get longest session duration in hours."""
+        return self._data.get("longest_session_seconds", 0) / 3600

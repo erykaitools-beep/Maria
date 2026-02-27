@@ -251,3 +251,9 @@ class LLMRouter:
     def history(self):
         """Get conversation history (from Ollama)."""
         return getattr(self.ollama, "history", [])
+
+    @history.setter
+    def history(self, value):
+        """Set conversation history (delegated to Ollama)."""
+        if hasattr(self.ollama, "history"):
+            self.ollama.history = value

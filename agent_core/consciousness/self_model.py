@@ -4,11 +4,21 @@ SelfModelBuilder - Maria's self-concept in the semantic graph.
 Creates and maintains 'self_concept' nodes that represent Maria's
 understanding of herself: name, purpose, traits, capabilities.
 
+Traits evolve over time based on accumulated experiences.
+Trait scores are stored on the self_concept node and persisted
+via IdentityStore (since the graph is recreated each session).
+
 Uses the existing SemanticGraph (same one used for learning).
 """
 
+import time
 import logging
 from typing import Optional, List, Dict, Any
+
+from agent_core.consciousness.trait_catalog import (
+    TRAIT_CATALOG,
+    EMERGENCE_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +229,137 @@ class SelfModelBuilder:
             "full_name": attrs.get("full_name", "M.A.R.I.A."),
             "purpose": attrs.get("purpose", ""),
             "traits": attrs.get("traits", []),
+            "trait_scores": attrs.get("trait_scores", {}),
             "capabilities": attrs.get("capabilities", []),
             "limitations": attrs.get("limitations", []),
             "node_id": node.get("id", ""),
         }
+
+    # -------------------------------------------------
+    # TRAIT SCORES (evolving personality)
+    # -------------------------------------------------
+
+    def get_trait_scores(self) -> Dict[str, Dict]:
+        """
+        Get detailed trait scores.
+
+        Returns:
+            Dict mapping trait_name -> {"score": float, "evidence_count": int, "last_updated": str}
+        """
+        node = self.get_self_node()
+        if node and "attributes" in node:
+            return node["attributes"].get("trait_scores", {})
+        return {}
+
+    def update_trait_scores(self, trait_scores: Dict[str, Dict]) -> None:
+        """
+        Update trait scores on self_concept node.
+
+        Also updates the simple 'traits' list for backward compatibility:
+        only traits with score >= EMERGENCE_THRESHOLD appear.
+
+        Args:
+            trait_scores: Dict mapping trait_name -> {"score": float, ...}
+        """
+        node = self.get_self_node()
+        if node is None:
+            self.ensure_self_model()
+            node = self.get_self_node()
+
+        if node and "attributes" in node:
+            node["attributes"]["trait_scores"] = trait_scores
+
+            # Update simple traits list (backward compatibility)
+            emerged = sorted([
+                name for name, data in trait_scores.items()
+                if data.get("score", 0) >= EMERGENCE_THRESHOLD
+            ])
+            node["attributes"]["traits"] = emerged
+            logger.debug(f"Trait scores updated, emerged: {emerged}")
+
+    def add_milestone_experience(self, experience: Dict) -> Optional[str]:
+        """
+        Record a significant experience as a graph node linked to self.
+
+        Only for milestone events (trait changes). Not every experience.
+
+        Args:
+            experience: Dict with at least 'event' and 'details' keys.
+
+        Returns:
+            Node ID of experience node, or None on failure.
+        """
+        self_id = self.ensure_self_model()
+
+        label = "exp_{}_{}".format(
+            experience.get("event", "unknown"),
+            int(time.time()),
+        )
+
+        try:
+            exp_id = self.graph.add_node(
+                label=label,
+                node_type="experience",
+                attributes=experience,
+                confidence=0.8,
+                source="consciousness",
+            )
+        except Exception as e:
+            logger.debug(f"Could not create experience node: {e}")
+            return None
+
+        try:
+            self.graph.add_edge(
+                self_id, "has_experience", exp_id,
+                weight=1.0,
+                confidence=0.8,
+                source="consciousness",
+            )
+        except (ValueError, Exception):
+            pass  # Node or edge issue, non-critical
+
+        return exp_id
+
+    def get_personality_description(self) -> str:
+        """
+        Human-readable personality description with trait scores.
+
+        Returns:
+            Multi-line Polish text describing personality.
+        """
+        trait_scores = self.get_trait_scores()
+        if not trait_scores:
+            return self.get_self_description()
+
+        lines = [self.get_self_description(), ""]
+
+        # Emerged traits (score >= threshold)
+        emerged = []
+        emerging = []
+        dormant = []
+
+        for name, data in sorted(trait_scores.items()):
+            score = data.get("score", 0)
+            evidence = data.get("evidence_count", 0)
+            desc = TRAIT_CATALOG.get(name, {}).get("description", "")
+
+            entry = f"  {name}: {score:.2f} ({evidence} doswiadczen)"
+            if desc:
+                entry += f" - {desc}"
+
+            if score >= EMERGENCE_THRESHOLD:
+                emerged.append(entry)
+            elif score > 0:
+                emerging.append(entry)
+            else:
+                dormant.append(entry)
+
+        if emerged:
+            lines.append("[Cechy aktywne]")
+            lines.extend(emerged)
+
+        if emerging:
+            lines.append("\n[Cechy kielkujace]")
+            lines.extend(emerging)
+
+        return "\n".join(lines)

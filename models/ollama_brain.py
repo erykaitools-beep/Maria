@@ -37,6 +37,7 @@ class OllamaBrain:
         self.model = model
         self.log_fn = log_fn or print
         self._identity_store = identity_store
+        self._conversation_memory = None
 
         # Base system prompt (static part)
         self._base_system_prompt = system_prompt or (
@@ -98,6 +99,31 @@ class OllamaBrain:
         except Exception:
             return ""
 
+    def _get_conversation_context(self) -> str:
+        """Get conversation memory context for system prompt."""
+        if self._conversation_memory is None:
+            return ""
+        try:
+            return self._conversation_memory.get_conversation_context(limit=3)
+        except Exception:
+            return ""
+
+    def set_conversation_memory(self, memory) -> None:
+        """
+        Attach conversation memory for persistence. Call before first think().
+
+        Restores previous session messages into history.
+
+        Args:
+            memory: ConversationMemory instance
+        """
+        self._conversation_memory = memory
+        if memory:
+            restored = memory.restore_history()
+            if restored:
+                for msg in restored:
+                    self.history.append(msg)
+
     def _get_awareness_context(self) -> str:
         """Get self-awareness context (files, memory, code, system)."""
         if not AWARENESS_AVAILABLE or _AWARENESS_BUILDER is None:
@@ -108,14 +134,17 @@ class OllamaBrain:
             return ""
 
     def _build_system_prompt(self) -> str:
-        """Build full system prompt with time, identity and awareness context."""
+        """Build full system prompt with time, identity, conversation, and awareness context."""
         time_ctx = self._get_time_context()
         identity_ctx = self._get_identity_context()
+        conversation_ctx = self._get_conversation_context()
         awareness_ctx = self._get_awareness_context()
 
         prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
         if identity_ctx:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
+        if conversation_ctx:
+            prompt += f"\n{conversation_ctx}"
         if awareness_ctx:
             prompt += f"\n{awareness_ctx}"
         return prompt
@@ -189,10 +218,14 @@ class OllamaBrain:
         self.refresh_time_context()
 
         self.history.append({"role": "user", "content": prompt})
+        if self._conversation_memory:
+            self._conversation_memory.save_turn("user", prompt)
 
         try:
             content = self._chat(self.history, temperature=temperature, **kwargs)
             self.history.append({"role": "assistant", "content": content})
+            if self._conversation_memory:
+                self._conversation_memory.save_turn("assistant", content)
             return content
         except Exception as e:
             self.log_fn(f"[OllamaBrain] [ERROR] Blad krytyczny API: {e}")
