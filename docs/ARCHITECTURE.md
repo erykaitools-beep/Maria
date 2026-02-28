@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.2 | Last updated: 2026-01-28
+> Version: 0.3 | Last updated: 2026-02-28
 
 ## 1. Overview
 
@@ -61,7 +61,11 @@
                               v
 +------------------------------------------------------------------+
 |                    WARSTWA LLM                                    |
-|  ollama_brain.py                                                  |
+|  LLMRouter (agent_core/llm/router.py)                             |
+|  - chat -> Ollama (offline, fast)                                 |
+|  - nauka/analiza -> NIM API (stronger model) z fallback Ollama    |
+|  - TokenBudget (100k/dzien, 2M/miesiac)                           |
+|  ollama_brain.py (models/)                                        |
 |  - komunikacja z Ollama API                                       |
 |  - JSON retry mechanism                                           |
 |  - historia rozmowy                                               |
@@ -240,7 +244,7 @@ System spelnia "Full Homeostasis" gdy:
 - [x] episodic_memory ma cap i FIFO
 - [x] System raportuje swoj stan (motivation, uptime, stats)
 
-**STATUS: COMPLETE ✅** (2026-01-28, 200 tests passing)
+**STATUS: COMPLETE** (2026-01-28, teraz 668 tests passing)
 
 ---
 
@@ -250,13 +254,18 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 
 ---
 
-## 5. Znane ograniczenia (Ver.4)
+## 5. Znane ograniczenia (Ver.4.1)
 
 1. **Brak embeddings** - semantic_graph wspiera embeddings, ale nie sa generowane
-2. ~~**Dwa systemy pamieci** - JSONL i semantic_graph nie sa zsynchronizowane~~ → Rozwiazane przez MemoryManager
-3. ~~**Brak cap na episodic_memory** - rosnie bez ograniczen~~ → Rozwiazane przez consolidate_episodic()
-4. ~~**Brak consolidation scheduler** - konsolidacja tylko manualna~~ → Rozwiazane przez epoch tasks w core.py
-5. **Brakujace moduly** - maria_web_learning.py, maria_api_bridge.py nie istnieja (planned for Phase C)
+2. ~~**Dwa systemy pamieci**~~ -> Rozwiazane przez MemoryManager
+3. ~~**Brak cap na episodic_memory**~~ -> Rozwiazane przez consolidate_episodic()
+4. ~~**Brak consolidation scheduler**~~ -> Rozwiazane przez epoch tasks w core.py
+5. **Legacy maria_core/** - stary kod nadal istnieje, owiniety adapterami (Stage 5 cleanup pending)
+6. **Brak Unified Perception** - bodźce z roznych zrodel nie trafiaja do wspolnego miejsca
+7. **Brak Plannera** - Maria reaguje na komendy, nie planuje samodzielnie
+8. **Brak Goal System** - Maria nie generuje wlasnych celow
+
+Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju warstw 1-3)
 
 ---
 
@@ -266,26 +275,72 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 
 ```
 agent_core/
-├── homeostasis/           # System homeostazy
+├── homeostasis/           # System homeostazy (9-fazowy tick loop)
 │   ├── sensors/           # Sensory (resource, cognitive, thermal, power, time)
 │   ├── state_model.py     # Dataclasses: ResourceMetrics, CognitiveMetrics
-│   ├── interpreter.py     # Raw → semantic state conversion
+│   ├── interpreter.py     # Raw -> semantic state conversion
 │   ├── constraints.py     # ConstraintValidator, thresholds
 │   ├── mode_regulator.py  # Mode enum, ModeRegulator
 │   ├── actions.py         # CorrectiveActionGenerator, AlarmDispatcher
-│   ├── core.py            # HomeostasisCore (1Hz tick loop)
+│   ├── core.py            # HomeostasisCore (1Hz tick, 9 phases)
 │   ├── pulse.py           # HomeostasisPulseThread (100ms)
 │   ├── api.py             # HomeostasisInterface, EventBus
-│   └── snapshot.py        # Snapshot protocol, recovery
+│   ├── snapshot.py        # Snapshot protocol, recovery
+│   ├── time_awareness.py  # TimeAwareness (dzien, godzina, pora dnia)
+│   └── event_logger.py    # Persistent JSONL event logging
+├── consciousness/         # Osobowosc, pamiec, sny
+│   ├── core.py            # ConsciousnessCore (orchestrator)
+│   ├── trait_catalog.py   # 7 cech osobowosci (rozszerzalne)
+│   ├── trait_evolver.py   # Deterministic trait evolution
+│   ├── self_model.py      # SelfModelBuilder (semantic graph nodes)
+│   ├── identity_store.py  # Persistent identity (birth date, sessions)
+│   ├── conversation_memory.py # Rolling context + LLM condensation
+│   ├── experience_tracker.py  # Event recording for personality
+│   ├── sleep_processor.py # NREM1-3 + REM phases
+│   ├── dream_generator.py # Rule-based creative linking
+│   └── human_state.py     # Human-readable state formatting
+├── teacher/               # Autonomiczny agent nauczyciel
+│   ├── teacher_agent.py   # 6-priority decision engine (P1-P6)
+│   ├── knowledge_analyzer.py # JSONL analysis, zero LLM calls
+│   └── teaching_strategy.py  # Strategy types + spaced repetition
+├── introspection/         # Samowiedza kodu (READ-ONLY)
+│   ├── analyzer.py        # AST static analysis
+│   ├── code_model.py      # Code self-model structures
+│   ├── reporters.py       # Human + Technical output
+│   └── scheduler.py       # Periodic analysis
+├── awareness/             # Kontekst samowiedzy
+│   └── context_builder.py # ContextBuilder for /awareness
+├── llm/                   # LLM management + NIM routing
+│   ├── router.py          # LLMRouter: chat->Ollama, nauka->NIM
+│   ├── nim_client.py      # NVIDIA NIM API client (OpenAI-compatible)
+│   ├── token_budget.py    # Daily/monthly token limits
+│   ├── latency_probe.py   # Non-blocking latency measurement
+│   └── manager.py         # LLMManager interface
 ├── memory/
 │   ├── manager.py         # MemoryManager (unified interface)
+│   ├── episodic_store.py  # Episodic memory
+│   ├── semantic_store.py  # Semantic memory
 │   └── snapshot_backend.py
-├── llm/
-│   └── manager.py         # LLMManager (latency, batch control)
 ├── metacontrol/
 │   └── controller.py      # MetaController interface
 ├── executor/
 │   └── module_executor.py # ModuleExecutor (signal dispatch)
+├── registry/              # Plug-in module system
+│   ├── module_registry.py # ModuleRegistry
+│   ├── command_dispatcher.py # Command routing
+│   ├── shared_context.py  # SharedContext (DI container)
+│   └── base_module.py     # MariaModule base class
+├── modules/               # REPL command modules (plug-in)
+│   ├── core_module.py     # /exit, /help
+│   ├── homeostasis_module.py  # /homeostasis
+│   ├── consciousness_module.py # /consciousness
+│   ├── teacher_module.py  # /teacher
+│   ├── learning_module.py # /learn
+│   ├── introspection_module.py # /introspect
+│   ├── awareness_module.py # /awareness
+│   ├── nim_module.py      # /nim
+│   ├── knowledge_module.py # /knowledge
+│   └── query_module.py    # /query
 ├── adapters/              # Legacy code wrappers
 │   ├── memory_adapter.py
 │   ├── semantic_adapter.py
@@ -294,50 +349,110 @@ agent_core/
 ├── ui/
 │   ├── telemetry_api.py   # Read-only dashboard
 │   └── operator_controls.py
-└── tests/                 # 200 tests
-    ├── test_*.py          # Unit tests (174)
-    └── test_integration_legacy.py (26)
+└── tests/                 # 668 tests
+    └── test_*.py          # 21 test files
 ```
 
 ### 6.2 Integracja z main.py
 
 ```
-main.py (Ver.1.2)
+main.py (Ver.2.0 - Registry-based)
     │
-    ├── /homeostasis        - Status command
-    ├── /homeostasis start  - Start monitoring loop (1Hz)
-    ├── /homeostasis stop   - Stop monitoring
+    ├── init_brain()
+    │   ├── OllamaBrain (llama3.1:8b)
+    │   ├── LLMRouter (NIM + Ollama hybrid)
+    │   ├── IdentityStore (persistent identity)
+    │   ├── ConversationMemory (rolling context)
+    │   └── ConsciousnessCore (personality, dreams)
     │
-    └── Mode Gating:
-        ├── SURVIVAL → Block perception
-        ├── SLEEP    → Wake on interaction
-        ├── REDUCED  → Warning, continue
-        └── ACTIVE   → Normal operation
+    ├── ModuleRegistry (plug-in system)
+    │   ├── core, homeostasis, consciousness
+    │   ├── teacher, learning, knowledge, query
+    │   ├── introspection, awareness, nim
+    │   └── CommandDispatcher (routes /commands)
+    │
+    ├── REPL loop
+    │   ├── /commands -> dispatcher
+    │   ├── text -> perception (BrainMemoryLoop)
+    │   └── Mode Gating:
+    │       ├── SURVIVAL -> Block perception
+    │       ├── SLEEP    -> Wake on interaction
+    │       ├── REDUCED  -> Warning, continue
+    │       └── ACTIVE   -> Normal operation
+    │
+    └── Cleanup
+        ├── ConversationMemory.condense_session()
+        └── ConsciousnessCore.checkpoint()
 ```
 
-### 6.3 Przepływ danych - Homeostasis Loop
+### 6.3 Przepływ danych - Homeostasis Loop (9 faz)
 
 ```
 [1Hz Tick] ──────────────────────────────────────────────────────────
     │
-    ├── SENSE: Read all sensors
+    ├── Phase 1: SENSE
     │   ├── ResourceSensor (RAM, CPU, disk)
     │   ├── CognitiveSensor (latency, coherence)
     │   ├── ThermalSensor (temperature)
     │   ├── PowerSensor (uptime)
     │   └── TimeSensor (idle, session)
     │
-    ├── INTERPRET: Raw → Semantic State
-    │   └── StateInterpreter.interpret()
+    ├── Phase 2: INTERPRET
+    │   └── StateInterpreter.process_metrics()
     │
-    ├── VALIDATE: Check constraints
-    │   └── ConstraintValidator.validate()
+    ├── Phase 3: VALIDATE
+    │   └── ConstraintValidator + CRITICAL alarms
     │
-    ├── DECIDE: Mode transition
+    ├── Phase 4: DECIDE MODE
     │   └── ModeRegulator.decide_mode()
     │
-    └── ACT: Execute corrective actions
-        └── CorrectiveActionGenerator.generate()
+    ├── Phase 5: GENERATE CORRECTIVE ACTIONS
+    │
+    ├── Phase 6: EXECUTE CORRECTIVE ACTIONS
+    │
+    ├── Phase 7: UPDATE HEALTH SCORE
+    │
+    ├── Phase 8: AUDIT & LOG (co 60 tickow)
+    │
+    └── Phase 9: TEACHER AUTO-TRIGGER
+        └── ACTIVE + idle >= 10min -> auto-sesja nauki (3 iteracje)
+```
+
+### 6.4 LLM Routing
+
+```
+LLMRouter
+    │
+    ├── think(prompt)       -> Ollama (chat, offline, fast)
+    ├── _ask_once(prompt)   -> NIM if budget OK, else Ollama
+    ├── analyze_task(task)  -> NIM if budget OK, else Ollama
+    │
+    └── TokenBudget
+        ├── Daily:   100,000 tokens
+        ├── Monthly: 2,000,000 tokens
+        └── States: OK -> LOW (<=20%) -> DEPLETED -> fallback Ollama
+```
+
+### 6.5 Consciousness Flow
+
+```
+ExperienceTracker                 TraitEvolver
+    │ record("learning_completed")    │ evolve()
+    │ record("conversation_turn")     │ (at checkpoint)
+    v                                 v
+[Session Buffer] ──────────> [Trait Scores 0.0-1.0]
+                                      │
+                              SelfModelBuilder
+                                      │
+                              [semantic_graph nodes]
+
+SleepProcessor (when ACTIVE -> SLEEP)
+    │
+    ├── NREM1: gather stats
+    ├── NREM2: boost edge weights (access_count >= 2)
+    ├── NREM3: mark stale nodes (>48h, importance < 0.2)
+    └── REM:   DreamGenerator (creative linking)
+               └── dream_log.jsonl
 ```
 
 ---

@@ -195,7 +195,7 @@ def build_pdf():
     features = [
         "Samodzielne uczenie sie z plikow .txt (chunking, ekstrakcja wiedzy, egzaminy)",
         "Homeostaza - autonomiczna regulacja trybow pracy (ACTIVE/REDUCED/SLEEP/SURVIVAL)",
-        "Swiadomosc - 19 cech osobowosci, pamiec rozmow, sny, ciaglosc tozsamosci",
+        "Swiadomosc - 7 cech osobowosci (rozszerzalne), pamiec rozmow, sny, ciaglosc tozsamosci",
         "Agent Nauczyciel - autonomicznie decyduje co i kiedy sie uczyc",
         "Pamiec semantyczna - graf wiedzy z cosine similarity i konsolidacja",
         "REPL + Web UI - interakcja przez terminal lub przegladarke",
@@ -379,19 +379,22 @@ def build_pdf():
 
     pdf.subsection("Osobowosc (TraitEvolver + TraitCatalog)")
     pdf.body_text(
-        "19 cech osobowosci pogrupowanych w 4 kategorie - kazda cecha ma wartosc 0.0-1.0 "
+        "7 cech osobowosci (rozszerzalnych) - kazda cecha ma wartosc 0.0-1.0 "
         "i ewoluuje dynamicznie na podstawie interakcji z uzytkownikiem:"
     )
     traits = [
-        ("Kognitywne", "curiosity, analytical_depth, creativity, pattern_recognition"),
-        ("Spoleczne", "empathy, humor, patience, directness, warmth"),
-        ("Motywacyjne", "persistence, self_improvement, autonomy, goal_orientation"),
-        ("Emocjonalne", "emotional_stability, optimism, sensitivity, resilience, playfulness"),
+        ("ciekawska", "Chce poznawac nowe rzeczy (sygnaly: perception, learning, unknown terms)"),
+        ("systematyczna", "Pracuje metodycznie (sygnaly: exam passed, learning completed)"),
+        ("pomocna", "Lubi pomagac i odpowiadac (sygnaly: conversation turns)"),
+        ("wytrwala", "Nie poddaje sie przy trudnych tematach (sygnaly: hard topic retry)"),
+        ("cierpliwa", "Znosi trudnosci ze spokojem (sygnaly: survival recovery, reduced mode)"),
+        ("refleksyjna", "Analizuje swoje doswiadczenia (sygnaly: introspection runs)"),
+        ("spoleczna", "Lubi interakcje z operatorem (sygnaly: conversation, greeting)"),
     ]
     widths = [30, 150]
-    pdf.table_row(["Kategoria", "Cechy"], widths, bold=True, fill=True)
-    for i, (cat, t) in enumerate(traits):
-        pdf.table_row([cat, t], widths, fill=(i % 2 == 0))
+    pdf.table_row(["Cecha", "Opis i sygnaly"], widths, bold=True, fill=True)
+    for i, (name, desc) in enumerate(traits):
+        pdf.table_row([name, desc], widths, fill=(i % 2 == 0))
 
     pdf.subsection("Pamiec rozmow (ConversationMemory)")
     pdf.body_text(

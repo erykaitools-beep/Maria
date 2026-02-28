@@ -41,17 +41,8 @@ class LatencyProbe:
         self._last_probe_time = 0.0
         self._executor = ThreadPoolExecutor(max_workers=1)
 
-        # Try to get inference function from legacy module
         if not self._inference_func:
-            self._init_legacy_adapter()
-
-    def _init_legacy_adapter(self) -> None:
-        """Initialize adapter for legacy OllamaBrain."""
-        try:
-            from models.ollama_brain import generate_response
-            self._inference_func = lambda p: generate_response(p, max_tokens=10)
-        except ImportError:
-            logger.debug("Legacy generate_response not available")
+            logger.debug("No inference_func provided - probe inactive until set")
 
     def measure_latency(
         self,
@@ -69,7 +60,7 @@ class LatencyProbe:
             Latency in milliseconds (9999 if timeout/error)
         """
         if not self._inference_func:
-            return 0.0
+            return -1.0  # no inference function = no data
 
         start_time = time.time()
 

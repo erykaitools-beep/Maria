@@ -277,7 +277,8 @@ def learn_next_chunk(
     base_dir: Path,
     index_path: Path,
     memory_path: Path,
-    ollama_model: str = OLLAMA_MODEL
+    ollama_model: str = OLLAMA_MODEL,
+    llm_fn=None,
 ) -> bool:
     """
     Uczy się następnego chunka z pliku o najwyższym priorytecie.
@@ -348,7 +349,7 @@ def learn_next_chunk(
     use_simple = (target['status'] == STATUS_EXAM_FAILED)
 
     # Ucz się chunka
-    learned_data = learn_chunk(chunk_to_learn, use_simple=use_simple)
+    learned_data = learn_chunk(chunk_to_learn, use_simple=use_simple, llm_fn=llm_fn)
     
     gc.collect()
     time.sleep(0.1)

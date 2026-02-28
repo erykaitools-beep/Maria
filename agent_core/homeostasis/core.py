@@ -395,7 +395,7 @@ class HomeostasisCore:
 
             processor = SleepProcessor(
                 semantic_memory=self._semantic_memory,
-                experience_tracker=self._experience_tracker,
+                session_id=self._session_id,
             )
             report = processor.process_sleep_cycle()
             self._last_sleep_report = report

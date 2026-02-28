@@ -1,5 +1,7 @@
 # M.A.R.I.A. - Development Roadmap
-> Version: 0.4 | Last updated: 2026-02-22
+> Version: 0.5 | Last updated: 2026-02-28
+>
+> **Szczegolowy plan rozwoju:** `docs/DEVELOPMENT_PLAN.md` (zatwierdzony 2026-02-28)
 
 ## Overview
 
@@ -9,7 +11,7 @@ Rozwoj M.A.R.I.A. podzielony jest na fazy:
 |------|-------|-----|--------|
 | A | Stabilizacja | Naprawic bledy, uzyskac stabilny runtime | **COMPLETE** |
 | B | Full Homeostasis | Pelna autonomia z petlami regulacji | **COMPLETE** |
-| C | Consciousness | Samowiedza, percepcja, tozsamosc | **IN PROGRESS** |
+| C | Consciousness | Samowiedza, percepcja, tozsamosc | **COMPLETE** |
 | D | Vision | Percepcja wizualna (oko) | PLANNED |
 | E | Smart Home | Integracja IoT, mobilne cialo | PLANNED |
 
@@ -122,10 +124,14 @@ Rozszerzenie funkcjonalnosci i poprawa wydajnosci.
 ### Definition of Done: Faza C
 - [x] Introspection module (samowiedza kodu)
 - [x] TimeAwareness (percepcja czasu)
-- [ ] Self-model w semantic_graph (osobowosc)
-- [ ] Pamiec rozmow z kondensacja
-- [ ] Ciaglosc tozsamosci (birth date, uptime)
-- [ ] SLEEP z "snami"
+- [x] Self-model w semantic_graph (osobowosc) - TraitEvolver + SelfModelBuilder
+- [x] Pamiec rozmow z kondensacja - ConversationMemory
+- [x] Ciaglosc tozsamosci (birth date, uptime) - IdentityStore
+- [x] SLEEP z "snami" - SleepProcessor + DreamGenerator
+- [x] Agent Nauczyciel z autonomicznym triggerem w homeostasis
+- [x] NIM API + Token Budget + LLM Router
+
+**STATUS: COMPLETE** (2026-02-27, 668 tests passing)
 
 ### Estymacja
 6-10 sesji pracy
@@ -219,7 +225,7 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | M3 | Faza C - introspection + time awareness | DONE |
 | M3.5 | Linux migration prep (Mini PC) | DONE |
 | M3.6 | NIM API + Token Budget + LLM Router | DONE |
-| M4 | Faza C complete - consciousness | IN PROGRESS |
+| M4 | Faza C complete - consciousness | DONE |
 | M5 | Faza D complete - vision | PLANNED |
 | M6 | Faza E complete - smart home | PLANNED |
 | M7 | Faza F - multi-source learning (cross-validation) | PLANNED |
@@ -264,28 +270,27 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 
 ---
 
-## Faza G: Multi-Agent System (Mentor + Teacher)
+## Faza G: Multi-Agent System (rozszerzenie)
 
 > Wyspecjalizowane agenty wspomagajace nauke Marii.
-> Pomysl Eryka z sesji 2026-02-25.
 
-### Koncept
+### Zrealizowane (w ramach Fazy C)
 
-Zamiast jednego LLM do wszystkiego - agenty z rolami:
+| Agent | Rola | Model | Status |
+|-------|------|-------|--------|
+| **Nauczyciel** | Planuje nauke, priorytety P1-P6, spaced repetition | NIM / Ollama | **DONE** |
+| **Egzaminator** | Tworzy pytania, ocenia odpowiedzi | Ollama / NIM | **DONE** |
 
-| Agent | Rola | Model |
-|-------|------|-------|
-| **Mentor** | Planuje co Maria ma sie uczyc, ustawia priorytety, ocenia postep | NIM (mocny) |
-| **Nauczyciel** | Wyjasnia trudne koncepty, generuje przyklady, sprawdza rozumienie | NIM / Ollama |
-| **Egzaminator** | Tworzy pytania, ocenia odpowiedzi (juz jest w exam_agent.py) | Ollama |
-| **Krytyk** | Wskazuje luki w wiedzy, sugeruje uzupelnienia | NIM |
+### Planowane
+
+| Agent | Rola | Model | Status |
+|-------|------|-------|--------|
+| **Krytyk** | Wskazuje luki w wiedzy, sugeruje uzupelnienia | NIM | PLANNED |
+| **Code Agent** | Pisze/modyfikuje kod w sandboxie | CodeLlama / DeepSeek | PLANNED |
 
 ### Zaleznosci
 - Wymaga: LLM Router (DONE), agent_core/registry (DONE)
 - Pasuje do: Fazy F (multi-source learning)
-
-### Estymacja
-6-10 sesji pracy
 
 ---
 

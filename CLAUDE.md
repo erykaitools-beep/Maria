@@ -114,7 +114,7 @@ System introspekcji (w `agent_core/introspection/`) pozwala Marii rozumiec swoja
 
 System swiadomosci (w `agent_core/consciousness/`) daje Marii osobowosc i ciaglosc:
 
-- **TraitEvolver + TraitCatalog:** 19 cech osobowosci z dynamiczna ewolucja
+- **TraitEvolver + TraitCatalog:** 7 cech osobowosci z dynamiczna ewolucja (rozszerzalne)
 - **ConversationMemory:** Rolling context z kondensacja LLM
 - **SleepProcessor + DreamGenerator:** Konsolidacja pamieci podczas SLEEP
 - **ExperienceTracker:** Kontekst emocjonalny z rozmow
@@ -478,7 +478,7 @@ python main.py                          # REPL
 ## Sesja 2026-02-27 - Consciousness Phase C + Agent Nauczyciel
 
 ### Consciousness (osobowosc, sny, pamiec rozmow):
-- [x] TraitEvolver + TraitCatalog (19 cech osobowosci)
+- [x] TraitEvolver + TraitCatalog (7 cech osobowosci, rozszerzalne)
 - [x] ConversationMemory (rolling context + kondensacja LLM)
 - [x] SleepProcessor + DreamGenerator (konsolidacja pamieci w SLEEP)
 - [x] ExperienceTracker (emocjonalny kontekst rozmow)

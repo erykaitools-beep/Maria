@@ -82,6 +82,7 @@ class TeacherModule(MariaModule):
                 base_dir=INPUT_DIR,
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
+                llm_fn=llm_fn,
             )
             return {"success": success}
         except Exception as e:
@@ -93,10 +94,16 @@ class TeacherModule(MariaModule):
             from maria_core.learning.exam_agent import run_exam_if_ready
             from maria_core.sys.config import KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS
 
+            router = self._get_router()
+            llm_fn = None
+            if router and hasattr(router, "_ask_once"):
+                llm_fn = lambda prompt: router._ask_once(prompt, temperature=0.3)
+
             success = run_exam_if_ready(
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
                 exam_path=EXAM_RESULTS,
+                llm_fn=llm_fn,
             )
             return {"success": success, "passed": success}
         except Exception as e:

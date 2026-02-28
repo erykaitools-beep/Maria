@@ -379,22 +379,26 @@ SREDNIE - moga byc problemy z watkami i synchronizacja
 Usuniecie duplikacji i aktualizacja dokumentacji.
 
 ### Zadania
-- [ ] Usun stary kod ktory jest w 100% zastapiony adapterami
+- [x] Usun stary kod ktory jest w 100% zastapiony adapterami
+  - Zarchiwizowano do `maria_core/_legacy_archived/2026-02-28/`: agent/, logs/, output/, memory/
+  - Weryfikacja: zero importow w produkcji, 668 testow passing, compileall clean
 - [x] Zaktualizuj `ARCHITECTURE.md` z nowa struktura
 - [x] Zaktualizuj `MAP_HOMEOSTASIS.md` - zmien statusy na `implemented`/`tested`
 - [ ] Dodaj sekcje "Homeostasis" do `README.md` (jesli istnieje)
 
 ### Definicja DONE
-- [ ] Zero duplikacji kodu
+- [x] Zero duplikacji kodu (legacy zarchiwizowane, nie usuniete - do usuniecia po 48h stabilnosci)
 - [x] Dokumentacja zgodna z kodem
 - [x] Wszystkie statusy w MAP_HOMEOSTASIS.md zaktualizowane
 
 ### Ryzyko
 NISKIE - tylko cleanup
 
-### Status: IN PROGRESS
+### Status: DONE (archiwizacja)
 - Dokumentacja zaktualizowana
-- Usuniecie starego kodu planowane na kolejna sesje
+- Legacy code zarchiwizowany do `maria_core/_legacy_archived/2026-02-28/`
+- Smoke test: 668 testow passing, compileall clean, import main/run_maria OK
+- Faktyczne usuniecie po 48h stabilnosci
 
 ---
 

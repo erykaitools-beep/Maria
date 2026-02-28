@@ -298,7 +298,8 @@ def run_exam_if_ready(
     index_path: Path,
     memory_path: Path,
     exam_path: Path,
-    ollama_model: str = OLLAMA_MODEL
+    ollama_model: str = OLLAMA_MODEL,
+    llm_fn=None,
 ) -> bool:
     """
     Uruchamia egzamin dla pliku, który jest gotowy (status=learned).
@@ -359,19 +360,19 @@ def run_exam_if_ready(
     num_questions = calculate_num_questions(len(memories))
 
     # Generuj egzamin
-    exam = generate_exam(context, num_questions)
+    exam = generate_exam(context, num_questions, llm_fn=llm_fn)
     if not exam:
         logger.error("Nie udało się wygenerować egzaminu")
         return False
 
     # Odpowiedz
-    answers = answer_exam(context, exam)
+    answers = answer_exam(context, exam, llm_fn=llm_fn)
     if not answers:
         logger.error("Nie udało się odpowiedzieć na egzamin")
         return False
 
     # Oceń
-    grading = grade_exam(exam, answers)
+    grading = grade_exam(exam, answers, llm_fn=llm_fn)
     if not grading:
         logger.error("Nie udało się ocenić egzaminu")
         return False
