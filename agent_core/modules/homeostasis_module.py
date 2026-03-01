@@ -75,6 +75,24 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"SandboxManager not initialized: {e}")
 
+        # Initialize GoalStore (Kontrakt K3)
+        try:
+            from pathlib import Path
+            from maria_core.sys.config import BASE_DIR
+            from agent_core.goals.store import GoalStore
+
+            goals_path = BASE_DIR / "meta_data" / "goals.jsonl"
+            goal_store = GoalStore(goals_path)
+            goal_store.load()
+            goal_store.seed_if_empty()
+            goal_store.expire_proposed()
+            if goal_store.stats()["total"] > 0:
+                goal_store.save()
+            ctx.goal_store = goal_store
+            print(f"[Homeostasis] [OK] GoalStore initialized ({goal_store.stats()['total']} goals)")
+        except Exception as e:
+            logger.debug(f"GoalStore not initialized: {e}")
+
         # Pass semantic_memory to core for sleep processing
         if core and ctx.semantic_memory:
             session_id = 0
