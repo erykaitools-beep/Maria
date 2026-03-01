@@ -169,10 +169,12 @@ class HomeostasisModule(MariaModule):
                 if hasattr(core, '_teacher_agent') and core._teacher_agent:
                     planner.set_teacher_agent(core._teacher_agent)
 
-                # Knowledge analyzer for snapshot
+                # Knowledge analyzer for snapshot + topic awareness
                 try:
                     from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
-                    planner.set_knowledge_analyzer(KnowledgeAnalyzer())
+                    analyzer = KnowledgeAnalyzer()
+                    planner.set_knowledge_analyzer(analyzer)
+                    ctx.knowledge_analyzer = analyzer
                 except Exception:
                     pass
 

@@ -25,7 +25,9 @@ class PlannerModule(MariaModule):
                 "  /plan               - pokaz ostatnia decyzje plannera\n"
                 "  /plan status        - status plannera (cykle, plany)\n"
                 "  /plan history [N]   - historia decyzji (domyslnie 10)\n"
-                "  /plan goals         - ranking celow wg priorytetu",
+                "  /plan goals         - ranking celow wg priorytetu\n"
+                "  /plan learn <temat> - dodaj cel nauki z tematem\n"
+                "  /plan topics        - pokaz dostepne tematy nauki",
                 "[PLANNER] WARSTWA 2",
             ),
         ]
@@ -57,9 +59,14 @@ class PlannerModule(MariaModule):
             return self._show_history(planner, limit)
         elif sub == "goals":
             return self._show_goals(planner)
+        elif sub == "learn":
+            topic = " ".join(args[1:]) if len(args) > 1 else ""
+            return self._cmd_learn_topic(topic)
+        elif sub == "topics":
+            return self._cmd_topics()
         else:
             print(f"[Planner] Nieznana komenda: {sub}")
-            print("  /plan [status|history|goals]")
+            print("  /plan [status|history|goals|learn|topics]")
 
     def _show_last_plan(self, planner):
         """Show the most recent plan."""
@@ -167,4 +174,76 @@ class PlannerModule(MariaModule):
             print(
                 f"  {score:5.2f}  [{status:7s}] [{gtype:11s}] {desc}"
             )
+        print()
+
+    def _cmd_learn_topic(self, topic: str):
+        """Create a LEARNING goal with specific topic."""
+        if not topic.strip():
+            print("[Planner] Uzycie: /plan learn <temat>")
+            print("  Przyklad: /plan learn fizyka")
+            return
+
+        topic = topic.strip()
+        goal_store = getattr(self.ctx, 'goal_store', None)
+        if goal_store is None:
+            print("[Planner] GoalStore nie zainicjalizowany")
+            return
+
+        # Check how many matching files exist
+        analyzer = getattr(self.ctx, 'knowledge_analyzer', None)
+        match_count = 0
+        if analyzer:
+            scored = analyzer.get_files_for_topics([topic])
+            match_count = len(scored)
+
+        from agent_core.goals.goal_model import (
+            GoalType, GoalStatus, create_goal,
+        )
+
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description=f"Nauka tematu: {topic}",
+            priority=0.9,
+            status=GoalStatus.ACTIVE,
+            created_by="user",
+            metadata={
+                "topics": [topic],
+                "source": "user",
+            },
+        )
+        goal_store.create(goal)
+        goal_store.save()
+
+        if match_count > 0:
+            print(f"\n[Planner] Dodano cel nauki: {topic}")
+            print(f"  Znaleziono {match_count} pasujacych plikow")
+        else:
+            print(f"\n[Planner] Dodano cel nauki: {topic}")
+            print(f"  Brak plikow pasujacych do tematu (0 dopasowao).")
+            print(f"  Sprawdz /plan topics lub dodaj pliki do input/")
+        print()
+
+    def _cmd_topics(self):
+        """Show available topics from knowledge base."""
+        analyzer = getattr(self.ctx, 'knowledge_analyzer', None)
+        if analyzer is None:
+            print("[Planner] KnowledgeAnalyzer nie zainicjalizowany")
+            return
+
+        topic_map = analyzer.get_topic_file_map()
+        if not topic_map:
+            print("\n[Planner] Brak tematow (brak nauczonych chunków z tagami)")
+            print("  Najpierw naucz sie czegos: /learn")
+            return
+
+        print(f"\n[Planner] Dostepne tematy ({len(topic_map)})")
+        print("-" * 50)
+
+        for topic, files in list(topic_map.items())[:20]:
+            print(f"  {topic:30s} ({len(files)} plikow)")
+
+        if len(topic_map) > 20:
+            print(f"  ... i {len(topic_map) - 20} wiecej")
+
+        print("\n  Uzyj: /plan learn <temat>")
         print()

@@ -1084,3 +1084,274 @@ class TestCycleCompleteEvent:
         assert cycle_events[0].payload["guard_blocked"] is False
         assert cycle_events[0].payload["no_goals"] is False
         assert "plan_id" in cycle_events[0].payload
+
+
+# ══════════════════════════════════════════════════════
+# Topic-Aware Learning - ActionExecutor
+# ══════════════════════════════════════════════════════
+
+
+class TestActionExecutorTopics:
+    """Tests for topic resolution in ActionExecutor."""
+
+    def test_exec_learn_with_topics_resolves_file_ids(self):
+        """ActionExecutor resolves topics to file_ids via analyzer."""
+        executor = ActionExecutor()
+        teacher = _make_mock_teacher(chunks=1)
+        executor.set_teacher_agent(teacher)
+
+        analyzer = MagicMock()
+        analyzer.get_files_for_topics.return_value = [
+            ("fizyka.txt", 3.0), ("fizyka2.txt", 2.0),
+        ]
+        executor.set_knowledge_analyzer(analyzer)
+
+        plan = create_plan(
+            "goal-1", "Nauka fizyki", ActionType.LEARN,
+            action_params={"topics": ["fizyka"]},
+        )
+        result = executor.execute(plan)
+
+        # Check that teacher was called with filter
+        teacher.run_session.assert_called_once()
+        call_kwargs = teacher.run_session.call_args
+        assert call_kwargs[1]["filter_file_ids"] == ["fizyka.txt", "fizyka2.txt"]
+
+        # Check resolution report was stored in plan
+        assert "resolved_file_ids" in plan.action_params
+        assert "resolution_report" in plan.action_params
+        assert plan.action_params["resolution_report"]["matches"] == 2
+
+    def test_exec_learn_with_topics_zero_matches(self):
+        """ActionExecutor with topics but 0 matching files."""
+        executor = ActionExecutor()
+        teacher = _make_mock_teacher(chunks=0, strategies=0)
+        executor.set_teacher_agent(teacher)
+
+        analyzer = MagicMock()
+        analyzer.get_files_for_topics.return_value = []
+        executor.set_knowledge_analyzer(analyzer)
+
+        plan = create_plan(
+            "goal-1", "Nauka fizyki", ActionType.LEARN,
+            action_params={"topics": ["nonexistent"]},
+        )
+        result = executor.execute(plan)
+
+        # Teacher called with None (empty -> None)
+        call_kwargs = teacher.run_session.call_args
+        assert call_kwargs[1]["filter_file_ids"] is None
+
+    def test_exec_learn_without_topics_backward_compatible(self):
+        """Without topics, Teacher called without filter."""
+        executor = ActionExecutor()
+        teacher = _make_mock_teacher(chunks=1)
+        executor.set_teacher_agent(teacher)
+
+        plan = create_plan("goal-1", "Test", ActionType.LEARN)
+        executor.execute(plan)
+
+        call_kwargs = teacher.run_session.call_args
+        assert call_kwargs[1]["filter_file_ids"] is None
+
+
+# ══════════════════════════════════════════════════════
+# Topic-Aware Learning - PlannerCore
+# ══════════════════════════════════════════════════════
+
+
+class TestPlannerTopics:
+    """Tests for topic awareness in PlannerCore."""
+
+    def test_create_plan_with_topic_metadata(self, tmp_path):
+        """LEARNING goal with topics -> plan.action_params has topics."""
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+        goal = _make_goal(
+            goal_type="learning",
+            description="Nauka fizyki",
+            metadata={"topics": ["fizyka"]},
+        )
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "fizyka.txt"}]},
+                "new_files_available": [{"id": "fizyka.txt"}],
+            },
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+        assert plan.action_params.get("topics") == ["fizyka"]
+
+    def test_create_plan_without_topics(self, tmp_path):
+        """META goal without topics -> empty action_params."""
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+        goal = _make_goal(goal_type="meta", description="Meta")
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "file.txt"}]},
+                "new_files_available": [{"id": "file.txt"}],
+            },
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+        assert plan.action_params.get("topics") is None
+
+    def test_auto_create_learning_goal(self, tmp_path):
+        """Planner auto-creates LEARNING goal with best topic."""
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+        # Wire mock dependencies
+        core = _make_mock_core(mode="active")
+        planner.set_homeostasis_core(core)
+
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_topic_file_map.return_value = {
+            "fizyka": ["fizyka1.txt", "fizyka2.txt"],
+            "logika": ["logika1.txt"],
+        }
+        planner._knowledge_analyzer = mock_analyzer
+
+        # GoalStore that stores created goals
+        created_goals = []
+        goal_store = MagicMock()
+        goal_store.get_active.return_value = []  # No existing learning goals
+        goal_store.create.side_effect = lambda g: created_goals.append(g)
+        planner._goal_store = goal_store
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "fizyka1.txt"}]},
+                "new_files_available": [{"id": "fizyka1.txt"}],
+                "learning_in_progress": [],
+            },
+            "evaluation_metrics": {"retention_rate": 0.85},
+        }
+
+        result = planner._auto_create_learning_goal(context)
+        assert result is True
+        assert len(created_goals) == 1
+        assert created_goals[0].metadata["topics"] == ["fizyka"]
+        assert created_goals[0].metadata["source"] == "auto"
+
+    def test_auto_create_skips_when_learning_goals_exist(self, tmp_path):
+        """Don't create auto-goal if LEARNING goals already active."""
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+        existing = _make_goal(goal_type="learning")
+        existing2 = _make_goal(goal_type="learning", goal_id="g2")
+        existing3 = _make_goal(goal_type="learning", goal_id="g3")
+
+        goal_store = MagicMock()
+        goal_store.get_active.return_value = [existing, existing2, existing3]
+        planner._goal_store = goal_store
+        planner._knowledge_analyzer = MagicMock()
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "f.txt"}]},
+                "new_files_available": [{"id": "f.txt"}],
+                "learning_in_progress": [],
+            },
+            "evaluation_metrics": {},
+        }
+
+        assert planner._auto_create_learning_goal(context) is False
+
+    def test_auto_create_skips_low_retention(self, tmp_path):
+        """Don't create new topics when retention is low."""
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        core = _make_mock_core(mode="active")
+        planner.set_homeostasis_core(core)
+
+        goal_store = MagicMock()
+        goal_store.get_active.return_value = []
+        planner._goal_store = goal_store
+        planner._knowledge_analyzer = MagicMock()
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "f.txt"}]},
+                "new_files_available": [{"id": "f.txt"}],
+                "learning_in_progress": [],
+            },
+            "evaluation_metrics": {"retention_rate": 0.4},
+        }
+
+        assert planner._auto_create_learning_goal(context) is False
+
+
+# ══════════════════════════════════════════════════════
+# Topic-Aware Learning - REPL commands
+# ══════════════════════════════════════════════════════
+
+
+class TestPlannerModuleTopics:
+    """Tests for /plan learn and /plan topics commands."""
+
+    def test_cmd_learn_topic_creates_goal(self):
+        """'/plan learn fizyka' creates a LEARNING goal with topic."""
+        from agent_core.modules.planner_module import PlannerModule
+
+        module = PlannerModule()
+
+        # Mock context
+        ctx = MagicMock()
+        created_goals = []
+        ctx.goal_store = MagicMock()
+        ctx.goal_store.create.side_effect = lambda g: created_goals.append(g)
+
+        analyzer = MagicMock()
+        analyzer.get_files_for_topics.return_value = [("fizyka.txt", 3.0)]
+        ctx.knowledge_analyzer = analyzer
+        ctx.planner_core = MagicMock()
+
+        module.ctx = ctx
+        module._cmd_learn_topic("fizyka")
+
+        assert len(created_goals) == 1
+        assert created_goals[0].type.value == "learning"
+        assert created_goals[0].metadata["topics"] == ["fizyka"]
+        assert created_goals[0].metadata["source"] == "user"
+        assert created_goals[0].priority == 0.9
+
+    def test_cmd_topics_shows_topics(self, capsys):
+        """'/plan topics' prints available topics."""
+        from agent_core.modules.planner_module import PlannerModule
+
+        module = PlannerModule()
+
+        ctx = MagicMock()
+        analyzer = MagicMock()
+        analyzer.get_topic_file_map.return_value = {
+            "fizyka": ["f1.txt", "f2.txt"],
+            "logika": ["l1.txt"],
+        }
+        ctx.knowledge_analyzer = analyzer
+
+        module.ctx = ctx
+        module._cmd_topics()
+
+        output = capsys.readouterr().out
+        assert "fizyka" in output
+        assert "logika" in output
+        assert "2 plikow" in output

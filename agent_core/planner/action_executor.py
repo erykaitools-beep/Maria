@@ -22,6 +22,9 @@ class ActionExecutor:
     - EVALUATE -> EvaluationObserver.generate_report()
     - MAINTENANCE -> update goal progress from system metrics
     - NOOP -> do nothing
+
+    Topic-aware: if plan.action_params has "topics", resolves them to
+    file_ids via KnowledgeAnalyzer and passes filter to Teacher.
     """
 
     def __init__(self):
@@ -29,6 +32,7 @@ class ActionExecutor:
         self._evaluation_observer = None
         self._homeostasis_core = None
         self._goal_store = None
+        self._knowledge_analyzer = None
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -45,6 +49,10 @@ class ActionExecutor:
     def set_goal_store(self, store) -> None:
         """Set goal store for progress updates."""
         self._goal_store = store
+
+    def set_knowledge_analyzer(self, analyzer) -> None:
+        """Set knowledge analyzer for topic->file resolution."""
+        self._knowledge_analyzer = analyzer
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
@@ -81,43 +89,107 @@ class ActionExecutor:
         result["duration_ms"] = (time.time() - start) * 1000
         return result
 
+    def _resolve_topics(self, plan: Plan) -> list:
+        """
+        Resolve topics from plan.action_params to file_ids.
+
+        If action_params has 'topics' but not 'resolved_file_ids',
+        uses KnowledgeAnalyzer to resolve. Stores result back in action_params.
+
+        Returns:
+            List of file_ids (may be empty), or None if no topic filter.
+        """
+        topics = plan.action_params.get("topics")
+        if not topics:
+            return None
+
+        # Already resolved?
+        if "resolved_file_ids" in plan.action_params:
+            return plan.action_params["resolved_file_ids"] or None
+
+        if self._knowledge_analyzer is None:
+            logger.warning("Topics specified but no KnowledgeAnalyzer available")
+            plan.action_params["resolved_file_ids"] = []
+            plan.action_params["resolution_report"] = {
+                "error": "no_analyzer", "matches": 0,
+            }
+            return []
+
+        scored_files = self._knowledge_analyzer.get_files_for_topics(topics)
+        file_ids = [fid for fid, _score in scored_files]
+
+        plan.action_params["resolved_file_ids"] = file_ids
+        plan.action_params["resolution_report"] = {
+            "topics": topics,
+            "matches": len(file_ids),
+            "top_scores": [
+                {"file": fid, "score": score}
+                for fid, score in scored_files[:5]
+            ],
+        }
+
+        logger.info(
+            f"[ActionExecutor] Resolved topics {topics} -> "
+            f"{len(file_ids)} files"
+        )
+        return file_ids or None
+
     def _exec_learn(self, plan: Plan) -> Dict[str, Any]:
         """Delegate learning to TeacherAgent (single iteration)."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
-        status = self._teacher_agent.run_session(max_iterations=1)
+        filter_ids = self._resolve_topics(plan)
+        status = self._teacher_agent.run_session(
+            max_iterations=1, filter_file_ids=filter_ids,
+        )
         stats = status.get("stats", {})
-        return {
+        result = {
             "success": stats.get("chunks_learned", 0) > 0,
             "chunks_learned": stats.get("chunks_learned", 0),
             "strategies_executed": stats.get("strategies_executed", 0),
         }
+        if stats.get("idle_reason"):
+            result["idle_reason"] = stats["idle_reason"]
+            result["filtered_out_count"] = stats.get("filtered_out_count", 0)
+        return result
 
     def _exec_exam(self, plan: Plan) -> Dict[str, Any]:
         """Delegate exam to TeacherAgent (single iteration)."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
-        status = self._teacher_agent.run_session(max_iterations=1)
+        filter_ids = self._resolve_topics(plan)
+        status = self._teacher_agent.run_session(
+            max_iterations=1, filter_file_ids=filter_ids,
+        )
         stats = status.get("stats", {})
-        return {
+        result = {
             "success": stats.get("exams_run", 0) > 0,
             "exams_run": stats.get("exams_run", 0),
             "exams_passed": stats.get("exams_passed", 0),
         }
+        if stats.get("idle_reason"):
+            result["idle_reason"] = stats["idle_reason"]
+        return result
 
     def _exec_review(self, plan: Plan) -> Dict[str, Any]:
         """Delegate review/spaced repetition to TeacherAgent."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
-        status = self._teacher_agent.run_session(max_iterations=1)
+        filter_ids = self._resolve_topics(plan)
+        status = self._teacher_agent.run_session(
+            max_iterations=1, filter_file_ids=filter_ids,
+        )
         stats = status.get("stats", {})
-        return {
+        result = {
             "success": stats.get("strategies_executed", 0) > 0,
             "strategies_executed": stats.get("strategies_executed", 0),
         }
+        if stats.get("idle_reason"):
+            result["idle_reason"] = stats["idle_reason"]
+        return result
 
     def _exec_evaluate(self, plan: Plan) -> Dict[str, Any]:
         """Trigger evaluation report generation."""

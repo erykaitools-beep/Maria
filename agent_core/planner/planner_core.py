@@ -41,6 +41,11 @@ HIGH_PRIORITY_EVENTS = {
 # Max in-memory plan history
 MAX_HISTORY_SIZE = 100
 
+# Auto-learning goal limits
+MAX_AUTO_LEARNING_GOALS = 3
+AUTO_GOAL_COOLDOWN_SEC = 3600  # 1 hour
+MIN_RETENTION_FOR_NEW_TOPICS = 0.6
+
 
 class PlannerCore:
     """
@@ -106,6 +111,7 @@ class PlannerCore:
 
     def set_knowledge_analyzer(self, analyzer) -> None:
         self._knowledge_analyzer = analyzer
+        self.executor.set_knowledge_analyzer(analyzer)
 
     def set_sandbox_manager(self, manager) -> None:
         self._sandbox_manager = manager
@@ -168,6 +174,12 @@ class PlannerCore:
 
         # -- STEP 4: SELECT GOAL --
         goal = self._select_goal(context)
+        if goal is None:
+            # Try to auto-create a learning goal with topic selection
+            created = self._auto_create_learning_goal(context)
+            if created:
+                goal = self._select_goal(context)
+
         if goal is None:
             logger.debug("Planner: no feasible goal found")
             self._emit_cycle_complete(tick_count, no_goals=True)
@@ -308,11 +320,18 @@ class PlannerCore:
 
         # LEARNING goals or META goal -> decide learn/exam/review
         action = self._decide_learning_action(snapshot, metrics)
+
+        # Pass topic filters from goal metadata to action_params
+        action_params = {}
+        topics = goal.metadata.get("topics")
+        if topics:
+            action_params["topics"] = topics
+
         return create_plan(
             goal_id=goal.id,
             goal_description=goal.description,
             action_type=action,
-            action_params={},
+            action_params=action_params,
         )
 
     def _decide_learning_action(
@@ -389,6 +408,123 @@ class PlannerCore:
             self._last_plans = self._last_plans[-50:]
 
         return plan
+
+    # -- Internal: auto-create learning goals -----------------
+
+    def _auto_create_learning_goal(self, context: Dict) -> bool:
+        """
+        Auto-create a LEARNING goal with topic when none exist.
+
+        Safety checks:
+        - No existing active LEARNING goals
+        - System in ACTIVE mode
+        - No active sandbox session
+        - retention_rate >= MIN_RETENTION_FOR_NEW_TOPICS
+        - Cooldown since last auto-goal creation
+        - New files available to learn
+
+        Returns True if a goal was created.
+        """
+        if self._goal_store is None or self._knowledge_analyzer is None:
+            return False
+
+        # Check for existing LEARNING goals
+        active_goals = self._goal_store.get_active()
+        learning_goals = [
+            g for g in active_goals
+            if g.type.value == "learning"
+        ]
+        if len(learning_goals) >= MAX_AUTO_LEARNING_GOALS:
+            return False
+
+        # Check cooldown - look at latest auto-created goal
+        now = time.time()
+        for g in learning_goals:
+            if g.metadata.get("source") == "auto":
+                if (now - g.created_at) < AUTO_GOAL_COOLDOWN_SEC:
+                    return False
+
+        # Safety: check mode is ACTIVE
+        if self._homeostasis_core:
+            state = self._homeostasis_core.get_state()
+            if state.mode.value != "active":
+                return False
+
+        # Safety: no active sandbox
+        if self._sandbox_manager and self._sandbox_manager.has_active_session():
+            return False
+
+        # Safety: retention OK (don't start new topics when review needed)
+        metrics = context.get("evaluation_metrics", {})
+        retention = metrics.get("retention_rate")
+        if retention is not None and retention < MIN_RETENTION_FOR_NEW_TOPICS:
+            return False
+
+        # Check there are new files to learn
+        snapshot = context.get("knowledge_snapshot")
+        if not snapshot:
+            return False
+        new_files = snapshot.get("new_files_available", [])
+        in_progress = snapshot.get("learning_in_progress", [])
+        if not new_files and not in_progress:
+            return False
+
+        # Find best topic - topic with most unfinished files
+        topic_map = self._knowledge_analyzer.get_topic_file_map()
+        if not topic_map:
+            # No topics available (no learned content yet) - skip topic selection
+            return False
+
+        # Get file statuses from snapshot
+        completed_files = set()
+        by_status = snapshot.get("files_by_status", {})
+        for rec in by_status.get("completed", []):
+            completed_files.add(rec.get("id", rec.get("file", "")))
+
+        # Count unfinished files per topic
+        topic_scores = {}
+        for topic, files in topic_map.items():
+            unfinished = [f for f in files if f not in completed_files]
+            if unfinished:
+                topic_scores[topic] = len(unfinished)
+
+        if not topic_scores:
+            return False
+
+        # Pick topic with most unfinished files
+        best_topic = max(topic_scores, key=topic_scores.get)
+
+        # Don't duplicate existing LEARNING goals with same topic
+        for g in learning_goals:
+            existing_topics = g.metadata.get("topics", [])
+            if best_topic in existing_topics:
+                return False
+
+        # Create the goal
+        from agent_core.goals.goal_model import (
+            GoalType, GoalStatus, create_goal,
+        )
+
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description=f"Nauka tematu: {best_topic}",
+            priority=0.8,
+            status=GoalStatus.ACTIVE,
+            created_by="planner",
+            metadata={
+                "topics": [best_topic],
+                "source": "auto",
+                "unfinished_files": topic_scores[best_topic],
+            },
+        )
+        self._goal_store.create(goal)
+        self._goal_store.save()
+
+        logger.info(
+            f"[Planner] Auto-created LEARNING goal: {best_topic} "
+            f"({topic_scores[best_topic]} unfinished files)"
+        )
+        return True
 
     # -- Internal: human-readable messages -------------------
 

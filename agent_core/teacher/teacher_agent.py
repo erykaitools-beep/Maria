@@ -60,6 +60,7 @@ class TeacherAgent:
         self._nim_planning_used = 0
         self._running = False
         self._iteration = 0
+        self._filter_file_ids: Optional[set] = None
 
         # Session stats
         self._stats = {
@@ -96,6 +97,7 @@ class TeacherAgent:
         self,
         max_iterations: int = 10,
         callback: Optional[Callable[[int, str, Dict], None]] = None,
+        filter_file_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Run autonomous learning session.
@@ -103,14 +105,20 @@ class TeacherAgent:
         Args:
             max_iterations: Max decision-execute cycles
             callback: Optional fn(iteration, strategy_type, result) called after each step
+            filter_file_ids: Optional list of file IDs to restrict learning to.
+                If provided, Teacher only considers files in this list.
+                If filtering removes all candidates, returns IDLE with reason.
 
         Returns:
             Session stats dict
         """
         self._running = True
         self._iteration = 0
+        self._filter_file_ids = set(filter_file_ids) if filter_file_ids else None
 
         logger.info(f"[TEACHER] Starting session (max {max_iterations} iterations)")
+        if self._filter_file_ids:
+            logger.info(f"[TEACHER] Topic filter active: {len(self._filter_file_ids)} files")
 
         while self._running and self._iteration < max_iterations:
             self._iteration += 1
@@ -160,6 +168,15 @@ class TeacherAgent:
     # Decision engine (priorities 1-6)
     # ──────────────────────────────────────────────
 
+    def _filter_records(self, records: List[Dict]) -> List[Dict]:
+        """Filter file records by topic filter if active."""
+        if self._filter_file_ids is None:
+            return records
+        return [
+            r for r in records
+            if r.get("id", r.get("file", "")) in self._filter_file_ids
+        ]
+
     def _decide_next_strategy(
         self, snapshot: Dict[str, Any], iteration: int
     ) -> Optional[TeachingStrategy]:
@@ -173,11 +190,14 @@ class TeacherAgent:
         4. Spaced repetition review
         5. Retry hard topic
         6. NIM gap analysis
+
+        If filter_file_ids is set, all candidate lists are filtered first.
+        If filtering removes all candidates, returns None with IDLE logged.
         """
         by_status = snapshot.get("files_by_status", {})
 
         # P1: Continue partial learning
-        in_progress = by_status.get("learning", [])
+        in_progress = self._filter_records(by_status.get("learning", []))
         if in_progress:
             target = in_progress[0]
             file_id = target.get("id", target.get("file", ""))
@@ -190,7 +210,7 @@ class TeacherAgent:
             )
 
         # P2: Examine ready files
-        ready_for_exam = by_status.get("learned", [])
+        ready_for_exam = self._filter_records(by_status.get("learned", []))
         if ready_for_exam:
             target = ready_for_exam[0]
             file_id = target.get("id", target.get("file", ""))
@@ -201,7 +221,9 @@ class TeacherAgent:
             )
 
         # P3: Start new file
-        new_files = snapshot.get("new_files_available", [])
+        new_files = self._filter_records(
+            snapshot.get("new_files_available", [])
+        )
         if new_files:
             target = new_files[0]  # Already sorted by priority (desc)
             file_id = target.get("id", target.get("file", ""))
@@ -213,7 +235,9 @@ class TeacherAgent:
             )
 
         # P4: Spaced repetition
-        due_reviews = self.scheduler.get_due_reviews(snapshot)
+        due_reviews = self._filter_records(
+            self.scheduler.get_due_reviews(snapshot)
+        )
         if due_reviews:
             target = due_reviews[0]
             file_id = target.get("id", target.get("file", ""))
@@ -226,7 +250,7 @@ class TeacherAgent:
             )
 
         # P5: Retry hard topic
-        hard_topics = by_status.get("hard_topic", [])
+        hard_topics = self._filter_records(by_status.get("hard_topic", []))
         completed_count = len(by_status.get("completed", []))
         # Only retry hard topics after some successful completions
         if hard_topics and completed_count >= 3:
@@ -239,13 +263,30 @@ class TeacherAgent:
                         "attempts": target.get("exam_attempts", 0)},
             )
 
-        # P6: NIM gap analysis
-        if self._nim_planning_used < self._max_nim_planning:
+        # P6: NIM gap analysis (skip if topic-filtered - NIM doesn't know about filter)
+        if self._filter_file_ids is None and self._nim_planning_used < self._max_nim_planning:
             strategy = self._nim_analyze_gaps(snapshot)
             if strategy:
                 return strategy
 
-        # Nothing to do
+        # Nothing to do - log reason if filtered
+        if self._filter_file_ids is not None:
+            # Count how many total candidates were filtered out
+            total_unfiltered = (
+                len(by_status.get("learning", []))
+                + len(by_status.get("learned", []))
+                + len(snapshot.get("new_files_available", []))
+                + len(by_status.get("hard_topic", []))
+            )
+            if total_unfiltered > 0:
+                logger.info(
+                    f"[TEACHER] IDLE: filtered_out_all_candidates "
+                    f"(removed {total_unfiltered} candidates, "
+                    f"filter has {len(self._filter_file_ids)} file_ids)"
+                )
+                self._stats["idle_reason"] = "filtered_out_all_candidates"
+                self._stats["filtered_out_count"] = total_unfiltered
+
         return None
 
     def _nim_analyze_gaps(

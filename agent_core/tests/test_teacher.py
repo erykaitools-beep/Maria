@@ -1074,3 +1074,283 @@ class TestTeacherAutoTrigger:
         core._teacher_thread.join(timeout=5)
 
         assert core._teacher_last_run >= before
+
+
+# ══════════════════════════════════════════════════════
+# Topic Awareness - KnowledgeAnalyzer
+# ══════════════════════════════════════════════════════
+
+
+class TestNormalizeTag:
+    """Tests for KnowledgeAnalyzer._normalize_tag()."""
+
+    def test_basic_normalization(self):
+        assert KnowledgeAnalyzer._normalize_tag("Fizyka") == "fizyka"
+        assert KnowledgeAnalyzer._normalize_tag("  LOGIKA  ") == "logika"
+
+    def test_rejects_stop_words(self):
+        assert KnowledgeAnalyzer._normalize_tag("inne") is None
+        assert KnowledgeAnalyzer._normalize_tag("Ogolne") is None
+        assert KnowledgeAnalyzer._normalize_tag("WIEDZA") is None
+        assert KnowledgeAnalyzer._normalize_tag("misc") is None
+
+    def test_rejects_short_tags(self):
+        assert KnowledgeAnalyzer._normalize_tag("x") is None
+        assert KnowledgeAnalyzer._normalize_tag("") is None
+
+    def test_rejects_long_tags(self):
+        assert KnowledgeAnalyzer._normalize_tag("a" * 41) is None
+
+    def test_accepts_valid_tags(self):
+        assert KnowledgeAnalyzer._normalize_tag("ab") == "ab"
+        assert KnowledgeAnalyzer._normalize_tag("a" * 40) == "a" * 40
+        assert KnowledgeAnalyzer._normalize_tag("fizyka kwantowa") == "fizyka kwantowa"
+
+
+def _make_memory_record(source_file, tags):
+    """Create a longterm memory record with tags."""
+    return {
+        "source_file": source_file,
+        "chunk_id": f"{source_file}#chunk_0",
+        "chunk_index": 0,
+        "summary": "test summary",
+        "tags": tags,
+        "timestamp": "2026-03-01T12:00:00Z",
+    }
+
+
+class TestTopicFileMap:
+    """Tests for KnowledgeAnalyzer.get_topic_file_map()."""
+
+    def test_basic_map(self, tmp_path):
+        mem_path = tmp_path / "memory.jsonl"
+        _write_jsonl(mem_path, [
+            _make_memory_record("fizyka.txt", ["fizyka", "mechanika"]),
+            _make_memory_record("fizyka2.txt", ["fizyka", "optyka"]),
+            _make_memory_record("logika.txt", ["logika"]),
+        ])
+
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "idx.jsonl",
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        topic_map = analyzer.get_topic_file_map()
+
+        assert "fizyka" in topic_map
+        assert len(topic_map["fizyka"]) == 2
+        assert "logika" in topic_map
+        assert len(topic_map["logika"]) == 1
+
+    def test_empty_memory(self, tmp_path):
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "idx.jsonl",
+            longterm_memory_path=tmp_path / "empty_mem.jsonl",
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        assert analyzer.get_topic_file_map() == {}
+
+    def test_cache_ttl(self, tmp_path):
+        mem_path = tmp_path / "memory.jsonl"
+        _write_jsonl(mem_path, [
+            _make_memory_record("file1.txt", ["tag1"]),
+        ])
+
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "idx.jsonl",
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        result1 = analyzer.get_topic_file_map()
+        assert "tag1" in result1
+
+        # Add more data
+        _write_jsonl(mem_path, [
+            _make_memory_record("file1.txt", ["tag1"]),
+            _make_memory_record("file2.txt", ["tag2"]),
+        ])
+
+        # Same result (cached)
+        result2 = analyzer.get_topic_file_map()
+        assert result2 is result1  # Same object = cache hit
+
+        # Expire cache
+        analyzer._topic_map_cache_ts = 0.0
+        result3 = analyzer.get_topic_file_map()
+        assert "tag2" in result3  # Now sees the new data
+
+    def test_stop_words_excluded(self, tmp_path):
+        mem_path = tmp_path / "memory.jsonl"
+        _write_jsonl(mem_path, [
+            _make_memory_record("file.txt", ["fizyka", "inne", "wiedza"]),
+        ])
+
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "idx.jsonl",
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        topic_map = analyzer.get_topic_file_map()
+        assert "fizyka" in topic_map
+        assert "inne" not in topic_map
+        assert "wiedza" not in topic_map
+
+
+class TestGetFilesForTopics:
+    """Tests for KnowledgeAnalyzer.get_files_for_topics() with scoring."""
+
+    def _make_analyzer(self, tmp_path, mem_records, idx_records=None):
+        mem_path = tmp_path / "memory.jsonl"
+        idx_path = tmp_path / "idx.jsonl"
+        _write_jsonl(mem_path, mem_records)
+        if idx_records:
+            _write_jsonl(idx_path, idx_records)
+        return KnowledgeAnalyzer(
+            knowledge_index_path=idx_path,
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+
+    def test_exact_match_scores_highest(self, tmp_path):
+        """Exact tag match gets +3.0."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("exact.txt", ["fizyka"]),
+            _make_memory_record("partial.txt", ["fizyka kwantowa"]),
+        ])
+        results = analyzer.get_files_for_topics(["fizyka"])
+        assert len(results) == 2
+        # exact.txt should score higher (exact=3 vs prefix=2)
+        assert results[0][0] == "exact.txt"
+        assert results[0][1] > results[1][1]
+
+    def test_prefix_vs_substring_scoring(self, tmp_path):
+        """'fizyk' should prefer 'fizyka kwantowa' (prefix=2) over 'metafizyka' (substring=1)."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("fizyka_file.txt", ["fizyka kwantowa"]),
+            _make_memory_record("meta_file.txt", ["metafizyka"]),
+        ])
+        results = analyzer.get_files_for_topics(["fizyk"])
+        assert len(results) == 2
+        # fizyka_file scores higher: prefix(2) > substring(1)
+        assert results[0][0] == "fizyka_file.txt"
+        assert results[0][1] > results[1][1]
+
+    def test_filename_fallback(self, tmp_path):
+        """File with matching name gets +0.5 even without tag match."""
+        analyzer = self._make_analyzer(tmp_path, [], idx_records=[
+            _make_index_record("fizyka_intro.txt"),
+            _make_index_record("matematyka.txt"),
+        ])
+        results = analyzer.get_files_for_topics(["fizyka"])
+        assert len(results) == 1
+        assert results[0][0] == "fizyka_intro.txt"
+        assert results[0][1] == 0.5
+
+    def test_empty_topics(self, tmp_path):
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("file.txt", ["tag"]),
+        ])
+        assert analyzer.get_files_for_topics([]) == []
+        assert analyzer.get_files_for_topics([""]) == []
+
+    def test_case_insensitive(self, tmp_path):
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("file.txt", ["Fizyka"]),
+        ])
+        results = analyzer.get_files_for_topics(["FIZYKA"])
+        assert len(results) == 1
+
+
+class TestSnapshotTopicsAvailable:
+    """Test that get_knowledge_snapshot() includes topics_available."""
+
+    def test_snapshot_has_topics(self, tmp_path):
+        mem_path = tmp_path / "memory.jsonl"
+        idx_path = tmp_path / "idx.jsonl"
+        _write_jsonl(mem_path, [
+            _make_memory_record("f1.txt", ["fizyka", "optyka"]),
+        ])
+        _write_jsonl(idx_path, [
+            _make_index_record("f1.txt", status="completed"),
+        ])
+        (tmp_path / "input").mkdir(exist_ok=True)
+
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=idx_path,
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        snapshot = analyzer.get_knowledge_snapshot()
+        assert "topics_available" in snapshot
+        assert "fizyka" in snapshot["topics_available"]
+        assert "optyka" in snapshot["topics_available"]
+
+
+# ══════════════════════════════════════════════════════
+# Topic Filtering - TeacherAgent
+# ══════════════════════════════════════════════════════
+
+
+class TestTeacherTopicFilter:
+    """Tests for filter_file_ids in TeacherAgent."""
+
+    def test_filter_selects_matching_file(self, tmp_path):
+        """With filter, Teacher picks only matching files."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("fizyka.txt", status="new", priority=90),
+            _make_index_record("historia.txt", status="new", priority=100),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+
+        status = agent.run_session(
+            max_iterations=1,
+            filter_file_ids=["fizyka.txt"],
+        )
+        stats = status.get("stats", {})
+        assert stats["chunks_learned"] == 1
+        assert stats["strategies_executed"] == 1
+
+    def test_filter_blocks_all_candidates_idle(self, tmp_path):
+        """When filter removes all candidates, Teacher goes IDLE."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("historia.txt", status="new", priority=100),
+        ])
+        status = agent.run_session(
+            max_iterations=1,
+            filter_file_ids=["fizyka.txt"],
+        )
+        stats = status.get("stats", {})
+        assert stats["strategies_executed"] == 0
+        assert stats.get("idle_reason") == "filtered_out_all_candidates"
+        assert stats.get("filtered_out_count", 0) > 0
+
+    def test_filter_blocks_p1_in_progress(self, tmp_path):
+        """Filter blocks P1 continue_partial if file not in filter."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("historia.txt", status="learning",
+                               chunks_learned=1, total_chunks=3),
+        ])
+        status = agent.run_session(
+            max_iterations=1,
+            filter_file_ids=["fizyka.txt"],
+        )
+        stats = status.get("stats", {})
+        assert stats["strategies_executed"] == 0
+        assert stats.get("idle_reason") == "filtered_out_all_candidates"
+
+    def test_no_filter_backward_compatible(self, tmp_path):
+        """Without filter, Teacher works as before."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new", priority=50),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+
+        status = agent.run_session(max_iterations=1)
+        stats = status.get("stats", {})
+        assert stats["chunks_learned"] == 1

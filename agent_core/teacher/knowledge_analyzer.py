@@ -9,10 +9,22 @@ Used by TeacherAgent to make informed decisions about what to learn next.
 
 import json
 import logging
+import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Tag normalization
+_TAG_STOP_WORDS = {
+    "inne", "ogolne", "wiedza", "other", "general", "misc",
+    "rozne", "notatki", "tekst", "plik",
+}
+_TAG_MIN_LEN = 2
+_TAG_MAX_LEN = 40
+
+# Cache TTL for topic map (seconds)
+_TOPIC_MAP_CACHE_TTL = 60
 
 
 class KnowledgeAnalyzer:
@@ -42,6 +54,10 @@ class KnowledgeAnalyzer:
         self.memory_path = Path(longterm_memory_path or LONGTERM_MEMORY)
         self.exam_path = Path(exam_results_path or EXAM_RESULTS)
         self.input_dir = Path(input_dir or INPUT_DIR)
+
+        # Cache for topic file map
+        self._topic_map_cache: Optional[Dict[str, List[str]]] = None
+        self._topic_map_cache_ts: float = 0.0
 
     def _load_jsonl(self, path: Path) -> List[Dict[str, Any]]:
         """Load records from a JSONL file."""
@@ -100,6 +116,10 @@ class KnowledgeAnalyzer:
         if self.input_dir.exists():
             input_count = len(list(self.input_dir.glob("*.txt")))
 
+        # Topics from cached topic map
+        topic_map = self.get_topic_file_map()
+        topics_available = list(topic_map.keys())
+
         return {
             "files_by_status": files_by_status,
             "total_files": len(index),
@@ -115,6 +135,7 @@ class KnowledgeAnalyzer:
             "learning_in_progress": files_by_status.get("learning", []),
             "learned_ready_for_exam": files_by_status.get("learned", []),
             "input_file_count": input_count,
+            "topics_available": topics_available,
         }
 
     def get_file_details(self, file_id: str) -> Optional[Dict[str, Any]]:
@@ -271,6 +292,131 @@ class KnowledgeAnalyzer:
                     tag_counts[tag_lower] = tag_counts.get(tag_lower, 0) + 1
 
         return dict(sorted(tag_counts.items(), key=lambda x: x[1], reverse=True))
+
+    # -- Topic awareness ------------------------------------
+
+    @staticmethod
+    def _normalize_tag(tag: str) -> Optional[str]:
+        """Normalize a tag for topic matching. Returns None if rejected."""
+        normalized = tag.lower().strip()
+        if len(normalized) < _TAG_MIN_LEN or len(normalized) > _TAG_MAX_LEN:
+            return None
+        if normalized in _TAG_STOP_WORDS:
+            return None
+        return normalized
+
+    def get_topic_file_map(self) -> Dict[str, List[str]]:
+        """
+        Build mapping: normalized_tag -> [file_id, ...].
+
+        Reads longterm_memory.jsonl and extracts tags per source_file.
+        Cached with TTL to avoid recalculating every tick.
+
+        Returns:
+            Dict sorted by file count (most files first).
+        """
+        now = time.time()
+        if (self._topic_map_cache is not None
+                and (now - self._topic_map_cache_ts) < _TOPIC_MAP_CACHE_TTL):
+            return self._topic_map_cache
+
+        memories = self._load_jsonl(self.memory_path)
+        topic_files: Dict[str, set] = {}
+
+        for mem in memories:
+            source = mem.get("source_file", "")
+            if not source:
+                continue
+            for tag in mem.get("tags", []):
+                normalized = self._normalize_tag(tag)
+                if normalized is not None:
+                    topic_files.setdefault(normalized, set()).add(source)
+
+        # Sort by file count descending, convert sets to sorted lists
+        result = {
+            topic: sorted(files)
+            for topic, files in sorted(
+                topic_files.items(),
+                key=lambda x: len(x[1]),
+                reverse=True,
+            )
+        }
+
+        self._topic_map_cache = result
+        self._topic_map_cache_ts = now
+        return result
+
+    def get_files_for_topics(
+        self, topics: List[str]
+    ) -> List[Tuple[str, float]]:
+        """
+        Find files matching given topics with scoring.
+
+        Scoring (deterministic):
+        - exact tag match: +3.0
+        - prefix match (tag starts with topic): +2.0
+        - substring match (topic in tag): +1.0
+        - filename contains topic: +0.5
+
+        All comparisons case-insensitive.
+
+        Args:
+            topics: List of topic search terms
+
+        Returns:
+            List of (file_id, score) sorted by score descending.
+            Only files with score > 0 included.
+        """
+        topic_map = self.get_topic_file_map()
+        index_records = self._load_jsonl(self.index_path)
+
+        # All known file IDs from index
+        all_file_ids = set()
+        for rec in index_records:
+            fid = rec.get("id", rec.get("file", ""))
+            if fid:
+                all_file_ids.add(fid)
+
+        # Also include files from topic_map not yet in index
+        for files in topic_map.values():
+            all_file_ids.update(files)
+
+        file_scores: Dict[str, float] = {}
+        topics_lower = [t.lower().strip() for t in topics if t.strip()]
+
+        if not topics_lower:
+            return []
+
+        # Score from tag matching
+        for tag, files in topic_map.items():
+            for topic in topics_lower:
+                score = 0.0
+                if tag == topic:
+                    score = 3.0
+                elif tag.startswith(topic):
+                    score = 2.0
+                elif topic in tag:
+                    score = 1.0
+
+                if score > 0:
+                    for fid in files:
+                        file_scores[fid] = file_scores.get(fid, 0.0) + score
+
+        # Score from filename matching
+        for fid in all_file_ids:
+            fid_lower = fid.lower()
+            for topic in topics_lower:
+                if topic in fid_lower:
+                    file_scores[fid] = file_scores.get(fid, 0.0) + 0.5
+
+        # Sort by score descending, then alphabetically for stability
+        results = [
+            (fid, score)
+            for fid, score in file_scores.items()
+            if score > 0
+        ]
+        results.sort(key=lambda x: (-x[1], x[0]))
+        return results
 
     def get_compact_summary(self) -> str:
         """
