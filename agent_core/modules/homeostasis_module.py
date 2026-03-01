@@ -93,6 +93,25 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"GoalStore not initialized: {e}")
 
+        # Initialize EvaluationObserver (Kontrakt K4, READ-ONLY)
+        try:
+            from maria_core.sys.config import BASE_DIR, KNOWLEDGE_INDEX, EXAM_RESULTS
+            from agent_core.evaluation.observer import EvaluationObserver
+
+            meta = BASE_DIR / "meta_data"
+            eval_observer = EvaluationObserver(
+                knowledge_index_path=KNOWLEDGE_INDEX,
+                exam_results_path=EXAM_RESULTS,
+                teacher_plans_path=meta / "teacher_plans.jsonl",
+                homeostasis_events_path=meta / "homeostasis_events.jsonl",
+                personality_experiences_path=meta / "personality_experiences.jsonl",
+                reports_path=meta / "evaluation_reports.jsonl",
+            )
+            ctx.evaluation_observer = eval_observer
+            print("[Homeostasis] [OK] EvaluationObserver initialized (READ-ONLY)")
+        except Exception as e:
+            logger.debug(f"EvaluationObserver not initialized: {e}")
+
         # Pass semantic_memory to core for sleep processing
         if core and ctx.semantic_memory:
             session_id = 0
