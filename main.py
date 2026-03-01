@@ -164,6 +164,10 @@ def register_modules(registry):
         from agent_core.modules.teacher_module import TeacherModule
         return TeacherModule()
 
+    def make_planner():
+        from agent_core.modules.planner_module import PlannerModule
+        return PlannerModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
@@ -173,6 +177,7 @@ def register_modules(registry):
     registry.try_register(make_consciousness, "consciousness")
     registry.try_register(make_awareness, "awareness")
     registry.try_register(make_teacher, "teacher")
+    registry.try_register(make_planner, "planner")
 
 
 # ====== POMOC ======

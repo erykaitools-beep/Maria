@@ -1,6 +1,6 @@
 # M.A.R.I.A. - Kontrakty Architektoniczne
 
-> Version: 1.2 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja)
+> Version: 1.3 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja), v1.3 (Kontrakt K5: Planner)
 > Zatwierdzone przez: Eryk + Claude
 >
 > Ten dokument definiuje formalne kontrakty ("konstytucje") dla nowych warstw systemu.
@@ -14,9 +14,10 @@
 2. [Sandbox / Production Boundary](#kontrakt-2-sandbox--production-boundary)
 3. [Goal System](#kontrakt-3-goal-system)
 4. [Agent Evaluation](#kontrakt-4-agent-evaluation)
-5. [Decyzja: Tick Aggregator](#decyzja-5-tick-aggregator)
-6. [Struktura plikow](#struktura-plikow)
-7. [Integracja z istniejacym kodem](#integracja)
+5. [Planner - ReAct Loop](#kontrakt-5-planner)
+6. [Decyzja: Tick Aggregator](#decyzja-5-tick-aggregator)
+7. [Struktura plikow](#struktura-plikow)
+8. [Integracja z istniejacym kodem](#integracja)
 
 ---
 
@@ -762,6 +763,209 @@ Sugestie to `List[GoalAdjustment]` ktore GoalStore moze przyjac lub zignorowac.
 
 ---
 
+## Kontrakt 5: Planner
+
+### Problem
+
+K1-K4 daly Marii percepcje, sandbox, cele i ewaluacje - ale nie ma "sprawcy" ktory to laczy.
+Teacher (P1-P6) dziala na if/elif chain z hardcoded priorytetami, Phase 10 tick loop
+odpala go co 10min idle. Brak centralnej petli decyzyjnej.
+
+### Rozwiazanie: Rule-based ReAct Loop (ADR-013)
+
+Planner v1 = deterministyczny, rule-based, zero LLM. Testable i przewidywalny.
+
+```
+OBSERVE -> THINK -> ACT -> EVALUATE
+   |                          |
+   +-------- REPEAT ----------+
+```
+
+- **OBSERVE:** Odczytaj PerceptionBuffer (K1), GoalStore (K3), EvaluationObserver (K4)
+- **THINK:** GoalSelector wybiera cel, PlannerGuard sprawdza gating rules
+- **ACT:** ActionExecutor deleguje do Teacher/Sandbox (K2)
+- **EVALUATE:** Emit PerceptionEvent(PLANNER), log decision
+
+### Planner zastepuje Phase 10
+
+Phase 10 tick loop (teacher auto-trigger) zostaje zastapiona PlannerCore:
+- Jesli PlannerCore podlaczony: `planner.run_cycle(tick)` w Phase 10
+- Jesli nie: fallback na stary `_check_teacher_trigger()` (backward-compatible)
+
+### Model danych
+
+```python
+class PlanStatus(Enum):
+    PENDING = "pending"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class ActionType(Enum):
+    LEARN = "learn"          # Deleguj nauke do Teacher
+    EXAM = "exam"            # Deleguj egzamin do Teacher
+    REVIEW = "review"        # Deleguj powtorke do Teacher
+    EVALUATE = "evaluate"    # Wygeneruj raport K4
+    MAINTENANCE = "maintenance"  # Sprawdz metryki zdrowia
+    NOOP = "noop"            # Nic do zrobienia
+
+
+@dataclass
+class Plan:
+    """Pojedynczy krok planowania (nie drzewo/graf)."""
+    plan_id: str             # UUID
+    timestamp: float
+    goal_id: Optional[str]   # Cel ktory realizuje
+    goal_description: str
+    action_type: ActionType
+    action_params: Dict[str, Any]
+    status: PlanStatus
+    result: Dict[str, Any] = field(default_factory=dict)
+    trace_id: Optional[str] = None  # Opcjonalny (per ChatGPT review)
+    duration_ms: float = 0.0
+
+
+@dataclass
+class PlannerState:
+    """Stan persystentny Plannera (planner_state.json)."""
+    total_cycles: int = 0
+    total_plans: int = 0
+    last_plan_id: Optional[str] = None
+    last_evaluation_ts: float = 0.0
+    last_cycle_ts: float = 0.0
+```
+
+### Planner Guard (gating rules)
+
+Planner NIE planuje jesli warunki nie sa spelnione:
+
+| Regula | Warunek blokujacy | Uzasadnienie |
+|--------|-------------------|-------------|
+| Health | `health_score < 0.7` | System nie zdrowy - nie obciazaj |
+| Mode | `mode != ACTIVE` | W REDUCED/SLEEP/SURVIVAL nie planuj nauki |
+| Sandbox | Aktywna sesja sandbox | Poczekaj na promote/discard |
+| Retention | `retention_rate < 0.5` | Za duzo oblanych - nie dodawaj nowej nauki |
+| Teacher | Teacher thread aktywny | Nie interferuj z biezaca sesja |
+
+```python
+class PlannerGuard:
+    def can_plan(self, health, mode, sandbox_active,
+                 retention, teacher_running) -> Tuple[bool, List[str]]:
+        """Zwraca (can_plan, list_of_block_reasons)."""
+```
+
+### Goal Selector (aging factor)
+
+Zapobiega starvation (dlugo czekajacy cel jest promowany):
+
+```python
+effective_priority = priority * (1.0 + min(hours_pending * 0.1, 4.0))
+```
+
+- Po 1h pending: x1.1
+- Po 10h pending: x2.0
+- Po 24h pending: x3.4
+- Max: x5.0 (clamp)
+
+Feasibility check per goal type:
+- MAINTENANCE / META / USER: zawsze feasible
+- LEARNING: wymaga dostepnych plikow do nauki
+
+### Action Executor
+
+Planner decyduje CO, Executor robi JAK:
+
+| ActionType | Delegacja |
+|-----------|-----------|
+| LEARN / EXAM / REVIEW | `TeacherAgent.run_session(max_iterations=1)` |
+| EVALUATE | `EvaluationObserver.generate_report()` |
+| MAINTENANCE | Update goal progress z system metrics |
+| NOOP | Nic nie rob |
+
+### Hybrid Frequency
+
+| Trigger | Warunek | Opis |
+|---------|---------|------|
+| Routine | Co 60 tickow (~1min) | Regularny cykl planowania |
+| Event-driven | `exam_result` | Natychmiast po egzaminie |
+| Event-driven | `alert` | Natychmiast na alert |
+| Event-driven | `user_command` | Natychmiast na komende usera |
+| Event-driven | `sandbox_promoted` | Natychmiast po promote |
+
+### Percepcja (nowe typy)
+
+PerceptionSource += `PLANNER`
+
+| event_type | source | priority | ttl | dedup | Payload |
+|-----------|--------|----------|-----|-------|---------|
+| `planner_decision` | PLANNER | 0.5 | 300s | nie | `plan_id`, `goal_id`, `action_type`, `goal_description` |
+| `planner_cycle_complete` | PLANNER | 0.3 | 60s | tak | `tick`, `planned`, `guard_blocked`, `no_goals` |
+
+### Persystencja
+
+| Plik | Format | Opis |
+|------|--------|------|
+| `meta_data/planner_state.json` | JSON | Biezacy stan (cykle, ostatni plan) |
+| `meta_data/planner_decisions.jsonl` | JSONL (append) | Historia decyzji |
+
+### Cooldown
+
+- Evaluation co 1h (nie czesciej) - anty-oscylacja na recommendations
+- Planner Guard blokuje planowanie nauki gdy retention < 0.5
+
+### REPL commands
+
+| Komenda | Opis |
+|---------|------|
+| `/plan` | Ostatnia decyzja plannera |
+| `/plan status` | Cykle, plany, ostatni eval |
+| `/plan history [N]` | Historia decyzji (domyslnie 10) |
+| `/plan goals` | Ranking celow wg effective priority |
+
+### Struktura plikow
+
+```
+agent_core/planner/
+  __init__.py
+  planner_model.py     # Plan, PlanStatus, ActionType, PlannerState
+  planner_guard.py     # PlannerGuard.can_plan() - 5 gating rules
+  goal_selector.py     # GoalSelector.select_goal() - aging + feasibility
+  action_executor.py   # ActionExecutor.execute() - delegacja
+  planner_core.py      # PlannerCore - centralny ReAct loop
+
+agent_core/modules/
+  planner_module.py    # REPL /plan commands
+```
+
+### Modyfikacje istniejacych plikow
+
+| Plik | Zmiana |
+|------|--------|
+| `agent_core/perception/event.py` | +PLANNER source, +2 event types |
+| `agent_core/registry/shared_context.py` | +planner_core field |
+| `agent_core/homeostasis/core.py` | Phase 10: planner z fallbackiem na teacher |
+| `agent_core/modules/homeostasis_module.py` | Wire PlannerCore |
+| `main.py` | `registry.try_register(make_planner, "planner")` |
+
+### Nowe ADR
+
+| ADR | Decyzja |
+|-----|---------|
+| **ADR-013** | Planner v1 rule-based (zero LLM, deterministic, testable) |
+
+### Czego NIE obejmuje (v1)
+
+- Brak LLM w petli decyzyjnej (rule-based only)
+- Brak multi-step planow (Plan = single step)
+- Brak drzew/grafow planowania
+- Brak priorytyzacji miedzy rownoleglymi celami (sekwencyjny)
+- Brak rollback planow (failed = log + next cycle)
+- Brak auto-generowania celow (to domena GoalStore)
+
+---
+
 ## Decyzja 5: Tick Aggregator (ADR-009)
 
 ### Pytanie
@@ -871,8 +1075,16 @@ agent_core/
     __init__.py
     observer.py                 # EvaluationObserver (READ-ONLY)
     report.py                   # EvaluationReport schema
+  planner/
+    __init__.py
+    planner_model.py            # Plan, PlanStatus, ActionType, PlannerState
+    planner_guard.py            # PlannerGuard (5 gating rules)
+    goal_selector.py            # GoalSelector (aging + feasibility)
+    action_executor.py          # ActionExecutor (delegacja)
+    planner_core.py             # PlannerCore (ReAct loop)
   modules/
-    evaluation_module.py        # REPL /evaluate command (nowy)
+    evaluation_module.py        # REPL /evaluate command
+    planner_module.py           # REPL /plan commands
 ```
 
 ### Dane (nowe pliki JSONL)
@@ -881,6 +1093,8 @@ agent_core/
 meta_data/
   goals.jsonl                   # Goal records (append-only)
   evaluation_reports.jsonl      # Evaluation reports (append-only)
+  planner_state.json            # Planner current state (K5)
+  planner_decisions.jsonl       # Planner decision history (K5, append-only)
   sandbox/                      # Katalog sandbox sesji
     sess_<uuid>/                # Jedna sesja
       knowledge_index.jsonl
@@ -910,9 +1124,11 @@ meta_data/
 | **ADR-010** | Sandbox-first learning (kazda nauka przez sandbox, promote jako jedyny most) |
 | **ADR-011** | Goals as data (cele sa obiektami danych z audit trail, nie hardcoded logika) |
 | **ADR-012** | Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta) |
+| **ADR-013** | Planner v1 rule-based (zero LLM, deterministyczny, testowalny) |
 
 ---
 
 *Utworzono: 2026-03-01*
 *Zatwierdzone przez: Eryk + Claude*
-*Nastepny krok: Implementacja wg `docs/DEVELOPMENT_PLAN.md` Warstwa 1 (Unified Perception)*
+*Warstwa 1 (K1-K4): Zaimplementowana (941 testow)*
+*Warstwa 2 (K5 Planner): Zaimplementowana (1023 testow)*

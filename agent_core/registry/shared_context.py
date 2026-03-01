@@ -32,6 +32,7 @@ class SharedContext:
     sandbox_manager: Any = None    # SandboxManager (Kontrakt K2)
     goal_store: Any = None         # GoalStore (Kontrakt K3)
     evaluation_observer: Any = None  # EvaluationObserver (Kontrakt K4)
+    planner_core: Any = None         # PlannerCore (Warstwa 2, Kontrakt K5)
 
     # REPL state
     last_result: Any = None

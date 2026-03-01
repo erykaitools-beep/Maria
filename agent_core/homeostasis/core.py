@@ -12,7 +12,7 @@ Phases per tick:
 6. HEALTH: Update aggregate health score
 7. PERCEIVE: Aggregate sensor events + external events into PerceptionBuffer
 8. AUDIT: Log state and decisions
-9. TEACHER: Auto-trigger learning during idle
+9. PLAN: Planner cycle (or teacher fallback when no planner)
 
 Spec reference: homeostasis_spec.md section 7.1 (lines 1289-1478)
 ADR-009: Tick Aggregator (perception via tick loop, not event bus)
@@ -136,6 +136,9 @@ class HomeostasisCore:
         self._teacher_thread: Optional[threading.Thread] = None
         self._teacher_last_run = 0.0
 
+        # Planner (Warstwa 2 - replaces teacher auto-trigger when wired)
+        self._planner_core = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -161,6 +164,15 @@ class HomeostasisCore:
             teacher_agent: TeacherAgent instance (with learn/exam fns already set)
         """
         self._teacher_agent = teacher_agent
+
+    def set_planner_core(self, planner_core) -> None:
+        """
+        Set planner for autonomous decision making during tick loop.
+
+        When planner is set, it replaces teacher auto-trigger in Phase 10.
+        Called from HomeostasisModule after init.
+        """
+        self._planner_core = planner_core
 
     def set_perception_buffer(self, buffer) -> None:
         """
@@ -348,9 +360,9 @@ class HomeostasisCore:
             self._log_state(interpreted_state)
 
         # ──────────────────────────────────────
-        # PHASE 10: TEACHER AUTO-TRIGGER
+        # PHASE 10: PLANNER (or teacher fallback)
         # ──────────────────────────────────────
-        self._check_teacher_trigger()
+        self._check_planner_trigger()
 
     def _aggregate_perception(
         self,
@@ -530,6 +542,30 @@ class HomeostasisCore:
             )
         except Exception as e:
             logger.warning(f"Sleep cycle failed: {e}")
+
+    def _check_planner_trigger(self) -> None:
+        """
+        Check if planner should run this tick.
+
+        Replaces Phase 10 teacher auto-trigger when planner is wired.
+        Planner handles its own frequency (every 60 ticks + event-driven).
+        Falls back to teacher auto-trigger if no planner configured.
+        """
+        if self._planner_core is None:
+            # Fallback: if no planner, use old teacher trigger
+            self._check_teacher_trigger()
+            return
+
+        try:
+            if self._planner_core.should_run(self._tick_count):
+                plan = self._planner_core.run_cycle(self._tick_count)
+                if plan:
+                    logger.debug(
+                        f"[PLANNER] Cycle complete: {plan.action_type.value} "
+                        f"-> {plan.status.value}"
+                    )
+        except Exception as e:
+            logger.warning(f"[PLANNER] Cycle error: {e}")
 
     def _check_teacher_trigger(self) -> None:
         """

@@ -19,6 +19,7 @@
 | **2026-02-27** | Consciousness Phase C: personality, dreams, conversation memory |
 | **2026-02-27** | Agent Nauczyciel + autonomiczny trigger w homeostasis |
 | **2026-03-01** | Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation |
+| **2026-03-01** | Warstwa 2: Planner (K5) - ReAct loop laczacy K1-K4 |
 
 ## Aktualny stan projektu
 
@@ -26,8 +27,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 941 passing |
-| **Faza wg ROADMAP** | C complete, Warstwa 1 (K1-K4) complete |
+| **Testy** | 1023 passing |
+| **Faza wg ROADMAP** | C complete, Warstwa 1 (K1-K4) complete, Warstwa 2 (K5 Planner) complete |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -58,11 +59,12 @@ project/
 │   ├── sandbox/         # Sandbox/Production boundary (K2): manager, protocol
 │   ├── goals/           # Goal System (K3): model, store, audit trail
 │   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
+│   ├── planner/         # Planner (K5): ReAct loop, guard, goal selector, executor
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 941 tests
+│   └── tests/           # 1023 tests
 └── docs/                # Documentation
 ```
 
@@ -143,16 +145,35 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
 
-## Kontrakty architektoniczne (K1-K4, 2026-03-01)
+## Kontrakty architektoniczne (K1-K5, 2026-03-01)
 
 Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
-- **K1 Unified Perception:** PerceptionEvent (frozen dataclass), 7 source types, 22 event types, PerceptionBuffer (deque maxlen=200), 6 adapterow, tick aggregator (ADR-009)
+- **K1 Unified Perception:** PerceptionEvent (frozen dataclass), 8 source types, 24 event types, PerceptionBuffer (deque maxlen=200), 6 adapterow, tick aggregator (ADR-009)
 - **K2 Sandbox:** Izolowane sesje nauki, promote() jako jedyny most do produkcji, transaction log (START/COMMIT/ROLLBACK), startup recovery
 - **K3 Goal System:** 4 typy celow (META/USER/LEARNING/MAINTENANCE), 6 statusow, audit trail, max 20 aktywnych, PROPOSED flow z izolacja
 - **K4 Evaluation:** READ-ONLY observer, 5 metryk (learning_velocity, retention_rate, knowledge_coverage, system_stability, personality_growth), threshold-based recommendations, zero LLM
+- **K5 Planner:** Rule-based ReAct loop (ADR-013), PlannerGuard (5 gating rules), GoalSelector (aging factor), ActionExecutor (delegacja do Teacher), hybrid frequency (60 ticks + event-driven), persystencja (planner_state.json + planner_decisions.jsonl)
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
+
+## Planner - Warstwa 2 (K5)
+
+System planowania (w `agent_core/planner/`) - pierwsza "warstwa sprawcza":
+
+- **PlannerCore:** Centralny ReAct loop (OBSERVE -> THINK -> ACT -> EVALUATE)
+- **PlannerGuard:** 5 gating rules (health, mode, sandbox, retention, teacher)
+- **GoalSelector:** Aging factor (priority *= 1 + hours * 0.1), feasibility check
+- **ActionExecutor:** Delegacja do Teacher/Sandbox/Observer
+- **Hybrid frequency:** Co 60 tickow + event-driven (exam_result, alert, user_command, sandbox_promoted)
+- **Zastepuje Phase 10:** Teacher trigger z backward-compatible fallbackiem
+- **Persystencja:** planner_state.json + planner_decisions.jsonl
+- **ADR-013:** Rule-based v1, zero LLM, deterministic, testable
+- **REPL commands:**
+  - `/plan` - ostatnia decyzja
+  - `/plan status` - cykle, plany, ostatni eval
+  - `/plan history [N]` - historia decyzji
+  - `/plan goals` - ranking celow wg effective priority
 
 ## Code Agent (planowany)
 
@@ -329,6 +350,7 @@ python run_ui.py
 - **ADR-010:** Sandbox-first learning (kazda nauka przez sandbox, promote jako jedyny most)
 - **ADR-011:** Goals as data (cele sa obiektami danych z audit trail, nie hardcoded logika)
 - **ADR-012:** Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta)
+- **ADR-013:** Planner v1 rule-based (zero LLM, deterministyczny, testowalny)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -575,4 +597,37 @@ agent_core/teacher/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-01 (Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation)*
+## Sesja 2026-03-01 (2/2) - Warstwa 2: Planner (K5)
+
+### Planner (ReAct loop laczacy K1-K4):
+- [x] PlannerModel: Plan, PlanStatus(5), ActionType(6), PlannerState
+- [x] PlannerGuard: 5 gating rules (health, mode, sandbox, retention, teacher)
+- [x] GoalSelector: aging factor + feasibility check
+- [x] ActionExecutor: delegacja LEARN/EXAM/REVIEW/EVALUATE/MAINTENANCE/NOOP
+- [x] PlannerCore: centralny ReAct loop, hybrid frequency, persystencja
+- [x] PerceptionSource += PLANNER, +2 event types
+- [x] Wiring: shared_context, core.py (Phase 10 replacement), homeostasis_module
+- [x] PlannerModule: REPL /plan, /plan status, /plan history, /plan goals
+- [x] main.py: registry.try_register(make_planner, "planner")
+- [x] 82 nowe testy, 1023 total passing
+- [x] Dokumentacja: CONTRACTS.md (K5), CLAUDE.md, ADR-013
+
+### Nowa struktura `agent_core/planner/`:
+```
+agent_core/planner/
+├── __init__.py
+├── planner_model.py     # Plan, PlanStatus, ActionType, PlannerState
+├── planner_guard.py     # PlannerGuard.can_plan() - 5 gating rules
+├── goal_selector.py     # GoalSelector.select_goal() - aging + feasibility
+├── action_executor.py   # ActionExecutor.execute() - delegacja
+└── planner_core.py      # PlannerCore - centralny ReAct loop
+```
+
+### ChatGPT review:
+- Potwierdzil architekture (rule-based v1, Phase 10 replacement, hybrid frequency)
+- Dodal: PlannerGuard, aging factor, cooldown na recommendations, trace_id optional
+- Review w `docs/PLANNER_BRIEF_FOR_REVIEW.md`
+
+---
+
+*Ostatnia aktualizacja: 2026-03-01 (Warstwa 2: Planner K5, 1023 testow)*

@@ -23,6 +23,7 @@ class PerceptionSource(Enum):
     EXAM = "exam"                    # run_exam_if_ready results
     CONSCIOUSNESS = "consciousness"  # trait evolution, sleep, dreams
     TEACHER = "teacher"              # TeacherAgent decisions
+    PLANNER = "planner"              # PlannerCore decisions (Warstwa 2)
     SYSTEM = "system"                # Mode changes, alerts, startup/shutdown
 
 
@@ -53,6 +54,9 @@ EVENT_TYPE_DEFAULTS: Dict[str, tuple] = {
     "trait_faded":               (0.5, 300.0, False),
     "dream_generated":           (0.5, 300.0, False),
     "sleep_cycle":               (0.5, 300.0, False),
+    # PLANNER events (Warstwa 2)
+    "planner_decision":          (0.5, 300.0, False),
+    "planner_cycle_complete":    (0.3, 60.0, True),
     # SYSTEM events
     "mode_change":               (0.8, 0.0, False),
     "alert":                     (1.0, 0.0, False),

@@ -148,6 +148,40 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"Teacher agent not wired: {e}")
 
+        # Wire PlannerCore (Warstwa 2) - replaces teacher auto-trigger in Phase 10
+        if core:
+            try:
+                from agent_core.planner.planner_core import PlannerCore
+
+                planner = PlannerCore()
+                planner.set_homeostasis_core(core)
+
+                if ctx.perception_buffer:
+                    planner.set_perception_buffer(ctx.perception_buffer)
+                if ctx.goal_store:
+                    planner.set_goal_store(ctx.goal_store)
+                if ctx.evaluation_observer:
+                    planner.set_evaluation_observer(ctx.evaluation_observer)
+                if ctx.sandbox_manager:
+                    planner.set_sandbox_manager(ctx.sandbox_manager)
+
+                # Reuse the teacher agent that was already wired above
+                if hasattr(core, '_teacher_agent') and core._teacher_agent:
+                    planner.set_teacher_agent(core._teacher_agent)
+
+                # Knowledge analyzer for snapshot
+                try:
+                    from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+                    planner.set_knowledge_analyzer(KnowledgeAnalyzer())
+                except Exception:
+                    pass
+
+                core.set_planner_core(planner)
+                ctx.planner_core = planner
+                print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")
+            except Exception as e:
+                logger.debug(f"PlannerCore not wired: {e}")
+
         return True
 
     def get_commands(self):

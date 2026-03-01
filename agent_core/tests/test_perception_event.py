@@ -31,8 +31,8 @@ class TestPerceptionSource:
         assert PerceptionSource.SYSTEM.value == "system"
 
     def test_source_count(self):
-        """Should have exactly 7 sources."""
-        assert len(PerceptionSource) == 7
+        """Should have exactly 8 sources (7 original + PLANNER)."""
+        assert len(PerceptionSource) == 8
 
     def test_source_from_string(self):
         """Should create source from string value."""
@@ -275,9 +275,9 @@ class TestIsDedupable:
 class TestEventTypeDefaults:
     """Tests for EVENT_TYPE_DEFAULTS registry."""
 
-    def test_all_22_types_registered(self):
-        """Event Type Registry should have all 22 types from contract."""
-        assert len(EVENT_TYPE_DEFAULTS) == 22
+    def test_all_types_registered(self):
+        """Event Type Registry should have all types (22 original + 2 planner)."""
+        assert len(EVENT_TYPE_DEFAULTS) == 24
 
     def test_sensor_types_present(self):
         """All 5 sensor reading types should be registered."""
