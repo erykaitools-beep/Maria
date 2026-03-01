@@ -28,6 +28,7 @@ class SharedContext:
     identity_store: Any = None
     consciousness: Any = None
     conversation_memory: Any = None
+    perception_buffer: Any = None  # PerceptionBuffer (Warstwa 1)
 
     # REPL state
     last_result: Any = None

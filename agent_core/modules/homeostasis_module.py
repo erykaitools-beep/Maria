@@ -43,8 +43,19 @@ class HomeostasisModule(MariaModule):
                 print(f"[Homeostasis] [WARN] Init failed: {e}")
                 return False
 
-        # Pass semantic_memory to core for sleep processing
+        # Initialize PerceptionBuffer (Warstwa 1)
         core = ctx.homeostasis_core
+        if core:
+            try:
+                from agent_core.perception.buffer import PerceptionBuffer
+                perception_buffer = PerceptionBuffer(maxlen=200)
+                core.set_perception_buffer(perception_buffer)
+                ctx.perception_buffer = perception_buffer
+                print("[Homeostasis] [OK] PerceptionBuffer initialized (maxlen=200)")
+            except Exception as e:
+                logger.debug(f"PerceptionBuffer not initialized: {e}")
+
+        # Pass semantic_memory to core for sleep processing
         if core and ctx.semantic_memory:
             session_id = 0
             experience_tracker = None

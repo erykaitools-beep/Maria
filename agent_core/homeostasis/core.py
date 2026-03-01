@@ -10,15 +10,19 @@ Phases per tick:
 4. DECIDE: Determine operating mode
 5. ACT: Generate and execute corrective actions
 6. HEALTH: Update aggregate health score
-7. AUDIT: Log state and decisions
+7. PERCEIVE: Aggregate sensor events + external events into PerceptionBuffer
+8. AUDIT: Log state and decisions
+9. TEACHER: Auto-trigger learning during idle
 
 Spec reference: homeostasis_spec.md section 7.1 (lines 1289-1478)
+ADR-009: Tick Aggregator (perception via tick loop, not event bus)
 """
 
 import time
 import threading
 import logging
-from typing import Dict, Any, List, Optional, TYPE_CHECKING
+from collections import deque
+from typing import Dict, Any, Deque, List, Optional, TYPE_CHECKING
 
 from .state_model import Mode, SystemState, ResourceMetrics, CognitiveMetrics
 from .sensors.resource_sensor import ResourceSensor
@@ -123,6 +127,10 @@ class HomeostasisCore:
         self._last_sleep_report = None
         self._experience_tracker = None
 
+        # Perception (Warstwa 1, ADR-009: Tick Aggregator)
+        self._perception_buffer = None  # Set via set_perception_buffer()
+        self._external_queue: Deque = deque(maxlen=50)  # Thread-safe external events
+
         # Teacher auto-trigger (set via set_teacher_agent)
         self._teacher_agent = None
         self._teacher_thread: Optional[threading.Thread] = None
@@ -153,6 +161,44 @@ class HomeostasisCore:
             teacher_agent: TeacherAgent instance (with learn/exam fns already set)
         """
         self._teacher_agent = teacher_agent
+
+    def set_perception_buffer(self, buffer) -> None:
+        """
+        Set perception buffer for tick aggregation (Warstwa 1).
+
+        Called from HomeostasisModule after init.
+
+        Args:
+            buffer: PerceptionBuffer instance
+        """
+        self._perception_buffer = buffer
+
+    def push_external_event(self, event) -> None:
+        """
+        Push external event to be ingested in next tick.
+
+        Thread-safe (deque append is atomic in CPython).
+        Called from REPL thread, teacher thread, etc.
+
+        Args:
+            event: PerceptionEvent from any adapter
+        """
+        self._external_queue.append(event)
+
+    def _drain_external_queue(self) -> list:
+        """
+        Drain all pending external events. Called ONLY from tick loop thread.
+
+        Returns:
+            List of PerceptionEvents
+        """
+        events = []
+        while self._external_queue:
+            try:
+                events.append(self._external_queue.popleft())
+            except IndexError:
+                break
+        return events
 
     def main_loop(self) -> None:
         """
@@ -286,15 +332,83 @@ class HomeostasisCore:
         self.state.health_score = self._compute_health(interpreted_state, alerts)
 
         # ──────────────────────────────────────
-        # PHASE 8: AUDIT & LOG
+        # PHASE 8: PERCEIVE (Tick Aggregator, ADR-009)
+        # ──────────────────────────────────────
+        self._aggregate_perception(
+            resource_metrics=resource_metrics,
+            cognitive_metrics=cognitive_metrics,
+            thermal_metrics=thermal_metrics,
+            time_metrics=time_metrics,
+        )
+
+        # ──────────────────────────────────────
+        # PHASE 9: AUDIT & LOG
         # ──────────────────────────────────────
         if self._tick_count % self.LOG_INTERVAL_TICKS == 0:
             self._log_state(interpreted_state)
 
         # ──────────────────────────────────────
-        # PHASE 9: TEACHER AUTO-TRIGGER
+        # PHASE 10: TEACHER AUTO-TRIGGER
         # ──────────────────────────────────────
         self._check_teacher_trigger()
+
+    def _aggregate_perception(
+        self,
+        resource_metrics=None,
+        cognitive_metrics=None,
+        thermal_metrics=None,
+        time_metrics=None,
+    ) -> None:
+        """
+        Aggregate sensor events + external events into PerceptionBuffer.
+
+        ADR-009: Tick Aggregator. Called once per tick after health update.
+        Converts raw sensor metrics to PerceptionEvents and pushes them
+        along with any external events (from REPL, teacher, etc.).
+
+        Args:
+            resource_metrics: ResourceMetrics from Phase 1 (may be None)
+            cognitive_metrics: CognitiveMetrics from Phase 1 (may be None)
+            thermal_metrics: ThermalMetrics from Phase 1 (may be None)
+            time_metrics: TimeMetrics from Phase 1 (may be None)
+        """
+        if self._perception_buffer is None:
+            return
+
+        try:
+            from agent_core.perception.adapters.sensor_adapter import SensorAdapter
+
+            # Convert sensor metrics to PerceptionEvents
+            if resource_metrics:
+                self._perception_buffer.push(
+                    SensorAdapter.from_resource_metrics(resource_metrics)
+                )
+            if cognitive_metrics:
+                self._perception_buffer.push(
+                    SensorAdapter.from_cognitive_metrics(cognitive_metrics)
+                )
+            if thermal_metrics:
+                self._perception_buffer.push(
+                    SensorAdapter.from_thermal_metrics(thermal_metrics)
+                )
+            if time_metrics:
+                self._perception_buffer.push(
+                    SensorAdapter.from_time_metrics(time_metrics)
+                )
+
+            # PowerSensor is read separately (not in Phase 1 currently)
+            # Will be added when power_sensor is integrated into Phase 1
+
+            # Drain external events (from REPL, teacher, etc.)
+            external_events = self._drain_external_queue()
+            if external_events:
+                self._perception_buffer.push_many(external_events)
+
+            # Remove expired events
+            self._perception_buffer.drain_expired()
+
+        except Exception as e:
+            logger.debug(f"Perception aggregation error: {e}")
 
     def _transition_mode(self, old_mode: Mode, new_mode: Mode) -> None:
         """
@@ -599,7 +713,7 @@ class HomeostasisCore:
 
         Returns comprehensive system status for UI/API.
         """
-        return {
+        telemetry = {
             "mode": self.state.mode.value,
             "health_score": self.state.health_score,
             "alerts": self.state.alerts.copy(),
@@ -608,3 +722,6 @@ class HomeostasisCore:
             "mode_duration_sec": self.state.mode_duration_seconds,
             "interpreted_state": self.state.interpreted_state.copy(),
         }
+        if self._perception_buffer is not None:
+            telemetry["perception"] = self._perception_buffer.stats()
+        return telemetry
