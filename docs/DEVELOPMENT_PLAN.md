@@ -48,7 +48,7 @@ Nowe ADR: ADR-009 (Tick Aggregator), ADR-010 (Sandbox-first), ADR-011 (Goals as 
 
 ## Warstwa 1: Unified Perception (zbieracz bodzcow)
 
-**Priorytet: NASTEPNY (implementacja wg kontraktu K1)**
+**Status: DONE (2026-03-01, Kontrakt K1)**
 
 ### Cel
 Jedno miejsce gdzie trafiaja WSZYSTKIE bodźce - tekst, metryki, wyniki nauki, *pozniej* obraz, *pozniej* IoT.
@@ -57,25 +57,23 @@ Jedno miejsce gdzie trafiaja WSZYSTKIE bodźce - tekst, metryki, wyniki nauki, *
 Bez tego Vision bedzie kolejnym silosem. Z Unified Perception kamera staje sie naturalnym "zmyslem" obok innych.
 
 ### Co obejmuje
-- Wspolny format bodzcow (Stimulus/Percept)
-- Kolejka percepcji z priorytetami
-- Filtrowanie i normalizacja
-- Adapter dla istniejacych sensorow (homeostasis sensors → percepts)
-- Adapter dla interakcji uzytkownika (chat → percepts)
-- Adapter dla wynikow nauki (learning results → percepts)
+- Wspolny format bodzcow (PerceptionEvent, 7 source types, 22 event types)
+- PerceptionBuffer (deque maxlen=200, sliding window z priorytetami)
+- 6 adapterow: sensor, user, learning, exam, consciousness, teacher
+- Tick Aggregator (ADR-009): Phase 8 PERCEIVE + external queue
 - *Pozniej:* adapter dla Vision, adapter dla Smart Home
 
 ### Status
-- [ ] Specyfikacja
-- [ ] Implementacja
-- [ ] Testy
-- [ ] Integracja z homeostasis
+- [x] Specyfikacja (Kontrakt K1 w CONTRACTS.md)
+- [x] Implementacja (agent_core/perception/)
+- [x] Testy (131 testow)
+- [x] Integracja z homeostasis (Phase 8 PERCEIVE)
 
 ---
 
 ## Warstwa 2: Planner (petla dzialania)
 
-**Priorytet: PO Unified Perception**
+**Priorytet: NASTEPNY**
 
 ### Cel
 Maria sama planuje i dziala, zamiast czekac na komendy.
@@ -84,6 +82,7 @@ Maria sama planuje i dziala, zamiast czekac na komendy.
 - Prosty ReAct loop: cel → mysl → dzialaj → obserwuj → powtorz
 - Tool-use: Maria wywoluje swoje wlasne komendy w petli
 - Ograniczenia bezpieczenstwa (max krokow, timeout, human approval dla ryzykownych akcji)
+- Integracja z GoalStore (K3) - planner czyta cele, aktualizuje progress
 
 ### Status
 - [ ] Specyfikacja
@@ -93,24 +92,26 @@ Maria sama planuje i dziala, zamiast czekac na komendy.
 
 ---
 
-## Warstwa 3: Goal System (cele)
+## Warstwa 3: Goal System (cele) + Evaluation
 
-**Priorytet: PO Planner**
+**Status: DONE (2026-03-01, Kontrakty K3 + K4)**
 
 ### Cel
-Maria generuje wlasne cele na podstawie swojego stanu.
+Maria generuje wlasne cele na podstawie swojego stanu. Observer mierzy postep.
 
 ### Co obejmuje
-- Generator celow (na podstawie knowledge gaps, wynikow nauki, stanu systemu)
-- Priorytetyzacja celow
-- Dzienny plan (po SLEEP→ACTIVE)
-- Raportowanie (podsumowanie dnia)
+- GoalStore: CRUD + append-only JSONL (meta_data/goals.jsonl)
+- 4 typy celow (META/USER/LEARNING/MAINTENANCE), 6 statusow, audit trail
+- Seed goals: 1 META + 3 MAINTENANCE (auto na starcie)
+- PROPOSED flow: propose/confirm/reject z izolacja od planowania
+- EvaluationObserver: 5 metryk, threshold-based recommendations, READ-ONLY
+- Sandbox (K2): izolowane sesje nauki, promote jako jedyny most do produkcji
 
 ### Status
-- [ ] Specyfikacja
-- [ ] Implementacja
-- [ ] Testy
-- [ ] Integracja z Planner
+- [x] Specyfikacja (Kontrakty K2, K3, K4 w CONTRACTS.md)
+- [x] Implementacja (agent_core/sandbox/, goals/, evaluation/)
+- [x] Testy (44 sandbox + 63 goals + 35 evaluation = 142 testow)
+- [x] Wiring w SharedContext i homeostasis_module.py
 
 ---
 

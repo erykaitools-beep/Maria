@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Development Roadmap
-> Version: 0.5 | Last updated: 2026-02-28
+> Version: 0.6 | Last updated: 2026-03-01
 >
 > **Szczegolowy plan rozwoju:** `docs/DEVELOPMENT_PLAN.md` (zatwierdzony 2026-02-28)
 
@@ -133,6 +133,41 @@ Rozszerzenie funkcjonalnosci i poprawa wydajnosci.
 
 **STATUS: COMPLETE** (2026-02-27, 668 tests passing)
 
+---
+
+## Faza C.5: KONTRAKTY ARCHITEKTONICZNE (K1-K4)
+
+### Cel
+Formalne specyfikacje i implementacja warstw laczacych istniejace moduly w spójny system kognitywny.
+
+### Zakres
+
+#### K1: Unified Perception
+- [x] PerceptionEvent (frozen dataclass, 7 source types, 22 event types)
+- [x] PerceptionBuffer (deque maxlen=200, sliding window)
+- [x] 6 adapterow (sensor, user, learning, exam, consciousness, teacher)
+- [x] Tick Aggregator (ADR-009): Phase 8 PERCEIVE + external queue
+
+#### K2: Sandbox / Production Boundary
+- [x] SandboxManager (create/seed/record/promote/discard/timeout/recovery/cleanup)
+- [x] Transaction log (START/COMMIT/ROLLBACK), startup recovery
+- [x] SANDBOX_DIR w config.py
+
+#### K3: Goal System
+- [x] GoalStore (CRUD + append-only JSONL + seed goals)
+- [x] 4 typy celow, 6 statusow, audit trail, PROPOSED flow
+
+#### K4: Agent Evaluation (READ-ONLY)
+- [x] EvaluationObserver (5 metryk, threshold-based recommendations)
+- [x] Pisze TYLKO do evaluation_reports.jsonl
+
+### Definition of Done: Faza C.5
+- [x] Wszystkie 4 kontrakty zaimplementowane z testami
+- [x] Wiring w SharedContext i homeostasis_module.py
+- [x] 941 testow passing (273 nowych, zero regresji)
+
+**STATUS: COMPLETE** (2026-03-01, 941 tests passing)
+
 ### Estymacja
 6-10 sesji pracy
 
@@ -226,6 +261,7 @@ Szczegoly: `docs/SMART_HOME_SPEC.md`
 | M3.5 | Linux migration prep (Mini PC) | DONE |
 | M3.6 | NIM API + Token Budget + LLM Router | DONE |
 | M4 | Faza C complete - consciousness | DONE |
+| M4.5 | Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation | DONE |
 | M5 | Faza D complete - vision | PLANNED |
 | M6 | Faza E complete - smart home | PLANNED |
 | M7 | Faza F - multi-source learning (cross-validation) | PLANNED |

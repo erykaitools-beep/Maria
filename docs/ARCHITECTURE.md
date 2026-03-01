@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.3 | Last updated: 2026-02-28
+> Version: 0.4 | Last updated: 2026-03-01
 
 ## 1. Overview
 
@@ -244,7 +244,7 @@ System spelnia "Full Homeostasis" gdy:
 - [x] episodic_memory ma cap i FIFO
 - [x] System raportuje swoj stan (motivation, uptime, stats)
 
-**STATUS: COMPLETE** (2026-01-28, teraz 668 tests passing)
+**STATUS: COMPLETE** (2026-01-28, teraz 941 tests passing)
 
 ---
 
@@ -254,18 +254,18 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 
 ---
 
-## 5. Znane ograniczenia (Ver.4.1)
+## 5. Znane ograniczenia (Ver.4.2)
 
 1. **Brak embeddings** - semantic_graph wspiera embeddings, ale nie sa generowane
 2. ~~**Dwa systemy pamieci**~~ -> Rozwiazane przez MemoryManager
 3. ~~**Brak cap na episodic_memory**~~ -> Rozwiazane przez consolidate_episodic()
 4. ~~**Brak consolidation scheduler**~~ -> Rozwiazane przez epoch tasks w core.py
-5. **Legacy maria_core/** - stary kod nadal istnieje, owiniety adapterami (Stage 5 cleanup pending)
-6. **Brak Unified Perception** - bodźce z roznych zrodel nie trafiaja do wspolnego miejsca
-7. **Brak Plannera** - Maria reaguje na komendy, nie planuje samodzielnie
-8. **Brak Goal System** - Maria nie generuje wlasnych celow
+5. **Legacy maria_core/** - stary kod nadal istnieje, owiniety adapterami (Stage 5 archiwizacja done)
+6. ~~**Brak Unified Perception**~~ -> Rozwiazane: PerceptionEvent + PerceptionBuffer + 6 adapterow (K1)
+7. **Brak Plannera** - Maria reaguje na komendy, nie planuje samodzielnie (Warstwa 2 planowana)
+8. ~~**Brak Goal System**~~ -> Rozwiazane: GoalStore z 4 typami celow + audit trail (K3)
 
-Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju warstw 1-3)
+Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju warstw 1-6)
 
 ---
 
@@ -303,6 +303,19 @@ agent_core/
 │   ├── teacher_agent.py   # 6-priority decision engine (P1-P6)
 │   ├── knowledge_analyzer.py # JSONL analysis, zero LLM calls
 │   └── teaching_strategy.py  # Strategy types + spaced repetition
+├── perception/            # Unified Perception (Kontrakt K1)
+│   ├── event.py           # PerceptionEvent, PerceptionSource, EVENT_TYPE_DEFAULTS
+│   ├── buffer.py          # PerceptionBuffer (deque maxlen=200)
+│   └── adapters/          # 6 adapterow (sensor, user, learning, exam, consciousness, teacher)
+├── sandbox/               # Sandbox / Production Boundary (Kontrakt K2)
+│   ├── protocol.py        # SandboxSession, SandboxStatus, PromoteResult
+│   └── manager.py         # SandboxManager (create/promote/discard/cleanup)
+├── goals/                 # Goal System (Kontrakt K3)
+│   ├── goal_model.py      # GoalType, GoalStatus, AuditEntry, Goal
+│   └── store.py           # GoalStore (CRUD + append-only JSONL persistence)
+├── evaluation/            # Agent Evaluation (Kontrakt K4, READ-ONLY)
+│   ├── observer.py        # EvaluationObserver (5 metryk, zero LLM)
+│   └── report.py          # EvaluationReport schema
 ├── introspection/         # Samowiedza kodu (READ-ONLY)
 │   ├── analyzer.py        # AST static analysis
 │   ├── code_model.py      # Code self-model structures
@@ -349,8 +362,8 @@ agent_core/
 ├── ui/
 │   ├── telemetry_api.py   # Read-only dashboard
 │   └── operator_controls.py
-└── tests/                 # 668 tests
-    └── test_*.py          # 21 test files
+└── tests/                 # 941 tests
+    └── test_*.py          # 25 test files
 ```
 
 ### 6.2 Integracja z main.py
@@ -385,7 +398,7 @@ main.py (Ver.2.0 - Registry-based)
         └── ConsciousnessCore.checkpoint()
 ```
 
-### 6.3 Przepływ danych - Homeostasis Loop (9 faz)
+### 6.3 Przepływ danych - Homeostasis Loop (10 faz)
 
 ```
 [1Hz Tick] ──────────────────────────────────────────────────────────
@@ -412,9 +425,13 @@ main.py (Ver.2.0 - Registry-based)
     │
     ├── Phase 7: UPDATE HEALTH SCORE
     │
-    ├── Phase 8: AUDIT & LOG (co 60 tickow)
+    ├── Phase 8: PERCEIVE (Kontrakt K1, ADR-009)
+    │   ├── Aggregate sensor events -> PerceptionBuffer
+    │   └── Drain external queue (REPL, teacher, etc.)
     │
-    └── Phase 9: TEACHER AUTO-TRIGGER
+    ├── Phase 9: AUDIT & LOG (co 60 tickow)
+    │
+    └── Phase 10: TEACHER AUTO-TRIGGER
         └── ACTIVE + idle >= 10min -> auto-sesja nauki (3 iteracje)
 ```
 

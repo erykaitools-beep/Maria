@@ -18,7 +18,7 @@
 | **2026-02-25** | Self-Awareness (ContextBuilder) + /awareness REPL + Web UI learning queue |
 | **2026-02-27** | Consciousness Phase C: personality, dreams, conversation memory |
 | **2026-02-27** | Agent Nauczyciel + autonomiczny trigger w homeostasis |
-| **2026-03-01** | Kontrakty architektoniczne (Perception, Sandbox, Goals, Evaluation) |
+| **2026-03-01** | Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation |
 
 ## Aktualny stan projektu
 
@@ -26,8 +26,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 668 passing |
-| **Faza wg ROADMAP** | B complete, C in progress (consciousness + teacher done) |
+| **Testy** | 941 passing |
+| **Faza wg ROADMAP** | C complete, Warstwa 1 (K1-K4) complete |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -50,13 +50,19 @@ project/
 │   ├── memory/          # memory_store.py, semantic_graph.py
 │   ├── perception/      # perception.py
 │   └── sys/             # config.py, meta_controller.py, resource_watchdog.py
-├── agent_core/          # NEW: Homeostasis system
+├── agent_core/          # NEW: Homeostasis + subsystems
 │   ├── homeostasis/     # Core homeostasis (sensors, constraints, mode_regulator)
+│   ├── consciousness/   # Personality, dreams, conversation memory
+│   ├── teacher/         # Autonomous learning agent (P1-P6)
+│   ├── perception/      # Unified Perception (K1): events, buffer, 6 adapters
+│   ├── sandbox/         # Sandbox/Production boundary (K2): manager, protocol
+│   ├── goals/           # Goal System (K3): model, store, audit trail
+│   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
-│   ├── llm/             # LLMManager interface
+│   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 243 tests
+│   └── tests/           # 941 tests
 └── docs/                # Documentation
 ```
 
@@ -136,6 +142,17 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher status` - status agenta
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
+
+## Kontrakty architektoniczne (K1-K4, 2026-03-01)
+
+Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
+
+- **K1 Unified Perception:** PerceptionEvent (frozen dataclass), 7 source types, 22 event types, PerceptionBuffer (deque maxlen=200), 6 adapterow, tick aggregator (ADR-009)
+- **K2 Sandbox:** Izolowane sesje nauki, promote() jako jedyny most do produkcji, transaction log (START/COMMIT/ROLLBACK), startup recovery
+- **K3 Goal System:** 4 typy celow (META/USER/LEARNING/MAINTENANCE), 6 statusow, audit trail, max 20 aktywnych, PROPOSED flow z izolacja
+- **K4 Evaluation:** READ-ONLY observer, 5 metryk (learning_velocity, retention_rate, knowledge_coverage, system_stability, personality_growth), threshold-based recommendations, zero LLM
+
+Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
 
 ## Code Agent (planowany)
 
@@ -335,6 +352,8 @@ claude_notes/
   2026-02-22_registry_and_security.md
   2026-02-22_deploy_complete.md
   2026-02-23_nim_api_and_hardening.md
+  2026-02-28_development_plan.md
+  2026-03-01_contracts_k1_k4.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -520,4 +539,40 @@ agent_core/teacher/
 
 ---
 
-*Ostatnia aktualizacja: 2026-02-27 (Consciousness + Agent Nauczyciel + Homeostasis trigger)*
+## Sesja 2026-03-01 - Kontrakty K1-K4 implementacja
+
+### Kontrakt K1: Unified Perception
+- [x] PerceptionEvent (frozen dataclass) + PerceptionSource (7 typow) + 22 event types
+- [x] PerceptionBuffer (deque maxlen=200, sliding window)
+- [x] 6 adapterow: sensor, user, learning, exam, consciousness, teacher
+- [x] Tick Aggregator (ADR-009): Phase 8 PERCEIVE + external queue
+- [x] 131 testow percepcji
+
+### Kontrakt K2: Sandbox / Production Boundary
+- [x] SandboxSession, SandboxStatus, PromoteResult (protocol.py)
+- [x] SandboxManager: create/seed/record/promote/discard/timeout/recovery/cleanup
+- [x] Transaction log (START/COMMIT/ROLLBACK), startup recovery
+- [x] SANDBOX_DIR w config.py, sandbox_manager w SharedContext
+- [x] 44 testy sandbox
+
+### Kontrakt K3: Goal System
+- [x] GoalType(4), GoalStatus(6), AuditEntry, Goal (goal_model.py)
+- [x] GoalStore: CRUD + append-only JSONL + seed goals (META + MAINTENANCE)
+- [x] PROPOSED flow: propose/confirm/reject z izolacja od planowania
+- [x] Limity: max 20 active, max 3 proposed, 24h timeout
+- [x] 63 testy goals
+
+### Kontrakt K4: Agent Evaluation (READ-ONLY)
+- [x] EvaluationObserver: 5 metryk z JSONL sources
+- [x] EvaluationReport: schema + threshold-based recommendations (zero LLM)
+- [x] Pisze TYLKO do evaluation_reports.jsonl
+- [x] 35 testow evaluation
+
+### Podsumowanie:
+- 941 testow passing (668 + 273 nowych)
+- 4 nowe pakiety: perception/, sandbox/, goals/, evaluation/
+- Wszystko podlaczone w homeostasis_module.py init() i SharedContext
+
+---
+
+*Ostatnia aktualizacja: 2026-03-01 (Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation)*

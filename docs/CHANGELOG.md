@@ -3,6 +3,96 @@
 
 ---
 
+## [2026-03-01] - Sesja 14: Kontrakty K1-K4 implementacja
+
+### Added - Warstwa 1: Unified Perception (Kontrakt K1)
+- **`agent_core/perception/event.py`** - PerceptionEvent (frozen dataclass), PerceptionSource (7 typow), EVENT_TYPE_DEFAULTS (22 typy), create_event() factory
+- **`agent_core/perception/buffer.py`** - PerceptionBuffer (deque maxlen=200, sliding window)
+- **`agent_core/perception/adapters/`** - 6 adapterow:
+  - SensorAdapter (resource, cognitive, thermal, power, time)
+  - UserAdapter (message, command)
+  - LearningAdapter (chunk learned, file scan, sandbox promoted/discarded)
+  - ExamAdapter (exam result)
+  - ConsciousnessAdapter (trait emerged/faded, dream, sleep cycle)
+  - TeacherAdapter (decision, session complete)
+- **Tick Aggregator (ADR-009):** Phase 8 PERCEIVE w tick loop, thread-safe external queue (deque maxlen=50)
+- 131 testow percepcji
+
+### Added - Kontrakt K2: Sandbox / Production Boundary
+- **`agent_core/sandbox/protocol.py`** - SandboxStatus, SandboxSession, PromoteResult
+- **`agent_core/sandbox/manager.py`** - SandboxManager:
+  - create/seed/record/promote/discard/timeout/recovery/cleanup
+  - Transaction log (START/COMMIT/ROLLBACK) w promote_log.jsonl
+  - Startup recovery: auto-DISCARD osieroconych sesji
+- **`maria_core/sys/config.py`** - SANDBOX_DIR = meta_data/sandbox
+- 44 testy sandbox
+
+### Added - Kontrakt K3: Goal System
+- **`agent_core/goals/goal_model.py`** - GoalType(4), GoalStatus(6), AuditEntry, Goal, create_goal()
+- **`agent_core/goals/store.py`** - GoalStore:
+  - CRUD + append-only JSONL persistence (meta_data/goals.jsonl)
+  - Seed goals: META (1) + MAINTENANCE (3)
+  - PROPOSED flow: propose/confirm/reject z izolacja od planowania
+  - Limity: max 20 active, max 3 proposed, 24h timeout, overflow auto-abandon
+- 63 testy goals
+
+### Added - Kontrakt K4: Agent Evaluation (READ-ONLY)
+- **`agent_core/evaluation/observer.py`** - EvaluationObserver:
+  - 5 metryk: learning_velocity, retention_rate, knowledge_coverage, system_stability, personality_growth
+  - Threshold-based recommendations (pure logic, zero LLM)
+  - Pisze TYLKO do evaluation_reports.jsonl
+- **`agent_core/evaluation/report.py`** - EvaluationReport schema
+- 35 testow evaluation
+
+### Changed
+- **`agent_core/registry/shared_context.py`** - Dodano: perception_buffer, sandbox_manager, goal_store, evaluation_observer
+- **`agent_core/homeostasis/core.py`** - Phase 8 PERCEIVE + external queue (ADR-009)
+- **`agent_core/modules/homeostasis_module.py`** - Wiring K1-K4 w init()
+
+### Statistics
+- **941 tests passing** (668 previous + 273 new)
+- 4 nowe pakiety: perception/, sandbox/, goals/, evaluation/
+- 20+ nowych plikow
+
+---
+
+## [2026-02-28] - Sesja 13: Warstwa 0 (bugs) + Stage 5 Cleanup
+
+### Fixed
+- **SleepProcessor bug** - przekazywano experience_tracker zamiast session_id
+- **latency_probe.py** - usuniety martwy import, zwraca -1.0 zamiast falszywego 0.0
+- **Trait count** - skorygowano 19 -> 7 w dokumentacji
+- **LLMRouter** - llm_fn teraz przekazywane do learn_next_chunk() i run_exam_if_ready()
+
+### Changed
+- **Stage 5 cleanup** - archiwizacja: agent/, logs/, output/, memory/ -> maria_core/_legacy_archived/
+- **Dokumentacja sync** - ARCHITECTURE.md v0.3, CONSCIOUSNESS_SPEC, ROADMAP Phase C
+
+### Statistics
+- **668 tests passing** (zero regresji)
+
+---
+
+## [2026-02-27] - Sesja 12: Consciousness Phase C + Agent Nauczyciel
+
+### Added - Consciousness (`agent_core/consciousness/`)
+- **TraitEvolver + TraitCatalog** - 7 cech osobowosci z dynamiczna ewolucja
+- **ConversationMemory** - Rolling context + kondensacja LLM
+- **SleepProcessor + DreamGenerator** - Konsolidacja pamieci podczas SLEEP
+- **ExperienceTracker** - Kontekst emocjonalny z rozmow
+- **IdentityStore** - Ciaglosc miedzy sesjami (session count, uptime, birth date)
+
+### Added - Agent Nauczyciel (`agent_core/teacher/`)
+- **TeacherAgent** - 6-priorytetowy silnik decyzyjny (P1-P6)
+- **KnowledgeAnalyzer** - Analiza JSONL, zero LLM
+- **SpacedRepetitionScheduler** - Interwaly powtórek na bazie wynikow
+- **Autonomiczny trigger** - Homeostasis Phase 9: ACTIVE + idle >= 10min -> auto-sesja nauki
+
+### Statistics
+- **668 tests passing** (75 teacher tests + consciousness tests)
+
+---
+
 ## [2026-02-23] - Sesja 11: Post-Deploy Hardening + NVIDIA NIM API
 
 ### Infrastructure
