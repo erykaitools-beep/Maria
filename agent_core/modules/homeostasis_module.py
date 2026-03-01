@@ -55,6 +55,26 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"PerceptionBuffer not initialized: {e}")
 
+        # Initialize SandboxManager (Kontrakt K2)
+        if core:
+            try:
+                from maria_core.sys.config import (
+                    SANDBOX_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS,
+                )
+                from agent_core.sandbox.manager import SandboxManager
+
+                sandbox_mgr = SandboxManager(
+                    sandbox_base_dir=SANDBOX_DIR,
+                    production_index=KNOWLEDGE_INDEX,
+                    production_memory=LONGTERM_MEMORY,
+                    production_exams=EXAM_RESULTS,
+                )
+                sandbox_mgr.startup_recovery()
+                ctx.sandbox_manager = sandbox_mgr
+                print("[Homeostasis] [OK] SandboxManager initialized")
+            except Exception as e:
+                logger.debug(f"SandboxManager not initialized: {e}")
+
         # Pass semantic_memory to core for sleep processing
         if core and ctx.semantic_memory:
             session_id = 0

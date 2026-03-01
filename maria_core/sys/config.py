@@ -41,10 +41,13 @@ EXAM_RESULTS = MEMORY_DIR / "exam_results.jsonl"
 LEARNING_LOG = LOGS_DIR / "learning.log"
 EXAM_LOG = LOGS_DIR / "exams.log"
 
+# Sandbox (ADR-010: Sandbox-first learning)
+SANDBOX_DIR = BASE_DIR / "meta_data" / "sandbox"
+
 
 def ensure_directories():
     """Tworzy katalogi jeśli nie istnieją."""
-    for directory in [INPUT_DIR, PROCESSED_DIR, MEMORY_DIR, LOGS_DIR]:
+    for directory in [INPUT_DIR, PROCESSED_DIR, MEMORY_DIR, LOGS_DIR, SANDBOX_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
 
 

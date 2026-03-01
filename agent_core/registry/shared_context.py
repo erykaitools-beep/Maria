@@ -29,6 +29,7 @@ class SharedContext:
     consciousness: Any = None
     conversation_memory: Any = None
     perception_buffer: Any = None  # PerceptionBuffer (Warstwa 1)
+    sandbox_manager: Any = None    # SandboxManager (Kontrakt K2)
 
     # REPL state
     last_result: Any = None
