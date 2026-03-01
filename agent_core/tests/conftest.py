@@ -157,3 +157,16 @@ def timer():
 
     return Timer()
 
+
+@pytest.fixture(autouse=True)
+def isolated_event_logger(tmp_path):
+    """Prevent tests from writing to production homeostasis_events.jsonl."""
+    import agent_core.homeostasis.event_logger as logger_module
+
+    original = logger_module._event_logger
+    logger_module._event_logger = logger_module.HomeostasisEventLogger(
+        log_path=tmp_path / "test_events.jsonl"
+    )
+    yield logger_module._event_logger
+    logger_module._event_logger = original
+
