@@ -1,7 +1,8 @@
-# M.A.R.I.A. - Plan Rozwoju (2026-02-28)
+# M.A.R.I.A. - Plan Rozwoju (2026-03-01)
 
 > Ten plan powstal z burzy mozgow opartej na analizach Groka, ChatGPT i Claude (ktory zna kod od srodka).
 > Trzymamy sie tej kolejnosci. Kazdy nowy modul wchodzi naturalnie w system, a nie jest doklejony z boku.
+> **2026-03-01:** Dodano Warstwe 0.5 (Kontrakty architektoniczne) - formalne specyfikacje przed implementacja.
 
 ## Zasada naczelna
 
@@ -25,9 +26,29 @@ To znaczy: kazdy nowy komponent musi dzialac RAZEM z reszta, nie obok.
 
 ---
 
+## Warstwa 0.5: Kontrakty architektoniczne
+
+**Priorytet: ZROBIONE (2026-03-01)**
+
+Formalne specyfikacje ("konstytucja") dla nowych warstw. Kazda implementacja MUSI byc zgodna z tymi kontraktami.
+
+| # | Kontrakt | Opis | Status |
+|---|----------|------|--------|
+| K1 | Unified Perception | PerceptionEvent format, 7 source types, priorytety, correlation_id, TTL, 6 adapterow | [x] |
+| K2 | Sandbox / Production | Kazda nauka przez sandbox, promote() jako jedyny most, reguly promote/discard | [x] |
+| K3 | Goal System | 4 typy celow (META/USER/LEARNING/MAINTENANCE), audit trail, max 20 aktywnych | [x] |
+| K4 | Agent Evaluation | READ-ONLY observer, 5 metryk, format raportu JSON, zero LLM | [x] |
+| D5 | Tick Aggregator (ADR-009) | Rozszerzenie tick loop zamiast event bus, deque dla external events | [x] |
+
+Szczegoly: `docs/CONTRACTS.md`
+
+Nowe ADR: ADR-009 (Tick Aggregator), ADR-010 (Sandbox-first), ADR-011 (Goals as data), ADR-012 (Evaluation READ-ONLY)
+
+---
+
 ## Warstwa 1: Unified Perception (zbieracz bodzcow)
 
-**Priorytet: NASTEPNY (po naprawach)**
+**Priorytet: NASTEPNY (implementacja wg kontraktu K1)**
 
 ### Cel
 Jedno miejsce gdzie trafiaja WSZYSTKIE bodźce - tekst, metryki, wyniki nauki, *pozniej* obraz, *pozniej* IoT.

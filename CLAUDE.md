@@ -18,6 +18,7 @@
 | **2026-02-25** | Self-Awareness (ContextBuilder) + /awareness REPL + Web UI learning queue |
 | **2026-02-27** | Consciousness Phase C: personality, dreams, conversation memory |
 | **2026-02-27** | Agent Nauczyciel + autonomiczny trigger w homeostasis |
+| **2026-03-01** | Kontrakty architektoniczne (Perception, Sandbox, Goals, Evaluation) |
 
 ## Aktualny stan projektu
 
@@ -72,6 +73,7 @@ project/
 | `docs/CONSCIOUSNESS_SPEC.md` | **Specyfikacja swiadomosci, osobowosci, snow** |
 | `docs/VISION_SPEC.md` | **Specyfikacja percepcji wizualnej (oko)** |
 | `docs/SMART_HOME_SPEC.md` | **Specyfikacja IoT / Smart Home** |
+| `docs/CONTRACTS.md` | **Kontrakty architektoniczne (Perception, Sandbox, Goals, Evaluation)** |
 | `docs/CHANGELOG.md` | Historia zmian |
 
 ## Homeostasis - nowy system
@@ -306,6 +308,10 @@ python run_ui.py
 - **ADR-006:** Introspection tylko READ-ONLY (Maria nie modyfikuje swojego kodu)
 - **ADR-007:** Smart Home - tylko lokalne API (Shelly/Tasmota), bez chmury
 - **ADR-008:** NIM do nauki, Ollama do chatu (hybrid routing z auto-fallback)
+- **ADR-009:** Tick Aggregator zamiast Event Bus (KISS, deterministyczna kolejnosc)
+- **ADR-010:** Sandbox-first learning (kazda nauka przez sandbox, promote jako jedyny most)
+- **ADR-011:** Goals as data (cele sa obiektami danych z audit trail, nie hardcoded logika)
+- **ADR-012:** Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta)
 
 ## Notatki Claude'a (brudnopis)
 
