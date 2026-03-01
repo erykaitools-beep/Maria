@@ -111,6 +111,7 @@ _notification_stop_event = threading.Event()
 _last_known_mode = "ACTIVE"
 _last_known_alerts_count = 0
 _last_event_timestamp = 0.0
+_last_planner_timestamp = 0.0
 NOTIFICATION_CHECK_INTERVAL = 5  # seconds
 
 
@@ -443,15 +444,75 @@ def notification_monitor_loop():
         except Exception as e:
             print(f"[UI] [NOTIFY] [ERROR] Monitor error: {e}")
 
+        # Check planner decisions
+        try:
+            _check_planner_notifications()
+        except Exception as e:
+            print(f"[UI] [NOTIFY] [ERROR] Planner monitor error: {e}")
+
         # Wait before next check
         _notification_stop_event.wait(NOTIFICATION_CHECK_INTERVAL)
 
     print("[UI] [NOTIFY] Notification monitor stopped")
 
 
+def _check_planner_notifications():
+    """Check planner_decisions.jsonl for new decisions and send notifications."""
+    global _last_planner_timestamp
+
+    if not _PLANNER_DECISIONS_PATH.exists():
+        return
+
+    # Read last few lines (tail approach - read all, take last few new ones)
+    new_decisions = []
+    try:
+        with open(_PLANNER_DECISIONS_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    decision = json.loads(line)
+                    ts = decision.get("timestamp", 0)
+                    if ts > _last_planner_timestamp:
+                        new_decisions.append(decision)
+                except json.JSONDecodeError:
+                    continue
+    except IOError:
+        return
+
+    # Notify about interesting decisions (skip NOOP and MAINTENANCE)
+    NOTIFY_ACTIONS = {"learn", "exam", "review", "evaluate"}
+
+    for decision in new_decisions:
+        action = decision.get("action_type", "")
+        ts = decision.get("timestamp", 0)
+
+        if ts > _last_planner_timestamp:
+            _last_planner_timestamp = ts
+
+        if action not in NOTIFY_ACTIONS:
+            continue
+
+        message = decision.get("message", "")
+        if not message:
+            goal = decision.get("goal_description", "")
+            message = f"{action}: {goal}" if goal else action
+
+        success = decision.get("result", {}).get("success", False)
+        status_icon = "OK" if success else "FAIL"
+
+        send_proactive_notification(
+            notification_type="planner_decision",
+            title=f"Planner: {action.upper()} [{status_icon}]",
+            message=message[:150],
+            data={"action": action, "success": success}
+        )
+
+
 def start_notification_monitor():
     """Start the notification monitor thread."""
-    global _notification_thread, _last_event_timestamp
+    global _notification_thread, _last_event_timestamp, _last_planner_timestamp
 
     if _notification_thread is not None and _notification_thread.is_alive():
         print("[UI] [NOTIFY] Monitor already running")
@@ -459,6 +520,7 @@ def start_notification_monitor():
 
     # Initialize last timestamp to now to avoid old notifications
     _last_event_timestamp = time.time()
+    _last_planner_timestamp = time.time()
     _notification_stop_event.clear()
 
     _notification_thread = threading.Thread(
@@ -830,6 +892,9 @@ def api_status_full():
     # Identity / Consciousness data
     identity_data = _get_identity_data()
 
+    # Planner data
+    planner_data = _get_planner_data()
+
     return jsonify({
         "timestamp": time.time(),
         "system": {
@@ -861,6 +926,7 @@ def api_status_full():
         "nim": nim_data,
         "identity": identity_data,
         "memory": memory_data,
+        "planner": planner_data,
         "chat_logs_count": chat_logs_count,
         "introspection": introspection_data,
         "learning_queue": _get_learning_queue()
@@ -940,6 +1006,60 @@ def _get_identity_data():
             pass
 
     return identity_data
+
+
+# Planner data paths
+_PLANNER_STATE_PATH = PROJECT_ROOT / "meta_data" / "planner_state.json"
+_PLANNER_DECISIONS_PATH = PROJECT_ROOT / "meta_data" / "planner_decisions.jsonl"
+
+
+def _get_planner_data():
+    """Get planner data from files (no SharedContext needed)."""
+    planner_data = {
+        "available": False,
+        "total_cycles": 0,
+        "total_plans": 0,
+        "last_decision": None,
+    }
+
+    # Read planner state
+    if _PLANNER_STATE_PATH.exists():
+        try:
+            with open(_PLANNER_STATE_PATH, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            planner_data["available"] = True
+            planner_data["total_cycles"] = state.get("total_cycles", 0)
+            planner_data["total_plans"] = state.get("total_plans_executed", 0)
+        except (IOError, json.JSONDecodeError):
+            pass
+
+    # Read last decision from JSONL
+    if _PLANNER_DECISIONS_PATH.exists():
+        try:
+            last_line = ""
+            with open(_PLANNER_DECISIONS_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        last_line = line.strip()
+            if last_line:
+                decision = json.loads(last_line)
+                planner_data["available"] = True
+                planner_data["last_decision"] = {
+                    "action": decision.get("action_type", "?"),
+                    "goal": decision.get("goal_description", ""),
+                    "status": decision.get("status", "?"),
+                    "success": decision.get("result", {}).get("success", False),
+                    "message": decision.get("message", ""),
+                    "timestamp": decision.get("timestamp", 0),
+                    "datetime": (
+                        datetime.fromtimestamp(decision["timestamp"]).strftime("%H:%M:%S")
+                        if decision.get("timestamp") else "-"
+                    ),
+                }
+        except (IOError, json.JSONDecodeError):
+            pass
+
+    return planner_data
 
 
 def _get_introspection_scheduler():

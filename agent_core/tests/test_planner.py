@@ -800,11 +800,16 @@ class TestPlannerCoreEventEmission:
 
         result = planner.run_cycle(60)
         assert result is not None
-        core.push_external_event.assert_called_once()
+        # 2 events: planner_decision + planner_cycle_complete
+        assert core.push_external_event.call_count == 2
 
-        event = core.push_external_event.call_args[0][0]
-        assert event.source == PerceptionSource.PLANNER
-        assert event.event_type == "planner_decision"
+        calls = core.push_external_event.call_args_list
+        decision_event = calls[0][0][0]
+        assert decision_event.source == PerceptionSource.PLANNER
+        assert decision_event.event_type == "planner_decision"
+
+        cycle_event = calls[1][0][0]
+        assert cycle_event.event_type == "planner_cycle_complete"
 
     def test_no_core_no_crash(self, planner_env):
         planner, _ = planner_env
@@ -881,3 +886,201 @@ class TestPerceptionSourcePlanner:
         assert event.source == PerceptionSource.PLANNER
         assert event.event_type == "planner_decision"
         assert event.priority == 0.5
+
+
+# ===============================================================
+# Observability Tests (format_message, rich payload, cycle_complete)
+# ===============================================================
+
+
+class TestFormatMessage:
+    """Test _format_message() generates human-readable Polish messages."""
+
+    def _make_planner(self, tmp_path):
+        return PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+    def test_learn_with_goal(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Nauka fizyki", ActionType.LEARN)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Ucze sie" in msg
+        assert "fizyki" in msg
+
+    def test_learn_without_goal(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "", ActionType.LEARN)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Ucze sie" in msg
+
+    def test_exam(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Chemia organiczna", ActionType.EXAM)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Egzamin" in msg
+        assert "Chemia" in msg
+
+    def test_review_with_retention(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Matematyka", ActionType.REVIEW,
+                           action_params={"retention": 0.72})
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Powtorka" in msg
+        assert "72%" in msg
+
+    def test_review_without_retention(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Historia", ActionType.REVIEW)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Powtorka" in msg
+        assert "Historia" in msg
+
+    def test_evaluate(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan(None, "Periodic evaluation", ActionType.EVALUATE)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Ewaluacja" in msg
+
+    def test_maintenance(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Health check", ActionType.MAINTENANCE,
+                           action_params={"metric": "health_score"})
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "Konserwacja" in msg
+        assert "health_score" in msg
+
+    def test_noop(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        plan = create_plan("g1", "Idle", ActionType.NOOP)
+        plan.result = {"success": True}
+        msg = planner._format_message(plan)
+        assert "czekam" in msg.lower()
+
+
+class TestRichPayload:
+    """Test that _emit_decision_event() has enriched payload with message."""
+
+    def test_decision_event_has_message(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="maintenance",
+                          metadata={"metric": "health_score", "threshold": 0.7})
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        result = planner.run_cycle(60)
+        assert result is not None
+
+        # Find planner_decision event
+        calls = core.push_external_event.call_args_list
+        decision_events = [c[0][0] for c in calls
+                           if c[0][0].event_type == "planner_decision"]
+        assert len(decision_events) == 1
+
+        payload = decision_events[0].payload
+        assert "message" in payload
+        assert len(payload["message"]) > 0
+        assert "goal_description" in payload
+        assert "duration_ms" in payload
+        assert "result_details" in payload
+
+    def test_plan_has_message_field(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="learning", description="Nauka chemii")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        result = planner.run_cycle(60)
+        assert result is not None
+        assert hasattr(result, "message")
+        assert len(result.message) > 0
+
+    def test_plan_to_dict_has_message(self, tmp_path):
+        plan = create_plan("g1", "Test goal", ActionType.LEARN)
+        plan.message = "Ucze sie: Test goal"
+        d = plan.to_dict()
+        assert d["message"] == "Ucze sie: Test goal"
+
+    def test_plan_from_dict_preserves_message(self):
+        d = {
+            "plan_id": "plan-abc",
+            "timestamp": time.time(),
+            "goal_id": "g1",
+            "goal_description": "Test",
+            "action_type": "learn",
+            "status": "completed",
+            "message": "Ucze sie: Test",
+        }
+        plan = Plan.from_dict(d)
+        assert plan.message == "Ucze sie: Test"
+
+
+class TestCycleCompleteEvent:
+    """Test that planner_cycle_complete event is emitted in all paths."""
+
+    def test_cycle_complete_on_guard_block(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core(health=0.1)  # Low health blocks guard
+        planner.set_homeostasis_core(core)
+
+        result = planner.run_cycle(60)
+        assert result is None
+
+        calls = core.push_external_event.call_args_list
+        cycle_events = [c[0][0] for c in calls
+                        if c[0][0].event_type == "planner_cycle_complete"]
+        assert len(cycle_events) == 1
+        assert cycle_events[0].payload["guard_blocked"] is True
+        assert "Planowanie wstrzymane" in cycle_events[0].payload["message"]
+
+    def test_cycle_complete_on_no_goals(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()  # Prevent periodic eval
+        # No goal store = no goals
+        planner._goal_store = None
+
+        result = planner.run_cycle(60)
+        assert result is None
+
+        calls = core.push_external_event.call_args_list
+        cycle_events = [c[0][0] for c in calls
+                        if c[0][0].event_type == "planner_cycle_complete"]
+        assert len(cycle_events) == 1
+        assert cycle_events[0].payload["no_goals"] is True
+        assert "Brak" in cycle_events[0].payload["message"]
+
+    def test_cycle_complete_on_successful_plan(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        result = planner.run_cycle(60)
+        assert result is not None
+
+        calls = core.push_external_event.call_args_list
+        cycle_events = [c[0][0] for c in calls
+                        if c[0][0].event_type == "planner_cycle_complete"]
+        assert len(cycle_events) == 1
+        assert cycle_events[0].payload["guard_blocked"] is False
+        assert cycle_events[0].payload["no_goals"] is False
+        assert "plan_id" in cycle_events[0].payload

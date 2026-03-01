@@ -153,6 +153,8 @@ class PlannerCore:
         can_plan, block_reasons = self._check_guard()
         if not can_plan:
             logger.debug(f"Planner cycle skipped: {block_reasons}")
+            self._emit_cycle_complete(tick_count, guard_blocked=True,
+                                      block_reasons=block_reasons)
             self._save_state()
             return None
 
@@ -168,6 +170,7 @@ class PlannerCore:
         goal = self._select_goal(context)
         if goal is None:
             logger.debug("Planner: no feasible goal found")
+            self._emit_cycle_complete(tick_count, no_goals=True)
             self._save_state()
             return None
 
@@ -364,13 +367,19 @@ class PlannerCore:
             PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
         )
 
+        # Generate human-readable message and attach to plan
+        plan.message = self._format_message(plan)
+
         self._state.total_plans_executed += 1
         self._state.current_plan_id = plan.plan_id
 
-        # Emit perception event
+        # Emit perception events
         self._emit_decision_event(plan)
+        self._emit_cycle_complete(
+            self._state.last_cycle_tick, plan=plan,
+        )
 
-        # Persist
+        # Persist (with message)
         self._log_decision(plan)
         self._save_state()
 
@@ -381,8 +390,42 @@ class PlannerCore:
 
         return plan
 
-    def _emit_decision_event(self, plan: Plan) -> None:
-        """Push a planner_decision PerceptionEvent."""
+    # -- Internal: human-readable messages -------------------
+
+    def _format_message(self, plan: Plan) -> str:
+        """Generate human-readable message for a plan decision."""
+        action = plan.action_type
+        goal = plan.goal_description or ""
+
+        if action == ActionType.LEARN:
+            return f"Ucze sie: {goal}" if goal else "Ucze sie nowego materialu"
+        elif action == ActionType.EXAM:
+            return f"Egzamin z: {goal}" if goal else "Egzamin"
+        elif action == ActionType.REVIEW:
+            retention = plan.action_params.get("retention")
+            if retention is not None:
+                return f"Powtorka: {goal} (retention {retention:.0%})"
+            return f"Powtorka: {goal}" if goal else "Powtorka materialu"
+        elif action == ActionType.EVALUATE:
+            return "Ewaluacja: raport okresowy"
+        elif action == ActionType.MAINTENANCE:
+            metric = plan.action_params.get("metric", "")
+            return f"Konserwacja: {metric}" if metric else "Konserwacja systemu"
+        elif action == ActionType.NOOP:
+            return "Nic do zrobienia - czekam"
+        return f"{action.value}: {goal}"
+
+    # -- Internal: event emission ---------------------------
+
+    def _emit_cycle_complete(
+        self,
+        tick_count: int,
+        guard_blocked: bool = False,
+        block_reasons: Optional[List[str]] = None,
+        no_goals: bool = False,
+        plan: Optional[Plan] = None,
+    ) -> None:
+        """Emit planner_cycle_complete PerceptionEvent at end of every cycle."""
         if self._homeostasis_core is None:
             return
 
@@ -391,15 +434,65 @@ class PlannerCore:
                 PerceptionSource, create_event,
             )
 
+            if guard_blocked:
+                message = f"Planowanie wstrzymane: {', '.join(block_reasons or [])}"
+            elif no_goals:
+                message = "Brak aktywnych celow - czekam"
+            elif plan is not None:
+                message = self._format_message(plan)
+            else:
+                message = "Cykl zakonczony"
+
+            payload = {
+                "tick": tick_count,
+                "cycle": self._state.total_cycles,
+                "guard_blocked": guard_blocked,
+                "no_goals": no_goals,
+                "message": message,
+            }
+
+            if plan is not None:
+                payload["plan_id"] = plan.plan_id
+                payload["action_type"] = plan.action_type.value
+                payload["goal_description"] = plan.goal_description
+                payload["success"] = plan.result.get("success", False)
+                payload["duration_ms"] = plan.duration_ms
+
+            event = create_event(
+                source=PerceptionSource.PLANNER,
+                event_type="planner_cycle_complete",
+                payload=payload,
+                priority=0.3,
+            )
+            self._homeostasis_core.push_external_event(event)
+        except Exception as e:
+            logger.debug(f"Could not emit cycle complete event: {e}")
+
+    def _emit_decision_event(self, plan: Plan) -> None:
+        """Push a planner_decision PerceptionEvent with rich payload."""
+        if self._homeostasis_core is None:
+            return
+
+        try:
+            from agent_core.perception.event import (
+                PerceptionSource, create_event,
+            )
+
+            message = self._format_message(plan)
+
             event = create_event(
                 source=PerceptionSource.PLANNER,
                 event_type="planner_decision",
                 payload={
                     "plan_id": plan.plan_id,
                     "goal_id": plan.goal_id,
+                    "goal_description": plan.goal_description,
                     "action_type": plan.action_type.value,
                     "status": plan.status.value,
                     "success": plan.result.get("success", False),
+                    "message": message,
+                    "duration_ms": plan.duration_ms,
+                    "result_details": plan.result,
                 },
                 priority=0.5,
             )

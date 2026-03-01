@@ -329,6 +329,7 @@
         .notification-toast.mode_change { border-left: 4px solid #00d4ff; }
         .notification-toast.warning { border-left: 4px solid #ffaa00; }
         .notification-toast.alert { border-left: 4px solid #ff4444; }
+        .notification-toast.planner_decision { border-left: 4px solid #aa66ff; }
 
         @keyframes slideIn {
             from { transform: translateX(100%); opacity: 0; }
@@ -348,6 +349,7 @@
         .notification-toast.mode_change .notification-title { color: #00d4ff; }
         .notification-toast.warning .notification-title { color: #ffaa00; }
         .notification-toast.alert .notification-title { color: #ff4444; }
+        .notification-toast.planner_decision .notification-title { color: #aa66ff; }
 
         .notification-message {
             color: #ccc;
@@ -601,6 +603,39 @@
                 <div class="metric-row">
                     <span class="metric-label">Samopoczucie</span>
                     <span class="metric-value" id="identityFeeling" style="font-size: 0.9em; color: #ccc;">-</span>
+                </div>
+            </div>
+
+            <!-- Planner Card -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Planner</span>
+                    <span class="card-badge" id="plannerBadge">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Cykle</span>
+                    <span class="metric-value" id="plannerCycles">0</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Wykonane plany</span>
+                    <span class="metric-value" id="plannerPlans">0</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Ostatnia akcja</span>
+                    <span class="metric-value" id="plannerAction">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Czas</span>
+                    <span class="metric-value" id="plannerTime" style="font-size: 0.9em;">-</span>
+                </div>
+
+                <div class="metric-row">
+                    <span class="metric-label">Komunikat</span>
+                    <span class="metric-value" id="plannerMessage" style="font-size: 0.85em; color: #ccc;">-</span>
                 </div>
             </div>
 
@@ -937,6 +972,36 @@
                         identity.primary_user || '-';
                     document.getElementById('identityFeeling').textContent =
                         identity.feeling || '-';
+                }
+
+                // Planner
+                const planner = data.planner;
+                if (planner) {
+                    const plannerBadge = document.getElementById('plannerBadge');
+                    if (planner.available) {
+                        plannerBadge.textContent = planner.total_plans + ' planow';
+                        plannerBadge.className = 'card-badge badge-ok';
+                    } else {
+                        plannerBadge.textContent = 'CZEKA';
+                        plannerBadge.className = 'card-badge badge-info';
+                    }
+
+                    document.getElementById('plannerCycles').textContent = planner.total_cycles;
+                    document.getElementById('plannerPlans').textContent = planner.total_plans;
+
+                    if (planner.last_decision) {
+                        const d = planner.last_decision;
+                        const actionEl = document.getElementById('plannerAction');
+                        actionEl.textContent = d.action.toUpperCase();
+                        actionEl.className = 'metric-value ' +
+                            (d.success ? 'ok' : d.status === 'failed' ? 'error' : '');
+                        document.getElementById('plannerTime').textContent = d.datetime || '-';
+                        document.getElementById('plannerMessage').textContent = d.message || d.goal || '-';
+                    } else {
+                        document.getElementById('plannerAction').textContent = '-';
+                        document.getElementById('plannerTime').textContent = '-';
+                        document.getElementById('plannerMessage').textContent = 'Jeszcze nie uruchomiony';
+                    }
                 }
 
                 // Memory

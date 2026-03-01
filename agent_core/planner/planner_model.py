@@ -48,6 +48,7 @@ class Plan:
     result: Dict[str, Any] = field(default_factory=dict)
     trace_id: Optional[str] = None  # Optional correlation id
     duration_ms: float = 0.0
+    message: str = ""               # Human-readable decision message
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +62,7 @@ class Plan:
             "result": self.result,
             "trace_id": self.trace_id,
             "duration_ms": self.duration_ms,
+            "message": self.message,
         }
 
     @staticmethod
@@ -76,6 +78,7 @@ class Plan:
             result=d.get("result", {}),
             trace_id=d.get("trace_id"),
             duration_ms=d.get("duration_ms", 0.0),
+            message=d.get("message", ""),
         )
 
 
