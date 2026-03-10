@@ -20,15 +20,19 @@
 | **2026-02-27** | Agent Nauczyciel + autonomiczny trigger w homeostasis |
 | **2026-03-01** | Kontrakty K1-K4: Perception, Sandbox, Goals, Evaluation |
 | **2026-03-01** | Warstwa 2: Planner (K5) - ReAct loop laczacy K1-K4 |
+| **2026-03-01** | K5.1 Topic-Aware Learning - Maria wybiera tematy nauki |
+| **2026-03-08** | ADR-014: Najpierw mozg (K6-K10), potem zmysly (Vision, Smart Home) |
+| **2026-03-08** | Stabilizacja: 4 bugi planner naprawione, daemon `run_maria.py` dziala |
+| **2026-03-08** | Web Source module (Wikipedia PL + RSS) - zbudowany, NIE podlaczony |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap refaktoryzacji** | 4/5 (Integracja complete) |
-| **Testy** | 1023 passing |
-| **Faza wg ROADMAP** | C complete, Warstwa 1 (K1-K4) complete, Warstwa 2 (K5 Planner) complete |
+| **Etap** | Warstwa 4: Stabilizacja K1-K5.1 |
+| **Testy** | 1121 passing |
+| **Faza** | K1-K5.1 DONE, stabilizacja TERAZ, K6-K10 cognitive core DOCELOWE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -60,11 +64,12 @@ project/
 │   ├── goals/           # Goal System (K3): model, store, audit trail
 │   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
 │   ├── planner/         # Planner (K5): ReAct loop, guard, goal selector, executor
+│   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS (NOT wired yet)
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1023 tests
+│   └── tests/           # 1121 tests
 └── docs/                # Documentation
 ```
 
@@ -145,7 +150,7 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
 
-## Kontrakty architektoniczne (K1-K5, 2026-03-01)
+## Kontrakty architektoniczne (K1-K5.1, 2026-03-01)
 
 Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
@@ -154,8 +159,11 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K3 Goal System:** 4 typy celow (META/USER/LEARNING/MAINTENANCE), 6 statusow, audit trail, max 20 aktywnych, PROPOSED flow z izolacja
 - **K4 Evaluation:** READ-ONLY observer, 5 metryk (learning_velocity, retention_rate, knowledge_coverage, system_stability, personality_growth), threshold-based recommendations, zero LLM
 - **K5 Planner:** Rule-based ReAct loop (ADR-013), PlannerGuard (5 gating rules), GoalSelector (aging factor), ActionExecutor (delegacja do Teacher), hybrid frequency (60 ticks + event-driven), persystencja (planner_state.json + planner_decisions.jsonl)
+- **K5.1 Topic-Aware Learning:** KnowledgeAnalyzer topic map + scoring, TeacherAgent filter_file_ids, auto-goal creation, /plan learn|topics REPL
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
+
+**Docelowe (K6-K10):** World Model, Autonomy Policy, Deliberation, Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
 
 ## Planner - Warstwa 2 (K5)
 
@@ -174,6 +182,30 @@ System planowania (w `agent_core/planner/`) - pierwsza "warstwa sprawcza":
   - `/plan status` - cykle, plany, ostatni eval
   - `/plan history [N]` - historia decyzji
   - `/plan goals` - ranking celow wg effective priority
+
+## Web Content Fetcher (zbudowany 2026-03-08, NIE podlaczony)
+
+System pobierania materialow z internetu (w `agent_core/web_source/`):
+
+- **WikiClient:** Wikipedia PL API (search + fetch, rate limit 1 req/2s)
+- **RSSClient:** RSS/Atom reader (xml.etree stdlib, zero nowych dependencies)
+- **TopicSuggester:** Zero LLM, uzywa KnowledgeAnalyzer (EXPAND top tematow + EXPLORE nowe tagi)
+- **ContentWriter:** Zapis do `input/` jako `web_{wiki|rss}_{slug}.txt` + header metadata
+- **FetchRegistry:** JSONL dedup (MERGE semantics), plik: `meta_data/web_fetch_registry.jsonl`
+- **`run_fetch_session()`:** Jedyny punkt integracji, w `__init__.py`
+- **47 testow** (all mocked HTTP, zero external deps)
+
+### Aktywacja (2 kroki):
+1. Dodac `FETCH = "fetch"` do `ActionType` w `agent_core/planner/planner_model.py`
+2. Dodac `_exec_fetch()` w `agent_core/planner/action_executor.py` wywolujacy `run_fetch_session()`
+
+### Test reczny:
+```python
+from agent_core.web_source import run_fetch_session
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+result = run_fetch_session(KnowledgeAnalyzer())
+print(result)  # {"articles_fetched": N, "topics_searched": M}
+```
 
 ## Code Agent (planowany)
 
@@ -250,49 +282,29 @@ Usunieto:
 - `nul` - pusty plik
 - `futures/` - pusty folder
 
-## Następne kroki
+## Nastepne kroki (2026-03-08)
 
-### Code Agent:
-- [ ] Zakup/setup mini PC
-- [ ] Zaprojektować protokół API
-- [ ] Stworzyć `agent_core/coding/client.py`
+### TERAZ: Stabilizacja K1-K5.1
+- [x] 4 bugi naprawione (retention gate, tick discontinuity, maintenance dominance, tick loop blocking)
+- [x] Web Content Fetcher zbudowany (agent_core/web_source/, 47 testow)
+- [ ] Aktywacja Web Fetchera: `ActionType.FETCH` + `_exec_fetch()` (2 kroki w planner)
+- [ ] Multi-day test automatyki (planner + topic-aware learning)
+- [ ] Analiza logow planner_decisions.jsonl
+- [ ] Identyfikacja pierwszego brakujacego elementu kognitywnego
 
-### Consciousness:
-- [x] Self-model kodu (introspection module - READ-ONLY)
-- [ ] Self-model w semantic_graph (osobowosc)
-- [ ] Pamiec rozmow z kondensacja
-- [ ] Ciaglosc tozsamosci (birth date, uptime)
-- [ ] SLEEP z "snami"
+### DOCELOWE: Cognitive Core (K6-K10)
+Rdzen kognitywny - budowany przyrostowo, gdy praktyka pokaze ze brakuje.
+Szczegoly: `docs/DEVELOPMENT_PLAN.md` (Warstwa 5-9)
+- K6: World Model / Belief System
+- K7: Autonomy Policy / Governance
+- K8: Deliberation / Strategic Planning
+- K9: Uncertainty / Reflection / Meta-Cognition
+- K10: General Action Safety Layer
 
-### Vision (oko) - systematyczne podejscie:
-- [x] Specyfikacja architektury (`docs/VISION_SPEC.md`)
-- [ ] **Faza 1:** Sensor Abstraction Layer
-  - [ ] Interfejsy bazowe (VisionSensor, SensorHealth, Capabilities)
-  - [ ] SensorHealth z graceful degradation
-  - [ ] Implementacja USB webcam
-  - [ ] Implementacja mock sensor (testy)
-  - [ ] Testy jednostkowe
-- [ ] **Faza 2:** Preprocessing Layer
-  - [ ] Quality Assessment (sharpness, brightness, noise)
-  - [ ] Degradation Detection
-  - [ ] Normalizacja obrazu
-  - [ ] Recovery suggestions
-- [ ] **Faza 3:** Vision Modules
-  - [ ] Motion Module (frame diff, optical flow)
-  - [ ] Scene Module (opis sceny)
-  - [ ] OCR Module (tekst)
-  - [ ] Face Module (detekcja + rozpoznawanie)
-- [ ] **Faza 4:** Vision Cortex
-  - [ ] Integracja modulow
-  - [ ] Attention Mechanism
-  - [ ] VisionModeManager
-  - [ ] Adapter do Consciousness
-
-### Web UI przyszłe rozszerzenia:
-- [ ] Powiadomienie o zakończeniu nauki (`learning_complete`)
-- [ ] Historia powiadomień w osobnym panelu
-- [ ] Mobilna responsywność (lepsze)
-- [ ] WebSocket reconnect logic
+### POZNIEJ: Zmysly i efektory (po cognitive core)
+- Vision (Warstwa 10) - wymaga K6, K7
+- Smart Home (Warstwa 11) - wymaga K7, K10, K6
+- Code Agent - wymaga K7, K10
 
 ## Znane problemy
 
@@ -351,6 +363,7 @@ python run_ui.py
 - **ADR-011:** Goals as data (cele sa obiektami danych z audit trail, nie hardcoded logika)
 - **ADR-012:** Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta)
 - **ADR-013:** Planner v1 rule-based (zero LLM, deterministyczny, testowalny)
+- **ADR-014:** Najpierw mozg, potem zmysly (Vision/Smart Home odlozone do domkniecia cognitive core K6-K10)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -376,6 +389,8 @@ claude_notes/
   2026-02-23_nim_api_and_hardening.md
   2026-02-28_development_plan.md
   2026-03-01_contracts_k1_k4.md
+  2026-03-08_stabilization_bugs.md
+  2026-03-08_web_content_fetcher.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -630,4 +645,30 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-01 (Warstwa 2: Planner K5, 1023 testow)*
+## Sesja 2026-03-08 (2/2) - Stabilizacja + Web Content Fetcher
+
+### Naprawione bugi (4):
+- [x] **Bug 1: Retention Gate Deadlock** - `retention_rate=0.0` (brak egzaminow) blokował planner
+- [x] **Bug 2: Tick Discontinuity** - po restart daemon `ticks_since = 0 - 4140 = -4080` → czekał 70 min
+- [x] **Bug 3: Maintenance Goal Dominance** - maintenance goals zawsze feasible → zawsze wybierane
+- [x] **Bug 4: Tick Loop Blocking** - planner `run_cycle()` synchronicznie w main thread, LLM 5-24min stall
+  - Fix: `threading.Thread(daemon=True)` + `_planner_thread.is_alive()` guard
+
+### Web Content Fetcher (agent_core/web_source/):
+- [x] `fetch_registry.py` - JSONL dedup, MERGE semantics
+- [x] `wiki_client.py` - Wikipedia PL API (search + fetch)
+- [x] `rss_client.py` - RSS/Atom reader (stdlib XML)
+- [x] `content_writer.py` - slugify + header + dedup
+- [x] `topic_suggester.py` - EXPAND/EXPLORE z KnowledgeAnalyzer (zero LLM)
+- [x] `__init__.py` - `run_fetch_session()` entry point
+- [x] `test_web_source.py` - 47 testow (all mocked HTTP)
+- [x] Dokumentacja: DEVELOPMENT_PLAN, ARCHITECTURE, CLAUDE.md, planner_model komentarz
+
+### Podsumowanie:
+- Testy: 1074 → 1121 (47 nowych web_source + 5 planner trigger)
+- Maria dziala autonomicznie (6 chunkow learned, 2 egzaminy zdane)
+- Web Fetcher gotowy, czeka na aktywacje (2 kroki w planner)
+
+---
+
+*Ostatnia aktualizacja: 2026-03-08 (4 bug fixes, Web Content Fetcher zbudowany, 1121 testow)*

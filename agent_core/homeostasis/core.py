@@ -138,6 +138,7 @@ class HomeostasisCore:
 
         # Planner (Warstwa 2 - replaces teacher auto-trigger when wired)
         self._planner_core = None
+        self._planner_thread: Optional[threading.Thread] = None
 
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
@@ -550,22 +551,46 @@ class HomeostasisCore:
         Replaces Phase 10 teacher auto-trigger when planner is wired.
         Planner handles its own frequency (every 60 ticks + event-driven).
         Falls back to teacher auto-trigger if no planner configured.
+
+        Runs planner cycle in a background thread to avoid blocking
+        the tick loop during long LLM calls (learning/exam sessions).
         """
         if self._planner_core is None:
             # Fallback: if no planner, use old teacher trigger
             self._check_teacher_trigger()
             return
 
+        # Don't start a new cycle if one is already running in background
+        if self._planner_thread is not None and self._planner_thread.is_alive():
+            return
+
         try:
             if self._planner_core.should_run(self._tick_count):
-                plan = self._planner_core.run_cycle(self._tick_count)
-                if plan:
-                    logger.debug(
-                        f"[PLANNER] Cycle complete: {plan.action_type.value} "
-                        f"-> {plan.status.value}"
-                    )
+                # Capture tick_count before spawning thread
+                tick = self._tick_count
+                self._start_planner_cycle(tick)
         except Exception as e:
-            logger.warning(f"[PLANNER] Cycle error: {e}")
+            logger.warning(f"[PLANNER] Trigger error: {e}")
+
+    def _start_planner_cycle(self, tick_count: int) -> None:
+        """Start planner cycle in background thread (non-blocking)."""
+
+        def _run():
+            try:
+                plan = self._planner_core.run_cycle(tick_count)
+                if plan:
+                    logger.info(
+                        f"[PLANNER] Cycle complete: {plan.action_type.value} "
+                        f"-> {plan.status.value} "
+                        f"({plan.duration_ms:.0f}ms)"
+                    )
+            except Exception as e:
+                logger.warning(f"[PLANNER] Cycle error: {e}")
+
+        self._planner_thread = threading.Thread(
+            target=_run, daemon=True, name="PlannerCycle"
+        )
+        self._planner_thread.start()
 
     def _check_teacher_trigger(self) -> None:
         """

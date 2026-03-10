@@ -37,16 +37,17 @@ class NIMClient:
     DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
     # Retry settings
-    MAX_RETRIES = 3
-    RETRY_BASE_DELAY = 1.0  # seconds
-    RETRY_BACKOFF = 2.0     # exponential multiplier
+    MAX_RETRIES = 3          # used for rate limit (429)
+    MAX_TIMEOUT_RETRIES = 1  # fail fast on timeout, fallback to Ollama
+    RETRY_BASE_DELAY = 1.0   # seconds
+    RETRY_BACKOFF = 2.0      # exponential multiplier
 
     def __init__(
         self,
         api_key: str,
         model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
         base_url: Optional[str] = None,
-        timeout: int = 120,
+        timeout: int = 45,
         system_prompt: Optional[str] = None,
         log_fn: Optional[Callable[[str], None]] = None,
     ):
@@ -121,6 +122,7 @@ class NIMClient:
         }
 
         last_error = None
+        timeout_count = 0
         for attempt in range(self.MAX_RETRIES):
             try:
                 response = requests.post(
@@ -171,15 +173,22 @@ class NIMClient:
                 return content.strip()
 
             except requests.exceptions.Timeout:
-                delay = self.RETRY_BASE_DELAY * (
-                    self.RETRY_BACKOFF ** attempt
-                )
-                logger.warning(
-                    f"NIM timeout ({self.timeout}s), retry in {delay:.1f}s "
-                    f"(attempt {attempt + 1}/{self.MAX_RETRIES})"
-                )
+                timeout_count += 1
                 last_error = NIMAPIError(
                     f"Timeout after {self.timeout}s"
+                )
+                # Fail fast on timeout - model is cold/overloaded,
+                # retrying wastes minutes before Ollama fallback
+                if timeout_count >= self.MAX_TIMEOUT_RETRIES:
+                    logger.warning(
+                        f"NIM timeout ({self.timeout}s), giving up "
+                        f"after {timeout_count} timeout(s)"
+                    )
+                    raise last_error
+                delay = self.RETRY_BASE_DELAY
+                logger.warning(
+                    f"NIM timeout ({self.timeout}s), retry in {delay:.1f}s "
+                    f"(timeout {timeout_count}/{self.MAX_TIMEOUT_RETRIES})"
                 )
                 time.sleep(delay)
                 continue

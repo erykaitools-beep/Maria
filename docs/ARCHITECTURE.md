@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.4 | Last updated: 2026-03-01
+> Version: 0.6 | Last updated: 2026-03-08
 
 ## 1. Overview
 
@@ -244,7 +244,7 @@ System spelnia "Full Homeostasis" gdy:
 - [x] episodic_memory ma cap i FIFO
 - [x] System raportuje swoj stan (motivation, uptime, stats)
 
-**STATUS: COMPLETE** (2026-01-28, teraz 941 tests passing)
+**STATUS: COMPLETE** (2026-01-28, teraz 1067 tests passing)
 
 ---
 
@@ -262,10 +262,10 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 4. ~~**Brak consolidation scheduler**~~ -> Rozwiazane przez epoch tasks w core.py
 5. **Legacy maria_core/** - stary kod nadal istnieje, owiniety adapterami (Stage 5 archiwizacja done)
 6. ~~**Brak Unified Perception**~~ -> Rozwiazane: PerceptionEvent + PerceptionBuffer + 6 adapterow (K1)
-7. **Brak Plannera** - Maria reaguje na komendy, nie planuje samodzielnie (Warstwa 2 planowana)
+7. ~~**Brak Plannera**~~ -> Rozwiazane: PlannerCore + GoalSelector + ActionExecutor + PlannerGuard (K5, K5.1)
 8. ~~**Brak Goal System**~~ -> Rozwiazane: GoalStore z 4 typami celow + audit trail (K3)
 
-Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju warstw 1-6)
+Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju: warstwy 1-3 DONE, warstwa 4 stabilizacja, K6-K10 cognitive core docelowe, potem Vision/Smart Home)
 
 ---
 
@@ -316,6 +316,19 @@ agent_core/
 ├── evaluation/            # Agent Evaluation (Kontrakt K4, READ-ONLY)
 │   ├── observer.py        # EvaluationObserver (5 metryk, zero LLM)
 │   └── report.py          # EvaluationReport schema
+├── planner/               # Planner - ReAct Loop (Kontrakt K5, Warstwa 2)
+│   ├── planner_core.py    # Central ReAct loop (co 60 tickow + event-driven)
+│   ├── planner_model.py   # Plan, PlanStatus, ActionType, PlannerState
+│   ├── planner_guard.py   # 5 gating rules
+│   ├── goal_selector.py   # Aging factor + feasibility ranking
+│   └── action_executor.py # Delegacja do Teacher/Sandbox/Evaluation
+├── web_source/            # Web Content Fetcher (gotowy, NIE podlaczony do plannera)
+│   ├── __init__.py        # run_fetch_session() - jedyny punkt integracji
+│   ├── wiki_client.py     # Wikipedia PL API (search + fetch)
+│   ├── rss_client.py      # RSS/Atom reader (xml.etree, zero nowych deps)
+│   ├── topic_suggester.py # Wybor tematow z KnowledgeAnalyzer (zero LLM)
+│   ├── content_writer.py  # Zapis .txt do input/ + dedup + slugify
+│   └── fetch_registry.py  # JSONL rejestr pobranych (MERGE semantics)
 ├── introspection/         # Samowiedza kodu (READ-ONLY)
 │   ├── analyzer.py        # AST static analysis
 │   ├── code_model.py      # Code self-model structures
@@ -352,6 +365,7 @@ agent_core/
 │   ├── introspection_module.py # /introspect
 │   ├── awareness_module.py # /awareness
 │   ├── nim_module.py      # /nim
+│   ├── planner_module.py # /plan (Warstwa 2)
 │   ├── knowledge_module.py # /knowledge
 │   └── query_module.py    # /query
 ├── adapters/              # Legacy code wrappers
@@ -362,8 +376,8 @@ agent_core/
 ├── ui/
 │   ├── telemetry_api.py   # Read-only dashboard
 │   └── operator_controls.py
-└── tests/                 # 941 tests
-    └── test_*.py          # 25 test files
+└── tests/                 # 1121 tests
+    └── test_*.py          # 28 test files
 ```
 
 ### 6.2 Integracja z main.py
@@ -431,8 +445,11 @@ main.py (Ver.2.0 - Registry-based)
     │
     ├── Phase 9: AUDIT & LOG (co 60 tickow)
     │
-    └── Phase 10: TEACHER AUTO-TRIGGER
-        └── ACTIVE + idle >= 10min -> auto-sesja nauki (3 iteracje)
+    └── Phase 10: PLANNER (Kontrakt K5)
+        ├── PlannerCore.run_cycle() (co 60 tickow + event-driven)
+        ├── GoalSelector → PlannerGuard → ActionExecutor
+        ├── Topic-Aware Learning (K5.1): topics → resolved_file_ids → Teacher
+        └── Fallback: teacher auto-trigger (backward compatible)
 ```
 
 ### 6.4 LLM Routing
@@ -475,3 +492,4 @@ SleepProcessor (when ACTIVE -> SLEEP)
 ---
 
 *Ten dokument jest zywym dokumentem - aktualizuj go przy zmianach architektonicznych.*
+*Ostatnia aktualizacja: 2026-03-08 (Web Content Fetcher, stabilizacja K1-K5.1, 1121 tests)*

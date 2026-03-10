@@ -138,7 +138,11 @@ class EvaluationObserver:
         records = self._read_jsonl(self._paths["exam_results"])
 
         total = len(records)
-        passed = sum(1 for r in records if r.get("passed", False))
+        # Support both formats: explicit "passed" bool, or derive from score
+        passed = sum(
+            1 for r in records
+            if r.get("passed") is True or r.get("score", 0) >= 0.7
+        )
 
         rate = passed / total if total > 0 else 0.0
 

@@ -1,72 +1,129 @@
-# run_maria.py
-# Start architektury M.A.R.I.A. z:
-# - META (maria_core/meta/meta_controller.py)
-# - WATCHDOG RAM (maria_core/resource_watchdog.py)
-# - orchestrator.maria_learning_cycle jako serce nauki
+#!/usr/bin/env python3
+"""M.A.R.I.A. Daemon - headless mode z pelnym pipeline K1-K5.1.
+
+Uruchamia homeostasis tick loop (1Hz) z:
+- Perception (K1), Sandbox (K2), Goals (K3), Evaluation (K4)
+- Planner (K5) + Topic-Aware Learning (K5.1)
+- Consciousness (osobowosc, sny, pamiec)
+- Teacher (autonomiczna nauka przy idle)
+
+Usage:
+    python run_maria.py
+
+Systemd: maria.service (ExecStart=/home/maria/maria/venv/bin/python run_maria.py)
+Signals: SIGTERM/SIGINT -> graceful shutdown
+"""
 
 import os
 import sys
+import signal
 import logging
+import threading
+import time
 from pathlib import Path
 
-# === ŚCIEŻKI / PAKIET ===
-BASE_DIR = Path(__file__).resolve().parent  # ...\Moja AI. Maria Ver.1
-
+# Paths
+BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
-
 os.chdir(BASE_DIR)
 
-# === IMPORTY Z RDZENIA ===
-from maria_core.sys.orchestrator import maria_learning_cycle
-from maria_core.sys.resource_watchdog import start_watchdog
-from maria_core.meta.meta_controller import meta  # singleton META
-
-
-# === LOGOWANIE PODSTAWOWE ===
+# Logging (journald-friendly)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("RUN_MARIA")
+logger = logging.getLogger("maria.daemon")
+
+# Shutdown event - interruptible by signals
+_shutdown = threading.Event()
+
+
+def _graceful_shutdown(ctx, registry):
+    """Cleanup: consciousness checkpoint + module cleanup."""
+    logger.info("Graceful shutdown starting...")
+
+    # Stop homeostasis loop
+    if ctx.homeostasis_core:
+        ctx.homeostasis_core.stop(reason="daemon_shutdown")
+
+    # Consciousness checkpoint
+    summary = "Daemon session"
+    if ctx.conversation_memory and ctx.conversation_memory.get_session_turn_count() > 0:
+        try:
+            condense_brain = getattr(ctx.brain, 'ollama', ctx.brain)
+            condensed = ctx.conversation_memory.condense_session(condense_brain)
+            if condensed:
+                ctx.conversation_memory.save_summary(condensed)
+                summary = condensed.get("summary", summary)
+        except Exception as e:
+            logger.warning(f"Condensation failed: {e}")
+
+    if ctx.consciousness:
+        try:
+            ctx.consciousness.checkpoint(summary=summary)
+            logger.info(f"Consciousness checkpoint: {summary}")
+        except Exception as e:
+            logger.warning(f"Consciousness checkpoint failed: {e}")
+
+    # Module cleanup
+    registry.cleanup_all()
+    logger.info("Daemon stopped")
 
 
 def main():
-    logger.info("[RUN_MARIA] Start architektury M.A.R.I.A. (META + WATCHDOG + ORCHESTRATOR)")
+    from main import init_brain, register_modules
+    from agent_core.registry import ModuleRegistry
 
-    # 1) Watchdog RAM – twardy bezpiecznik
-    start_watchdog(limit_percent=90, check_interval_sec=3)
+    logger.info("M.A.R.I.A. Daemon starting...")
 
-    # 2) META – status i decyzja, czy wolno się uczyć
-    try:
-        status = meta.get_status_summary()
-        logger.info(status)
-    except Exception as e:
-        logger.warning(f"[RUN_MARIA] Nie udało się pobrać statusu META: {e}")
+    # 1. Initialize (same as REPL)
+    ctx = init_brain()
+    logger.info(f"Brain initialized: {ctx.brain_model}")
 
-    try:
-        if hasattr(meta, "is_learning_allowed") and not meta.is_learning_allowed():
-            logger.warning("[RUN_MARIA] META: is_learning_allowed() = False → kończę proces bez nauki.")
-            meta.log_decision("skip_learning_cycle", "meta blocked learning in current mode")
-            return
-    except Exception as e:
-        logger.warning(f"[RUN_MARIA] Błąd w meta.is_learning_allowed(): {e}")
+    registry = ModuleRegistry()
+    register_modules(registry)
+    registry.init_all(ctx)
+    logger.info("All modules initialized")
 
-    # 3) Jedna bezpieczna sesja nauki
-    logger.info("[RUN_MARIA] Uruchamiam maria_learning_cycle (konserwatywne parametry).")
-    maria_learning_cycle(
-        max_iterations=5,          # krótka, bezpieczna sesja
-        learn_steps_per_exam=5,    # rzadziej egzaminy
-        use_ollama_priority=False, # mniej obciążenia
-    )
+    # 2. Signal handlers
+    def on_signal(signum, frame):
+        logger.info(f"Signal {signum} received")
+        _shutdown.set()
 
-    # 4) Log decyzji do META (opcjonalna nagroda / informacja)
-    try:
-        meta.log_decision("learning_cycle_completed", "run_maria.py zakończył cykl bez crasha")
-    except Exception as e:
-        logger.warning(f"[RUN_MARIA] Nie udało się zalogować decyzji w META: {e}")
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
 
-    logger.info("[RUN_MARIA] Koniec cyklu M.A.R.I.A.")
+    # 3. Verify homeostasis core
+    if not ctx.homeostasis_core:
+        logger.error("HomeostasisCore not initialized - cannot run daemon")
+        registry.cleanup_all()
+        sys.exit(1)
+
+    # 4. Run homeostasis loop (blocks until shutdown)
+    logger.info("Starting homeostasis tick loop...")
+
+    core = ctx.homeostasis_core
+    core._running = True
+
+    while not _shutdown.is_set():
+        try:
+            tick_start = time.time()
+            core._execute_tick()
+            core._tick_count += 1
+
+            tick_duration = time.time() - tick_start
+            remaining = core.TICK_INTERVAL_SEC - tick_duration
+            if remaining > 0:
+                _shutdown.wait(timeout=remaining)
+            elif tick_duration > core.TICK_WARNING_THRESHOLD_SEC:
+                logger.warning(f"Tick overrun: {tick_duration:.2f}s")
+        except Exception as e:
+            logger.error(f"Tick error: {e}", exc_info=True)
+            _shutdown.wait(timeout=core.TICK_INTERVAL_SEC)
+
+    # 5. Cleanup
+    _graceful_shutdown(ctx, registry)
 
 
 if __name__ == "__main__":

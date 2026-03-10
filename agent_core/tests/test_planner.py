@@ -313,6 +313,12 @@ class TestPlannerGuard:
         can, reasons = self.guard.can_plan(0.9, "active", False, None)
         assert can is True
 
+    def test_retention_zero_means_no_data(self):
+        """retention_rate=0.0 means no exams taken, not bad retention."""
+        can, reasons = self.guard.can_plan(0.9, "active", False, 0.0)
+        assert can is True
+        assert not any("retention" in r for r in reasons)
+
     def test_retention_exactly_threshold(self):
         can, reasons = self.guard.can_plan(0.9, "active", False, MIN_RETENTION_RATE)
         assert can is True  # >= threshold
@@ -593,6 +599,13 @@ class TestPlannerCoreShouldRun:
         assert planner.should_run(10) is False
         assert planner.should_run(60) is True
 
+    def test_tick_discontinuity_after_restart(self, planner_env):
+        """After daemon restart, tick resets to 0 but state has old value."""
+        planner, _ = planner_env
+        planner._state.last_cycle_tick = 5000  # Old daemon tick
+        # New daemon starts from tick 0 - ticks_since is negative
+        assert planner.should_run(60) is True
+
 
 class TestPlannerCoreGuard:
     def test_guard_blocks_when_unhealthy(self, planner_env):
@@ -818,6 +831,74 @@ class TestPlannerCoreEventEmission:
         plan.status = PlanStatus.COMPLETED
         # Should not crash
         planner._emit_decision_event(plan)
+
+
+class TestPlannerCoreIdleReset:
+    """Bug 5: Planner must call record_activity() after actions
+    so Maria doesn't stay in SLEEP forever in daemon mode."""
+
+    def test_record_activity_called_after_learning(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        planner.run_cycle(60)
+        core.record_activity.assert_called()
+
+    def test_record_activity_called_after_maintenance(self, planner_env):
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="maintenance",
+                          metadata={"metric": "health_score", "threshold": 0.7})
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        planner.run_cycle(60)
+        core.record_activity.assert_called()
+
+    def test_record_activity_not_called_for_noop(self, planner_env):
+        """NOOP should not reset idle - no real work was done."""
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        # Force NOOP: goal with no files to learn and high retention
+        observer = _make_mock_observer(metrics={
+            "learning_velocity": 0, "retention_rate": 0.95,
+            "knowledge_coverage": 1.0, "system_stability": 0.9,
+            "personality_growth": 0.1,
+        })
+        planner.set_evaluation_observer(observer)
+
+        analyzer = MagicMock()
+        analyzer.get_knowledge_snapshot.return_value = {
+            "files_by_status": {}, "new_files_available": [],
+        }
+        planner.set_knowledge_analyzer(analyzer)
+
+        goal = _make_goal(goal_type="meta")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        planner.run_cycle(60)
+        core.record_activity.assert_not_called()
+
+    def test_no_core_no_crash_on_activity(self, planner_env):
+        """record_activity should not crash when no core is set."""
+        planner, _ = planner_env
+        # No core set - finalize should still work
+        goal = _make_goal(goal_type="maintenance",
+                          metadata={"metric": "health_score", "threshold": 0.7})
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        result = planner.run_cycle(60)
+        assert result is not None
 
 
 class TestPlannerCoreStatus:

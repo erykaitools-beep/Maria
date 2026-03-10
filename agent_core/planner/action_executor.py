@@ -217,13 +217,27 @@ class ActionExecutor:
 
         state = self._homeostasis_core.get_state()
         health = state.health_score
+        interp = state.interpreted_state or {}
 
         # Update the maintenance goal's progress if goal_store available
         if self._goal_store and plan.goal_id:
             goal = self._goal_store.get(plan.goal_id)
-            if goal and goal.metadata.get("metric") == "health_score":
-                threshold = goal.metadata.get("threshold", 0.7)
-                progress = min(health / threshold, 1.0) if threshold > 0 else 1.0
+            if goal:
+                metric = goal.metadata.get("metric", "")
+                threshold = goal.metadata.get("threshold", 0)
+                progress = 0.0
+
+                if metric == "health_score" and threshold > 0:
+                    progress = min(health / threshold, 1.0)
+                elif metric == "cpu_load" and threshold > 0:
+                    # CPU: lower is better, progress=1.0 when cpu < threshold
+                    cpu = interp.get("cpu_load", 0)
+                    progress = 1.0 if cpu < threshold else max(0.0, 1.0 - (cpu - threshold) / threshold)
+                elif metric == "ram_available_pct" and threshold > 0:
+                    # RAM: higher is better, progress=1.0 when ram > threshold
+                    ram = interp.get("ram_available_pct", 0)
+                    progress = min(ram / threshold, 1.0)
+
                 self._goal_store.update_progress(plan.goal_id, progress)
                 self._goal_store.save()
 

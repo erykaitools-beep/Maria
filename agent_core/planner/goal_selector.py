@@ -98,8 +98,11 @@ class GoalSelector:
         """
         goal_type = goal.type.value
 
-        # MAINTENANCE goals are always feasible
+        # MAINTENANCE goals: only feasible when metric needs attention
+        # progress >= 1.0 means metric is within threshold (satisfied)
         if goal_type == "maintenance":
+            if goal.progress >= 1.0:
+                return False, "metric within threshold"
             return True, ""
 
         # META goals are always feasible

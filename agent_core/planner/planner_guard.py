@@ -59,7 +59,11 @@ class PlannerGuard:
         if sandbox_active:
             reasons.append("sandbox session active")
 
-        if retention_rate is not None and retention_rate < MIN_RETENTION_RATE:
+        # retention_rate=0.0 means "no exam data" (no exams taken yet),
+        # NOT "bad retention". Only gate when we have real exam results.
+        if (retention_rate is not None
+                and retention_rate > 0.0
+                and retention_rate < MIN_RETENTION_RATE):
             reasons.append(
                 f"retention_rate {retention_rate:.2f} < {MIN_RETENTION_RATE}"
             )

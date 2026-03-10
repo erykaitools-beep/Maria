@@ -28,6 +28,8 @@ class ActionType(Enum):
     EVALUATE = "evaluate"        # Trigger EvaluationObserver report
     MAINTENANCE = "maintenance"  # Maintenance action (update goal progress)
     NOOP = "noop"                # Nothing to do (idle)
+    # Future: FETCH = "fetch"    # Fetch web content (agent_core/web_source/)
+    #   Activation: add FETCH here + _exec_fetch() in action_executor.py
 
 
 @dataclass

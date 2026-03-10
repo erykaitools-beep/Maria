@@ -128,7 +128,8 @@ class PlannerCore:
         """
         # Routine check
         ticks_since = tick_count - self._state.last_cycle_tick
-        if ticks_since >= ROUTINE_INTERVAL_TICKS:
+        # Handle tick discontinuity after daemon restart (tick resets to 0)
+        if ticks_since < 0 or ticks_since >= ROUTINE_INTERVAL_TICKS:
             return True
 
         # Event-driven check: high-priority events since last cycle
@@ -385,6 +386,14 @@ class PlannerCore:
         plan.status = (
             PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
         )
+
+        # Reset idle streak so Maria doesn't stay in SLEEP forever
+        # after autonomous learning/exam/evaluation actions
+        if plan.action_type != ActionType.NOOP and self._homeostasis_core:
+            try:
+                self._homeostasis_core.record_activity()
+            except Exception:
+                pass
 
         # Generate human-readable message and attach to plan
         plan.message = self._format_message(plan)

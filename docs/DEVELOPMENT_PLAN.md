@@ -1,13 +1,28 @@
-# M.A.R.I.A. - Plan Rozwoju (2026-03-01)
+# M.A.R.I.A. - Plan Rozwoju (2026-03-08)
 
 > Ten plan powstal z burzy mozgow opartej na analizach Groka, ChatGPT i Claude (ktory zna kod od srodka).
 > Trzymamy sie tej kolejnosci. Kazdy nowy modul wchodzi naturalnie w system, a nie jest doklejony z boku.
 > **2026-03-01:** Dodano Warstwe 0.5 (Kontrakty architektoniczne) - formalne specyfikacje przed implementacja.
+> **2026-03-08:** Zmiana kierunku: najpierw domkniecie rdzenia kognitywnego (K6-K10), potem zmysly i efektory.
 
 ## Zasada naczelna
 
 Maria ma byc **systemem kognitywnym**, nie kolekcja modulow.
 To znaczy: kazdy nowy komponent musi dzialac RAZEM z reszta, nie obok.
+
+## Decyzja strategiczna (2026-03-08, ADR-014)
+
+**Najpierw mozg, potem zmysly i rece.**
+
+Vision, Smart Home i inne moduly srodowiskowe zostaja odlozone do czasu domkniecia
+rdzenia kognitywnego (K6-K10), poniewaz:
+
+- nowe zmysly bez lepszego poznania = wiecej szumu
+- nowe efektory bez governance = wieksze ryzyko
+- nowe moduly bez srodka strategicznego = wieksza zlozonosc bez proporcjonalnej korzysci
+
+K6-K10 to **architektura docelowa** - budowana przyrostowo, wtedy gdy praktyka pokaze
+ze danej warstwy brakuje. Nie budujemy na zapas, ale wiemy dokad idziemy.
 
 ---
 
@@ -73,22 +88,30 @@ Bez tego Vision bedzie kolejnym silosem. Z Unified Perception kamera staje sie n
 
 ## Warstwa 2: Planner (petla dzialania)
 
-**Priorytet: NASTEPNY**
+**Status: DONE (2026-03-01, Kontrakt K5 + K5.1)**
 
 ### Cel
 Maria sama planuje i dziala, zamiast czekac na komendy.
 
 ### Co obejmuje
-- Prosty ReAct loop: cel → mysl → dzialaj → obserwuj → powtorz
-- Tool-use: Maria wywoluje swoje wlasne komendy w petli
-- Ograniczenia bezpieczenstwa (max krokow, timeout, human approval dla ryzykownych akcji)
-- Integracja z GoalStore (K3) - planner czyta cele, aktualizuje progress
+- Rule-based ReAct loop (ADR-013: zero LLM w petli decyzyjnej)
+- PlannerCore: co 60 tickow + event-driven (exam_result, alert, user_command, sandbox_promoted)
+- PlannerGuard: 5 gating rules blokujacych planowanie gdy system nie zdrowy
+- GoalSelector: aging factor (priority *= 1 + hours * 0.1, max 5x) + feasibility
+- ActionExecutor: delegacja do Teacher/Sandbox/EvaluationObserver
+- Plan = single step (v1, nie drzewo/graf)
+- **K5.1 Topic-Aware Learning:** Maria wybiera tematy nauki
+  - KnowledgeAnalyzer: tag normalization, topic-file mapping z cache 60s, scoring (exact=3, prefix=2, substring=1, filename=0.5)
+  - TeacherAgent: filter_file_ids param, IDLE z idle_reason gdy filtr wycina wszystkich
+  - ActionExecutor: topics → resolved_file_ids + resolution_report
+  - Auto-goal creation: bezpieczne autonomiczne tworzenie celow nauki (ACTIVE mode, retention >= 0.6, cooldown 1h, max 3)
+  - REPL: /plan learn <temat>, /plan topics
 
 ### Status
-- [ ] Specyfikacja
-- [ ] Implementacja
-- [ ] Testy
-- [ ] Integracja z homeostasis
+- [x] Specyfikacja (Kontrakt K5 w CONTRACTS.md)
+- [x] Implementacja (agent_core/planner/ + rozszerzenia teacher, modules)
+- [x] Testy (82 planner + 29 topic-aware = 111 testow)
+- [x] Integracja z homeostasis (Phase 10 replacement z backward-compatible fallback)
 
 ---
 
@@ -115,68 +138,210 @@ Maria generuje wlasne cele na podstawie swojego stanu. Observer mierzy postep.
 
 ---
 
-## Warstwa 4: Vision (Faza 1-2)
+## Warstwa 4: Stabilizacja (TERAZ)
 
-**Priorytet: PO Goal System**
+**Priorytet: TERAZ (2026-03-08)**
+
+### Cel
+K1-K5.1 dzialaja. Teraz trzeba je przetestowac w praktyce i zobaczyc co faktycznie brakuje.
+
+### Co obejmuje
+- Testy stabilnosci automatyki (planner + topic-aware learning)
+- Obserwacja: co planner robi dobrze, co zle, gdzie brakuje kontekstu
+- Zbieranie danych o tym ktore warstwy kognitywne (K6-K10) sa potrzebne PIERWSZE
+- Drobne poprawki na podstawie obserwacji
+
+### Status
+- [x] Naprawione 4 bugi (retention gate, tick discontinuity, maintenance dominance, tick loop blocking)
+- [x] Web Content Fetcher (agent_core/web_source/) - gotowy, NIE podlaczony do plannera
+- [ ] Multi-day test automatyki
+- [ ] Analiza logow planner_decisions.jsonl
+- [ ] Identyfikacja pierwszego brakujacego elementu kognitywnego
+- [ ] Aktywacja Web Content Fetcher (2 kroki ponizej)
+
+### Web Content Fetcher (zbudowany 2026-03-08, czeka na aktywacje)
+
+Modul pozwalajacy Marii autonomicznie pobierac materialy z internetu (Wikipedia PL + RSS).
+Zbudowany i przetestowany (47 testow), ale **celowo NIE podlaczony** do plannera.
+Maria moze dzialac na obecnych materialach, a modul czeka gotowy do aktywacji.
+
+**Struktura:**
+```
+agent_core/web_source/
+    __init__.py          # run_fetch_session() - jedyny punkt integracji
+    wiki_client.py       # Wikipedia PL API (search + fetch)
+    rss_client.py        # RSS/Atom reader (xml.etree, zero nowych dependencies)
+    topic_suggester.py   # Wybor tematow z KnowledgeAnalyzer (zero LLM)
+    content_writer.py    # Zapis .txt do input/ + dedup
+    fetch_registry.py    # JSONL rejestr pobranych (MERGE semantics)
+```
+
+**Flow:** TopicSuggester (na bazie KnowledgeAnalyzer) → WikiClient/RSSClient → ContentWriter → FetchRegistry
+
+**2 kroki do aktywacji:**
+1. **`agent_core/planner/planner_model.py`** - dodac `FETCH = "fetch"` do `ActionType` enum
+2. **`agent_core/planner/action_executor.py`** - dodac `_exec_fetch()` ktory wywoluje `run_fetch_session()`
+
+---
+
+## Warstwa 5-9: Cognitive Core (DOCELOWE, K6-K10)
+
+**Priorytet: PRZYROSTOWO - budowane gdy praktyka pokaze ze brakuje**
+
+> Te warstwy to docelowa architektura rdzenia kognitywnego.
+> Nie budujemy ich wszystkich naraz. Kazda wchodzi wtedy, gdy obecny system
+> wyraznie pokazuje ze jej brak jest waskim gardlem.
+> Kolejnosc moze sie zmienic w zaleznosci od praktycznych potrzeb.
+
+### K6: World Model / Belief System
+
+**Cel:** Maria rozumie nie tylko zdarzenia, ale trwala strukture swiata.
+
+**Czego brakuje w obecnym systemie:**
+- encje: osoba, plik, urzadzenie, miejsce, temat, modul
+- relacje miedzy encjami (semantic_graph to proto-wersja)
+- rozroznienie: fakt vs obserwacja vs hipoteza vs niepewne przypuszczenie
+- confidence i zrodlo wiedzy per przekonanie
+- aktualizacja przekonan w czasie (belief revision)
+
+**Kiedy budowac:** Gdy Maria dostanie nowe zrodla danych (Vision, Smart Home, nowe kanaly)
+i semantic_graph przestanie wystarczac do reprezentacji wiedzy o swiecie.
+
+**Obecne proto-elementy:** semantic_graph.py, knowledge_analyzer.py (topic mapping), exam_results (confidence per temat)
+
+---
+
+### K7: Autonomy Policy / Governance
+
+**Cel:** Pelna autonomia bez polityki dzialania jest niebezpieczna i niestabilna.
+
+**Czego brakuje w obecnym systemie:**
+- klasyfikacja akcji: dozwolone autonomicznie / wymagajace potwierdzenia / zabronione
+- poziomy ryzyka per typ akcji
+- zasady HITL (Human-In-The-Loop) - kiedy pytac czlowieka
+- warunki eskalacji
+- limity operacyjne i bezpieczniki (ponad to co robi PlannerGuard)
+
+**Kiedy budowac:** Przed Smart Home (sterowanie urzadzeniami wymaga governance).
+PlannerGuard (5 gating rules) to proto-wersja - rozszerzenie gdy przestrzen akcji urosnie.
+
+**Obecne proto-elementy:** PlannerGuard (planner_guard.py), ConstraintValidator (constraints.py)
+
+---
+
+### K8: Deliberation / Strategic Planning
+
+**Cel:** Przejscie od "wybierz nastepny krok" do "prowadz proces przez wiele krokow".
+
+**Czego brakuje w obecnym systemie:**
+- plany wieloetapowe (obecny Plan = single step, ADR-013)
+- dekompozycja celow na podcele
+- checkpointy w dlugich procesach
+- sledzenie intencji (dlaczego robimy X, nie tylko co robimy)
+- repriorytetyzacja przy zmianie sytuacji
+
+**Kiedy budowac:** Gdy przestrzen akcji urosnie poza nauke (Vision, Smart Home, Code Agent)
+i single-step planner przestanie wystarczac.
+
+**Obecne proto-elementy:** PlannerCore (single-step ReAct), GoalSelector (aging + feasibility)
+
+---
+
+### K9: Uncertainty / Reflection / Meta-Cognition
+
+**Cel:** System kognitywny powinien wiedziec czego nie wie.
+
+**Czego brakuje w obecnym systemie:**
+- confidence per decyzja (nie tylko per egzamin)
+- assumptions jawnie zapisane przy kazdym planie
+- evidence trail (dlaczego podjeto decyzje)
+- self-check po decyzji (czy skutek zgadza sie z oczekiwaniem)
+- wykrywanie blednych zalozen
+- "potrzebuje czlowieka, bo nie jestem pewna"
+
+**Kiedy budowac:** Gdy K4 Evaluation przestanie wystarczac do oceny jakosci decyzji,
+lub gdy Maria zacznie podejmowac decyzje z realnymi konsekwencjami (Smart Home, Code Agent).
+
+**Obecne proto-elementy:** EvaluationObserver (5 metryk), EvaluationReport (threshold-based recommendations)
+
+---
+
+### K10: General Action Safety Layer
+
+**Cel:** Uogolnienie sandbox na wszystkie typy akcji, nie tylko nauke.
+
+**Czego brakuje w obecnym systemie:**
+- tryby: simulate -> stage -> commit (dla dowolnej akcji)
+- walidacja skutkow przed wykonaniem
+- rollback dla akcji nie-learningowych
+- action audit log (ogolny, nie tylko sandbox transaction log)
+- ogolny protokol bezpieczenstwa dla nowych typow akcji
+
+**Kiedy budowac:** Razem z pierwszym efektorem (Smart Home lub Code Agent),
+bo dopiero wtedy pojawia sie akcje z realnymi konsekwencjami poza sandbox.
+
+**Obecne proto-elementy:** SandboxManager (K2), transaction log (START/COMMIT/ROLLBACK)
+
+---
+
+## Warstwa 10: Vision
+
+**Priorytet: PO domknieciu potrzebnych warstw Cognitive Core**
 
 ### Cel
 Zmysl wzroku jako naturalny kanal w Unified Perception.
 
+### Wymagania wstepne
+- K7 (Autonomy Policy) - governance dla nowego zrodla danych
+- K6 (World Model) - miejsce na reprezentacje tego co Maria widzi
+
 ### Co obejmuje
-- Faza 1: Sensor Abstraction Layer (kamera USB, mock sensor)
+- Faza 1: Sensor Abstraction Layer (kamera USB/WiFi, mock sensor)
 - Faza 2: Preprocessing (jakosc obrazu, normalizacja, degradacja)
-- Wejscie do Unified Perception (obraz → percept)
-
-### Szczegoly
-Patrz: `docs/VISION_SPEC.md` (fazy 1-2)
-
-### Status
-- [ ] Hardware (kamera)
-- [ ] Faza 1 implementacja
-- [ ] Faza 2 implementacja
-- [ ] Integracja z Unified Perception
-
----
-
-## Warstwa 5: Vision (Faza 3-4)
-
-**Priorytet: PO Faza 1-2**
-
-### Co obejmuje
 - Faza 3: Vision Modules (Motion, Scene, OCR, Face)
 - Faza 4: Vision Cortex (integracja, attention mechanism)
-- Adapter do Consciousness
+- Adapter do Unified Perception + Consciousness
+
+### Szczegoly
+Patrz: `docs/VISION_SPEC.md`
 
 ### Status
-- [ ] Faza 3 implementacja
-- [ ] Faza 4 implementacja
-- [ ] Integracja z Consciousness
+- [ ] Cognitive Core prerequisites
+- [ ] Faza 1-2 implementacja
+- [ ] Faza 3-4 implementacja
+- [ ] Integracja z Unified Perception + Consciousness
 
 ---
 
-## Warstwa 6: Smart Home (kolejny zmysl)
+## Warstwa 11: Smart Home
 
 **Priorytet: PO Vision**
 
 ### Cel
-IoT jako kolejny kanal percepcji w Unified Perception.
+IoT jako kolejny kanal percepcji i pierwszy efektor w swiecie fizycznym.
+
+### Wymagania wstepne
+- K7 (Autonomy Policy) - KONIECZNE przed sterowaniem urzadzeniami
+- K10 (Action Safety) - simulate/stage/commit dla akcji fizycznych
+- K6 (World Model) - reprezentacja urzadzen, pomieszczen, stanow
 
 ### Co obejmuje
 - DeviceRegistry + ShellyDevice
 - Smart Home → percepts (temperatura, ruch, swiatlo)
-- Planner moze sterowac urzadzeniami jako "tool"
+- Planner moze sterowac urzadzeniami jako "tool" (przez Action Safety Layer)
 
 ### Szczegoly
 Patrz: `docs/SMART_HOME_SPEC.md`
 
 ### Status
+- [ ] Cognitive Core prerequisites (K7, K10)
 - [ ] Hardware (Shelly devices)
 - [ ] Implementacja
-- [ ] Integracja z Unified Perception
+- [ ] Integracja z Unified Perception + Action Safety
 
 ---
 
-## Diagram przepływu (docelowy)
+## Diagram przeplywu (docelowy)
 
 ```
 Bodźce (Stimuli)
@@ -185,10 +350,25 @@ Bodźce (Stimuli)
 [Unified Perception] <-- chat, nauka, sensory, kamera, IoT
   |
   v
-[Planner / ReAct Loop] <-- cele z Goal System
+[World Model (K6)] <-- aktualizacja przekonan, encje, relacje
   |
   v
-[Actions] --> /learn, /teacher, Smart Home, odpowiedz userowi
+[Deliberation (K8)] <-- cele z Goal System, plany wieloetapowe
+  |
+  v
+[Planner / ReAct Loop] <-- taktyczne decyzje, single-step execution
+  |
+  v
+[Autonomy Policy (K7)] <-- czy wolno? HITL check
+  |
+  v
+[Action Safety (K10)] <-- simulate -> stage -> commit
+  |
+  v
+[Actions] --> /learn, /teacher, Smart Home, Code Agent, odpowiedz userowi
+  |
+  v
+[Meta-Cognition (K9)] <-- czy skutek zgadza sie z oczekiwaniem?
   |
   v
 [Homeostasis] --> monitoruje, reguluje tryby

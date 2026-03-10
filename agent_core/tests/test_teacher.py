@@ -10,6 +10,7 @@ import threading
 import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 from agent_core.teacher.teaching_strategy import TeachingStrategy, SpacedRepetitionScheduler
 from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
@@ -1074,6 +1075,135 @@ class TestTeacherAutoTrigger:
         core._teacher_thread.join(timeout=5)
 
         assert core._teacher_last_run >= before
+
+
+# ══════════════════════════════════════════════════════
+# Planner Trigger (background thread)
+# ══════════════════════════════════════════════════════
+
+
+class MockPlannerCore:
+    """Lightweight mock of PlannerCore for trigger tests."""
+
+    def __init__(self, should_run_val=True, cycle_delay=0):
+        self._should_run_val = should_run_val
+        self._cycle_delay = cycle_delay
+        self.cycles_run = 0
+        self.last_tick = None
+
+    def should_run(self, tick_count):
+        return self._should_run_val
+
+    def run_cycle(self, tick_count):
+        import time as _time
+        self.last_tick = tick_count
+        if self._cycle_delay > 0:
+            _time.sleep(self._cycle_delay)
+        self.cycles_run += 1
+        # Return a mock plan
+        mock_plan = MagicMock()
+        mock_plan.action_type = MagicMock()
+        mock_plan.action_type.value = "learn"
+        mock_plan.status = MagicMock()
+        mock_plan.status.value = "completed"
+        mock_plan.duration_ms = self._cycle_delay * 1000
+        return mock_plan
+
+
+class TestPlannerTrigger:
+    """Tests for planner trigger running in background thread."""
+
+    def _make_core(self, tmp_path):
+        """Create HomeostasisCore with mocked event logger."""
+        from agent_core.homeostasis.event_logger import HomeostasisEventLogger
+        log_path = tmp_path / "events.jsonl"
+        event_logger = HomeostasisEventLogger(log_path=log_path)
+        core = HomeostasisCore(event_logger=event_logger)
+        return core
+
+    def test_planner_runs_in_thread(self, tmp_path):
+        """Planner cycle runs in background thread, not blocking tick."""
+        core = self._make_core(tmp_path)
+        planner = MockPlannerCore(should_run_val=True)
+        core.set_planner_core(planner)
+
+        core._tick_count = 60
+        core._check_planner_trigger()
+
+        # Thread should be started
+        assert core._planner_thread is not None
+        core._planner_thread.join(timeout=5)
+        assert planner.cycles_run == 1
+        assert planner.last_tick == 60
+
+    def test_no_concurrent_planner_cycles(self, tmp_path):
+        """Second trigger skipped when planner thread is still alive."""
+        core = self._make_core(tmp_path)
+        # Planner that takes 1 second
+        planner = MockPlannerCore(should_run_val=True, cycle_delay=0.5)
+        core.set_planner_core(planner)
+
+        core._tick_count = 60
+        core._check_planner_trigger()
+        assert core._planner_thread is not None
+        assert core._planner_thread.is_alive()
+
+        # Second trigger while first is still running
+        core._tick_count = 61
+        core._check_planner_trigger()
+
+        # Wait for first to finish
+        core._planner_thread.join(timeout=5)
+
+        # Only 1 cycle ran
+        assert planner.cycles_run == 1
+
+    def test_planner_should_run_false(self, tmp_path):
+        """No thread spawned when should_run returns False."""
+        core = self._make_core(tmp_path)
+        planner = MockPlannerCore(should_run_val=False)
+        core.set_planner_core(planner)
+
+        core._tick_count = 30
+        core._check_planner_trigger()
+
+        assert core._planner_thread is None
+        assert planner.cycles_run == 0
+
+    def test_planner_replaces_teacher(self, tmp_path):
+        """When planner is set, teacher auto-trigger is not called."""
+        core = self._make_core(tmp_path)
+        planner = MockPlannerCore(should_run_val=False)
+        core.set_planner_core(planner)
+
+        teacher = MockTeacherAgent()
+        core.set_teacher_agent(teacher)
+
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 700
+
+        core._check_planner_trigger()
+
+        # Teacher should NOT have been triggered
+        assert core._teacher_thread is None
+        assert teacher.sessions_run == 0
+
+    def test_fallback_to_teacher_when_no_planner(self, tmp_path):
+        """Without planner, teacher auto-trigger is used."""
+        core = self._make_core(tmp_path)
+        # No planner set
+        teacher = MockTeacherAgent()
+        core.set_teacher_agent(teacher)
+
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 700
+
+        core._check_planner_trigger()
+
+        # Teacher should have been triggered
+        assert core._teacher_thread is not None
+        core._teacher_thread.join(timeout=5)
+        assert teacher.sessions_run == 1
 
 
 # ══════════════════════════════════════════════════════

@@ -320,7 +320,8 @@ sensor   sensor     state      constraints actions  alarms
 
 ---
 
-*Ostatnia aktualizacja: 2026-01-28 (Etap 1-4 complete, 200 tests passing)*
-
-*Nastepny krok: Etap 5 - cleanup starego kodu i opcjonalne testy stabilnosci 30+ minut*
+*Ostatnia aktualizacja: 2026-03-01*
+*Homeostasis core: 200 tests passing (ta mapa)*
+*Caly projekt: 1067 tests (homeostasis + consciousness + teacher + perception + sandbox + goals + evaluation + planner)*
+*Nowe warstwy (K1-K5.1) opisane w: `docs/CONTRACTS.md`, `docs/DEVELOPMENT_PLAN.md`, `docs/ARCHITECTURE.md`*
 
