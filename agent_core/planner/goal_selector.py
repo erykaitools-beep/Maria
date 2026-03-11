@@ -34,6 +34,7 @@ class GoalSelector:
         evaluation_metrics: Dict[str, float],
         knowledge_snapshot: Optional[Dict[str, Any]] = None,
         now: Optional[float] = None,
+        world_summary: Optional[Dict[str, Any]] = None,
     ) -> Optional[Any]:
         """
         Select the highest effective-priority feasible goal.

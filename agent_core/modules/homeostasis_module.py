@@ -178,6 +178,23 @@ class HomeostasisModule(MariaModule):
                 except Exception:
                     pass
 
+                # World Model (K6) for structured knowledge representation
+                try:
+                    from agent_core.world_model import WorldModel
+                    world_model = WorldModel()
+                    loaded = world_model.load()
+                    if loaded == 0:
+                        stats = world_model.build()
+                        world_model.save()
+                        total = sum(stats.values())
+                        print(f"[Homeostasis] [OK] WorldModel built ({total} beliefs)")
+                    else:
+                        print(f"[Homeostasis] [OK] WorldModel loaded ({loaded} beliefs)")
+                    planner.set_world_model(world_model)
+                    ctx.world_model = world_model
+                except Exception as e:
+                    logger.debug(f"WorldModel not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

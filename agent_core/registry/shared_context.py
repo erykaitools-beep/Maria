@@ -34,6 +34,7 @@ class SharedContext:
     evaluation_observer: Any = None  # EvaluationObserver (Kontrakt K4)
     planner_core: Any = None         # PlannerCore (Warstwa 2, Kontrakt K5)
     knowledge_analyzer: Any = None   # KnowledgeAnalyzer (topic awareness)
+    world_model: Any = None          # WorldModel (Kontrakt K6)
 
     # REPL state
     last_result: Any = None

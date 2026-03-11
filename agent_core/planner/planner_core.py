@@ -84,6 +84,7 @@ class PlannerCore:
         self._teacher_agent = None
         self._knowledge_analyzer = None
         self._sandbox_manager = None
+        self._world_model = None
 
         # Load persisted state
         self._load_state()
@@ -115,6 +116,9 @@ class PlannerCore:
 
     def set_sandbox_manager(self, manager) -> None:
         self._sandbox_manager = manager
+
+    def set_world_model(self, world_model) -> None:
+        self._world_model = world_model
 
     # -- Main entry point (called from tick loop) -----------
 
@@ -269,6 +273,18 @@ class PlannerCore:
             except Exception:
                 pass
 
+        # K6: World Model beliefs and knowledge gaps
+        if self._world_model:
+            try:
+                context["world_summary"] = (
+                    self._world_model.query.get_world_summary()
+                )
+                context["knowledge_gaps"] = (
+                    self._world_model.query.get_knowledge_gaps()[:5]
+                )
+            except Exception:
+                pass
+
         return context
 
     # -- Internal: periodic evaluation ----------------------
@@ -300,6 +316,7 @@ class PlannerCore:
             active_goals=active_goals,
             evaluation_metrics=context.get("evaluation_metrics", {}),
             knowledge_snapshot=context.get("knowledge_snapshot"),
+            world_summary=context.get("world_summary"),
         )
 
     # -- Internal: plan creation ----------------------------
@@ -392,6 +409,16 @@ class PlannerCore:
         if plan.action_type != ActionType.NOOP and self._homeostasis_core:
             try:
                 self._homeostasis_core.record_activity()
+            except Exception:
+                pass
+
+        # K6: Update beliefs after exam results
+        if (plan.action_type == ActionType.EXAM
+                and result.get("success")
+                and self._world_model):
+            try:
+                self._world_model.process_exam_result(result)
+                self._world_model.save()
             except Exception:
                 pass
 
@@ -500,8 +527,24 @@ class PlannerCore:
         if not topic_scores:
             return False
 
-        # Pick topic with most unfinished files
-        best_topic = max(topic_scores, key=topic_scores.get)
+        # K6: Prefer topic with lowest confidence in World Model
+        best_topic = None
+        if self._world_model:
+            try:
+                conf_map = self._world_model.query.get_topic_confidence_map()
+                # Filter to topics that have unfinished files
+                candidates = {
+                    t: conf_map.get(t, 0.0)
+                    for t in topic_scores
+                }
+                if candidates:
+                    best_topic = min(candidates, key=candidates.get)
+            except Exception:
+                pass
+
+        # Fallback: pick topic with most unfinished files
+        if best_topic is None:
+            best_topic = max(topic_scores, key=topic_scores.get)
 
         # Don't duplicate existing LEARNING goals with same topic
         for g in learning_goals:
