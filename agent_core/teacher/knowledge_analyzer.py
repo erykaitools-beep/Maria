@@ -59,11 +59,35 @@ class KnowledgeAnalyzer:
         self._topic_map_cache: Optional[Dict[str, List[str]]] = None
         self._topic_map_cache_ts: float = 0.0
 
-    def _load_jsonl(self, path: Path) -> List[Dict[str, Any]]:
-        """Load records from a JSONL file."""
+    def _load_jsonl(self, path: Path, merge_key: str = "") -> List[Dict[str, Any]]:
+        """Load records from a JSONL file.
+
+        Args:
+            path: Path to JSONL file.
+            merge_key: If set, apply MERGE semantics (last record per key wins).
+                       This collapses duplicates and bounds memory.
+        """
         if not path.exists():
             return []
-        records = []
+        if merge_key:
+            merged: Dict[str, Dict[str, Any]] = {}
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                rec = json.loads(line)
+                                key = rec.get(merge_key, "")
+                                if key:
+                                    merged[key] = rec
+                            except json.JSONDecodeError:
+                                continue
+            except IOError as e:
+                logger.warning(f"Could not read {path}: {e}")
+            return list(merged.values())
+        from collections import deque
+        records: deque = deque(maxlen=5000)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -75,7 +99,7 @@ class KnowledgeAnalyzer:
                             continue
         except IOError as e:
             logger.warning(f"Could not read {path}: {e}")
-        return records
+        return list(records)
 
     def get_knowledge_snapshot(self) -> Dict[str, Any]:
         """
@@ -93,7 +117,7 @@ class KnowledgeAnalyzer:
             - learning_in_progress: List[Dict]
             - input_file_count: int
         """
-        index = self._load_jsonl(self.index_path)
+        index = self._load_jsonl(self.index_path, merge_key="id")
         exams = self._load_jsonl(self.exam_path)
 
         # Group by status
@@ -149,7 +173,7 @@ class KnowledgeAnalyzer:
             Dict with index record + exam history + memory entries,
             or None if not found.
         """
-        index = self._load_jsonl(self.index_path)
+        index = self._load_jsonl(self.index_path, merge_key="id")
 
         # Find matching record (partial match)
         match = None
@@ -197,7 +221,7 @@ class KnowledgeAnalyzer:
         Returns:
             List of gap descriptors sorted by priority.
         """
-        index = self._load_jsonl(self.index_path)
+        index = self._load_jsonl(self.index_path, merge_key="id")
         gaps = []
 
         for rec in index:
@@ -250,7 +274,7 @@ class KnowledgeAnalyzer:
         import time
         from datetime import datetime
 
-        index = self._load_jsonl(self.index_path)
+        index = self._load_jsonl(self.index_path, merge_key="id")
         now = time.time()
         candidates = []
 
@@ -368,7 +392,7 @@ class KnowledgeAnalyzer:
             Only files with score > 0 included.
         """
         topic_map = self.get_topic_file_map()
-        index_records = self._load_jsonl(self.index_path)
+        index_records = self._load_jsonl(self.index_path, merge_key="id")
 
         # All known file IDs from index
         all_file_ids = set()
