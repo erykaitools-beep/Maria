@@ -18,6 +18,7 @@ Spec reference: homeostasis_spec.md section 7.1 (lines 1289-1478)
 ADR-009: Tick Aggregator (perception via tick loop, not event bus)
 """
 
+import os
 import time
 import threading
 import logging
@@ -114,8 +115,8 @@ class HomeostasisCore:
             idle_seconds=0,
         )
 
-        # Audit log (in-memory, for backward compatibility)
-        self.audit_log: List[Dict[str, Any]] = []
+        # Audit log (in-memory, bounded to prevent memory leak)
+        self.audit_log: Deque[Dict[str, Any]] = deque(maxlen=1000)
 
         # Control
         self._running = False
@@ -718,6 +719,9 @@ class HomeostasisCore:
 
         Spec: homeostasis_spec.md lines 1468-1478
         """
+        # Process RSS (resident memory) - track for memory leak detection
+        process_rss_mb = self._get_process_rss_mb()
+
         # Persistent event log (JSONL)
         self.event_logger.log_state_snapshot(
             mode=self.state.mode,
@@ -725,7 +729,14 @@ class HomeostasisCore:
             interpreted_state=state,
             alerts_count=len(self.state.alerts),
             tick_count=self._tick_count,
+            extra={"process_rss_mb": process_rss_mb} if process_rss_mb else None,
         )
+
+        if process_rss_mb:
+            logger.info(
+                f"[MEMORY] Process RSS: {process_rss_mb:.1f} MB "
+                f"(tick {self._tick_count})"
+            )
 
         # In-memory audit log (backward compatibility)
         self.audit_log.append({
@@ -735,12 +746,25 @@ class HomeostasisCore:
             "health": self.state.health_score,
             "ram_available_pct": state.get("ram_available_pct", 0),
             "cpu_load": state.get("cpu_load", 0),
+            "process_rss_mb": process_rss_mb,
             "alerts": self.state.alerts.copy(),
         })
 
-        # Keep audit log bounded
-        if len(self.audit_log) > 10000:
-            self.audit_log = self.audit_log[-5000:]
+        # audit_log is deque(maxlen=1000), auto-evicts old entries
+
+    @staticmethod
+    def _get_process_rss_mb() -> Optional[float]:
+        """Get current process RSS (Resident Set Size) in MB via /proc."""
+        try:
+            with open(f"/proc/{os.getpid()}/status", "r") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        # VmRSS: 123456 kB
+                        kb = int(line.split()[1])
+                        return kb / 1024.0
+        except (OSError, ValueError, IndexError):
+            pass
+        return None
 
     def stop(self, reason: str = "user_request") -> None:
         """Stop the main loop."""
@@ -758,7 +782,7 @@ class HomeostasisCore:
 
     def get_audit_log(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent audit log entries."""
-        return self.audit_log[-limit:]
+        return list(self.audit_log)[-limit:]
 
     def record_user_interaction(self) -> None:
         """Record that user interaction occurred."""

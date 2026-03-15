@@ -16,6 +16,7 @@ import json
 import time
 import threading
 import logging
+from collections import deque
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -111,6 +112,8 @@ class HomeostasisEventLogger:
     DEFAULT_LOG_PATH = Path("meta_data/homeostasis_events.jsonl")
     FLUSH_INTERVAL_SEC = 10  # Flush buffer every 10 seconds
     MAX_BUFFER_SIZE = 50     # Flush if buffer exceeds this
+    MAX_LOG_LINES = 5000     # Rotate when file exceeds this
+    ROTATE_KEEP_LINES = 2000  # Keep last N lines after rotation
 
     def __init__(
         self,
@@ -333,6 +336,7 @@ class HomeostasisEventLogger:
         interpreted_state: Dict[str, Any],
         alerts_count: int,
         tick_count: int,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Log periodic state snapshot.
@@ -343,6 +347,7 @@ class HomeostasisEventLogger:
             interpreted_state: Full metrics
             alerts_count: Number of active alerts
             tick_count: Current tick count
+            extra: Optional extra fields (e.g. process_rss_mb)
         """
         now = time.time()
         uptime = now - self._start_time
@@ -355,6 +360,8 @@ class HomeostasisEventLogger:
             "inference_latency_ms": interpreted_state.get("inference_latency_ms", 0),
             "coherence_score": interpreted_state.get("coherence_score", 1.0),
         }
+        if extra:
+            metrics.update(extra)
 
         event = StateSnapshotEvent(
             timestamp=now,
@@ -440,8 +447,30 @@ class HomeostasisEventLogger:
             self._buffer.clear()
             self._last_flush_time = time.time()
 
+            # Check if rotation needed
+            self._maybe_rotate()
+
         except Exception as e:
             logger.error(f"Failed to flush event buffer: {e}")
+
+    def _maybe_rotate(self) -> None:
+        """Rotate log file if it exceeds MAX_LOG_LINES."""
+        try:
+            if not self.log_path.exists():
+                return
+            with open(self.log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) <= self.MAX_LOG_LINES:
+                return
+            # Keep only last ROTATE_KEEP_LINES
+            keep = lines[-self.ROTATE_KEEP_LINES:]
+            with open(self.log_path, "w", encoding="utf-8") as f:
+                f.writelines(keep)
+            logger.info(
+                f"Event log rotated: {len(lines)} -> {len(keep)} lines"
+            )
+        except Exception as e:
+            logger.warning(f"Event log rotation failed: {e}")
 
     def flush(self) -> None:
         """Force flush buffer to disk."""
@@ -466,11 +495,12 @@ class HomeostasisEventLogger:
         # First flush any buffered events
         self.flush()
 
-        events = []
         try:
             if not self.log_path.exists():
                 return []
 
+            # Use deque to keep only last N matching events (bounded memory)
+            tail = deque(maxlen=limit)
             with open(self.log_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -478,16 +508,16 @@ class HomeostasisEventLogger:
                         continue
                     try:
                         event = json.loads(line)
-                        # Check both "event" and "event_type" keys for compatibility
                         evt = event.get("event") or event.get("event_type")
                         if event_type is None or evt == event_type:
-                            events.append(event)
+                            tail.append(event)
                     except json.JSONDecodeError:
                         continue
 
             # Return newest first
-            events.reverse()
-            return events[:limit]
+            result = list(tail)
+            result.reverse()
+            return result
 
         except Exception as e:
             logger.error(f"Failed to read events: {e}")
@@ -514,8 +544,11 @@ class HomeostasisEventLogger:
             if self.log_path.exists():
                 with open(self.log_path, "r", encoding="utf-8") as f:
                     for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
                         try:
-                            event = json.loads(line.strip())
+                            event = json.loads(line)
                             evt = event.get("event") or event.get("event_type")
                             if evt == "mode_change":
                                 mode_changes += 1
@@ -524,9 +557,9 @@ class HomeostasisEventLogger:
                                 severity = event.get("severity", "UNKNOWN")
                                 if severity in alerts:
                                     alerts[severity] += 1
-                        except:
+                        except json.JSONDecodeError:
                             continue
-        except:
+        except OSError:
             pass
 
         return {
