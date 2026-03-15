@@ -31,8 +31,13 @@ from maria_ui.config import (
 
 # Import homeostasis components (with fallback if not running)
 try:
-    from agent_core.homeostasis.event_logger import get_event_logger
+    from agent_core.homeostasis.event_logger import HomeostasisEventLogger
     HOMEOSTASIS_AVAILABLE = True
+
+    def get_event_logger():
+        """Read-only event logger for Web UI (no startup event)."""
+        return HomeostasisEventLogger(log_startup=False)
+
 except ImportError:
     HOMEOSTASIS_AVAILABLE = False
 

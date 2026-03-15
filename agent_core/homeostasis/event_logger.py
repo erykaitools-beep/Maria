@@ -116,6 +116,7 @@ class HomeostasisEventLogger:
         self,
         log_path: Optional[Path] = None,
         auto_flush: bool = True,
+        log_startup: bool = True,
     ):
         """
         Initialize event logger.
@@ -123,6 +124,7 @@ class HomeostasisEventLogger:
         Args:
             log_path: Path to JSONL file (default: meta_data/homeostasis_events.jsonl)
             auto_flush: Whether to auto-flush buffer periodically
+            log_startup: Whether to log startup event (False for read-only usage)
         """
         self.log_path = log_path or self.DEFAULT_LOG_PATH
         self._buffer: List[Dict[str, Any]] = []
@@ -136,8 +138,9 @@ class HomeostasisEventLogger:
         # Ensure directory exists
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Log startup
-        self._log_startup()
+        # Log startup (skip for read-only consumers like Web UI)
+        if log_startup:
+            self._log_startup()
 
     def _log_startup(self) -> None:
         """Log system startup event."""

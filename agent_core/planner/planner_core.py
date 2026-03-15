@@ -166,18 +166,14 @@ class PlannerCore:
             logger.debug(f"Planner cycle skipped: {block_reasons}")
             self._emit_cycle_complete(tick_count, guard_blocked=True,
                                       block_reasons=block_reasons)
+            self._log_skip(tick_count, "guard_blocked", block_reasons)
             self._save_state()
             return None
 
         # -- STEP 2: PERCEIVE --
         context = self._gather_context()
 
-        # -- STEP 3: CHECK if evaluation needed --
-        plan = self._maybe_evaluate(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # -- STEP 4: SELECT GOAL --
+        # -- STEP 3: SELECT GOAL (learning/exam/review first) --
         goal = self._select_goal(context)
         if goal is None:
             # Try to auto-create a learning goal with topic selection
@@ -185,17 +181,22 @@ class PlannerCore:
             if created:
                 goal = self._select_goal(context)
 
-        if goal is None:
-            logger.debug("Planner: no feasible goal found")
-            self._emit_cycle_complete(tick_count, no_goals=True)
-            self._save_state()
-            return None
+        if goal is not None:
+            # -- STEP 4: CREATE PLAN for goal --
+            plan = self._create_plan_for_goal(goal, context)
+            return self._finalize_plan(plan)
 
-        # -- STEP 5: CREATE PLAN --
-        plan = self._create_plan_for_goal(goal, context)
+        # -- STEP 5: EVALUATE as fallback (no actionable goals) --
+        plan = self._maybe_evaluate(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
 
-        # -- STEP 6: EXECUTE --
-        return self._finalize_plan(plan)
+        # Nothing to do
+        logger.debug("Planner: no feasible goal and no evaluation needed")
+        self._emit_cycle_complete(tick_count, no_goals=True)
+        self._log_skip(tick_count, "no_goals", [])
+        self._save_state()
+        return None
 
     # -- Internal: guard ------------------------------------
 
@@ -290,17 +291,31 @@ class PlannerCore:
     # -- Internal: periodic evaluation ----------------------
 
     def _maybe_evaluate(self, context: Dict) -> Optional[Plan]:
-        """Check if it's time for a periodic evaluation report."""
+        """
+        Check if it's time for a periodic evaluation report.
+
+        Evaluation interval scales with idle time:
+        - Normal: every 1h (EVALUATION_INTERVAL_SEC)
+        - Idle (no learning in last eval): every 6h
+        """
         now = time.time()
         since_eval = now - self._state.last_evaluation_ts
 
-        if since_eval >= EVALUATION_INTERVAL_SEC:
+        # Adaptive interval: if last eval showed no learning, slow down
+        interval = EVALUATION_INTERVAL_SEC
+        recs = context.get("recommendations", [])
+        for rec in recs:
+            if "No learning activity" in rec:
+                interval = EVALUATION_INTERVAL_SEC * 6  # 6h when idle
+                break
+
+        if since_eval >= interval:
             self._state.last_evaluation_ts = now
             return create_plan(
                 goal_id=None,
                 goal_description="Periodic evaluation report",
                 action_type=ActionType.EVALUATE,
-                action_params={"period_hours": 1.0},
+                action_params={"period_hours": since_eval / 3600.0},
             )
         return None
 
@@ -358,12 +373,13 @@ class PlannerCore:
         """
         Decide which learning action to take based on knowledge state.
 
-        Mirrors Teacher P1-P6 priority logic but at planner level:
-        - Files in "learning" status -> LEARN (continue partial)
-        - Files in "learned" status (ready for exam) -> EXAM
-        - New files available -> LEARN (start new)
-        - Low retention -> REVIEW (spaced repetition)
-        - Otherwise -> NOOP
+        Priority logic:
+        - P1: Files in "learning" status -> LEARN (continue partial)
+        - P2: Files in "learned" status (ready for exam) -> EXAM
+        - P3: New files available -> LEARN (start new)
+        - P4: Low retention -> REVIEW (spaced repetition)
+        - P5: No materials left -> FETCH (get new content from web)
+        - P6: Nothing to do -> NOOP
         """
         if snapshot is None:
             return ActionType.LEARN  # Default to learning
@@ -386,6 +402,10 @@ class PlannerCore:
         retention = metrics.get("retention_rate", 1.0)
         if retention < 0.8:
             return ActionType.REVIEW
+
+        # P5: All learned, fetch new content
+        if by_status.get("completed"):
+            return ActionType.FETCH
 
         return ActionType.NOOP
 
@@ -599,6 +619,8 @@ class PlannerCore:
         elif action == ActionType.MAINTENANCE:
             metric = plan.action_params.get("metric", "")
             return f"Konserwacja: {metric}" if metric else "Konserwacja systemu"
+        elif action == ActionType.FETCH:
+            return "Pobieram nowe materialy z internetu"
         elif action == ActionType.NOOP:
             return "Nic do zrobienia - czekam"
         return f"{action.value}: {goal}"
@@ -689,6 +711,24 @@ class PlannerCore:
             logger.debug(f"Could not emit planner event: {e}")
 
     # -- Persistence ----------------------------------------
+
+    def _log_skip(self, tick_count: int, reason: str, details: list) -> None:
+        """Log skipped cycle to planner_decisions.jsonl for debugging."""
+        try:
+            self._decisions_path.parent.mkdir(parents=True, exist_ok=True)
+            record = {
+                "plan_id": None,
+                "timestamp": time.time(),
+                "action_type": "skip",
+                "status": reason,
+                "message": f"Cykl pominiety: {reason}",
+                "result": {"reasons": details},
+                "tick": tick_count,
+            }
+            with open(self._decisions_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except IOError:
+            pass
 
     def _log_decision(self, plan: Plan) -> None:
         """Append plan to planner_decisions.jsonl."""
