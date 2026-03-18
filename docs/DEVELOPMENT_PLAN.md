@@ -195,19 +195,25 @@ agent_core/web_source/
 
 ### K6: World Model / Belief System
 
+**Status: DONE (2026-03-11)**
+
 **Cel:** Maria rozumie nie tylko zdarzenia, ale trwala strukture swiata.
 
-**Czego brakuje w obecnym systemie:**
-- encje: osoba, plik, urzadzenie, miejsce, temat, modul
-- relacje miedzy encjami (semantic_graph to proto-wersja)
-- rozroznienie: fakt vs obserwacja vs hipoteza vs niepewne przypuszczenie
-- confidence i zrodlo wiedzy per przekonanie
-- aktualizacja przekonan w czasie (belief revision)
+**Co zaimplementowano:**
+- `agent_core/world_model/` (5 plikow, 69 testow)
+- `belief_model.py`: EntityType(6), BeliefType(3), BeliefSource(5), frozen Belief dataclass
+- `belief_store.py`: JSONL persistence z MERGE semantics, indexes by entity/type/tag, cap 2000
+- `belief_builder.py`: buduje beliefs z istniejacych JSONL (topics, files, concepts), update_from_exam
+- `query.py`: topic_confidence_map, knowledge_gaps, entity_summary, world_summary
+- `__init__.py`: WorldModel facade (load/build/process_exam/save)
 
-**Kiedy budowac:** Gdy Maria dostanie nowe zrodla danych (Vision, Smart Home, nowe kanaly)
-i semantic_graph przestanie wystarczac do reprezentacji wiedzy o swiecie.
+**Integracja z Plannerem:**
+- `_gather_context()` wzbogacony o world_summary + knowledge_gaps (top 5)
+- `_finalize_plan()` rewizja beliefs po egzaminie (pass: +0.1 conf + FACT, fail: -0.15)
+- `_auto_create_learning_goal()` preferuje temat z najnizszym confidence (K6-aware)
+- GoalSelector: opcjonalny parametr world_summary (backward compatible)
 
-**Obecne proto-elementy:** semantic_graph.py, knowledge_analyzer.py (topic mapping), exam_results (confidence per temat)
+**Obecne proto-elementy (nadal uzywane):** semantic_graph.py, knowledge_analyzer.py (topic mapping), exam_results (confidence per temat)
 
 ---
 

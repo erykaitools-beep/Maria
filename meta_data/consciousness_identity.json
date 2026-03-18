@@ -4,48 +4,50 @@
   "name": "Maria",
   "full_name": "M.A.R.I.A.",
   "full_name_expanded": "Meta Analysis Recalibration Intelligence Architecture",
-  "total_uptime_seconds": 1199.8332498073578,
-  "session_count": 10,
-  "current_session_start": "2026-02-27T20:15:31.608666",
-  "restart_count": 9,
+  "total_uptime_seconds": 197203.5025856495,
+  "session_count": 1747,
+  "current_session_start": "2026-03-18T16:14:47.971710",
+  "restart_count": 1746,
   "primary_user": "Eryk",
-  "last_session_summary": "Przywitano operatora Eryka w trakcie sesji. Użytkownik ma 10 sesji i 0,3 godziny uptime.",
-  "last_shutdown_timestamp": "2026-02-27T20:16:55.555137",
+  "last_session_summary": "Daemon session",
+  "last_shutdown_timestamp": "2026-03-17T19:11:08.357062",
   "trait_scores": {
     "ciekawska": {
-      "score": 0.495,
+      "score": 0.4614,
       "evidence_count": 0,
       "last_updated": ""
     },
     "systematyczna": {
-      "score": 0.5148,
-      "evidence_count": 2,
-      "last_updated": "2026-02-27T20:16:55"
+      "score": 0.6148,
+      "evidence_count": 16,
+      "last_updated": "2026-03-17T19:11:08"
     },
     "pomocna": {
-      "score": 0.495,
+      "score": 0.4614,
       "evidence_count": 0,
       "last_updated": ""
     },
     "wytrwala": {
-      "score": 0.0,
-      "evidence_count": 0,
-      "last_updated": ""
+      "score": 0.0195,
+      "evidence_count": 1,
+      "last_updated": "2026-03-10T17:41:12"
     },
     "cierpliwa": {
-      "score": 0.0,
-      "evidence_count": 0,
-      "last_updated": ""
+      "score": 0.01,
+      "evidence_count": 1,
+      "last_updated": "2026-03-10T17:41:12"
     },
     "refleksyjna": {
-      "score": 0.0397,
-      "evidence_count": 2,
-      "last_updated": "2026-02-27T20:16:55"
+      "score": 0.3066,
+      "evidence_count": 16,
+      "last_updated": "2026-03-17T19:11:08"
     },
     "spoleczna": {
-      "score": 0.3169,
-      "evidence_count": 2,
-      "last_updated": "2026-02-27T20:16:55"
+      "score": 0.4303,
+      "evidence_count": 16,
+      "last_updated": "2026-03-17T19:11:08"
     }
-  }
+  },
+  "total_conversations": 0,
+  "longest_session_seconds": 190155.89330220222
 }

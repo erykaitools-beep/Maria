@@ -5,6 +5,7 @@
 import ollama
 import json
 import re
+from collections import deque
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 
@@ -54,9 +55,9 @@ class OllamaBrain:
         self.system_prompt = self._build_system_prompt()
 
         # Historia rozmowy - uzywana tylko przez think()
-        self.history: List[Dict[str, str]] = [
-            {"role": "system", "content": self.system_prompt}
-        ]
+        # deque(maxlen=50) zapobiega nieograniczonemu wzrostowi pamieci
+        self.history: deque = deque(maxlen=50)
+        self.history.append({"role": "system", "content": self.system_prompt})
         self.call_count = 0
 
         if verify_model:
@@ -154,9 +155,11 @@ class OllamaBrain:
         self._last_interaction = datetime.now()
         self.system_prompt = self._build_system_prompt()
 
-        # Update system message in history
+        # Update system message in history (or re-insert if rotated out by deque)
         if self.history and self.history[0]["role"] == "system":
             self.history[0]["content"] = self.system_prompt
+        else:
+            self.history.appendleft({"role": "system", "content": self.system_prompt})
 
     def _verify_model_exists(self):
         try:
@@ -187,7 +190,7 @@ class OllamaBrain:
 
     def _chat(self, messages: List[Dict[str, str]], temperature: float = 0.3, **kwargs) -> str:
         """Surowe wywołanie ollama.chat z listą wiadomości."""
-        options = {"temperature": temperature}
+        options = {"temperature": temperature, "num_ctx": 4096}
         options.update(kwargs)
 
         resp = ollama.chat(model=self.model, messages=messages, options=options)

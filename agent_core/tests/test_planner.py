@@ -152,9 +152,9 @@ class TestPlanStatus:
 
 class TestActionType:
     def test_all_types(self):
-        assert len(ActionType) == 6
+        assert len(ActionType) == 7
         values = {a.value for a in ActionType}
-        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop"}
+        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop", "fetch"}
 
 
 class TestPlan:

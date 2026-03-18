@@ -78,6 +78,8 @@ class ActionExecutor:
                 result = self._exec_evaluate(plan)
             elif action == ActionType.MAINTENANCE:
                 result = self._exec_maintenance(plan)
+            elif action == ActionType.FETCH:
+                result = self._exec_fetch(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -206,6 +208,28 @@ class ActionExecutor:
                 "report_id": report.report_id,
                 "metrics": report.metrics,
                 "recommendations": report.recommendations,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _exec_fetch(self, plan: Plan) -> Dict[str, Any]:
+        """Fetch web content via web_source module."""
+        if self._knowledge_analyzer is None:
+            return {"success": False, "error": "No knowledge analyzer configured"}
+
+        try:
+            from agent_core.web_source import run_fetch_session
+
+            max_articles = plan.action_params.get("max_articles", 3)
+            result = run_fetch_session(
+                knowledge_analyzer=self._knowledge_analyzer,
+                max_articles=max_articles,
+            )
+            return {
+                "success": result.get("articles_fetched", 0) > 0,
+                "articles_fetched": result.get("articles_fetched", 0),
+                "topics_searched": result.get("topics_searched", 0),
+                "errors": result.get("errors", 0),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

@@ -349,11 +349,17 @@ class EvaluationObserver:
 
     # ---- I/O helpers ----
 
-    def _read_jsonl(self, path: Path) -> List[dict]:
-        """Read JSONL file. Returns empty list if file missing or corrupt."""
+    def _read_jsonl(self, path: Path, max_lines: int = 10000) -> List[dict]:
+        """Read JSONL file with bounded memory.
+
+        Args:
+            path: JSONL file path.
+            max_lines: Max lines to keep (last N). Prevents OOM on huge files.
+        """
         if not path.exists():
             return []
-        result = []
+        from collections import deque
+        tail: deque = deque(maxlen=max_lines)
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -361,12 +367,12 @@ class EvaluationObserver:
                     if not line:
                         continue
                     try:
-                        result.append(json.loads(line))
+                        tail.append(json.loads(line))
                     except json.JSONDecodeError:
                         pass
         except OSError:
             pass
-        return result
+        return list(tail)
 
     def _save_report(self, report: EvaluationReport) -> None:
         """Append report to evaluation_reports.jsonl."""

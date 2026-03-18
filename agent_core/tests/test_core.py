@@ -165,9 +165,10 @@ class TestAuditLogging:
         return core
 
     def test_audit_log_exists(self, core):
-        """Core should maintain audit log."""
+        """Core should maintain audit log (deque for bounded memory)."""
         assert hasattr(core, 'audit_log')
-        assert isinstance(core.audit_log, list)
+        from collections import deque
+        assert isinstance(core.audit_log, deque)
 
     def test_get_audit_log(self, core):
         """Should be able to retrieve audit log."""

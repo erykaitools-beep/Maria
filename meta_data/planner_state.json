@@ -1,0 +1,8 @@
+{
+  "last_cycle_tick": 120,
+  "last_evaluation_ts": 1773577379.3821075,
+  "last_recommendation_ts": 0.0,
+  "total_cycles": 3259,
+  "total_plans_executed": 119,
+  "current_plan_id": "plan-64da9a01137e"
+}

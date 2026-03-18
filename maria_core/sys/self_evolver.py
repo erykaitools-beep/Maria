@@ -118,6 +118,7 @@ Na czym skupisz się w nadchodzącym dniu? Czy zmieniasz cel?
                 "model": "llama3.2:3b",  # zaktualizuj model
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_ctx": 4096},
             },
             timeout=30,
         )

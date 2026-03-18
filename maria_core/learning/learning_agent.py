@@ -105,6 +105,7 @@ def call_ollama(prompt: str, model: str = OLLAMA_MODEL, temperature: float = OLL
         "stream": False,
         "options": {
             "temperature": temperature,
+            "num_ctx": 4096,
         }
     }
 
@@ -223,11 +224,22 @@ def intelligent_chunk_text(text: str) -> List[Tuple[str, int, int]]:
             chunks.append((chunk_text, start, end))
 
         # Następny chunk z overlapem
+        # KLUCZOWE: start musi ZAWSZE przesunac sie do przodu
+        prev_start = start
         start = end - CHUNK_OVERLAP
 
-        # Zabezpieczenie przed nieskończoną pętlą
-        if start >= end:
-            start = end
+        # Zabezpieczenie przed nieskończoną pętlą:
+        # jesli overlap cofnal nas do tego samego miejsca (lub wczesniej),
+        # wymuszamy postep o co najmniej 1 pozycje
+        if start <= prev_start:
+            start = prev_start + max(MIN_CHUNK_SIZE, 1)
+
+        # Hard limit: max 100 chunkow (bezpiecznik na wypadek regresji)
+        if len(chunks) >= 100:
+            logger.warning(
+                f"Chunk limit (100) reached for text of {len(text)} chars, stopping"
+            )
+            break
 
     logger.debug(f"Podzielono tekst na {len(chunks)} chunków")
     return chunks

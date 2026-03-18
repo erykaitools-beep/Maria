@@ -15,8 +15,7 @@ Usage:
     result = run_fetch_session(KnowledgeAnalyzer())
     # {"articles_fetched": 3, "topics_searched": 5, "errors": 0}
 
-NOT wired into planner/homeostasis yet.
-Future: ActionType.FETCH in planner_model.py
+Wired into planner via ActionType.FETCH + ActionExecutor._exec_fetch().
 """
 
 import logging
