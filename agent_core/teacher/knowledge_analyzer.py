@@ -135,14 +135,30 @@ class KnowledgeAnalyzer:
         all_scores = [e.get("score", 0) for e in exams if "score" in e]
         avg_score = sum(all_scores) / len(all_scores) if all_scores else 0.0
 
-        # Count input files
+        # Count input files and detect unindexed ones
         input_count = 0
+        unindexed_files: List[str] = []
         if self.input_dir.exists():
-            input_count = len(list(self.input_dir.glob("*.txt")))
+            indexed_names = {
+                rec.get("file", rec.get("id", "")) for rec in index
+            }
+            for txt in self.input_dir.glob("*.txt"):
+                input_count += 1
+                if txt.name not in indexed_names:
+                    unindexed_files.append(txt.name)
 
         # Topics from cached topic map
         topic_map = self.get_topic_file_map()
         topics_available = list(topic_map.keys())
+
+        # new_files_available: indexed "new" status + unindexed input files
+        new_from_index = sorted(
+            files_by_status.get("new", []),
+            key=lambda r: r.get("priority", 0),
+            reverse=True,
+        )
+        # Pliki w input/ ktorych nie ma jeszcze w indeksie
+        new_from_disk = [{"file": name, "status": "unindexed"} for name in unindexed_files]
 
         return {
             "files_by_status": files_by_status,
@@ -151,14 +167,11 @@ class KnowledgeAnalyzer:
             "total_chunks_available": total_chunks_available,
             "average_exam_score": avg_score,
             "hard_topics": files_by_status.get("hard_topic", []),
-            "new_files_available": sorted(
-                files_by_status.get("new", []),
-                key=lambda r: r.get("priority", 0),
-                reverse=True,
-            ),
+            "new_files_available": new_from_index + new_from_disk,
             "learning_in_progress": files_by_status.get("learning", []),
             "learned_ready_for_exam": files_by_status.get("learned", []),
             "input_file_count": input_count,
+            "unindexed_file_count": len(unindexed_files),
             "topics_available": topics_available,
         }
 

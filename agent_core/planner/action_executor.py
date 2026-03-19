@@ -225,11 +225,12 @@ class ActionExecutor:
                 knowledge_analyzer=self._knowledge_analyzer,
                 max_articles=max_articles,
             )
+            errors = result.get("errors", 0)
             return {
-                "success": result.get("articles_fetched", 0) > 0,
+                "success": errors == 0,
                 "articles_fetched": result.get("articles_fetched", 0),
                 "topics_searched": result.get("topics_searched", 0),
-                "errors": result.get("errors", 0),
+                "errors": errors,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

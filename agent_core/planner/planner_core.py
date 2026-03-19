@@ -376,7 +376,7 @@ class PlannerCore:
         Priority logic:
         - P1: Files in "learning" status -> LEARN (continue partial)
         - P2: Files in "learned" status (ready for exam) -> EXAM
-        - P3: New files available -> LEARN (start new)
+        - P3: New/unindexed files available -> LEARN (start new)
         - P4: Low retention -> REVIEW (spaced repetition)
         - P5: No materials left -> FETCH (get new content from web)
         - P6: Nothing to do -> NOOP
@@ -394,7 +394,7 @@ class PlannerCore:
         if by_status.get("learned"):
             return ActionType.EXAM
 
-        # P3: New files
+        # P3: New files (indexed "new" status OR unindexed files in input/)
         if snapshot.get("new_files_available"):
             return ActionType.LEARN
 

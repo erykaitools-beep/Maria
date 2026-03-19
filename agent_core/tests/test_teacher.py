@@ -261,7 +261,9 @@ class TestKnowledgeAnalyzer:
         assert snapshot["total_files"] == 5
         assert len(snapshot["files_by_status"]["completed"]) == 1
         assert len(snapshot["files_by_status"]["new"]) == 2
-        assert len(snapshot["new_files_available"]) == 2
+        # 2 indexed "new" + 2 unindexed (file1.txt, file2.txt from input/)
+        assert len(snapshot["new_files_available"]) == 4
+        assert snapshot["unindexed_file_count"] == 2
         assert len(snapshot["learning_in_progress"]) == 1
         assert len(snapshot["hard_topics"]) == 1
         assert snapshot["total_chunks_learned"] == 3
