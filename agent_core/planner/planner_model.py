@@ -50,6 +50,7 @@ class Plan:
     trace_id: Optional[str] = None  # Optional correlation id
     duration_ms: float = 0.0
     message: str = ""               # Human-readable decision message
+    metadata: Dict[str, Any] = field(default_factory=dict)  # K8: strategy_id, step_order
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +65,7 @@ class Plan:
             "trace_id": self.trace_id,
             "duration_ms": self.duration_ms,
             "message": self.message,
+            "metadata": self.metadata,
         }
 
     @staticmethod
@@ -80,6 +82,7 @@ class Plan:
             trace_id=d.get("trace_id"),
             duration_ms=d.get("duration_ms", 0.0),
             message=d.get("message", ""),
+            metadata=d.get("metadata", {}),
         )
 
 
@@ -89,6 +92,7 @@ def create_plan(
     action_type: ActionType,
     action_params: Optional[Dict[str, Any]] = None,
     trace_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Plan:
     """Factory function for creating a Plan."""
     return Plan(
@@ -100,6 +104,7 @@ def create_plan(
         action_params=action_params or {},
         status=PlanStatus.PENDING,
         trace_id=trace_id,
+        metadata=metadata or {},
     )
 
 

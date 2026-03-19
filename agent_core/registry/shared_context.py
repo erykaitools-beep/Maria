@@ -36,6 +36,7 @@ class SharedContext:
     knowledge_analyzer: Any = None   # KnowledgeAnalyzer (topic awareness)
     world_model: Any = None          # WorldModel (Kontrakt K6)
     autonomy_policy: Any = None      # AutonomyPolicy (Kontrakt K7)
+    deliberation: Any = None         # Deliberation (Kontrakt K8)
 
     # REPL state
     last_result: Any = None

@@ -86,6 +86,7 @@ class PlannerCore:
         self._sandbox_manager = None
         self._world_model = None
         self._autonomy_policy = None
+        self._deliberation = None
 
         # Load persisted state
         self._load_state()
@@ -123,6 +124,9 @@ class PlannerCore:
 
     def set_autonomy_policy(self, policy) -> None:
         self._autonomy_policy = policy
+
+    def set_deliberation(self, deliberation) -> None:
+        self._deliberation = deliberation
 
     # -- Main entry point (called from tick loop) -----------
 
@@ -355,7 +359,37 @@ class PlannerCore:
                 action_params={"metric": goal.metadata.get("metric", "")},
             )
 
-        # LEARNING goals or META goal -> decide learn/exam/review
+        # K8: Consult Deliberation for multi-step strategy
+        if self._deliberation:
+            delib_action = self._consult_deliberation(goal, context)
+            if delib_action is not None:
+                action_type_str = delib_action["action_type"]
+                try:
+                    action = ActionType(action_type_str)
+                except ValueError:
+                    action = ActionType.NOOP
+
+                action_params = delib_action.get("action_params", {})
+                # Merge topic filters from goal metadata
+                topics = goal.metadata.get("topics")
+                if topics and "topics" not in action_params:
+                    action_params["topics"] = topics
+
+                return create_plan(
+                    goal_id=goal.id,
+                    goal_description=delib_action.get(
+                        "step_description", goal.description
+                    ),
+                    action_type=action,
+                    action_params=action_params,
+                    metadata={
+                        "strategy_id": delib_action.get("strategy_id"),
+                        "step_order": delib_action.get("step_order"),
+                        "strategy_intent": delib_action.get("strategy_intent", ""),
+                    },
+                )
+
+        # Fallback: LEARNING goals or META goal -> decide learn/exam/review
         action = self._decide_learning_action(snapshot, metrics)
 
         # Pass topic filters from goal metadata to action_params
@@ -370,6 +404,34 @@ class PlannerCore:
             action_type=action,
             action_params=action_params,
         )
+
+    def _consult_deliberation(self, goal, context: Dict) -> Optional[Dict]:
+        """
+        Ask K8 Deliberation for next action from a multi-step strategy.
+
+        Returns action dict or None (fallback to _decide_learning_action).
+        """
+        snapshot = context.get("knowledge_snapshot")
+        delib_context = {
+            "intent": goal.description,
+            "topic": (goal.metadata.get("topics") or [""])[0] if goal.metadata.get("topics") else "",
+            "goal_type": goal.type.value,
+            "new_files_available": bool(
+                snapshot and snapshot.get("new_files_available")
+            ),
+            "weak_topics": [],
+            "knowledge_snapshot": snapshot,
+        }
+
+        # Detect weak topics from world model
+        if self._world_model:
+            try:
+                gaps = self._world_model.query.get_knowledge_gaps()
+                delib_context["weak_topics"] = [g.get("topic", "") for g in gaps[:5]]
+            except Exception:
+                pass
+
+        return self._deliberation.get_next_action(goal.id, delib_context)
 
     def _decide_learning_action(
         self, snapshot: Optional[Dict], metrics: Dict
@@ -462,6 +524,13 @@ class PlannerCore:
         if self._autonomy_policy:
             self._autonomy_policy.record_execution(
                 plan.action_type.value, result.get("success", False)
+            )
+
+        # K8: Report step outcome back to deliberation
+        if self._deliberation and plan.metadata.get("strategy_id"):
+            outcome = "pass" if result.get("success") else "fail"
+            self._deliberation.report_step_outcome(
+                plan.metadata["strategy_id"], outcome, result
             )
 
         # Reset idle streak so Maria doesn't stay in SLEEP forever

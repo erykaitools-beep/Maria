@@ -205,6 +205,16 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"AutonomyPolicy not initialized: {e}")
 
+                # Deliberation (K8) for multi-step strategies
+                try:
+                    from agent_core.deliberation import Deliberation
+                    deliberation = Deliberation()
+                    planner.set_deliberation(deliberation)
+                    ctx.deliberation = deliberation
+                    print("[Homeostasis] [OK] Deliberation wired (K8)")
+                except Exception as e:
+                    logger.debug(f"Deliberation not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

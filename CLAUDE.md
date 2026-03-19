@@ -30,9 +30,9 @@
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | Cognitive Core: K6-K7 DONE, K8-K10 docelowe |
-| **Testy** | 1239 passing |
-| **Faza** | K1-K7 DONE, K8-K10 cognitive core DOCELOWE |
+| **Etap** | Cognitive Core: K6-K8 DONE, K9-K10 docelowe |
+| **Testy** | 1288 passing |
+| **Faza** | K1-K8 DONE, K9-K10 cognitive core DOCELOWE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -65,12 +65,13 @@ project/
 │   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
 │   ├── planner/         # Planner (K5): ReAct loop, guard, goal selector, executor
 │   ├── autonomy/        # Autonomy Policy (K7): classification, rate limiter, rules, escalation
+│   ├── deliberation/    # Deliberation (K8): strategy, templates, deliberator, intent tracker
 │   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1121 tests
+│   └── tests/           # 1288 tests
 └── docs/                # Documentation
 ```
 
@@ -163,10 +164,11 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K5.1 Topic-Aware Learning:** KnowledgeAnalyzer topic map + scoring, TeacherAgent filter_file_ids, auto-goal creation, /plan learn|topics REPL
 - **K6 World Model:** Belief system (frozen dataclass), BeliefStore (JSONL, cap 2000, MERGE), BeliefBuilder (from existing JSONL), query API, WorldModel facade
 - **K7 Autonomy Policy:** ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN), rate limiter (sliding window per ActionType), PolicyEngine (3 rules: consecutive_failure_breaker, degraded_mode_restrict, restricted_actions_block), EscalationHandler (JSONL log, HITL placeholder), AutonomyPolicy facade
+- **K8 Deliberation:** Multi-step strategies (Strategy+Step dataclasses), 3 templates (learn_topic, explore_new, consolidate), Deliberator (rule-based selection+advancement), IntentTracker (JSONL intents), Deliberation facade, wired into PlannerCore._create_plan_for_goal() z fallback
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
 
-**Docelowe (K8-K10):** Deliberation, Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
+**Docelowe (K9-K10):** Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
 
 ## Planner - Warstwa 2 (K5)
 
@@ -295,12 +297,12 @@ Usunieto:
 - [ ] Analiza logow planner_decisions.jsonl
 - [ ] Identyfikacja pierwszego brakujacego elementu kognitywnego
 
-### DOCELOWE: Cognitive Core (K6-K10)
+### DOCELOWE: Cognitive Core (K9-K10)
 Rdzen kognitywny - budowany przyrostowo, gdy praktyka pokaze ze brakuje.
 Szczegoly: `docs/DEVELOPMENT_PLAN.md` (Warstwa 5-9)
-- K6: World Model / Belief System
-- K7: Autonomy Policy / Governance
-- K8: Deliberation / Strategic Planning
+- ~~K6: World Model / Belief System~~ DONE
+- ~~K7: Autonomy Policy / Governance~~ DONE
+- ~~K8: Deliberation / Strategic Planning~~ DONE
 - K9: Uncertainty / Reflection / Meta-Cognition
 - K10: General Action Safety Layer
 

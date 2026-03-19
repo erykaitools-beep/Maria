@@ -1132,3 +1132,119 @@ meta_data/
 *Zatwierdzone przez: Eryk + Claude*
 *Warstwa 1 (K1-K4): Zaimplementowana (941 testow)*
 *Warstwa 2 (K5 Planner): Zaimplementowana (1023 testow)*
+*Warstwa 3 (K6 World Model): Zaimplementowana (1194 testow)*
+*Warstwa 4 (K7 Autonomy Policy): Zaimplementowana (1239 testow)*
+*Warstwa 5 (K8 Deliberation): Zaimplementowana (1288 testow)*
+
+---
+
+## Kontrakt 8: Deliberation / Strategic Planning
+
+### Problem
+
+Planner (K5) podejmuje jednorazowe decyzje (single-step plans) co 60 tickow.
+Brak wielokrokowego planowania: nie potrafi np. "najpierw LEARN, potem EXAM, a jak obleje - REVIEW i ponowny EXAM".
+Kazdy cykl to niezalezna decyzja bez kontynuacji strategii.
+
+### Rozwiazanie
+
+Multi-step strategies jako data (ADR-011), rule-based (ADR-013):
+
+1. **Strategy + Step** - wielokrokowy plan z fallbackami
+2. **Strategy Templates** - gotowe szablony dla typowych flow
+3. **Deliberator** - wybiera i prowadzi strategie
+4. **IntentTracker** - zapamietuje dlaczego wybrano strategie (JSONL)
+5. **Deliberation** - fasada laczaca wszystko
+
+### Struktura
+
+```
+agent_core/deliberation/
+    __init__.py              # Deliberation facade
+    strategy.py              # Strategy + Step dataclasses
+    strategy_templates.py    # 3 szablony + TEMPLATE_REGISTRY
+    deliberator.py           # Wybor i prowadzenie strategii
+    intent_tracker.py        # JSONL log intencji
+```
+
+### Strategy Model
+
+```python
+@dataclass
+class Step:
+    step_id: str
+    order: int                    # 0-based position
+    action_type: str              # "learn", "exam", "review", "fetch", "evaluate"
+    action_params: Dict
+    status: StepStatus            # PENDING -> ACTIVE -> COMPLETED/FAILED/SKIPPED
+    max_retries: int              # How many times to retry on fail (default 1)
+    fallback_step_order: Optional[int]  # On fail, jump here (v1)
+
+@dataclass
+class Strategy:
+    strategy_id: str
+    goal_id: str
+    template_name: str
+    status: StrategyStatus        # ACTIVE -> COMPLETED/ABANDONED/PAUSED
+    steps: List[Step]
+    current_step_order: int       # Which step we're on
+    intent: str                   # Why this strategy
+```
+
+### Templates (v1)
+
+| Template | Flow | Trigger |
+|----------|------|---------|
+| `learn_topic` | LEARN -> EXAM -> (fail?) REVIEW -> EXAM | topic specified or default |
+| `explore_new` | FETCH -> LEARN -> EXAM | new_files_available |
+| `consolidate` | REVIEW -> EXAM -> EVALUATE | weak_topics detected |
+
+### Integracja z PlannerCore
+
+```
+PlannerCore._create_plan_for_goal(goal, context)
+    |
+    +-> _consult_deliberation(goal, context)
+    |       |
+    |       +-> Deliberation.get_next_action(goal_id, context)
+    |       |       |
+    |       |       +-> active strategy? -> return current step
+    |       |       +-> no strategy? -> _select_strategy() from templates
+    |       |       +-> no match? -> return None
+    |       |
+    |       +-> return action dict (action_type, params, strategy_id)
+    |
+    +-> if None -> fallback to _decide_learning_action() (stare zachowanie)
+
+PlannerCore._finalize_plan(plan)
+    |
+    +-> after execute -> Deliberation.report_step_outcome(strategy_id, "pass"/"fail")
+```
+
+### Backward compatible
+
+- `deliberation=None` -> PlannerCore uzywa starej logiki (_decide_learning_action)
+- Deliberation jest **advisory**: jesli nie ma strategii, planner dziala jak wczesniej
+
+### Persistence
+
+- `meta_data/deliberation_intents.jsonl` - log intencji (bounded 500 records)
+- Strategies in-memory only (v1), tworzone on-demand z templates
+
+### Rozszerzalnosc (v2 path)
+
+| Element | v1 | v2 path |
+|---------|-----|---------|
+| Steps | Sequential list | DAG (step.next_on_success/fail) |
+| Templates | Registry of functions | LLM-generated strategies |
+| Conditions | Enum (PASS/FAIL/TIMEOUT) | Expressions ("confidence > 0.7") |
+| Selection | Rule-based matching | LLM select_strategy() |
+| Persistence | In-memory + intents JSONL | Full JSONL strategies |
+| Integration | Advisory (optional) | Primary -> replacement |
+
+### Limity
+
+- Max 10 active strategies
+- Max 5 strategies per goal (oldest trimmed)
+- Max 3 abandoned attempts per template per goal (exhaust detection)
+- IntentTracker: 500 records max (bounded read)
