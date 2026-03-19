@@ -153,17 +153,16 @@ K1-K5.1 dzialaja. Teraz trzeba je przetestowac w praktyce i zobaczyc co faktyczn
 
 ### Status
 - [x] Naprawione 4 bugi (retention gate, tick discontinuity, maintenance dominance, tick loop blocking)
-- [x] Web Content Fetcher (agent_core/web_source/) - gotowy, NIE podlaczony do plannera
-- [ ] Multi-day test automatyki
-- [ ] Analiza logow planner_decisions.jsonl
-- [ ] Identyfikacja pierwszego brakujacego elementu kognitywnego
-- [ ] Aktywacja Web Content Fetcher (2 kroki ponizej)
+- [x] Web Content Fetcher (agent_core/web_source/) - gotowy i podlaczony do plannera
+- [x] Aktywacja Web Content Fetcher: `ActionType.FETCH` + `_exec_fetch()` wired
+- [x] Identyfikacja brakujacych elementow kognitywnych -> K6, K7, K8 zaimplementowane
+- [ ] Multi-day test automatyki (K1-K8 + planner + topic-aware learning)
+- [ ] Analiza logow planner_decisions.jsonl + deliberation_intents.jsonl
 
-### Web Content Fetcher (zbudowany 2026-03-08, czeka na aktywacje)
+### Web Content Fetcher (zbudowany 2026-03-08, aktywowany 2026-03-19)
 
 Modul pozwalajacy Marii autonomicznie pobierac materialy z internetu (Wikipedia PL + RSS).
-Zbudowany i przetestowany (47 testow), ale **celowo NIE podlaczony** do plannera.
-Maria moze dzialac na obecnych materialach, a modul czeka gotowy do aktywacji.
+Zbudowany i przetestowany (47 testow), **podlaczony** do plannera.
 
 **Struktura:**
 ```
@@ -178,20 +177,19 @@ agent_core/web_source/
 
 **Flow:** TopicSuggester (na bazie KnowledgeAnalyzer) → WikiClient/RSSClient → ContentWriter → FetchRegistry
 
-**2 kroki do aktywacji:**
-1. **`agent_core/planner/planner_model.py`** - dodac `FETCH = "fetch"` do `ActionType` enum
-2. **`agent_core/planner/action_executor.py`** - dodac `_exec_fetch()` ktory wywoluje `run_fetch_session()`
+**Aktywacja (DONE):**
+1. **`agent_core/planner/planner_model.py`** - `FETCH = "fetch"` w `ActionType` enum
+2. **`agent_core/planner/action_executor.py`** - `_exec_fetch()` wywoluje `run_fetch_session()`
 
 ---
 
-## Warstwa 5-9: Cognitive Core (DOCELOWE, K6-K10)
+## Warstwa 5-9: Cognitive Core (K6-K8 DONE, K9-K10 DOCELOWE)
 
-**Priorytet: PRZYROSTOWO - budowane gdy praktyka pokaze ze brakuje**
+**K6-K8: DONE (2026-03-11 - 2026-03-19) | K9-K10: PRZYROSTOWO**
 
 > Te warstwy to docelowa architektura rdzenia kognitywnego.
-> Nie budujemy ich wszystkich naraz. Kazda wchodzi wtedy, gdy obecny system
-> wyraznie pokazuje ze jej brak jest waskim gardlem.
-> Kolejnosc moze sie zmienic w zaleznosci od praktycznych potrzeb.
+> K6 (World Model), K7 (Autonomy Policy) i K8 (Deliberation) sa zaimplementowane.
+> K9 i K10 wchodza wtedy, gdy obecny system wyraznie pokaze ze ich brak jest waskim gardlem.
 
 ### K6: World Model / Belief System
 
@@ -251,19 +249,36 @@ agent_core/web_source/
 
 ### K8: Deliberation / Strategic Planning
 
+**Status: DONE (2026-03-19)**
+
 **Cel:** Przejscie od "wybierz nastepny krok" do "prowadz proces przez wiele krokow".
 
-**Czego brakuje w obecnym systemie:**
-- plany wieloetapowe (obecny Plan = single step, ADR-013)
-- dekompozycja celow na podcele
-- checkpointy w dlugich procesach
-- sledzenie intencji (dlaczego robimy X, nie tylko co robimy)
-- repriorytetyzacja przy zmianie sytuacji
+**Co zaimplementowano:**
+- `agent_core/deliberation/` (5 plikow, 49 testow)
+- `strategy.py`: Step + Strategy dataclasses (StepStatus, StepOutcome, StrategyStatus enums)
+- `strategy_templates.py`: 3 szablony (learn_topic, explore_new, consolidate) + TEMPLATE_REGISTRY
+- `deliberator.py`: Rule-based selection + advancement + fallback/retry + abandon
+- `intent_tracker.py`: IntentTracker (JSONL persistence, bounded 500 records)
+- `__init__.py`: Deliberation facade
 
-**Kiedy budowac:** Gdy przestrzen akcji urosnie poza nauke (Vision, Smart Home, Code Agent)
-i single-step planner przestanie wystarczac.
+**Integracja z Plannerem:**
+- Pipeline: PlannerCore._create_plan_for_goal() -> _consult_deliberation() -> get_next_action()
+- Jesli aktywna strategia -> uzyj nastepny krok z wieloetapowego planu
+- Jesli brak strategii -> fallback na _decide_learning_action() (stare zachowanie)
+- Po execute: report_step_outcome() -> advance/retry/fallback/abandon strategy
+- Plan.metadata przechowuje strategy_id i step_order
+- Backward compatible: deliberation=None nie psuje nic
 
-**Obecne proto-elementy:** PlannerCore (single-step ReAct), GoalSelector (aging + feasibility)
+**Templates (v1):**
+- `learn_topic`: LEARN -> EXAM -> (fail?) REVIEW -> EXAM
+- `explore_new`: FETCH -> LEARN -> EXAM
+- `consolidate`: REVIEW -> EXAM -> EVALUATE
+
+**Limity:** max 10 active strategies, max 5 per goal, 3x abandoned = skip template, 500 intents
+
+**Rozszerzalnosc (v2 path):** lista->DAG, enum->expressions, rule-based->LLM, advisory->primary
+
+**Obecne proto-elementy (nadal uzywane):** PlannerCore (single-step ReAct fallback), GoalSelector (aging + feasibility)
 
 ---
 

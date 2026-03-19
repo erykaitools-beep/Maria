@@ -1,5 +1,5 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.6 | Last updated: 2026-03-08
+> Version: 0.7 | Last updated: 2026-03-19
 
 ## 1. Overview
 
@@ -264,8 +264,11 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 6. ~~**Brak Unified Perception**~~ -> Rozwiazane: PerceptionEvent + PerceptionBuffer + 6 adapterow (K1)
 7. ~~**Brak Plannera**~~ -> Rozwiazane: PlannerCore + GoalSelector + ActionExecutor + PlannerGuard (K5, K5.1)
 8. ~~**Brak Goal System**~~ -> Rozwiazane: GoalStore z 4 typami celow + audit trail (K3)
+9. ~~**Brak World Model**~~ -> Rozwiazane: BeliefStore + BeliefBuilder + WorldModelQuery (K6)
+10. ~~**Brak Autonomy Policy**~~ -> Rozwiazane: ActionClassification + RateLimiter + PolicyEngine (K7)
+11. ~~**Brak Deliberation**~~ -> Rozwiazane: Strategy templates + Deliberator + IntentTracker (K8)
 
-Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju: warstwy 1-3 DONE, warstwa 4 stabilizacja, K6-K10 cognitive core docelowe, potem Vision/Smart Home)
+Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju: warstwy 1-3 DONE, K6-K8 DONE, K9-K10 cognitive core docelowe, potem Vision/Smart Home)
 
 ---
 
@@ -322,7 +325,22 @@ agent_core/
 │   ├── planner_guard.py   # 5 gating rules
 │   ├── goal_selector.py   # Aging factor + feasibility ranking
 │   └── action_executor.py # Delegacja do Teacher/Sandbox/Evaluation
-├── web_source/            # Web Content Fetcher (gotowy, NIE podlaczony do plannera)
+├── world_model/           # World Model / Belief System (Kontrakt K6)
+│   ├── belief_model.py    # Belief (frozen), EntityType, BeliefType, BeliefSource
+│   ├── belief_store.py    # BeliefStore (JSONL, MERGE, cap 2000)
+│   ├── belief_builder.py  # Buduje beliefs z JSONL (zero LLM, idempotent)
+│   └── query.py           # WorldModelQuery (topic confidence, gaps, summaries)
+├── autonomy/              # Autonomy Policy / Governance (Kontrakt K7)
+│   ├── action_class.py    # ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN)
+│   ├── rate_limiter.py    # Sliding-window rate limiter per ActionType
+│   ├── policy_rules.py    # PolicyEngine + 3 built-in rules
+│   └── escalation.py      # EscalationHandler (JSONL log, HITL placeholder)
+├── deliberation/          # Deliberation / Strategic Planning (Kontrakt K8)
+│   ├── strategy.py        # Strategy + Step dataclasses
+│   ├── strategy_templates.py # 3 szablony + TEMPLATE_REGISTRY
+│   ├── deliberator.py     # Rule-based selection + advancement
+│   └── intent_tracker.py  # IntentTracker (JSONL, bounded 500)
+├── web_source/            # Web Content Fetcher (podlaczony do plannera)
 │   ├── __init__.py        # run_fetch_session() - jedyny punkt integracji
 │   ├── wiki_client.py     # Wikipedia PL API (search + fetch)
 │   ├── rss_client.py      # RSS/Atom reader (xml.etree, zero nowych deps)
@@ -445,11 +463,13 @@ main.py (Ver.2.0 - Registry-based)
     │
     ├── Phase 9: AUDIT & LOG (co 60 tickow)
     │
-    └── Phase 10: PLANNER (Kontrakt K5)
+    └── Phase 10: PLANNER (K5 + K6 + K7 + K8)
         ├── PlannerCore.run_cycle() (co 60 tickow + event-driven)
-        ├── GoalSelector → PlannerGuard → ActionExecutor
+        ├── GoalSelector → PlannerGuard → AutonomyPolicy (K7) → ActionExecutor
+        ├── Deliberation (K8): multi-step strategies → next action from template
+        ├── WorldModel (K6): belief context + exam feedback
         ├── Topic-Aware Learning (K5.1): topics → resolved_file_ids → Teacher
-        └── Fallback: teacher auto-trigger (backward compatible)
+        └── Fallback: _decide_learning_action() (backward compatible)
 ```
 
 ### 6.4 LLM Routing

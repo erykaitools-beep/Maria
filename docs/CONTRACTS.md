@@ -1,6 +1,6 @@
 # M.A.R.I.A. - Kontrakty Architektoniczne
 
-> Version: 1.3 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja), v1.3 (Kontrakt K5: Planner)
+> Version: 1.6 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja), v1.3 (Kontrakt K5: Planner), v1.4 (Kontrakt K6: World Model), v1.5 (Kontrakt K7: Autonomy Policy), v1.6 (Kontrakt K8: Deliberation)
 > Zatwierdzone przez: Eryk + Claude
 >
 > Ten dokument definiuje formalne kontrakty ("konstytucje") dla nowych warstw systemu.
@@ -15,9 +15,12 @@
 3. [Goal System](#kontrakt-3-goal-system)
 4. [Agent Evaluation](#kontrakt-4-agent-evaluation)
 5. [Planner - ReAct Loop](#kontrakt-5-planner)
-6. [Decyzja: Tick Aggregator](#decyzja-5-tick-aggregator)
-7. [Struktura plikow](#struktura-plikow)
-8. [Integracja z istniejacym kodem](#integracja)
+6. [World Model / Belief System](#kontrakt-6-world-model--belief-system)
+7. [Autonomy Policy / Governance](#kontrakt-7-autonomy-policy--governance)
+8. [Deliberation / Strategic Planning](#kontrakt-8-deliberation--strategic-planning)
+9. [Decyzja: Tick Aggregator](#decyzja-5-tick-aggregator)
+10. [Struktura plikow](#struktura-plikow)
+11. [Integracja z istniejacym kodem](#integracja)
 
 ---
 
@@ -47,6 +50,7 @@ class PerceptionSource(Enum):
     EXAM = "exam"                    # run_exam_if_ready results
     CONSCIOUSNESS = "consciousness"  # trait evolution, sleep, dreams
     TEACHER = "teacher"              # TeacherAgent decisions
+    PLANNER = "planner"              # Planner decisions (K5)
     SYSTEM = "system"                # Mode changes, alerts, startup/shutdown
 
 
@@ -1082,6 +1086,24 @@ agent_core/
     goal_selector.py            # GoalSelector (aging + feasibility)
     action_executor.py          # ActionExecutor (delegacja)
     planner_core.py             # PlannerCore (ReAct loop)
+  world_model/
+    __init__.py                 # WorldModel facade (K6)
+    belief_model.py             # Belief (frozen), EntityType, BeliefType, BeliefSource
+    belief_store.py             # BeliefStore (JSONL, MERGE, cap 2000)
+    belief_builder.py           # Buduje beliefs z JSONL (zero LLM)
+    query.py                    # WorldModelQuery (topic confidence, gaps)
+  autonomy/
+    __init__.py                 # AutonomyPolicy facade + CheckResult (K7)
+    action_class.py             # ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN)
+    rate_limiter.py             # ActionRateLimiter (sliding window)
+    policy_rules.py             # PolicyEngine + 3 built-in rules
+    escalation.py               # EscalationHandler (JSONL log)
+  deliberation/
+    __init__.py                 # Deliberation facade (K8)
+    strategy.py                 # Strategy + Step dataclasses
+    strategy_templates.py       # 3 szablony + TEMPLATE_REGISTRY
+    deliberator.py              # Wybor i prowadzenie strategii
+    intent_tracker.py           # IntentTracker (JSONL intents)
   modules/
     evaluation_module.py        # REPL /evaluate command
     planner_module.py           # REPL /plan commands
@@ -1095,6 +1117,9 @@ meta_data/
   evaluation_reports.jsonl      # Evaluation reports (append-only)
   planner_state.json            # Planner current state (K5)
   planner_decisions.jsonl       # Planner decision history (K5, append-only)
+  beliefs.jsonl                 # Beliefs store (K6, MERGE semantics)
+  autonomy_decisions.jsonl      # Autonomy escalation log (K7, append-only)
+  deliberation_intents.jsonl    # Intent log (K8, append-only, bounded 500)
   sandbox/                      # Katalog sandbox sesji
     sess_<uuid>/                # Jedna sesja
       knowledge_index.jsonl
@@ -1110,7 +1135,7 @@ meta_data/
 
 | Plik | Zmiana |
 |------|--------|
-| `agent_core/registry/shared_context.py` | Nowe pola: `perception_buffer`, `goal_store`, `evaluation_observer`, `sandbox_manager` |
+| `agent_core/registry/shared_context.py` | Nowe pola: `perception_buffer`, `goal_store`, `evaluation_observer`, `sandbox_manager`, `knowledge_analyzer`, `world_model`, `autonomy_policy`, `deliberation` |
 | `agent_core/homeostasis/core.py` | Phase 8: tick aggregation + external queue. Periodic evaluation trigger. |
 | `agent_core/modules/homeostasis_module.py` | Wiring nowych komponentow w `init()` |
 | `agent_core/modules/teacher_module.py` | Sandbox paths zamiast production paths |
@@ -1135,6 +1160,185 @@ meta_data/
 *Warstwa 3 (K6 World Model): Zaimplementowana (1194 testow)*
 *Warstwa 4 (K7 Autonomy Policy): Zaimplementowana (1239 testow)*
 *Warstwa 5 (K8 Deliberation): Zaimplementowana (1288 testow)*
+
+---
+
+## Kontrakt 6: World Model / Belief System
+
+### Problem
+
+System uczy sie plikow i zdaje egzaminy, ale nie ma reprezentacji "co wie" ani "jak dobrze to zna".
+Brak srodka ciezkosci wiedzy: planner nie wie, ktore tematy sa slabe, ktore mocne.
+Nie ma feedback loop: zdany egzamin nie wzmacnia "pewnosci" tematu.
+
+### Rozwiazanie
+
+Belief system jako frozen dataclasses z JSONL persistence (MERGE semantics):
+
+1. **Belief** - jednostka wiedzy: entity + confidence + source
+2. **BeliefStore** - JSONL store z indeksami (cap 2000, MERGE)
+3. **BeliefBuilder** - buduje beliefs z istniejacych JSONL (READ-ONLY, zero LLM)
+4. **WorldModelQuery** - API zapytan (topic confidence, knowledge gaps)
+5. **WorldModel** - fasada
+
+### Struktura
+
+```
+agent_core/world_model/
+    __init__.py          # WorldModel facade
+    belief_model.py      # Belief (frozen), EntityType, BeliefType, BeliefSource
+    belief_store.py      # BeliefStore (JSONL, MERGE, cap 2000)
+    belief_builder.py    # Buduje beliefs z knowledge_index + longterm_memory
+    query.py             # WorldModelQuery - topic confidence, gaps, summaries
+```
+
+### Belief Model
+
+```python
+class EntityType(Enum):
+    TOPIC, FILE, CONCEPT, MODULE, PERSON, PLACE
+
+class BeliefType(Enum):
+    FACT          # Potwierdzone (exam score >= 0.7)
+    OBSERVATION   # Nauczone ale niezweryfikowane
+    HYPOTHESIS    # Wnioskowane
+
+class BeliefSource(Enum):
+    LEARNING, EXAM, MEMORY_FACT, SYSTEM, USER
+
+@dataclass(frozen=True)
+class Belief:
+    belief_id: str
+    entity: str               # O czym (np. "fizyka kwantowa")
+    entity_type: EntityType
+    belief_type: BeliefType
+    content: str              # Tresc
+    confidence: float         # 0.0-1.0
+    source: BeliefSource
+    source_id: str            # Skad (np. file_id)
+    tags: Tuple[str, ...]
+    revision: int             # Wersja (inkrementowana przy revise)
+    superseded_by: Optional[str]  # Jesli zastapiony nowszym
+```
+
+### BeliefStore
+
+- JSONL persistence z MERGE semantics (last record per belief_id wins)
+- Cap: **2000 beliefs** (najslabsze confidence pruned)
+- Indeksy: by_entity, by_entity_type, by_tag
+- `revise()`: tworzy nowy rekord, oznacza stary jako superseded
+
+### BeliefBuilder (zero LLM)
+
+- `build_topic_beliefs()` - z tagow w `maria_longterm_memory.jsonl`, confidence = min(1.0, file_count/5)
+- `build_file_beliefs()` - z `knowledge_index.jsonl`, typ/confidence na bazie statusu + exam score
+- `build_concept_beliefs()` - z key_points w longterm memory
+- `update_from_exam()` - zdany: +0.1 conf, OBSERVATION->FACT; oblany: -0.15 conf
+- Idempotentny (bezpiecznie uruchamiac wielokrotnie)
+
+### Integracja z PlannerCore
+
+- `_gather_context()` -> `wm.query.get_world_summary()` + `get_knowledge_gaps()`
+- `_auto_create_learning_goal()` -> preferuje temat z najnizszym confidence
+- `_finalize_plan()` -> po egzaminie `wm.process_exam_result()` + `wm.save()`
+- `homeostasis_module.py` -> lazy build on init
+
+### Limity
+
+- Max 2000 beliefs (pruning najslabszych)
+- JSONL bounded read (MERGE, last wins)
+- Zero LLM, zero side effects (READ-ONLY sources)
+
+---
+
+## Kontrakt 7: Autonomy Policy / Governance
+
+### Problem
+
+Planner (K5) nie ma ograniczen: moze uruchamiac fetch w nieskonczonosc (1430 prob),
+wykonywac akcje w trybie SLEEP, nie reaguje na powtarzajace sie bledy.
+Brak polityki autonomii: co wolno, co wymaga zatwierdzenia, co zabronione.
+
+### Rozwiazanie
+
+Warstwa miedzy PlannerGuard a ActionExecutor:
+
+1. **ActionClassification** - 4 klasy akcji (FREE/GUARDED/RESTRICTED/FORBIDDEN)
+2. **ActionRateLimiter** - sliding window rate limiting per ActionType
+3. **PolicyEngine** - lancuch regul (first match wins)
+4. **EscalationHandler** - logowanie decyzji + HITL placeholder
+5. **AutonomyPolicy** - fasada
+
+### Struktura
+
+```
+agent_core/autonomy/
+    __init__.py          # AutonomyPolicy facade + CheckResult
+    action_class.py      # ActionClassification enum + DEFAULT_ACTION_CLASSIFICATIONS
+    rate_limiter.py      # ActionRateLimiter (sliding window, per action type)
+    policy_rules.py      # PolicyEngine + 3 built-in rules + PolicyContext/PolicyResult
+    escalation.py        # EscalationHandler (JSONL log, HITL placeholder)
+```
+
+### Action Classification
+
+| Klasa | Akcje | Ograniczenia |
+|-------|-------|-------------|
+| **FREE** | learn, exam, review, evaluate, noop | Bez ograniczen |
+| **GUARDED** | maintenance, fetch | Rate limit + logowanie |
+| **RESTRICTED** | (przyszle) | Wymaga warunkow lub HITL |
+| **FORBIDDEN** | (przyszle) | Nigdy autonomicznie |
+
+Nieznane akcje -> RESTRICTED (safe-by-default).
+
+### Rate Limiter
+
+- Sliding window: **3600s (1h)**
+- `fetch`: max **5/h**
+- `maintenance`: max **10/h**
+- FREE actions: bez limitu
+
+### Policy Rules (3 built-in)
+
+| Regula | Warunek | Decyzja |
+|--------|---------|---------|
+| `rule_consecutive_failure_breaker` | >= 3 kolejne bledy tej samej akcji | BLOCK |
+| `rule_degraded_mode_restrict` | tryb != ACTIVE + akcja GUARDED+ | BLOCK |
+| `rule_restricted_actions_block` | akcja FORBIDDEN | BLOCK |
+|                                  | akcja RESTRICTED | ESCALATE |
+
+PolicyEngine: lancuch regul, first non-None result wins. Jesli wszystkie None -> ALLOW.
+
+### Integracja z PlannerCore
+
+```
+PlannerCore._finalize_plan(plan):
+    |
+    +-> AutonomyPolicy.check(action_type, health, mode, ...)
+    |       |
+    |       +-> rate_limiter.check() (for GUARDED)
+    |       +-> engine.evaluate(PolicyContext) -> PolicyResult
+    |       +-> if blocked: escalation_handler.handle() -> log + blocked_result
+    |       |
+    |       +-> return CheckResult(allowed, decision, reasons)
+    |
+    +-> if not allowed: plan.status = FAILED, return
+    +-> else: executor.execute(plan)
+    +-> AutonomyPolicy.record_execution(action_type, success)
+```
+
+### Persistence
+
+- `meta_data/autonomy_decisions.jsonl` - log escalacji i blokad
+- Rate limiter: in-memory (sliding window, resets on restart)
+- Consecutive failures: in-memory (resets on restart)
+
+### Limity
+
+- fetch: 5/h, maintenance: 10/h
+- 3 consecutive failures -> block
+- GUARDED blocked in non-ACTIVE mode
+- RESTRICTED/FORBIDDEN always blocked (until HITL v2)
 
 ---
 

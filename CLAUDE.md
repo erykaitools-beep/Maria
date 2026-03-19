@@ -23,7 +23,10 @@
 | **2026-03-01** | K5.1 Topic-Aware Learning - Maria wybiera tematy nauki |
 | **2026-03-08** | ADR-014: Najpierw mozg (K6-K10), potem zmysly (Vision, Smart Home) |
 | **2026-03-08** | Stabilizacja: 4 bugi planner naprawione, daemon `run_maria.py` dziala |
-| **2026-03-08** | Web Source module (Wikipedia PL + RSS) - zbudowany, NIE podlaczony |
+| **2026-03-08** | Web Source module (Wikipedia PL + RSS) - zbudowany i podlaczony |
+| **2026-03-11** | K6 World Model / Belief System (69 testow) |
+| **2026-03-18** | OOM crash fix - infinite loop w intelligent_chunk_text() |
+| **2026-03-19** | K7 Autonomy Policy (45 testow) + K8 Deliberation (49 testow) |
 
 ## Aktualny stan projektu
 
@@ -64,6 +67,7 @@ project/
 │   ├── goals/           # Goal System (K3): model, store, audit trail
 │   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
 │   ├── planner/         # Planner (K5): ReAct loop, guard, goal selector, executor
+│   ├── world_model/     # World Model (K6): beliefs, store, builder, query
 │   ├── autonomy/        # Autonomy Policy (K7): classification, rate limiter, rules, escalation
 │   ├── deliberation/    # Deliberation (K8): strategy, templates, deliberator, intent tracker
 │   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS
@@ -88,7 +92,7 @@ project/
 | `docs/CONSCIOUSNESS_SPEC.md` | **Specyfikacja swiadomosci, osobowosci, snow** |
 | `docs/VISION_SPEC.md` | **Specyfikacja percepcji wizualnej (oko)** |
 | `docs/SMART_HOME_SPEC.md` | **Specyfikacja IoT / Smart Home** |
-| `docs/CONTRACTS.md` | **Kontrakty architektoniczne (Perception, Sandbox, Goals, Evaluation)** |
+| `docs/CONTRACTS.md` | **Kontrakty architektoniczne (K1-K8: Perception, Sandbox, Goals, Evaluation, Planner, World Model, Autonomy, Deliberation)** |
 | `docs/CHANGELOG.md` | Historia zmian |
 
 ## Homeostasis - nowy system
@@ -152,7 +156,7 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
 
-## Kontrakty architektoniczne (K1-K7)
+## Kontrakty architektoniczne (K1-K8)
 
 Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
@@ -287,15 +291,17 @@ Usunieto:
 - `nul` - pusty plik
 - `futures/` - pusty folder
 
-## Nastepne kroki (2026-03-08)
+## Nastepne kroki (2026-03-19)
 
-### TERAZ: Stabilizacja K1-K5.1
+### TERAZ: Stabilizacja K1-K8
 - [x] 4 bugi naprawione (retention gate, tick discontinuity, maintenance dominance, tick loop blocking)
-- [x] Web Content Fetcher zbudowany (agent_core/web_source/, 47 testow)
-- [ ] Aktywacja Web Fetchera: `ActionType.FETCH` + `_exec_fetch()` (2 kroki w planner)
-- [ ] Multi-day test automatyki (planner + topic-aware learning)
-- [ ] Analiza logow planner_decisions.jsonl
-- [ ] Identyfikacja pierwszego brakujacego elementu kognitywnego
+- [x] Web Content Fetcher zbudowany i podlaczony (agent_core/web_source/, 47 testow)
+- [x] Aktywacja Web Fetchera: `ActionType.FETCH` + `_exec_fetch()` wired
+- [x] K6 World Model (agent_core/world_model/, 69 testow)
+- [x] K7 Autonomy Policy (agent_core/autonomy/, 45 testow)
+- [x] K8 Deliberation (agent_core/deliberation/, 49 testow)
+- [ ] Multi-day test automatyki (K1-K8 + planner + topic-aware learning)
+- [ ] Analiza logow planner_decisions.jsonl + deliberation_intents.jsonl
 
 ### DOCELOWE: Cognitive Core (K9-K10)
 Rdzen kognitywny - budowany przyrostowo, gdy praktyka pokaze ze brakuje.
@@ -396,6 +402,9 @@ claude_notes/
   2026-03-01_contracts_k1_k4.md
   2026-03-08_stabilization_bugs.md
   2026-03-08_web_content_fetcher.md
+  2026-03-11_k6_world_model.md
+  2026-03-18_oom_crash_fix.md
+  2026-03-19_k8_deliberation.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -676,4 +685,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-08 (4 bug fixes, Web Content Fetcher zbudowany, 1121 testow)*
+*Ostatnia aktualizacja: 2026-03-19 (K6 World Model + K7 Autonomy Policy + K8 Deliberation, 1288 testow)*
