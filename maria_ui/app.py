@@ -381,8 +381,8 @@ def notification_monitor_loop():
                 new_alerts = []
 
                 for event in events:
-                    evt_type = event.get("event", "")
-                    evt_ts = event.get("timestamp", 0)
+                    evt_type = event.get("event", event.get("event_type", ""))
+                    evt_ts = event.get("timestamp", event.get("ts", 0))
 
                     # Skip already processed events
                     if evt_ts <= _last_event_timestamp:
@@ -440,7 +440,7 @@ def notification_monitor_loop():
 
                 # Update mode from state_snapshot if no mode_change found
                 for event in events:
-                    if event.get("event") == "state_snapshot":
+                    if event.get("event", event.get("event_type")) == "state_snapshot":
                         snapshot_mode = event.get("mode", "ACTIVE")
                         if snapshot_mode != _last_known_mode:
                             _last_known_mode = snapshot_mode
@@ -608,10 +608,10 @@ def api_status():
             events = event_logger.get_recent_events(limit=5)
 
             for event in events:
-                if event.get("event") == "mode_change":
+                if event.get("event", event.get("event_type")) == "mode_change":
                     mode = event.get("to_mode", "ACTIVE")
                     break
-                elif event.get("event") == "state_snapshot":
+                elif event.get("event", event.get("event_type")) == "state_snapshot":
                     mode = event.get("mode", "ACTIVE")
                     health_score = event.get("health_score", 1.0)
                     break
@@ -619,8 +619,8 @@ def api_status():
             if events:
                 last = events[0]
                 last_event = {
-                    "type": last.get("event", "unknown"),
-                    "timestamp": last.get("timestamp", 0)
+                    "type": last.get("event", last.get("event_type", "unknown")),
+                    "timestamp": last.get("timestamp", last.get("ts", 0))
                 }
         except Exception as e:
             print(f"[UI] [WARN] Could not read homeostasis: {e}")
@@ -765,8 +765,8 @@ def api_status_full():
 
             # Process events
             for event in events:
-                evt_type = event.get("event", "unknown")
-                ts = event.get("timestamp", 0)
+                evt_type = event.get("event", event.get("event_type", "unknown"))
+                ts = event.get("timestamp", event.get("ts", 0))
 
                 # Get current mode
                 if evt_type == "mode_change" and homeostasis_data["mode"] == "ACTIVE":
@@ -940,7 +940,7 @@ def api_status_full():
 
 def _get_event_details(event):
     """Extract human-readable details from event."""
-    evt_type = event.get("event", "")
+    evt_type = event.get("event", event.get("event_type", ""))
 
     if evt_type == "mode_change":
         return f"{event.get('from_mode', '?')} -> {event.get('to_mode', '?')}"
