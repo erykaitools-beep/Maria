@@ -195,6 +195,16 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"WorldModel not initialized: {e}")
 
+                # Autonomy Policy (K7) for action governance
+                try:
+                    from agent_core.autonomy import AutonomyPolicy
+                    autonomy_policy = AutonomyPolicy()
+                    planner.set_autonomy_policy(autonomy_policy)
+                    ctx.autonomy_policy = autonomy_policy
+                    print("[Homeostasis] [OK] AutonomyPolicy wired (K7)")
+                except Exception as e:
+                    logger.debug(f"AutonomyPolicy not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

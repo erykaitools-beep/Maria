@@ -219,19 +219,33 @@ agent_core/web_source/
 
 ### K7: Autonomy Policy / Governance
 
+**Status: DONE (2026-03-19)**
+
 **Cel:** Pelna autonomia bez polityki dzialania jest niebezpieczna i niestabilna.
 
-**Czego brakuje w obecnym systemie:**
-- klasyfikacja akcji: dozwolone autonomicznie / wymagajace potwierdzenia / zabronione
-- poziomy ryzyka per typ akcji
-- zasady HITL (Human-In-The-Loop) - kiedy pytac czlowieka
-- warunki eskalacji
-- limity operacyjne i bezpieczniki (ponad to co robi PlannerGuard)
+**Co zaimplementowano:**
+- `agent_core/autonomy/` (5 plikow, 45 testow)
+- `action_class.py`: ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN), default mapping per ActionType
+- `rate_limiter.py`: Sliding-window rate limiter per action type (fetch: 5/h, maintenance: 10/h)
+- `policy_rules.py`: PolicyEngine (rule chain), 3 built-in rules (consecutive_failure_breaker, degraded_mode_restrict, restricted_actions_block)
+- `escalation.py`: EscalationHandler (JSONL logging, HITL placeholder)
+- `__init__.py`: AutonomyPolicy facade (check + record_execution)
 
-**Kiedy budowac:** Przed Smart Home (sterowanie urzadzeniami wymaga governance).
-PlannerGuard (5 gating rules) to proto-wersja - rozszerzenie gdy przestrzen akcji urosnie.
+**Integracja z Plannerem:**
+- Pipeline: PlannerGuard.can_plan() -> AutonomyPolicy.check() -> ActionExecutor.execute()
+- `_finalize_plan()`: K7 check przed execute(), blokuje jesli policy nie pozwala
+- `record_execution()`: sledzi consecutive failures + rate limit po kazdej akcji
+- Backward compatible: autonomy_policy=None nie psuje nic
 
-**Obecne proto-elementy:** PlannerGuard (planner_guard.py), ConstraintValidator (constraints.py)
+**Kluczowe zabezpieczenia:**
+- Consecutive failure breaker: blokuje po 3 porazach z rzedu (zapobiega petlom jak fetch-fail 1430x)
+- Rate limiter: max 5 fetch/h, max 10 maintenance/h
+- Mode restrict: GUARDED actions blokowane w REDUCED/SLEEP
+- Safe-by-default: nieznane akcje = RESTRICTED (wymagaja potwierdzenia)
+
+**HITL:** Placeholder - logowanie + blokada. Pelny HITL (Web UI prompt) w przyszlosci.
+
+**Obecne proto-elementy (nadal uzywane):** PlannerGuard (planner_guard.py), ConstraintValidator (constraints.py)
 
 ---
 

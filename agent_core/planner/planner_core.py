@@ -85,6 +85,7 @@ class PlannerCore:
         self._knowledge_analyzer = None
         self._sandbox_manager = None
         self._world_model = None
+        self._autonomy_policy = None
 
         # Load persisted state
         self._load_state()
@@ -119,6 +120,9 @@ class PlannerCore:
 
     def set_world_model(self, world_model) -> None:
         self._world_model = world_model
+
+    def set_autonomy_policy(self, policy) -> None:
+        self._autonomy_policy = policy
 
     # -- Main entry point (called from tick loop) -----------
 
@@ -413,6 +417,36 @@ class PlannerCore:
 
     def _finalize_plan(self, plan: Plan) -> Plan:
         """Execute plan, emit event, log, save state."""
+        # K7: Autonomy Policy check before execution
+        if self._autonomy_policy:
+            health = 1.0
+            mode = "active"
+            if self._homeostasis_core:
+                state = self._homeostasis_core.get_state()
+                health = state.health_score
+                mode = state.mode.value
+
+            check = self._autonomy_policy.check(
+                action_type=plan.action_type.value,
+                action_params=plan.action_params,
+                goal_id=plan.goal_id,
+                health_score=health,
+                mode=mode,
+            )
+            if not check.allowed:
+                plan.status = PlanStatus.FAILED
+                plan.result = check.blocked_result or {
+                    "success": False, "blocked_by": "autonomy_policy"
+                }
+                plan.message = self._format_message(plan)
+                self._state.total_plans_executed += 1
+                self._emit_cycle_complete(
+                    self._state.last_cycle_tick, plan=plan,
+                )
+                self._log_decision(plan)
+                self._save_state()
+                return plan
+
         plan.status = PlanStatus.EXECUTING
         start = time.time()
 
@@ -423,6 +457,12 @@ class PlannerCore:
         plan.status = (
             PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
         )
+
+        # K7: Record outcome for consecutive failure tracking + rate limiting
+        if self._autonomy_policy:
+            self._autonomy_policy.record_execution(
+                plan.action_type.value, result.get("success", False)
+            )
 
         # Reset idle streak so Maria doesn't stay in SLEEP forever
         # after autonomous learning/exam/evaluation actions

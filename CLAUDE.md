@@ -30,9 +30,9 @@
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | Warstwa 4: Stabilizacja K1-K5.1 |
-| **Testy** | 1121 passing |
-| **Faza** | K1-K5.1 DONE, stabilizacja TERAZ, K6-K10 cognitive core DOCELOWE |
+| **Etap** | Cognitive Core: K6-K7 DONE, K8-K10 docelowe |
+| **Testy** | 1239 passing |
+| **Faza** | K1-K7 DONE, K8-K10 cognitive core DOCELOWE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -64,7 +64,8 @@ project/
 │   ├── goals/           # Goal System (K3): model, store, audit trail
 │   ├── evaluation/      # Agent Evaluation (K4, READ-ONLY): observer, report
 │   ├── planner/         # Planner (K5): ReAct loop, guard, goal selector, executor
-│   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS (NOT wired yet)
+│   ├── autonomy/        # Autonomy Policy (K7): classification, rate limiter, rules, escalation
+│   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
@@ -150,7 +151,7 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
 
-## Kontrakty architektoniczne (K1-K5.1, 2026-03-01)
+## Kontrakty architektoniczne (K1-K7)
 
 Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
@@ -160,10 +161,12 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K4 Evaluation:** READ-ONLY observer, 5 metryk (learning_velocity, retention_rate, knowledge_coverage, system_stability, personality_growth), threshold-based recommendations, zero LLM
 - **K5 Planner:** Rule-based ReAct loop (ADR-013), PlannerGuard (5 gating rules), GoalSelector (aging factor), ActionExecutor (delegacja do Teacher), hybrid frequency (60 ticks + event-driven), persystencja (planner_state.json + planner_decisions.jsonl)
 - **K5.1 Topic-Aware Learning:** KnowledgeAnalyzer topic map + scoring, TeacherAgent filter_file_ids, auto-goal creation, /plan learn|topics REPL
+- **K6 World Model:** Belief system (frozen dataclass), BeliefStore (JSONL, cap 2000, MERGE), BeliefBuilder (from existing JSONL), query API, WorldModel facade
+- **K7 Autonomy Policy:** ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN), rate limiter (sliding window per ActionType), PolicyEngine (3 rules: consecutive_failure_breaker, degraded_mode_restrict, restricted_actions_block), EscalationHandler (JSONL log, HITL placeholder), AutonomyPolicy facade
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
 
-**Docelowe (K6-K10):** World Model, Autonomy Policy, Deliberation, Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
+**Docelowe (K8-K10):** Deliberation, Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
 
 ## Planner - Warstwa 2 (K5)
 

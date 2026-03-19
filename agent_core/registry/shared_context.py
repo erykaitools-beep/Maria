@@ -35,6 +35,7 @@ class SharedContext:
     planner_core: Any = None         # PlannerCore (Warstwa 2, Kontrakt K5)
     knowledge_analyzer: Any = None   # KnowledgeAnalyzer (topic awareness)
     world_model: Any = None          # WorldModel (Kontrakt K6)
+    autonomy_policy: Any = None      # AutonomyPolicy (Kontrakt K7)
 
     # REPL state
     last_result: Any = None
