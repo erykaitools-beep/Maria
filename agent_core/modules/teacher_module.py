@@ -71,7 +71,12 @@ class TeacherModule(MariaModule):
         """Wrap learn_next_chunk to work with TeacherAgent."""
         try:
             from maria_core.learning.learning_agent import learn_next_chunk
+            from maria_core.perception.perception import scan_input_directory
             from maria_core.sys.config import INPUT_DIR, KNOWLEDGE_INDEX, LONGTERM_MEMORY
+
+            # Index new files from input/ before learning
+            # (unindexed files are invisible to learn_next_chunk)
+            scan_input_directory(INPUT_DIR, KNOWLEDGE_INDEX)
 
             router = self._get_router()
             llm_fn = None
