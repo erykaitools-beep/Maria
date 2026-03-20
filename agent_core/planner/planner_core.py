@@ -87,6 +87,7 @@ class PlannerCore:
         self._world_model = None
         self._autonomy_policy = None
         self._deliberation = None
+        self._meta_cognition = None
 
         # Load persisted state
         self._load_state()
@@ -127,6 +128,9 @@ class PlannerCore:
 
     def set_deliberation(self, deliberation) -> None:
         self._deliberation = deliberation
+
+    def set_meta_cognition(self, meta_cognition) -> None:
+        self._meta_cognition = meta_cognition
 
     # -- Main entry point (called from tick loop) -----------
 
@@ -290,6 +294,15 @@ class PlannerCore:
                 )
                 context["knowledge_gaps"] = (
                     self._world_model.query.get_knowledge_gaps()[:5]
+                )
+            except Exception:
+                pass
+
+        # K9: Meta-cognition confidence and patterns
+        if self._meta_cognition:
+            try:
+                context["meta_confidence"] = (
+                    self._meta_cognition.get_status()
                 )
             except Exception:
                 pass
@@ -509,6 +522,34 @@ class PlannerCore:
                 self._save_state()
                 return plan
 
+        # K9: Record assumptions BEFORE execution
+        if self._meta_cognition:
+            try:
+                topic = ""
+                topics = plan.action_params.get("topics", [])
+                if topics:
+                    topic = topics[0]
+                mc_context = {
+                    "action_params": plan.action_params,
+                    "topic": topic,
+                    **plan.metadata,
+                }
+                if self._homeostasis_core:
+                    state = self._homeostasis_core.get_state()
+                    mc_context["retention_rate"] = getattr(
+                        state, "retention_rate", None
+                    )
+                self._meta_cognition.record_decision(
+                    plan_id=plan.plan_id,
+                    action_type=plan.action_type.value,
+                    goal_id=plan.goal_id,
+                    topic=topic,
+                    context=mc_context,
+                    step_id=plan.metadata.get("step_id"),
+                )
+            except Exception:
+                pass
+
         plan.status = PlanStatus.EXECUTING
         start = time.time()
 
@@ -532,6 +573,17 @@ class PlannerCore:
             self._deliberation.report_step_outcome(
                 plan.metadata["strategy_id"], outcome, result
             )
+
+        # K9: Reflect on outcome AFTER execution
+        if self._meta_cognition:
+            try:
+                self._meta_cognition.reflect(
+                    plan_id=plan.plan_id,
+                    success=result.get("success", False),
+                    result=result,
+                )
+            except Exception:
+                pass
 
         # Reset idle streak so Maria doesn't stay in SLEEP forever
         # after autonomous learning/exam/evaluation actions

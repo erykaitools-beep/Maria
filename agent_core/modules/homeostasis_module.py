@@ -215,6 +215,16 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"Deliberation not initialized: {e}")
 
+                # Meta-Cognition (K9) for self-reflection
+                try:
+                    from agent_core.meta_cognition import MetaCognition
+                    meta_cognition = MetaCognition()
+                    planner.set_meta_cognition(meta_cognition)
+                    ctx.meta_cognition = meta_cognition
+                    print("[Homeostasis] [OK] MetaCognition wired (K9)")
+                except Exception as e:
+                    logger.debug(f"MetaCognition not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

@@ -1452,3 +1452,123 @@ PlannerCore._finalize_plan(plan)
 - Max 5 strategies per goal (oldest trimmed)
 - Max 3 abandoned attempts per template per goal (exhaust detection)
 - IntentTracker: 500 records max (bounded read)
+
+---
+
+## Kontrakt 9: Meta-Cognition (K9)
+
+**Status:** IMPLEMENTED (2026-03-20)
+**ADR:** ADR-013 (rule-based, zero LLM), ADR-011 (reflections as data)
+**Testy:** 73 (test_meta_cognition.py)
+
+### Cel
+
+System meta-poznawczy: sledzi zalozenia przed wykonaniem akcji, porownuje wynik z oczekiwaniem, buduje pewnosc per akcja/temat, sygnalizuje "potrzebuje czlowieka".
+
+"System powinien wiedziec czego nie wie."
+
+### Struktura
+
+```
+agent_core/meta_cognition/
+    __init__.py              # MetaCognition facade (6 metod publicznych)
+    reflection_model.py      # Dataclasses: Reflection, Assumption, Lesson + 5 enums
+    reflection_store.py      # JSONL persistence (meta_data/reflections.jsonl)
+    confidence_tracker.py    # Pewnosc per action_type i per topic (exponential decay)
+    reflector.py             # Buduje zalozenia, porownuje wynik, wykrywa wzorce
+```
+
+### Enums
+
+| Enum | Wartosci |
+|------|----------|
+| AssumptionType | TOPIC_LEARNABLE, EXAM_WILL_PASS, FETCH_RELEVANT, RETENTION_STABLE, STRATEGY_EFFECTIVE |
+| OutcomeMatch | MATCH (delta<=0.15), PARTIAL (0.15-0.4), MISMATCH (>0.4), UNKNOWN (fallback bool) |
+| LessonType | WRONG_ASSUMPTION, UNEXPECTED_SUCCESS, SLOW_EXECUTION, PARTIAL_RESULT |
+| Severity | LOW, MEDIUM, HIGH |
+| NeedHumanReason | LOW_CONFIDENCE, REPEATED_FAILURES, ASSUMPTION_DRIFT |
+
+### Dataclasses
+
+**Assumption**: assumption_type, description, basis
+**Lesson**: lesson_type, assumption_type (optional), message, severity
+**Reflection**: 2-fazowy rekord (mutable):
+- Phase 1 (przed exec): reflection_id, plan_id, step_id, action_type, goal_id, topic, assumptions[], expected_success, confidence_before, timestamp_started
+- Phase 2 (po exec): actual_success, outcome_match, confidence_after, lessons[], timestamp_finished
+- Properties: duration_ms, is_reflected
+
+### Facade API (MetaCognition)
+
+| Metoda | Kiedy | Co robi |
+|--------|-------|---------|
+| `record_decision(plan_id, action_type, goal_id, topic, context)` | Przed exec | Buduje zalozenia, zapisuje oczekiwany wynik |
+| `reflect(plan_id, success, result)` | Po exec | Porownuje wynik z oczekiwaniem, wyciaga lekcje |
+| `get_decision_confidence(action_type, topic)` | Przed decyzja | 0.6*action + 0.4*topic (exponential decay) |
+| `analyze_patterns()` | Okresowo | Wykrywa wzorce bledow |
+| `need_human()` | Kiedy potrzeba | True gdy pewnosc za niska |
+| `get_status()` | REPL/WebUI | Pelny status do wyswietlenia |
+
+### Confidence Tracker
+
+- Per action_type: success rate z exponential decay (DECAY=0.85)
+- Per topic: success rate z exponential decay
+- Combined: `0.6 * action_conf + 0.4 * topic_conf`
+- DEFAULT_CONFIDENCE = 0.5 (gdy brak historii)
+- LOW_CONFIDENCE_THRESHOLD = 0.3
+- MIN_SAMPLES = 3 (min refleksji do meaningful confidence)
+
+### "Need Human" Signal
+
+True gdy dowolne z:
+- Consecutive failures >= 3 dla dowolnego action_type
+- Ta sama assumption_type wrong >= 3x w ostatnich 20 refleksji
+- Temat z confidence < 0.3 i >= 3 proby
+
+V1: advisory (logowane, widoczne w get_status), NIE blokujace.
+
+### Integracja z PlannerCore
+
+```
+PlannerCore._finalize_plan(plan)
+    |
+    +-> PRZED execute:  meta_cognition.record_decision(plan_id, action, topic, context)
+    |                     -> buduje assumptions z kontekstu (rule-based)
+    |                     -> zapisuje Reflection z expected_success + confidence_before
+    |
+    +-> executor.execute(plan)
+    |
+    +-> PO execute:     meta_cognition.reflect(plan_id, success, result)
+    |                     -> outcome_match (MATCH/PARTIAL/MISMATCH)
+    |                     -> lessons: [Lesson(WRONG_ASSUMPTION, ..., HIGH), ...]
+    |                     -> aktualizuje confidence_after
+
+PlannerCore._gather_context()
+    |
+    +-> meta_cognition.get_status() -> context["meta_confidence"]
+```
+
+### Wiring (homeostasis_module.py)
+
+```python
+from agent_core.meta_cognition import MetaCognition
+meta_cognition = MetaCognition()
+planner.set_meta_cognition(meta_cognition)
+ctx.meta_cognition = meta_cognition
+```
+
+### Backward compatible
+
+- `meta_cognition=None` -> PlannerCore dziala jak wczesniej (zero impact)
+- MetaCognition jest **advisory**: nie blokuje planowania
+
+### Persistence
+
+- `meta_data/reflections.jsonl` - append-only, rewrite on update
+- MAX_RECORDS = 1000 (oldest trimmed)
+
+### Limity
+
+- Max 1000 reflections in memory
+- Pattern analysis window: 20 most recent reflected records
+- Consecutive failure threshold: 3
+- Wrong assumption threshold: 3x in window

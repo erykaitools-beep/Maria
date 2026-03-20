@@ -37,6 +37,7 @@ class SharedContext:
     world_model: Any = None          # WorldModel (Kontrakt K6)
     autonomy_policy: Any = None      # AutonomyPolicy (Kontrakt K7)
     deliberation: Any = None         # Deliberation (Kontrakt K8)
+    meta_cognition: Any = None       # MetaCognition (Kontrakt K9)
 
     # REPL state
     last_result: Any = None
