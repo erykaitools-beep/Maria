@@ -290,9 +290,10 @@ class TestPlannerGuard:
         assert can is False
         assert any("mode" in r for r in reasons)
 
-    def test_sleep_mode_blocked(self):
+    def test_sleep_mode_allowed(self):
+        """SLEEP allows autonomous learning/consolidation."""
         can, reasons = self.guard.can_plan(0.9, "sleep", False, 0.8)
-        assert can is False
+        assert can is True
 
     def test_survival_mode_blocked(self):
         can, reasons = self.guard.can_plan(0.9, "survival", False, 0.8)

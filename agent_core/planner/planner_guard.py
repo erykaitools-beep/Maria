@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 MIN_HEALTH_SCORE = 0.7
 MIN_RETENTION_RATE = 0.5
 EVALUATION_COOLDOWN_SEC = 900  # 15 min cooldown on eval recommendations
+ALLOWED_MODES = {"active", "sleep"}  # SLEEP allows autonomous learning/consolidation
 
 
 class PlannerGuard:
@@ -53,8 +54,8 @@ class PlannerGuard:
                 f"health_score {health_score:.2f} < {MIN_HEALTH_SCORE}"
             )
 
-        if mode != "active":
-            reasons.append(f"mode is {mode}, not active")
+        if mode not in ALLOWED_MODES:
+            reasons.append(f"mode is {mode}, not in {ALLOWED_MODES}")
 
         if sandbox_active:
             reasons.append("sandbox session active")
