@@ -24,9 +24,9 @@ ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
 # Default Polish educational/science feeds
 DEFAULT_FEEDS = [
-    "https://www.polskieradio.pl/130/rss",       # Nauka (Polskie Radio)
-    "https://naukawpolsce.pl/rss.xml",            # Nauka w Polsce (PAP)
-    "https://www.focus.pl/feed",                   # Focus.pl (popularnonaukowy)
+    "https://naukawpolsce.pl/rss.xml",            # Nauka w Polsce (PAP) - nauka PL
+    "https://www.polskieradio.pl/130/rss",        # Polskie Radio - nauka
+    "https://www.kopalniawiedzy.pl/rss/feed.xml", # Kopalnia Wiedzy - nauka/technologia
 ]
 
 

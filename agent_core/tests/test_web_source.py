@@ -17,7 +17,7 @@ from agent_core.web_source.wiki_client import WikiClient
 from agent_core.web_source.rss_client import RSSClient
 from agent_core.web_source.content_writer import ContentWriter
 from agent_core.web_source.topic_suggester import TopicSuggester
-from agent_core.web_source import run_fetch_session
+from agent_core.web_source import run_fetch_session, _build_topic_keywords, _is_rss_relevant
 
 
 # ══════════════════════════════════════════════════════
@@ -762,5 +762,102 @@ class TestRunFetchSession:
         assert "topics_searched" in result
         assert "wiki_fetched" in result
         assert "rss_fetched" in result
+        assert "rss_filtered" in result
         assert "errors" in result
         assert "skipped" in result
+
+
+class TestRSSRelevanceFilter:
+    """Tests for RSS topic-based filtering."""
+
+    def test_build_keywords_from_suggestions(self):
+        suggestions = [
+            {"topic": "fizyka kwantowa", "strategy": "expand"},
+            {"topic": "biologia", "strategy": "explore"},
+        ]
+        kw = _build_topic_keywords(suggestions)
+        # Stems: fizyka->fizy, kwantowa->kwanto, biologia->biolog
+        assert any(k.startswith("fizy") for k in kw)
+        assert any(k.startswith("kwant") for k in kw)
+        assert any(k.startswith("biolog") for k in kw)
+
+    def test_build_keywords_skips_short_words(self):
+        suggestions = [{"topic": "AI w IT", "strategy": "expand"}]
+        kw = _build_topic_keywords(suggestions)
+        assert "ai" not in kw
+        assert "it" not in kw
+
+    def test_build_keywords_empty(self):
+        assert _build_topic_keywords([]) == set()
+
+    def test_relevant_title_match(self):
+        # "fizy" stem matches "fizyce" (Polish locative)
+        assert _is_rss_relevant(
+            "Nowe odkrycie w fizyce jadrowej",
+            "krotki opis",
+            {"fizy", "kwanto"},
+        ) is True
+
+    def test_relevant_summary_match(self):
+        # "biolog" stem matches "biologii" (Polish genitive)
+        assert _is_rss_relevant(
+            "Tytul ogolny",
+            "Badania dotycza biologii morskiej",
+            {"biolog"},
+        ) is True
+
+    def test_irrelevant_entry_filtered(self):
+        assert _is_rss_relevant(
+            "Beauty trendy 2026",
+            "Kosmetyczny swiat ewoluuje",
+            {"fizy", "biolog", "nauka"},
+        ) is False
+
+    def test_empty_keywords_passes_all(self):
+        """Backward compatibility: no keywords = no filtering."""
+        assert _is_rss_relevant(
+            "Beauty trendy",
+            "Cokolwiek",
+            set(),
+        ) is True
+
+    def test_case_insensitive(self):
+        assert _is_rss_relevant(
+            "FIZYKA Jadrowa",
+            "",
+            {"fizy"},
+        ) is True
+
+    @patch("agent_core.web_source.RSSClient")
+    @patch("agent_core.web_source.WikiClient")
+    def test_session_filters_irrelevant_rss(self, mock_wiki_cls, mock_rss_cls, tmp_path):
+        """Full session: irrelevant RSS entries get filtered out."""
+        mock_wiki = MagicMock()
+        mock_wiki_cls.return_value = mock_wiki
+        mock_wiki.search.return_value = []
+
+        mock_rss = MagicMock()
+        mock_rss_cls.return_value = mock_rss
+        mock_rss.fetch_all.return_value = [
+            {"title": "Fizyka jadrowa nowe odkrycie", "link": "http://a.pl/1", "summary": "N" * 300},
+            {"title": "Beauty trendy 2026", "link": "http://a.pl/2", "summary": "K" * 300},
+            {"title": "Test hulajnogi elektrycznej", "link": "http://a.pl/3", "summary": "R" * 300},
+        ]
+
+        analyzer = _make_mock_analyzer(
+            topic_map={"fizyka": ["f1", "f2"]},
+        )
+
+        result = run_fetch_session(
+            knowledge_analyzer=analyzer,
+            input_dir=tmp_path,
+            registry_path=tmp_path / "reg.jsonl",
+            max_articles=5,
+        )
+
+        # Only physics article should pass filter (stem "fizy" matches "Fizyka")
+        assert result["rss_fetched"] == 1
+        assert result["rss_filtered"] == 2
+
+        files = list(tmp_path.glob("web_rss_*.txt"))
+        assert len(files) == 1

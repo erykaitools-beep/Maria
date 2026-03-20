@@ -19,8 +19,9 @@ Wired into planner via ActionType.FETCH + ActionExecutor._exec_fetch().
 """
 
 import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from agent_core.web_source.fetch_registry import FetchRegistry
 from agent_core.web_source.wiki_client import WikiClient
@@ -29,6 +30,42 @@ from agent_core.web_source.content_writer import ContentWriter
 from agent_core.web_source.topic_suggester import TopicSuggester
 
 logger = logging.getLogger(__name__)
+
+# Minimum word length for topic keyword matching
+_KEYWORD_MIN_LEN = 3
+
+
+def _build_topic_keywords(suggestions: List[Dict[str, Any]]) -> Set[str]:
+    """
+    Extract lowercase keyword stems from topic suggestions for RSS filtering.
+
+    Splits multi-word topics into individual words, keeps words >= _KEYWORD_MIN_LEN,
+    and truncates to stems (first 75% of chars, min 4) to handle Polish declension
+    (e.g. "fizyka" -> "fizy" matches "fizyce", "fizycy", "fizyki").
+    """
+    keywords = set()
+    for s in suggestions:
+        topic = s.get("topic", "")
+        for word in re.split(r"[\s,;/\-]+", topic):
+            word = word.lower().strip()
+            if len(word) >= _KEYWORD_MIN_LEN:
+                # Truncate to stem: handle Polish declension
+                stem_len = max(4, int(len(word) * 0.75))
+                keywords.add(word[:stem_len])
+    return keywords
+
+
+def _is_rss_relevant(title: str, summary: str, keywords: Set[str]) -> bool:
+    """
+    Check if RSS entry is relevant to Maria's learning topics.
+
+    Returns True if title or summary contains at least one topic keyword.
+    Empty keyword set passes everything (backward-compatible fallback).
+    """
+    if not keywords:
+        return True
+    text = f"{title} {summary}".lower()
+    return any(kw in text for kw in keywords)
 
 
 def run_fetch_session(
@@ -62,6 +99,7 @@ def run_fetch_session(
         "topics_searched": 0,
         "wiki_fetched": 0,
         "rss_fetched": 0,
+        "rss_filtered": 0,
         "errors": 0,
         "skipped": 0,
     }
@@ -135,8 +173,13 @@ def run_fetch_session(
             stats["errors"] += 1
             logger.warning(f"[WEB_SOURCE] Error fetching '{topic}': {e}")
 
-    # Step 3: Fetch from RSS (optional)
+    # Step 3: Fetch from RSS (optional, filtered by topic relevance)
     if enable_rss and stats["articles_fetched"] < max_articles:
+        topic_keywords = _build_topic_keywords(suggestions)
+        logger.debug(
+            f"[WEB_SOURCE] RSS topic filter keywords: {topic_keywords}"
+        )
+
         try:
             rss = RSSClient()
             entries = rss.fetch_all()
@@ -154,6 +197,11 @@ def run_fetch_session(
 
                 if registry.is_fetched(link):
                     stats["skipped"] += 1
+                    continue
+
+                # Filter: only keep entries relevant to Maria's topics
+                if not _is_rss_relevant(title, summary, topic_keywords):
+                    stats["rss_filtered"] += 1
                     continue
 
                 filename = writer.write_article(
@@ -179,6 +227,7 @@ def run_fetch_session(
         f"{stats['articles_fetched']} fetched "
         f"({stats['wiki_fetched']} wiki, {stats['rss_fetched']} rss), "
         f"{stats['topics_searched']} topics searched, "
+        f"{stats['rss_filtered']} rss filtered out, "
         f"{stats['skipped']} skipped, "
         f"{stats['errors']} errors"
     )
