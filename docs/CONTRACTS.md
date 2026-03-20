@@ -1572,3 +1572,105 @@ ctx.meta_cognition = meta_cognition
 - Pattern analysis window: 20 most recent reflected records
 - Consecutive failure threshold: 3
 - Wrong assumption threshold: 3x in window
+
+---
+
+## Kontrakt 10: Action Safety (K10)
+
+**Status:** IMPLEMENTED (2026-03-20)
+**ADR:** ADR-013 (rule-based, zero LLM), ADR-011 (data as structure)
+**Testy:** 52 (test_action_safety.py)
+
+### Cel
+
+Ujednolicony audyt i walidacja efektow dla WSZYSTKICH typow akcji. Uogolnienie K2 Sandbox na caly system. Safe-by-default dla nowych typow akcji.
+
+K7=CZY wolno, K9=CZY zalozenie trafne, K10=CZY stan sie zmienil jak oczekiwano.
+
+### Struktura
+
+```
+agent_core/action_safety/
+    __init__.py              # ActionSafety facade
+    safety_model.py          # ActionRecord, StateSnapshot, SafetyProfile + 4 enums
+    safety_classifier.py     # ActionType -> SafetyProfile mapping
+    audit_log.py             # JSONL persistence (meta_data/action_audit.jsonl)
+    effect_validator.py      # Before/after state capture + comparison
+```
+
+### Enums
+
+| Enum | Wartosci |
+|------|----------|
+| SafetyMode | AUTO_COMMIT, AUDIT_ONLY, STAGED (future HITL) |
+| Reversibility | REVERSIBLE, PARTIALLY_REVERSIBLE, IRREVERSIBLE |
+| EffectType | NONE, KNOWLEDGE, FILESYSTEM, GOAL_STATE, EXTERNAL_API, DEVICE |
+| ValidationResult | VALID, UNEXPECTED, SKIPPED |
+
+### Safety Classification
+
+| ActionType | SafetyMode | Reversibility | EffectType | Snapshots |
+|-----------|------------|---------------|------------|-----------|
+| learn/exam/review | AUTO_COMMIT | REVERSIBLE | KNOWLEDGE | No (K2) |
+| evaluate/noop | AUTO_COMMIT | REVERSIBLE | NONE | No |
+| maintenance | AUDIT_ONLY | REVERSIBLE | GOAL_STATE | Yes |
+| fetch | AUDIT_ONLY | PARTIAL | FILESYSTEM | Yes |
+| **unknown** | **STAGED** | **IRREVERSIBLE** | EXTERNAL_API | **Yes** |
+
+### Facade API (ActionSafety)
+
+| Metoda | Kiedy | Co robi |
+|--------|-------|---------|
+| `before_action(plan_id, action_type, params, goal_id)` | Przed exec | Klasyfikacja + snapshot before. Returns SafetyMode |
+| `after_action(plan_id, success, result, duration_ms)` | Po exec | Snapshot after + walidacja + audit record |
+| `is_staged(action_type)` | Quick check | True dla nieznanych akcji (v2 HITL) |
+| `get_status()` | REPL/WebUI | Pelny status |
+
+### Effect Validation (v1)
+
+- **fetch:** input_file_count nie powinien spadac
+- **maintenance:** goal_count nie powinien eksplodowac (> +5)
+- **any audited:** health_score drop > 0.3 = UNEXPECTED
+- **learn/exam/noop:** SKIPPED (K2/K4 pokrywaja)
+
+### Integracja z PlannerCore
+
+```
+PlannerCore._finalize_plan(plan)
+    |
+    +-> K7 check -> blocked? return
+    +-> K9 record_decision
+    +-> K10 before_action -> SafetyMode + snapshot before
+    +-> executor.execute(plan)
+    +-> K10 after_action -> snapshot after + validate
+    +-> K7 record_execution
+    +-> K8 report_step_outcome
+    +-> K9 reflect
+    +-> K6 update beliefs
+```
+
+### Wiring (homeostasis_module.py)
+
+```python
+from agent_core.action_safety import ActionSafety
+action_safety = ActionSafety()
+action_safety.set_homeostasis_core(core)
+planner.set_action_safety(action_safety)
+ctx.action_safety = action_safety
+```
+
+### Backward compatible
+
+- `action_safety=None` -> PlannerCore dziala jak wczesniej
+- v1: STAGED logowane ale nie blokujace (placeholder dla Smart Home/Code Agent)
+
+### Persistence
+
+- `meta_data/action_audit.jsonl` - append-only
+- MAX_RECENT = 200 in-memory cache
+
+### Limity
+
+- Max 200 records in memory (bounded)
+- Health drop threshold: 0.3
+- Max goal increase per action: 5

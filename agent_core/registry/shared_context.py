@@ -38,6 +38,7 @@ class SharedContext:
     autonomy_policy: Any = None      # AutonomyPolicy (Kontrakt K7)
     deliberation: Any = None         # Deliberation (Kontrakt K8)
     meta_cognition: Any = None       # MetaCognition (Kontrakt K9)
+    action_safety: Any = None        # ActionSafety (Kontrakt K10)
 
     # REPL state
     last_result: Any = None

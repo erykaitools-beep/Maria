@@ -225,6 +225,21 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"MetaCognition not initialized: {e}")
 
+                # Action Safety (K10) for unified action audit
+                try:
+                    from agent_core.action_safety import ActionSafety
+                    action_safety = ActionSafety()
+                    action_safety.set_homeostasis_core(core)
+                    if ctx.goal_store:
+                        action_safety.set_goal_store(ctx.goal_store)
+                    if ctx.knowledge_analyzer:
+                        action_safety.set_knowledge_analyzer(ctx.knowledge_analyzer)
+                    planner.set_action_safety(action_safety)
+                    ctx.action_safety = action_safety
+                    print("[Homeostasis] [OK] ActionSafety wired (K10)")
+                except Exception as e:
+                    logger.debug(f"ActionSafety not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

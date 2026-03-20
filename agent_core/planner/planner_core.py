@@ -88,6 +88,7 @@ class PlannerCore:
         self._autonomy_policy = None
         self._deliberation = None
         self._meta_cognition = None
+        self._action_safety = None
 
         # Load persisted state
         self._load_state()
@@ -131,6 +132,9 @@ class PlannerCore:
 
     def set_meta_cognition(self, meta_cognition) -> None:
         self._meta_cognition = meta_cognition
+
+    def set_action_safety(self, action_safety) -> None:
+        self._action_safety = action_safety
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -578,6 +582,21 @@ class PlannerCore:
             except Exception:
                 pass
 
+        # K10: Capture before-state and classify action
+        safety_mode = None
+        if self._action_safety:
+            try:
+                safety_mode = self._action_safety.before_action(
+                    plan_id=plan.plan_id,
+                    action_type=plan.action_type.value,
+                    action_params=plan.action_params,
+                    goal_id=plan.goal_id,
+                    metadata=plan.metadata,
+                )
+                # v1: STAGED actions logged but not blocked (placeholder)
+            except Exception:
+                pass
+
         plan.status = PlanStatus.EXECUTING
         start = time.time()
 
@@ -588,6 +607,18 @@ class PlannerCore:
         plan.status = (
             PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
         )
+
+        # K10: Capture after-state and validate effects
+        if self._action_safety:
+            try:
+                self._action_safety.after_action(
+                    plan_id=plan.plan_id,
+                    success=result.get("success", False),
+                    result=result,
+                    duration_ms=plan.duration_ms,
+                )
+            except Exception:
+                pass
 
         # K7: Record outcome for consecutive failure tracking + rate limiting
         if self._autonomy_policy:
