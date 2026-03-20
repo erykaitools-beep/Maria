@@ -1437,3 +1437,78 @@ class TestPlannerModuleTopics:
         assert "fizyka" in output
         assert "logika" in output
         assert "2 plikow" in output
+
+
+# ═══════════════════════════════════════════════════════
+# Rate Limit Pre-Check Tests
+# ═══════════════════════════════════════════════════════
+
+
+class TestRateLimitPreCheck:
+    """Test that planner skips rate-limited actions instead of spamming K7."""
+
+    def test_is_action_rate_limited_no_policy(self, tmp_path):
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        assert planner._is_action_rate_limited("fetch") is False
+
+    def test_is_action_rate_limited_allowed(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(AutonomyPolicy())
+        assert planner._is_action_rate_limited("fetch") is False
+
+    def test_is_action_rate_limited_blocked(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy.rate_limiter import ActionRateLimiter
+        # Fill up rate limit (1 allowed, 1 recorded -> blocked)
+        limiter = ActionRateLimiter(limits={"fetch": 1})
+        limiter.record("fetch")
+        policy = AutonomyPolicy(rate_limiter=limiter)
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(policy)
+        assert planner._is_action_rate_limited("fetch") is True
+
+    def test_decide_learning_action_skips_fetch_when_rate_limited(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy.rate_limiter import ActionRateLimiter
+        limiter = ActionRateLimiter(limits={"fetch": 1})
+        limiter.record("fetch")
+        policy = AutonomyPolicy(rate_limiter=limiter)
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(policy)
+
+        # Snapshot where only FETCH would be chosen (all completed, good retention)
+        snapshot = {
+            "files_by_status": {"completed": [{"id": "f1"}]},
+            "new_files_available": [],
+        }
+        action = planner._decide_learning_action(snapshot, {"retention_rate": 0.9})
+        # Should be NOOP, not FETCH (because fetch is rate-limited)
+        assert action == ActionType.NOOP
+
+    def test_decide_learning_action_allows_fetch_when_not_limited(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(AutonomyPolicy())
+
+        snapshot = {
+            "files_by_status": {"completed": [{"id": "f1"}]},
+            "new_files_available": [],
+        }
+        action = planner._decide_learning_action(snapshot, {"retention_rate": 0.9})
+        assert action == ActionType.FETCH

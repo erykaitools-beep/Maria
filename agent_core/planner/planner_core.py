@@ -132,6 +132,25 @@ class PlannerCore:
     def set_meta_cognition(self, meta_cognition) -> None:
         self._meta_cognition = meta_cognition
 
+    # -- Internal: pre-check autonomy policy ----------------
+
+    def _is_action_rate_limited(self, action_type_value: str) -> bool:
+        """
+        Quick check if action would be rate-limited by K7.
+
+        Used to avoid creating plans we know will be blocked.
+        """
+        if not self._autonomy_policy:
+            return False
+        try:
+            check = self._autonomy_policy.check(
+                action_type=action_type_value,
+                action_params={},
+            )
+            return not check.allowed and check.decision == "rate_limited"
+        except Exception:
+            return False
+
     # -- Main entry point (called from tick loop) -----------
 
     def should_run(self, tick_count: int) -> bool:
@@ -377,30 +396,38 @@ class PlannerCore:
             delib_action = self._consult_deliberation(goal, context)
             if delib_action is not None:
                 action_type_str = delib_action["action_type"]
-                try:
-                    action = ActionType(action_type_str)
-                except ValueError:
-                    action = ActionType.NOOP
 
-                action_params = delib_action.get("action_params", {})
-                # Merge topic filters from goal metadata
-                topics = goal.metadata.get("topics")
-                if topics and "topics" not in action_params:
-                    action_params["topics"] = topics
+                # Pre-check: skip rate-limited actions from deliberation
+                if self._is_action_rate_limited(action_type_str):
+                    logger.debug(
+                        f"Planner: deliberation suggested {action_type_str} "
+                        f"but it's rate-limited, falling through"
+                    )
+                else:
+                    try:
+                        action = ActionType(action_type_str)
+                    except ValueError:
+                        action = ActionType.NOOP
 
-                return create_plan(
-                    goal_id=goal.id,
-                    goal_description=delib_action.get(
-                        "step_description", goal.description
-                    ),
-                    action_type=action,
-                    action_params=action_params,
-                    metadata={
-                        "strategy_id": delib_action.get("strategy_id"),
-                        "step_order": delib_action.get("step_order"),
-                        "strategy_intent": delib_action.get("strategy_intent", ""),
-                    },
-                )
+                    action_params = delib_action.get("action_params", {})
+                    # Merge topic filters from goal metadata
+                    topics = goal.metadata.get("topics")
+                    if topics and "topics" not in action_params:
+                        action_params["topics"] = topics
+
+                    return create_plan(
+                        goal_id=goal.id,
+                        goal_description=delib_action.get(
+                            "step_description", goal.description
+                        ),
+                        action_type=action,
+                        action_params=action_params,
+                        metadata={
+                            "strategy_id": delib_action.get("strategy_id"),
+                            "step_order": delib_action.get("step_order"),
+                            "strategy_intent": delib_action.get("strategy_intent", ""),
+                        },
+                    )
 
         # Fallback: LEARNING goals or META goal -> decide learn/exam/review
         action = self._decide_learning_action(snapshot, metrics)
@@ -482,9 +509,10 @@ class PlannerCore:
         if retention < 0.8:
             return ActionType.REVIEW
 
-        # P5: All learned, fetch new content
+        # P5: All learned, fetch new content (if not rate-limited)
         if by_status.get("completed"):
-            return ActionType.FETCH
+            if not self._is_action_rate_limited("fetch"):
+                return ActionType.FETCH
 
         return ActionType.NOOP
 
