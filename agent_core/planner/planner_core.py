@@ -663,6 +663,16 @@ class PlannerCore:
             except Exception:
                 pass
 
+        # K6: Rebuild beliefs periodically (after EVALUATE, ~1/hour)
+        # Picks up new files, topics, concepts from learning
+        if (plan.action_type == ActionType.EVALUATE
+                and self._world_model):
+            try:
+                self._world_model.build_all()
+                self._world_model.save()
+            except Exception:
+                pass
+
         # Generate human-readable message and attach to plan
         plan.message = self._format_message(plan)
 
