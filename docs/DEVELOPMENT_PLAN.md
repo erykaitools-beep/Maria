@@ -183,13 +183,13 @@ agent_core/web_source/
 
 ---
 
-## Warstwa 5-9: Cognitive Core (K6-K8 DONE, K9-K10 DOCELOWE)
+## Warstwa 5-9: Cognitive Core (K6-K10 DONE)
 
-**K6-K8: DONE (2026-03-11 - 2026-03-19) | K9-K10: PRZYROSTOWO**
+**K6-K10: DONE (2026-03-11 - 2026-03-20)**
 
-> Te warstwy to docelowa architektura rdzenia kognitywnego.
-> K6 (World Model), K7 (Autonomy Policy) i K8 (Deliberation) sa zaimplementowane.
-> K9 i K10 wchodza wtedy, gdy obecny system wyraznie pokaze ze ich brak jest waskim gardlem.
+> Rdzen kognitywny kompletny. Wszystkie 10 kontraktow (K1-K10) zaimplementowane.
+> K6 (World Model), K7 (Autonomy Policy), K8 (Deliberation), K9 (Meta-Cognition), K10 (Action Safety).
+> Nastepny krok: Vision (Warstwa 10) i Smart Home (Warstwa 11).
 
 ### K6: World Model / Belief System
 
@@ -282,40 +282,61 @@ agent_core/web_source/
 
 ---
 
-### K9: Uncertainty / Reflection / Meta-Cognition
+### K9: Meta-Cognition / Reflection
+
+**Status: DONE (2026-03-20)**
 
 **Cel:** System kognitywny powinien wiedziec czego nie wie.
 
-**Czego brakuje w obecnym systemie:**
-- confidence per decyzja (nie tylko per egzamin)
-- assumptions jawnie zapisane przy kazdym planie
-- evidence trail (dlaczego podjeto decyzje)
-- self-check po decyzji (czy skutek zgadza sie z oczekiwaniem)
-- wykrywanie blednych zalozen
-- "potrzebuje czlowieka, bo nie jestem pewna"
+**Co zaimplementowano:**
+- `agent_core/meta_cognition/` (5 plikow, 73 testy)
+- `reflection_model.py`: ReflectionRecord, Assumption, OutcomeMatch, Lesson dataclasses
+- `reflection_store.py`: JSONL persistence (meta_data/reflections.jsonl), bounded 300 records
+- `confidence_tracker.py`: Per-action/topic confidence z exponential decay, "need human" signal
+- `reflector.py`: Before/after reflection, assumption tracking, pattern detection (slow exec, repeated failure)
+- `__init__.py`: MetaCognition facade (record_decision/reflect/get_confidence/needs_human/get_status)
 
-**Kiedy budowac:** Gdy K4 Evaluation przestanie wystarczac do oceny jakosci decyzji,
-lub gdy Maria zacznie podejmowac decyzje z realnymi konsekwencjami (Smart Home, Code Agent).
+**Integracja z Plannerem:**
+- Pipeline: K9 record_decision() przed execute, K9 reflect() po execute
+- Assumptions zapisywane z kazdym planem, weryfikowane po wykonaniu
+- Confidence per action_type spada po failure, rosnie po success
+- `needs_human()`: sygnalizuje gdy confidence < 0.3 lub 3+ consecutive failures
+- Backward compatible: meta_cognition=None nie psuje nic
 
-**Obecne proto-elementy:** EvaluationObserver (5 metryk), EvaluationReport (threshold-based recommendations)
+**Obecne proto-elementy (nadal uzywane):** EvaluationObserver (K4, 5 metryk agregatowych)
 
 ---
 
-### K10: General Action Safety Layer
+### K10: Action Safety Layer
 
-**Cel:** Uogolnienie sandbox na wszystkie typy akcji, nie tylko nauke.
+**Status: DONE (2026-03-20)**
 
-**Czego brakuje w obecnym systemie:**
-- tryby: simulate -> stage -> commit (dla dowolnej akcji)
-- walidacja skutkow przed wykonaniem
-- rollback dla akcji nie-learningowych
-- action audit log (ogolny, nie tylko sandbox transaction log)
-- ogolny protokol bezpieczenstwa dla nowych typow akcji
+**Cel:** Uogolnienie sandbox na wszystkie typy akcji + unified audit log.
 
-**Kiedy budowac:** Razem z pierwszym efektorem (Smart Home lub Code Agent),
-bo dopiero wtedy pojawia sie akcje z realnymi konsekwencjami poza sandbox.
+**Co zaimplementowano:**
+- `agent_core/action_safety/` (5 plikow, 52 testy)
+- `safety_model.py`: SafetyMode(3), Reversibility(3), EffectType(6), ValidationResult(3), StateSnapshot, SafetyProfile, ActionRecord
+- `safety_classifier.py`: Per-action-type classification (7 known + safe-by-default for unknown = STAGED)
+- `audit_log.py`: JSONL persistence (meta_data/action_audit.jsonl), bounded 200 in-memory
+- `effect_validator.py`: Before/after state capture + validation (health drop, file count, goal explosion)
+- `__init__.py`: ActionSafety facade (before_action/after_action/is_staged/get_audit_stats/get_status)
 
-**Obecne proto-elementy:** SandboxManager (K2), transaction log (START/COMMIT/ROLLBACK)
+**Klasyfikacja akcji:**
+| ActionType | SafetyMode | Reversibility | EffectType | Snapshots |
+|-----------|------------|---------------|------------|-----------|
+| learn/exam/review | AUTO_COMMIT | REVERSIBLE | KNOWLEDGE | No (K2 handles) |
+| evaluate/noop | AUTO_COMMIT | REVERSIBLE | NONE | No |
+| maintenance | AUDIT_ONLY | REVERSIBLE | GOAL_STATE | Yes |
+| fetch | AUDIT_ONLY | PARTIAL | FILESYSTEM | Yes |
+| unknown | STAGED | IRREVERSIBLE | EXTERNAL_API | Yes |
+
+**Integracja z Plannerem:**
+- Pipeline: K10 before_action() -> execute -> K10 after_action()
+- STAGED actions blocked (placeholder for HITL)
+- Effect validation: health drop >0.3 = UNEXPECTED, fetch file decrease = UNEXPECTED
+- Backward compatible: action_safety=None nie psuje nic
+
+**Obecne proto-elementy (nadal uzywane):** SandboxManager (K2, learning-specific isolation)
 
 ---
 
@@ -341,7 +362,7 @@ Zmysl wzroku jako naturalny kanal w Unified Perception.
 Patrz: `docs/VISION_SPEC.md`
 
 ### Status
-- [ ] Cognitive Core prerequisites
+- [x] Cognitive Core prerequisites (K6, K7 DONE)
 - [ ] Faza 1-2 implementacja
 - [ ] Faza 3-4 implementacja
 - [ ] Integracja z Unified Perception + Consciousness
@@ -369,7 +390,7 @@ IoT jako kolejny kanal percepcji i pierwszy efektor w swiecie fizycznym.
 Patrz: `docs/SMART_HOME_SPEC.md`
 
 ### Status
-- [ ] Cognitive Core prerequisites (K7, K10)
+- [x] Cognitive Core prerequisites (K6, K7, K10 DONE)
 - [ ] Hardware (Shelly devices)
 - [ ] Implementacja
 - [ ] Integracja z Unified Perception + Action Safety

@@ -27,15 +27,16 @@
 | **2026-03-11** | K6 World Model / Belief System (69 testow) |
 | **2026-03-18** | OOM crash fix - infinite loop w intelligent_chunk_text() |
 | **2026-03-19** | K7 Autonomy Policy (45 testow) + K8 Deliberation (49 testow) |
+| **2026-03-20** | K9 Meta-Cognition (73 testy) + K10 Action Safety (52 testy) - **Cognitive Core COMPLETE** |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | Cognitive Core: K6-K8 DONE, K9-K10 docelowe |
-| **Testy** | 1288 passing |
-| **Faza** | K1-K8 DONE, K9-K10 cognitive core DOCELOWE |
+| **Etap** | Cognitive Core K1-K10 COMPLETE |
+| **Testy** | 1427 passing |
+| **Faza** | K1-K10 DONE, Vision/Smart Home next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -70,12 +71,14 @@ project/
 │   ├── world_model/     # World Model (K6): beliefs, store, builder, query
 │   ├── autonomy/        # Autonomy Policy (K7): classification, rate limiter, rules, escalation
 │   ├── deliberation/    # Deliberation (K8): strategy, templates, deliberator, intent tracker
+│   ├── meta_cognition/  # Meta-Cognition (K9): reflection, confidence, assumptions
+│   ├── action_safety/   # Action Safety (K10): audit log, effect validation, classification
 │   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS
 │   ├── introspection/   # Code self-awareness (READ-ONLY)
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1288 tests
+│   └── tests/           # 1427 tests
 └── docs/                # Documentation
 ```
 
@@ -156,7 +159,7 @@ System nauczania (w `agent_core/teacher/`) decyduje co i kiedy sie uczyc:
   - `/teacher plan` - podglad nastepnego kroku
   - `/teacher history` - historia planow
 
-## Kontrakty architektoniczne (K1-K8)
+## Kontrakty architektoniczne (K1-K10) - COMPLETE
 
 Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
@@ -167,12 +170,12 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K5 Planner:** Rule-based ReAct loop (ADR-013), PlannerGuard (5 gating rules), GoalSelector (aging factor), ActionExecutor (delegacja do Teacher), hybrid frequency (60 ticks + event-driven), persystencja (planner_state.json + planner_decisions.jsonl)
 - **K5.1 Topic-Aware Learning:** KnowledgeAnalyzer topic map + scoring, TeacherAgent filter_file_ids, auto-goal creation, /plan learn|topics REPL
 - **K6 World Model:** Belief system (frozen dataclass), BeliefStore (JSONL, cap 2000, MERGE), BeliefBuilder (from existing JSONL), query API, WorldModel facade
-- **K7 Autonomy Policy:** ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN), rate limiter (sliding window per ActionType), PolicyEngine (3 rules: consecutive_failure_breaker, degraded_mode_restrict, restricted_actions_block), EscalationHandler (JSONL log, HITL placeholder), AutonomyPolicy facade
-- **K8 Deliberation:** Multi-step strategies (Strategy+Step dataclasses), 3 templates (learn_topic, explore_new, consolidate), Deliberator (rule-based selection+advancement), IntentTracker (JSONL intents), Deliberation facade, wired into PlannerCore._create_plan_for_goal() z fallback
+- **K7 Autonomy Policy:** ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN), rate limiter (sliding window per ActionType), PolicyEngine (3 rules), EscalationHandler (JSONL log, HITL placeholder), AutonomyPolicy facade
+- **K8 Deliberation:** Multi-step strategies (Strategy+Step dataclasses), 3 templates (learn_topic, explore_new, consolidate), Deliberator (rule-based selection+advancement), IntentTracker (JSONL intents), Deliberation facade
+- **K9 Meta-Cognition:** ReflectionRecord (assumption tracking), ReflectionStore (JSONL, 300 cap), ConfidenceTracker (exponential decay), Reflector (before/after, pattern detection), MetaCognition facade, needs_human() signal
+- **K10 Action Safety:** SafetyMode(3), SafetyProfile per action type, AuditLog (JSONL, 200 cap), EffectValidator (before/after state capture), ActionSafety facade, safe-by-default (unknown=STAGED)
 
-Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`.
-
-**Docelowe (K9-K10):** Meta-Cognition, Action Safety - patrz `docs/DEVELOPMENT_PLAN.md`
+Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K10 kompletny (1427 testow).**
 
 ## Planner - Warstwa 2 (K5)
 
@@ -291,31 +294,23 @@ Usunieto:
 - `nul` - pusty plik
 - `futures/` - pusty folder
 
-## Nastepne kroki (2026-03-19)
+## Nastepne kroki (2026-03-20)
 
-### TERAZ: Stabilizacja K1-K8
-- [x] 4 bugi naprawione (retention gate, tick discontinuity, maintenance dominance, tick loop blocking)
-- [x] Web Content Fetcher zbudowany i podlaczony (agent_core/web_source/, 47 testow)
-- [x] Aktywacja Web Fetchera: `ActionType.FETCH` + `_exec_fetch()` wired
+### DONE: Cognitive Core K1-K10 (2026-03-20)
+- [x] K1-K5.1: Perception, Sandbox, Goals, Evaluation, Planner, Topic-Aware Learning
 - [x] K6 World Model (agent_core/world_model/, 69 testow)
 - [x] K7 Autonomy Policy (agent_core/autonomy/, 45 testow)
 - [x] K8 Deliberation (agent_core/deliberation/, 49 testow)
-- [ ] Multi-day test automatyki (K1-K8 + planner + topic-aware learning)
-- [ ] Analiza logow planner_decisions.jsonl + deliberation_intents.jsonl
+- [x] K9 Meta-Cognition (agent_core/meta_cognition/, 73 testy)
+- [x] K10 Action Safety (agent_core/action_safety/, 52 testy)
+- [x] Fetch spam fix (rate limit pre-check in planner)
+- [ ] Multi-day test automatyki (K1-K10 + planner + topic-aware learning)
+- [ ] Analiza logow: planner_decisions.jsonl, deliberation_intents.jsonl, reflections.jsonl, action_audit.jsonl
 
-### DOCELOWE: Cognitive Core (K9-K10)
-Rdzen kognitywny - budowany przyrostowo, gdy praktyka pokaze ze brakuje.
-Szczegoly: `docs/DEVELOPMENT_PLAN.md` (Warstwa 5-9)
-- ~~K6: World Model / Belief System~~ DONE
-- ~~K7: Autonomy Policy / Governance~~ DONE
-- ~~K8: Deliberation / Strategic Planning~~ DONE
-- K9: Uncertainty / Reflection / Meta-Cognition
-- K10: General Action Safety Layer
-
-### POZNIEJ: Zmysly i efektory (po cognitive core)
-- Vision (Warstwa 10) - wymaga K6, K7
-- Smart Home (Warstwa 11) - wymaga K7, K10, K6
-- Code Agent - wymaga K7, K10
+### NASTEPNE: Zmysly i efektory (cognitive core gotowy!)
+- Vision (Warstwa 10) - prerequisites met (K6, K7)
+- Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
+- Code Agent - prerequisites met (K7, K10)
 
 ## Znane problemy
 
@@ -685,4 +680,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-19 (K6 World Model + K7 Autonomy Policy + K8 Deliberation, 1288 testow)*
+*Ostatnia aktualizacja: 2026-03-20 (K9 Meta-Cognition + K10 Action Safety, Cognitive Core K1-K10 COMPLETE, 1427 testow)*
