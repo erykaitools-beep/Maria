@@ -43,8 +43,32 @@ class HomeostasisModule(MariaModule):
                 print(f"[Homeostasis] [WARN] Init failed: {e}")
                 return False
 
-        # Initialize PerceptionBuffer (Warstwa 1)
+        # Initialize ModelScheduler (multi-organ model stack)
         core = ctx.homeostasis_core
+        if core:
+            try:
+                from agent_core.llm.model_scheduler import ModelScheduler
+                from agent_core.llm.model_registry import ModelRole
+
+                scheduler = ModelScheduler()
+                scheduler.load_health()
+
+                # Register MODEL-02 (EXECUTOR) which is already loaded by OllamaBrain
+                brain_model = getattr(ctx, 'brain_model', 'llama3.1:8b')
+                scheduler.register_running_model(ModelRole.EXECUTOR, brain_model)
+
+                ctx.model_scheduler = scheduler
+                core.set_model_scheduler(scheduler)
+
+                # Wire to LLMRouter if available
+                if ctx.brain and hasattr(ctx.brain, 'set_model_scheduler'):
+                    ctx.brain.set_model_scheduler(scheduler)
+
+                print("[Homeostasis] [OK] ModelScheduler initialized")
+            except Exception as e:
+                logger.debug(f"ModelScheduler not initialized: {e}")
+
+        # Initialize PerceptionBuffer (Warstwa 1)
         if core:
             try:
                 from agent_core.perception.buffer import PerceptionBuffer

@@ -5,12 +5,19 @@ Routing rules:
 - think() -> always Ollama (chat, offline, fast, local history)
 - analyze_task() -> NIM if budget OK, else Ollama
 - _ask_once() -> NIM if budget OK, else Ollama
+- ask_as_role() -> ModelScheduler selects model by role (multi-organ)
 
 Every NIM call updates token budget automatically.
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional
+
+try:
+    import ollama as ollama_lib
+except ImportError:
+    ollama_lib = None
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +61,7 @@ class LLMRouter:
         self.ollama = ollama_brain
         self.nim = nim_client
         self.budget = token_budget
+        self._model_scheduler = None
 
         # Stats
         self._nim_calls = 0
@@ -174,6 +182,78 @@ class LLMRouter:
                 )
 
     # -------------------------------------------------
+    # MODEL SCHEDULER (multi-organ routing)
+    # -------------------------------------------------
+
+    def set_model_scheduler(self, scheduler) -> None:
+        """
+        Attach ModelScheduler for multi-model routing.
+
+        When set, ask_as_role() becomes available for role-based
+        model selection. Existing methods (think, _ask_once,
+        analyze_task) remain unchanged for backward compatibility.
+        """
+        self._model_scheduler = scheduler
+
+    def ask_as_role(
+        self, role, prompt: str, temperature: float = 0.3
+    ) -> str:
+        """
+        Send a prompt to a specific model role via ModelScheduler.
+
+        Ensures the model for the requested role is loaded,
+        performs inference, records latency, and releases the model.
+
+        Falls back to Ollama EXECUTOR if scheduler unavailable
+        or model can't be loaded.
+
+        Args:
+            role: ModelRole enum value (e.g. ModelRole.PLANNER)
+            prompt: The prompt text
+            temperature: Sampling temperature
+
+        Returns:
+            Response text from the selected model
+        """
+        if self._model_scheduler is None:
+            # No scheduler - fall through to default Ollama
+            self._ollama_calls += 1
+            return self.ollama._ask_once(prompt, temperature=temperature)
+
+        result = self._model_scheduler.ensure_ready(role)
+
+        if not result.success:
+            logger.warning(
+                f"[LLMRouter] Cannot load {role.value}: {result.reason}, "
+                f"falling back to Ollama"
+            )
+            self._ollama_calls += 1
+            return self.ollama._ask_once(prompt, temperature=temperature)
+
+        # Use the model tag from scheduler (may be fallback)
+        try:
+            start = time.time()
+            resp = ollama_lib.chat(
+                model=result.ollama_tag,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": temperature},
+            )
+            latency = time.time() - start
+            self._model_scheduler.record_request(result.role, latency)
+            self._ollama_calls += 1
+
+            text = resp.get("message", {}).get("content", "")
+            return text.strip()
+        except Exception as e:
+            logger.warning(
+                f"[LLMRouter] ask_as_role({role.value}) inference failed: {e}"
+            )
+            self._ollama_calls += 1
+            return self.ollama._ask_once(prompt, temperature=temperature)
+        finally:
+            self._model_scheduler.release(result.role)
+
+    # -------------------------------------------------
     # STATUS & REPORTING
     # -------------------------------------------------
 
@@ -225,6 +305,9 @@ class LLMRouter:
         else:
             stats["nim_model"] = None
             stats["nim_available"] = False
+
+        if self._model_scheduler is not None:
+            stats["scheduler"] = self._model_scheduler.get_status()
 
         return stats
 

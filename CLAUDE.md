@@ -33,15 +33,16 @@
 | **2026-03-21** | Architecture Map - interaktywna mapa modulow w Web UI |
 | **2026-03-21** | Model Registry v1.1 + Deployment Order v1.1 (multi-organ local model stack) |
 | **2026-03-21** | OpenClaw research - potwierdzona integracja jako efektor (tools/invoke bez LLM) |
+| **2026-03-21** | ModelScheduler - multi-organ model stack infrastructure (75 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K11 COMPLETE + Architecture Map |
-| **Testy** | 1512 passing |
-| **Faza** | Cognitive core done, efektory next (OpenClaw, Vision, Smart Home) |
+| **Etap** | K1-K11 COMPLETE + Architecture Map + ModelScheduler |
+| **Testy** | 1587 passing |
+| **Faza** | ModelScheduler deployed, Stage 2 benchmark next, then OpenClaw |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -83,9 +84,9 @@ project/
 │   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS (podlaczony do planner)
 │   ├── introspection/   # Code self-awareness (READ-ONLY) + Architecture Map data source
 │   ├── memory/          # MemoryManager interface
-│   ├── llm/             # LLMManager + NIM routing
+│   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1512 tests
+│   └── tests/           # 1587 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -253,19 +254,27 @@ System archiwizacji logow (w `agent_core/storage/`):
 - **Dysk:** 6TB ext4 "maria-storage" zamontowany na /mnt/storage/
 - **Backup:** 30 kopii zamiast 7
 
-## Model Registry (2026-03-21, docs only)
+## Model Registry + ModelScheduler (2026-03-21, IMPLEMENTED)
 
-Multi-organ local model stack planowany w `docs/MODEL_REGISTRY.md`:
+Multi-organ local model stack zaimplementowany w `agent_core/llm/`:
 
 - **MODEL-01:** Strategic Planner (qwen2.5:14b, 9GB, cold)
 - **MODEL-02:** Executor (llama3.1:8b, 5GB, warm) - obecny jedyny model
 - **MODEL-03:** Coder (qwen2.5-coder:7b, 5GB, cold)
-- **MODEL-04:** Triage (TBD 3B, 2-3GB, warm)
+- **MODEL-04:** Triage (TBD 3B, 2-3GB, warm) - czeka na benchmark Stage 2
 - **MODEL-05:** Memory (shared on MODEL-02 by default)
 - **MODEL-06:** NIM external API (z-ai/glm5, 0GB, expiry Aug 2026)
 - **Golden rule:** MODEL-02 + MODEL-04 warm, reszta on-demand
 - **Heavy model mutex:** MODEL-01 i MODEL-03 nigdy jednoczesnie
 - **Deployment:** 7 stage'ow w `docs/DEPLOYMENT_ORDER.md`
+
+### Implementacja (`agent_core/llm/`):
+- **model_registry.py:** ModelRole(6), ModelSpec (frozen dataclass), statyczny REGISTRY, RAM tiery
+- **model_scheduler.py:** ModelScheduler - load/unload via Ollama, RAM guard (psutil), heavy mutex (threading.Lock), idle timeout, health persist (model_health.json), tick() w homeostasis loop
+- **routing_rules.py:** TaskType(8) -> ModelRole mapping, heuristic_classify (keyword-based fallback)
+- **router.py rozszerzony:** ask_as_role(role, prompt) - scheduler laduje model, inference, release
+- **Wiring:** SharedContext.model_scheduler, HomeostasisCore Phase 9.5, auto-register MODEL-02 na starcie
+- **75 testow** (all mocked, zero external deps)
 
 ## OpenClaw Integration (2026-03-21, research done)
 
@@ -373,12 +382,13 @@ Usunieto:
 - [x] Architecture Map (Web UI /architecture)
 - [x] Model Registry + Deployment Order (docs)
 - [x] OpenClaw research (tools/invoke potwierdzone)
-- [ ] Multi-day stability test (K1-K11 on production)
-- [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates
+- [x] Multi-day stability test (K1-K11 on production) - 2 dni stabilne logi
+- [x] ModelScheduler implementation (75 testow) - load/unload, RAM guard, mutex, idle timeout
+- [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
 
-### NASTEPNE: Efektory (cognitive core + experiment system gotowe!)
+### NASTEPNE: Efektory (ModelScheduler deployed!)
 - OpenClaw integration - efektor (browser, shell, messaging) - research done, plan ready
-- Model Registry implementation - ModelScheduler w agent_core/llm/
+- Model Registry Stage 2 - benchmark triage candidates, wybrac MODEL-04
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
 
@@ -756,4 +766,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-21 (K11 Experiment System, Architecture Map, Storage Manager, Model Registry, OpenClaw research, 1512 testow)*
+*Ostatnia aktualizacja: 2026-03-21 (ModelScheduler deployed, K11, Architecture Map, Storage Manager, Model Registry, OpenClaw research, 1587 testow)*

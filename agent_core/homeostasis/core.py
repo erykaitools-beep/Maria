@@ -141,6 +141,9 @@ class HomeostasisCore:
         self._planner_core = None
         self._planner_thread: Optional[threading.Thread] = None
 
+        # Model Scheduler (multi-organ model stack)
+        self._model_scheduler = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -166,6 +169,16 @@ class HomeostasisCore:
             teacher_agent: TeacherAgent instance (with learn/exam fns already set)
         """
         self._teacher_agent = teacher_agent
+
+    def set_model_scheduler(self, scheduler) -> None:
+        """
+        Set model scheduler for multi-organ model management.
+
+        Scheduler tick() runs before planner to ensure models are
+        loaded/unloaded based on idle timeouts and RAM pressure.
+        Called from HomeostasisModule after init.
+        """
+        self._model_scheduler = scheduler
 
     def set_planner_core(self, planner_core) -> None:
         """
@@ -360,6 +373,15 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         if self._tick_count % self.LOG_INTERVAL_TICKS == 0:
             self._log_state(interpreted_state)
+
+        # ──────────────────────────────────────
+        # PHASE 9.5: MODEL SCHEDULER (idle timeouts, RAM pressure)
+        # ──────────────────────────────────────
+        if self._model_scheduler:
+            try:
+                self._model_scheduler.tick()
+            except Exception as e:
+                logger.debug(f"ModelScheduler tick error: {e}")
 
         # ──────────────────────────────────────
         # PHASE 10: PLANNER (or teacher fallback)
