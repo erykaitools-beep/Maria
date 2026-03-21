@@ -1,4 +1,4 @@
-"""Tests for agent_core/experiment/ - K11 Experiment System (Phases 1-2)."""
+"""Tests for agent_core/experiment/ - K11 Experiment System (Phases 1-6)."""
 
 import json
 import time
@@ -435,3 +435,442 @@ class TestProposalEngine:
             k9_patterns={"consecutive_failures": {}},
         )
         assert len(result) == 0
+
+
+# ── ExperimentRunner tests ─────────────────────────────────
+
+
+from agent_core.experiment.experiment_runner import ExperimentRunner
+from unittest.mock import MagicMock, patch
+
+
+class TestExperimentRunner:
+
+    def _make_runner(self):
+        runner = ExperimentRunner()
+        return runner
+
+    def _make_pending_experiment(self):
+        p = create_proposal(
+            source=ProposalSource.K4_RECOMMENDATION,
+            parameter_id="planner.ROUTINE_INTERVAL_TICKS",
+            current_value=60, proposed_value=50,
+            hypothesis="h", rationale="r", expected_outcome="e",
+        )
+        return create_experiment(p)
+
+    def test_run_completes(self):
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+
+        # Mock teacher
+        teacher = MagicMock()
+        teacher.run_session.return_value = {"stats": {"chunks_learned": 1}}
+        runner.set_teacher_agent(teacher)
+
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.COMPLETED
+        assert result.test_cycles == 5
+        assert result.finished_at is not None
+        assert result.started_at is not None
+
+    def test_restores_parameter(self):
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+
+        import agent_core.planner.planner_core as pc
+        original = pc.ROUTINE_INTERVAL_TICKS
+
+        teacher = MagicMock()
+        teacher.run_session.return_value = {"stats": {}}
+        runner.set_teacher_agent(teacher)
+
+        runner.run(exp)
+        # Parameter should be restored
+        assert pc.ROUTINE_INTERVAL_TICKS == original
+
+    def test_restores_on_cycle_errors(self):
+        """Per-cycle errors are caught, experiment still completes, param restored."""
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+
+        import agent_core.planner.planner_core as pc
+        original = pc.ROUTINE_INTERVAL_TICKS
+
+        teacher = MagicMock()
+        teacher.run_session.side_effect = RuntimeError("boom")
+        runner.set_teacher_agent(teacher)
+
+        result = runner.run(exp)
+        # Cycles run but fail silently - experiment still completes
+        assert result.status == ExperimentStatus.COMPLETED
+        assert result.test_cycles == 5
+        assert pc.ROUTINE_INTERVAL_TICKS == original
+
+    def test_rejects_unknown_parameter(self):
+        runner = self._make_runner()
+        exp = Experiment(
+            experiment_id="exp-test", proposal_id="p",
+            parameter_id="nonexistent.X",
+            baseline_value=1, test_value=2,
+        )
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.FAILED
+        assert "Unknown parameter" in result.error
+
+    def test_rejects_out_of_bounds(self):
+        runner = self._make_runner()
+        p = create_proposal(
+            source=ProposalSource.MANUAL,
+            parameter_id="planner.ROUTINE_INTERVAL_TICKS",
+            current_value=60, proposed_value=999,
+            hypothesis="h", rationale="r", expected_outcome="e",
+        )
+        exp = create_experiment(p)
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.FAILED
+        assert "out of bounds" in result.error
+
+    def test_rejects_concurrent(self):
+        runner = self._make_runner()
+        exp1 = self._make_pending_experiment()
+        exp2 = self._make_pending_experiment()
+
+        teacher = MagicMock()
+        # Make first experiment very slow
+        def slow_session(**kwargs):
+            import time
+            time.sleep(0.01)
+            return {"stats": {}}
+        teacher.run_session.side_effect = slow_session
+        runner.set_teacher_agent(teacher)
+
+        # Simulate concurrent by setting _current_experiment
+        runner._current_experiment = exp1
+        runner._current_experiment.status = ExperimentStatus.RUNNING
+
+        result = runner.run(exp2)
+        assert result.status == ExperimentStatus.FAILED
+        assert "already running" in result.error
+
+    def test_health_guard_aborts(self):
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+
+        # Mock unhealthy homeostasis
+        core = MagicMock()
+        state = MagicMock()
+        state.health_score = 0.5
+        core.get_state.return_value = state
+        runner.set_homeostasis_core(core)
+
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.ABORTED
+        assert "Health" in result.error
+
+    def test_is_running_property(self):
+        runner = self._make_runner()
+        assert not runner.is_running
+
+    def test_no_teacher_still_completes(self):
+        """Without teacher, cycles run but nothing happens."""
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.COMPLETED
+        assert result.test_cycles == 5
+
+    def test_timeout_aborts(self):
+        runner = self._make_runner()
+        exp = self._make_pending_experiment()
+        exp.max_duration_sec = 0.0  # instant timeout
+
+        teacher = MagicMock()
+        teacher.run_session.return_value = {"stats": {}}
+        runner.set_teacher_agent(teacher)
+
+        result = runner.run(exp)
+        assert result.status == ExperimentStatus.ABORTED
+        assert "Timeout" in result.error
+
+
+# ── ReportGenerator tests ──────────────────────────────────
+
+
+from agent_core.experiment.report_generator import ReportGenerator
+
+
+class TestReportGenerator:
+
+    def _make_completed_experiment(self):
+        exp = Experiment(
+            experiment_id="exp-test", proposal_id="prop-test",
+            parameter_id="config.EXAM_PASS_THRESHOLD",
+            baseline_value=0.6, test_value=0.65,
+            status=ExperimentStatus.COMPLETED,
+            started_at=100.0, finished_at=400.0,
+            baseline_metrics={
+                "retention_rate": 0.55,
+                "learning_velocity": 2.0,
+                "knowledge_coverage": 0.7,
+            },
+            result_metrics={
+                "retention_rate": 0.72,
+                "learning_velocity": 1.8,
+                "knowledge_coverage": 0.71,
+            },
+            test_cycles=5, target_cycles=5,
+        )
+        return exp
+
+    def test_generate_adopt(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        report = gen.generate(exp)
+
+        assert report is not None
+        assert report.report_id.startswith("rep-")
+        assert report.recommendation == "ADOPT"
+        assert report.confidence > 0.5
+        assert report.delta_metrics["retention_rate"] > 0
+
+    def test_generate_reject(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        # Invert: result worse than baseline
+        exp.result_metrics["retention_rate"] = 0.40
+        report = gen.generate(exp)
+
+        assert report is not None
+        assert report.recommendation == "REJECT"
+
+    def test_generate_inconclusive_few_cycles(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        exp.test_cycles = 2
+        report = gen.generate(exp)
+
+        assert report is not None
+        assert report.recommendation == "INCONCLUSIVE"
+
+    def test_generate_inconclusive_small_change(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        # Tiny change
+        exp.result_metrics["retention_rate"] = 0.56
+        report = gen.generate(exp)
+
+        assert report is not None
+        assert report.recommendation == "INCONCLUSIVE"
+
+    def test_generate_from_aborted(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        exp.status = ExperimentStatus.ABORTED
+        report = gen.generate(exp)
+
+        assert report is not None
+        assert report.recommendation == "INCONCLUSIVE"
+        assert report.confidence < 0.5
+
+    def test_returns_none_for_pending(self):
+        gen = ReportGenerator()
+        exp = Experiment(
+            experiment_id="exp-x", proposal_id="p",
+            parameter_id="x", baseline_value=1, test_value=2,
+            status=ExperimentStatus.PENDING,
+        )
+        assert gen.generate(exp) is None
+
+    def test_returns_none_for_empty_metrics(self):
+        gen = ReportGenerator()
+        exp = Experiment(
+            experiment_id="exp-x", proposal_id="p",
+            parameter_id="x", baseline_value=1, test_value=2,
+            status=ExperimentStatus.COMPLETED,
+        )
+        assert gen.generate(exp) is None
+
+    def test_delta_computation(self):
+        gen = ReportGenerator()
+        delta = gen._compute_deltas(
+            {"a": 0.5, "b": 1.0},
+            {"a": 0.8, "b": 0.7, "c": 0.3},
+        )
+        assert delta["a"] == 0.3
+        assert delta["b"] == -0.3
+        assert delta["c"] == 0.3
+
+    def test_confidence_scales_with_cycles(self):
+        gen = ReportGenerator()
+        c1 = gen._compute_confidence(1, 5, False)
+        c5 = gen._compute_confidence(5, 5, False)
+        assert c5 > c1
+
+    def test_confidence_penalty_for_abort(self):
+        gen = ReportGenerator()
+        c_normal = gen._compute_confidence(5, 5, False)
+        c_aborted = gen._compute_confidence(5, 5, True)
+        assert c_aborted < c_normal
+
+    def test_report_links_to_experiment(self):
+        gen = ReportGenerator()
+        exp = self._make_completed_experiment()
+        report = gen.generate(exp)
+        assert exp.report_id == report.report_id
+
+
+# ── ExperimentSystem facade tests ──────────────────────────
+
+
+from agent_core.experiment import ExperimentSystem
+
+
+class TestExperimentSystem:
+
+    def _make_system(self, tmp_path):
+        return ExperimentSystem(
+            reports_path=tmp_path / "reports.jsonl",
+        )
+
+    def test_scan_and_approve(self, tmp_path):
+        system = self._make_system(tmp_path)
+        system.proposal_engine = ProposalEngine(
+            proposals_path=tmp_path / "proposals.jsonl"
+        )
+
+        # Trigger a proposal
+        proposals = system.scan_for_proposals(
+            k4_metrics={},
+            k4_recommendations=[],
+            k9_patterns={"consecutive_failures": {"exam": 5}},
+        )
+        assert len(proposals) == 1
+
+        # Approve
+        pid = proposals[0].proposal_id
+        assert system.approve(pid)
+
+        p = system.proposal_engine.get_proposal(pid)
+        assert p.status == ProposalStatus.APPROVED
+
+    def test_reject(self, tmp_path):
+        system = self._make_system(tmp_path)
+        system.proposal_engine = ProposalEngine(
+            proposals_path=tmp_path / "proposals.jsonl"
+        )
+
+        proposals = system.scan_for_proposals(
+            k4_metrics={},
+            k4_recommendations=[],
+            k9_patterns={"consecutive_failures": {"exam": 5}},
+        )
+        pid = proposals[0].proposal_id
+        assert system.reject(pid)
+
+        p = system.proposal_engine.get_proposal(pid)
+        assert p.status == ProposalStatus.REJECTED
+
+    def test_add_comment(self, tmp_path):
+        system = self._make_system(tmp_path)
+        system.proposal_engine = ProposalEngine(
+            proposals_path=tmp_path / "proposals.jsonl"
+        )
+
+        proposals = system.scan_for_proposals(
+            k4_metrics={},
+            k4_recommendations=[],
+            k9_patterns={"consecutive_failures": {"exam": 5}},
+        )
+        pid = proposals[0].proposal_id
+        assert system.add_comment(pid, "ciekawe", "eryk")
+
+        p = system.proposal_engine.get_proposal(pid)
+        assert len(p.comments) == 1
+
+    def test_run_experiment_requires_approval(self, tmp_path):
+        system = self._make_system(tmp_path)
+        system.proposal_engine = ProposalEngine(
+            proposals_path=tmp_path / "proposals.jsonl"
+        )
+
+        proposals = system.scan_for_proposals(
+            k4_metrics={},
+            k4_recommendations=[],
+            k9_patterns={"consecutive_failures": {"exam": 5}},
+        )
+        pid = proposals[0].proposal_id
+
+        # Try running without approval
+        report = system.run_experiment(pid)
+        assert report is None
+
+    def test_get_status(self, tmp_path):
+        system = self._make_system(tmp_path)
+        status = system.get_status()
+        assert "proposals" in status
+        assert "total_reports" in status
+        assert status["current_experiment"] is None
+
+    def test_report_persistence(self, tmp_path):
+        """Reports are saved to JSONL and loaded on restart."""
+        system = self._make_system(tmp_path)
+        system.proposal_engine = ProposalEngine(
+            proposals_path=tmp_path / "proposals.jsonl"
+        )
+
+        proposals = system.scan_for_proposals(
+            k4_metrics={},
+            k4_recommendations=[],
+            k9_patterns={"consecutive_failures": {"exam": 5}},
+        )
+        pid = proposals[0].proposal_id
+        system.approve(pid)
+
+        # Run experiment (will produce a report even without teacher)
+        report = system.run_experiment(pid)
+        # It may or may not produce report depending on metrics capture
+        # But the facade should not crash
+
+        # Verify reports file exists if report was generated
+        if report:
+            system2 = self._make_system(tmp_path)
+            reports = system2.get_all_reports()
+            assert len(reports) >= 1
+
+    def test_nonexistent_proposal(self, tmp_path):
+        system = self._make_system(tmp_path)
+        assert system.run_experiment("nonexistent") is None
+
+
+# ── Integration with K7/K10 ────────────────────────────────
+
+
+class TestExperimentIntegration:
+
+    def test_action_classification(self):
+        from agent_core.autonomy.action_class import classify_action, ActionClassification
+        result = classify_action("experiment")
+        assert result == ActionClassification.GUARDED
+
+    def test_safety_profile(self):
+        from agent_core.action_safety.safety_classifier import get_safety_profile
+        from agent_core.action_safety.safety_model import SafetyMode, EffectType
+        profile = get_safety_profile("experiment")
+        assert profile.safety_mode == SafetyMode.AUDIT_ONLY
+        assert profile.effect_type == EffectType.CONFIGURATION
+
+    def test_action_type_exists(self):
+        from agent_core.planner.planner_model import ActionType
+        assert ActionType.EXPERIMENT.value == "experiment"
+
+    def test_strategy_template_exists(self):
+        from agent_core.deliberation.strategy_templates import get_template
+        tmpl = get_template("experiment")
+        assert tmpl is not None
+        strategy = tmpl("goal-test", intent="Test experiment")
+        assert len(strategy.steps) == 3
+
+    def test_effect_type_configuration(self):
+        from agent_core.action_safety.safety_model import EffectType
+        assert EffectType.CONFIGURATION.value == "configuration"

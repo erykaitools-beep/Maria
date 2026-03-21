@@ -51,6 +51,10 @@ DEFAULT_SAFETY_PROFILES: Dict[str, SafetyProfile] = {
         SafetyMode.AUDIT_ONLY, Reversibility.PARTIALLY_REVERSIBLE,
         EffectType.FILESYSTEM, True, True,
     ),
+    "experiment": SafetyProfile(
+        SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
+        EffectType.CONFIGURATION, True, True,
+    ),
 }
 
 # Safe-by-default profile for unknown action types

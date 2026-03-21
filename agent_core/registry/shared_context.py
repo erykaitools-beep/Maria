@@ -39,6 +39,7 @@ class SharedContext:
     deliberation: Any = None         # Deliberation (Kontrakt K8)
     meta_cognition: Any = None       # MetaCognition (Kontrakt K9)
     action_safety: Any = None        # ActionSafety (Kontrakt K10)
+    experiment_system: Any = None    # ExperimentSystem (Kontrakt K11)
 
     # REPL state
     last_result: Any = None

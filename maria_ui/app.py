@@ -1417,6 +1417,176 @@ def handle_clear_history():
 # MAIN
 # =============================================================================
 
+# =============================================================================
+# EXPERIMENT SYSTEM (K11)
+# =============================================================================
+
+# Lazy import for experiment system
+_experiment_system = None
+
+def _get_experiment_system():
+    """Get or create ExperimentSystem instance."""
+    global _experiment_system
+    if _experiment_system is None:
+        try:
+            from agent_core.experiment import ExperimentSystem
+            _experiment_system = ExperimentSystem()
+        except ImportError:
+            pass
+    return _experiment_system
+
+
+@app.route('/experiments')
+@require_auth
+def experiments_page():
+    """Experiment dashboard page."""
+    return render_template('experiments.html')
+
+
+@app.route('/api/experiments/proposals')
+@require_auth
+def api_experiment_proposals():
+    """Get all proposals."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    proposals = system.proposal_engine.get_all_proposals()
+    return jsonify([p.to_dict() for p in proposals])
+
+
+@app.route('/api/experiments/reports')
+@require_auth
+def api_experiment_reports():
+    """Get all reports."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    reports = system.get_all_reports()
+    return jsonify([r.to_dict() for r in reports])
+
+
+@app.route('/api/experiments/reports/<report_id>')
+@require_auth
+def api_experiment_report_detail(report_id):
+    """Get single report."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    report = system.get_report(report_id)
+    if report is None:
+        return jsonify({"error": "Report not found"}), 404
+    return jsonify(report.to_dict())
+
+
+@app.route('/api/experiments/approve/<proposal_id>', methods=['POST'])
+@require_auth
+def api_experiment_approve(proposal_id):
+    """Approve a proposal."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    if system.approve(proposal_id):
+        return jsonify({"success": True, "message": f"Proposal {proposal_id} approved"})
+    return jsonify({"success": False, "message": "Approval failed"}), 400
+
+
+@app.route('/api/experiments/reject/<proposal_id>', methods=['POST'])
+@require_auth
+def api_experiment_reject(proposal_id):
+    """Reject a proposal."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    if system.reject(proposal_id):
+        return jsonify({"success": True, "message": f"Proposal {proposal_id} rejected"})
+    return jsonify({"success": False, "message": "Rejection failed"}), 400
+
+
+@app.route('/api/experiments/comment/<proposal_id>', methods=['POST'])
+@require_auth
+def api_experiment_comment(proposal_id):
+    """Add comment to a proposal."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"success": False, "message": "Empty comment"}), 400
+
+    # Sanitize
+    text = html.escape(text)[:500]
+
+    if system.add_comment(proposal_id, text, "user"):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "message": "Comment failed"}), 400
+
+
+@app.route('/api/experiments/status')
+@require_auth
+def api_experiment_status():
+    """Get experiment system status."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    return jsonify(system.get_status())
+
+
+@app.route('/api/experiments/params')
+@require_auth
+def api_experiment_params():
+    """Get tunable parameters."""
+    try:
+        from agent_core.experiment import parameter_registry
+        params = parameter_registry.list_parameters()
+        result = []
+        for pid, spec in params.items():
+            result.append({
+                "param_id": pid,
+                "module_path": spec.module_path,
+                "constant_name": spec.constant_name,
+                "current_value": spec.current_value,
+                "value_type": spec.value_type,
+                "min_value": spec.min_value,
+                "max_value": spec.max_value,
+                "step": spec.step,
+                "risk_level": spec.risk_level.value,
+                "impact_metric": spec.impact_metric,
+                "description": spec.description,
+            })
+        return jsonify(result)
+    except ImportError:
+        return jsonify({"error": "Experiment module not available"}), 503
+
+
+@app.route('/api/experiments/export/<report_id>')
+@require_auth
+def api_experiment_export(report_id):
+    """Export report as JSON download."""
+    system = _get_experiment_system()
+    if system is None:
+        return jsonify({"error": "Experiment system not available"}), 503
+
+    report = system.get_report(report_id)
+    if report is None:
+        return jsonify({"error": "Report not found"}), 404
+
+    from flask import Response
+    data = json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+    return Response(
+        data,
+        mimetype='application/json',
+        headers={'Content-Disposition': f'attachment; filename={report_id}.json'},
+    )
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("[START] M.A.R.I.A. Web UI (Sprint 5)")

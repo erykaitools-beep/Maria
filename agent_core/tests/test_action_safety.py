@@ -54,8 +54,9 @@ class TestEnums:
         assert Reversibility.PARTIALLY_REVERSIBLE.value == "partial"
 
     def test_effect_type_values(self):
-        assert len(EffectType) == 6
+        assert len(EffectType) == 7
         assert EffectType.DEVICE.value == "device"
+        assert EffectType.CONFIGURATION.value == "configuration"
 
     def test_validation_result_values(self):
         assert len(ValidationResult) == 3

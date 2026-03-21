@@ -89,6 +89,7 @@ class PlannerCore:
         self._deliberation = None
         self._meta_cognition = None
         self._action_safety = None
+        self._experiment_system = None
 
         # Load persisted state
         self._load_state()
@@ -135,6 +136,10 @@ class PlannerCore:
 
     def set_action_safety(self, action_safety) -> None:
         self._action_safety = action_safety
+
+    def set_experiment_system(self, experiment_system) -> None:
+        self._experiment_system = experiment_system
+        self.executor.set_experiment_system(experiment_system)
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -852,6 +857,8 @@ class PlannerCore:
             return f"Konserwacja: {metric}" if metric else "Konserwacja systemu"
         elif action == ActionType.FETCH:
             return "Pobieram nowe materialy z internetu"
+        elif action == ActionType.EXPERIMENT:
+            return f"Eksperyment: {goal}" if goal else "Eksperyment z parametrem"
         elif action == ActionType.NOOP:
             return "Nic do zrobienia - czekam"
         return f"{action.value}: {goal}"

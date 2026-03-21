@@ -152,6 +152,44 @@ def build_consolidate(
     )
 
 
+def build_experiment(
+    goal_id: str,
+    intent: str = "",
+    proposal_id: str = "",
+    **kwargs,
+) -> Strategy:
+    """
+    Run a parameter experiment (K11).
+
+    Flow: EVALUATE (baseline) -> EXPERIMENT -> EVALUATE (result) -> report
+    """
+    steps = [
+        create_step(
+            order=0,
+            action_type="evaluate",
+            description="Ewaluacja bazowa przed eksperymentem",
+        ),
+        create_step(
+            order=1,
+            action_type="experiment",
+            description=f"Eksperyment: {intent}" if intent else "Eksperyment parametru",
+            action_params={"proposal_id": proposal_id} if proposal_id else {},
+        ),
+        create_step(
+            order=2,
+            action_type="evaluate",
+            description="Ewaluacja po eksperymencie",
+        ),
+    ]
+    return create_strategy(
+        goal_id=goal_id,
+        template_name="experiment",
+        steps=steps,
+        intent=intent or "Eksperyment z parametrem",
+        metadata={"proposal_id": proposal_id} if proposal_id else {},
+    )
+
+
 # Template type: callable(goal_id, intent, **kwargs) -> Strategy
 StrategyTemplate = Callable[..., Strategy]
 
@@ -161,6 +199,7 @@ TEMPLATE_REGISTRY: Dict[str, StrategyTemplate] = {
     "learn_topic": build_learn_topic,
     "explore_new": build_explore_new,
     "consolidate": build_consolidate,
+    "experiment": build_experiment,
 }
 
 

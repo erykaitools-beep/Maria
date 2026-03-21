@@ -153,9 +153,9 @@ class TestStrategy:
 
 
 class TestStrategyTemplates:
-    def test_registry_has_3_templates(self):
-        assert len(TEMPLATE_REGISTRY) == 3
-        assert set(TEMPLATE_REGISTRY.keys()) == {"learn_topic", "explore_new", "consolidate"}
+    def test_registry_has_4_templates(self):
+        assert len(TEMPLATE_REGISTRY) == 4
+        assert set(TEMPLATE_REGISTRY.keys()) == {"learn_topic", "explore_new", "consolidate", "experiment"}
 
     def test_list_templates(self):
         names = list_templates()

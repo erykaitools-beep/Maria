@@ -168,6 +168,10 @@ def register_modules(registry):
         from agent_core.modules.planner_module import PlannerModule
         return PlannerModule()
 
+    def make_experiment():
+        from agent_core.modules.experiment_module import ExperimentModule
+        return ExperimentModule()
+
     registry.try_register(make_homeostasis, "homeostasis")
     registry.try_register(make_introspection, "introspection")
     registry.try_register(make_learning, "learning")
@@ -178,6 +182,7 @@ def register_modules(registry):
     registry.try_register(make_awareness, "awareness")
     registry.try_register(make_teacher, "teacher")
     registry.try_register(make_planner, "planner")
+    registry.try_register(make_experiment, "experiment")
 
 
 # ====== POMOC ======

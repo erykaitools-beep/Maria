@@ -33,6 +33,7 @@ class ActionExecutor:
         self._homeostasis_core = None
         self._goal_store = None
         self._knowledge_analyzer = None
+        self._experiment_system = None
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -53,6 +54,10 @@ class ActionExecutor:
     def set_knowledge_analyzer(self, analyzer) -> None:
         """Set knowledge analyzer for topic->file resolution."""
         self._knowledge_analyzer = analyzer
+
+    def set_experiment_system(self, system) -> None:
+        """Set experiment system for K11 experiment actions."""
+        self._experiment_system = system
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
@@ -80,6 +85,8 @@ class ActionExecutor:
                 result = self._exec_maintenance(plan)
             elif action == ActionType.FETCH:
                 result = self._exec_fetch(plan)
+            elif action == ActionType.EXPERIMENT:
+                result = self._exec_experiment(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -233,6 +240,29 @@ class ActionExecutor:
                 "articles_fetched": result.get("articles_fetched", 0),
                 "topics_searched": result.get("topics_searched", 0),
                 "errors": errors,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _exec_experiment(self, plan: Plan) -> Dict[str, Any]:
+        """Run K11 experiment via ExperimentSystem."""
+        if self._experiment_system is None:
+            return {"success": False, "error": "No experiment system configured"}
+
+        proposal_id = plan.action_params.get("proposal_id")
+        if not proposal_id:
+            return {"success": False, "error": "No proposal_id in action_params"}
+
+        try:
+            report = self._experiment_system.run_experiment(proposal_id)
+            if report is None:
+                return {"success": False, "error": "Experiment did not produce report"}
+            return {
+                "success": True,
+                "report_id": report.report_id,
+                "recommendation": report.recommendation,
+                "confidence": report.confidence,
+                "conclusion": report.conclusion,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

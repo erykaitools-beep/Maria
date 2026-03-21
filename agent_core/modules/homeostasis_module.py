@@ -240,6 +240,21 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"ActionSafety not initialized: {e}")
 
+                # Experiment System (K11) for autonomous parameter tuning
+                try:
+                    from agent_core.experiment import ExperimentSystem
+                    experiment_system = ExperimentSystem()
+                    experiment_system.set_homeostasis_core(core)
+                    if ctx.evaluation_observer:
+                        experiment_system.set_evaluation_observer(ctx.evaluation_observer)
+                    if hasattr(core, '_teacher_agent') and core._teacher_agent:
+                        experiment_system.set_teacher_agent(core._teacher_agent)
+                    planner.set_experiment_system(experiment_system)
+                    ctx.experiment_system = experiment_system
+                    print("[Homeostasis] [OK] ExperimentSystem wired (K11)")
+                except Exception as e:
+                    logger.debug(f"ExperimentSystem not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

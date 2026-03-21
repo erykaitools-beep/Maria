@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "fetch": 5,
     "maintenance": 10,
+    "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
 }
 
 # Sliding window size

@@ -39,6 +39,7 @@ class EffectType(Enum):
     GOAL_STATE = "goal_state"      # MAINTENANCE (modifies goal progress)
     EXTERNAL_API = "external_api"  # FETCH (HTTP calls), future: smart home
     DEVICE = "device"              # Future: smart home physical actions
+    CONFIGURATION = "configuration"  # K11: temporary parameter override
 
 
 class ValidationResult(Enum):

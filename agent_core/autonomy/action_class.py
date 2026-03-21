@@ -32,6 +32,7 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
     "noop": ActionClassification.FREE,
     "maintenance": ActionClassification.GUARDED,
     "fetch": ActionClassification.GUARDED,
+    "experiment": ActionClassification.GUARDED,
 }
 
 

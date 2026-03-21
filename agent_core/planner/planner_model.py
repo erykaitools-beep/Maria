@@ -29,6 +29,7 @@ class ActionType(Enum):
     MAINTENANCE = "maintenance"  # Maintenance action (update goal progress)
     NOOP = "noop"                # Nothing to do (idle)
     FETCH = "fetch"              # Fetch web content (agent_core/web_source/)
+    EXPERIMENT = "experiment"    # K11: Run parameter experiment
 
 
 @dataclass
