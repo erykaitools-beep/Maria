@@ -28,15 +28,20 @@
 | **2026-03-18** | OOM crash fix - infinite loop w intelligent_chunk_text() |
 | **2026-03-19** | K7 Autonomy Policy (45 testow) + K8 Deliberation (49 testow) |
 | **2026-03-20** | K9 Meta-Cognition (73 testy) + K10 Action Safety (52 testy) - **Cognitive Core COMPLETE** |
+| **2026-03-21** | Bug fixes (exam score, beliefs, deliberation) + Storage Manager + 6TB disk |
+| **2026-03-21** | K11 Experiment System (67 testow) - autonomiczny tuning parametrow |
+| **2026-03-21** | Architecture Map - interaktywna mapa modulow w Web UI |
+| **2026-03-21** | Model Registry v1.1 + Deployment Order v1.1 (multi-organ local model stack) |
+| **2026-03-21** | OpenClaw research - potwierdzona integracja jako efektor (tools/invoke bez LLM) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | Cognitive Core K1-K10 COMPLETE |
-| **Testy** | 1427 passing |
-| **Faza** | K1-K10 DONE, Vision/Smart Home next |
+| **Etap** | K1-K11 COMPLETE + Architecture Map |
+| **Testy** | 1512 passing |
+| **Faza** | Cognitive core done, efektory next (OpenClaw, Vision, Smart Home) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -73,13 +78,15 @@ project/
 │   ├── deliberation/    # Deliberation (K8): strategy, templates, deliberator, intent tracker
 │   ├── meta_cognition/  # Meta-Cognition (K9): reflection, confidence, assumptions
 │   ├── action_safety/   # Action Safety (K10): audit log, effect validation, classification
-│   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS
-│   ├── introspection/   # Code self-awareness (READ-ONLY)
+│   ├── experiment/      # Experiment System (K11): proposals, runner, reports, parameter tuning
+│   ├── storage/         # Storage Manager: log archival, daily summaries (6TB disk)
+│   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS (podlaczony do planner)
+│   ├── introspection/   # Code self-awareness (READ-ONLY) + Architecture Map data source
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1427 tests
-└── docs/                # Documentation
+│   └── tests/           # 1512 tests
+└── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
 ## Kluczowe pliki do przejrzenia
@@ -95,7 +102,9 @@ project/
 | `docs/CONSCIOUSNESS_SPEC.md` | **Specyfikacja swiadomosci, osobowosci, snow** |
 | `docs/VISION_SPEC.md` | **Specyfikacja percepcji wizualnej (oko)** |
 | `docs/SMART_HOME_SPEC.md` | **Specyfikacja IoT / Smart Home** |
-| `docs/CONTRACTS.md` | **Kontrakty architektoniczne (K1-K8: Perception, Sandbox, Goals, Evaluation, Planner, World Model, Autonomy, Deliberation)** |
+| `docs/CONTRACTS.md` | **Kontrakty architektoniczne (K1-K11)** |
+| `docs/MODEL_REGISTRY.md` | **Multi-organ local model stack (5 ról, RAM tiers, mutex)** |
+| `docs/DEPLOYMENT_ORDER.md` | **7-stage deployment z benchmarkami i rollback** |
 | `docs/CHANGELOG.md` | Historia zmian |
 
 ## Homeostasis - nowy system
@@ -175,7 +184,9 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K9 Meta-Cognition:** ReflectionRecord (assumption tracking), ReflectionStore (JSONL, 300 cap), ConfidenceTracker (exponential decay), Reflector (before/after, pattern detection), MetaCognition facade, needs_human() signal
 - **K10 Action Safety:** SafetyMode(3), SafetyProfile per action type, AuditLog (JSONL, 200 cap), EffectValidator (before/after state capture), ActionSafety facade, safe-by-default (unknown=STAGED)
 
-Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K10 kompletny (1427 testow).**
+- **K11 Experiment System:** Proposal engine (4 rules), parameter registry (12 params), experiment runner (setattr+restore), report generator (ADOPT/REJECT/INCONCLUSIVE), ExperimentSystem facade, human gate (PROPOSED goals), REPL /experiments, Web UI /experiments
+
+Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K11 kompletny (1512 testow).**
 
 ## Planner - Warstwa 2 (K5)
 
@@ -195,7 +206,78 @@ System planowania (w `agent_core/planner/`) - pierwsza "warstwa sprawcza":
   - `/plan history [N]` - historia decyzji
   - `/plan goals` - ranking celow wg effective priority
 
-## Web Content Fetcher (zbudowany 2026-03-08, NIE podlaczony)
+## K11 Experiment System (2026-03-21) - COMPLETE
+
+System autonomicznego tuningu parametrow (w `agent_core/experiment/`):
+
+- **ProposalEngine:** 4 reguly (LOW_RETENTION, CONSECUTIVE_FAILURES, HIGH_COVERAGE, SLOW_EXECUTION)
+- **ParameterRegistry:** 12 parametrow z bounds, risk levels, impact metrics
+- **ExperimentRunner:** setattr patch, health guard (0.8/0.9), timeout 1h, restore ALWAYS (finally)
+- **ReportGenerator:** delta metryki, ADOPT/REJECT/INCONCLUSIVE, confidence scoring
+- **ExperimentSystem facade:** scan -> approve -> run -> report pipeline
+- **Human gate:** Reuse K3 PROPOSED goals, Eryk zatwierdza/odrzuca
+- **Planner:** ActionType.EXPERIMENT, build_experiment template (K8)
+- **K7:** GUARDED + rate limit 1/h
+- **K10:** AUDIT_ONLY + EffectType.CONFIGURATION
+- **REPL commands:**
+  - `/experiments` - lista propozycji i raportow
+  - `/experiment approve <id>` - zatwierdz propozycje
+  - `/experiment reject <id>` - odrzuc
+  - `/experiment status` - aktualny eksperyment
+  - `/experiment report <id>` - pokaz raport
+  - `/experiment params` - lista parametrow do tuningu
+  - `/experiment comment <id> <text>` - dodaj uwage
+- **Web UI:** `/experiments` - 3 taby (Propozycje, Raporty, Parametry) + 12 API endpoints
+- **67 testow**
+
+## Architecture Map (2026-03-21)
+
+Interaktywna mapa modulow w Web UI (read-only, zero wplywu na runtime):
+
+- **URL:** `http://192.168.178.32:5000/architecture`
+- **3 widoki:**
+  - **Graf** - force-directed graph pakietow, krawedzie = importy, drill-down do funkcji
+  - **Pipeline** - 15 krokow decyzyjnych (SENSE -> ... -> K6 UPDATE)
+  - **Data Flow** - 15 plikow JSONL z writerami i readerami
+- **Funkcje:** search, click-to-detail, connected highlight, zoom/drag
+- **Dane:** z CodeAnalyzer AST (194 pliki, 39k linii, 822 zaleznosci)
+- **Cel:** ulatwienie nawigacji dla przyszlych agentow i ludzi
+
+## Storage Manager (2026-03-21)
+
+System archiwizacji logow (w `agent_core/storage/`):
+
+- **LogArchiver:** przenosi stare rekordy JSONL -> /mnt/storage/data/logs/
+- **DailySummary:** kompakcja do dziennych podsumowań -> /mnt/storage/data/summaries/
+- **Integracja:** z SleepProcessor (faza archiwizacji przed REM)
+- **Dysk:** 6TB ext4 "maria-storage" zamontowany na /mnt/storage/
+- **Backup:** 30 kopii zamiast 7
+
+## Model Registry (2026-03-21, docs only)
+
+Multi-organ local model stack planowany w `docs/MODEL_REGISTRY.md`:
+
+- **MODEL-01:** Strategic Planner (qwen2.5:14b, 9GB, cold)
+- **MODEL-02:** Executor (llama3.1:8b, 5GB, warm) - obecny jedyny model
+- **MODEL-03:** Coder (qwen2.5-coder:7b, 5GB, cold)
+- **MODEL-04:** Triage (TBD 3B, 2-3GB, warm)
+- **MODEL-05:** Memory (shared on MODEL-02 by default)
+- **MODEL-06:** NIM external API (z-ai/glm5, 0GB, expiry Aug 2026)
+- **Golden rule:** MODEL-02 + MODEL-04 warm, reszta on-demand
+- **Heavy model mutex:** MODEL-01 i MODEL-03 nigdy jednoczesnie
+- **Deployment:** 7 stage'ow w `docs/DEPLOYMENT_ORDER.md`
+
+## OpenClaw Integration (2026-03-21, research done)
+
+OpenClaw jako efektor pod kontrola Marii (zbadane, nie zaimplementowane):
+
+- **Kluczowe:** `POST /tools/invoke` pozwala wywolywac narzedzia BEZ LLM
+- **Narzedzia:** browser (Chromium), exec (shell), web_fetch, message (Telegram/Slack/Discord), 20+ wiecej
+- **Integracja:** Maria HTTP -> OpenClaw Gateway (:18789) -> tool execution -> JSON result
+- **Plan:** `agent_core/effector/openclaw_client.py` (ActionType.EFFECTOR, K7 RESTRICTED)
+- **Repo:** github.com/openclaw/openclaw (MIT, 247k stars)
+
+## Web Content Fetcher (zbudowany 2026-03-08, podlaczony do planner)
 
 System pobierania materialow z internetu (w `agent_core/web_source/`):
 
@@ -207,29 +289,15 @@ System pobierania materialow z internetu (w `agent_core/web_source/`):
 - **`run_fetch_session()`:** Jedyny punkt integracji, w `__init__.py`
 - **47 testow** (all mocked HTTP, zero external deps)
 
-### Aktywacja (2 kroki):
-1. Dodac `FETCH = "fetch"` do `ActionType` w `agent_core/planner/planner_model.py`
-2. Dodac `_exec_fetch()` w `agent_core/planner/action_executor.py` wywolujacy `run_fetch_session()`
+**Status:** Podlaczony do planner (ActionType.FETCH + _exec_fetch()). Maria autonomicznie pobiera materialy gdy brak nowych plikow.
 
-### Test reczny:
-```python
-from agent_core.web_source import run_fetch_session
-from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
-result = run_fetch_session(KnowledgeAnalyzer())
-print(result)  # {"articles_fetched": N, "topics_searched": M}
-```
+## Code Agent (zastapiony przez OpenClaw + Model Registry)
 
-## Code Agent (planowany)
+Pierwotny plan (osobny mini PC 64GB) zastapiony przez:
+- **MODEL-03 (Coder)** w Model Registry - lokalny qwen2.5-coder:7b na obecnym mini PC
+- **OpenClaw** jako efektor (shell, browser, pliki) - jesli potrzebna zdalna egzekucja
 
-Zewnętrzny agent kodujący na dedykowanym mini PC (64GB RAM):
-
-- **LLM:** CodeLlama 13B / DeepSeek Coder (wymienialny jak Ollama)
-- **Komunikacja:** REST API przez LAN/WiFi
-- **Sandbox:** Docker na mini PC
-- **Repo:** Mirror na dysku zewnętrznym
-- **Human-in-the-loop:** Przed zatwierdzeniem kodu
-
-Szczegóły: `docs/CODE_AGENT_SPEC.md`
+Szczegoly: `docs/MODEL_REGISTRY.md`, `docs/CODE_AGENT_SPEC.md` (legacy)
 
 ## Sesja 2026-02-01 (1/2)
 
@@ -294,23 +362,25 @@ Usunieto:
 - `nul` - pusty plik
 - `futures/` - pusty folder
 
-## Nastepne kroki (2026-03-20)
+## Nastepne kroki (2026-03-21)
 
-### DONE: Cognitive Core K1-K10 (2026-03-20)
+### DONE: Cognitive Core K1-K11 (2026-03-21)
 - [x] K1-K5.1: Perception, Sandbox, Goals, Evaluation, Planner, Topic-Aware Learning
-- [x] K6 World Model (agent_core/world_model/, 69 testow)
-- [x] K7 Autonomy Policy (agent_core/autonomy/, 45 testow)
-- [x] K8 Deliberation (agent_core/deliberation/, 49 testow)
-- [x] K9 Meta-Cognition (agent_core/meta_cognition/, 73 testy)
-- [x] K10 Action Safety (agent_core/action_safety/, 52 testy)
-- [x] Fetch spam fix (rate limit pre-check in planner)
-- [ ] Multi-day test automatyki (K1-K10 + planner + topic-aware learning)
-- [ ] Analiza logow: planner_decisions.jsonl, deliberation_intents.jsonl, reflections.jsonl, action_audit.jsonl
+- [x] K6 World Model (69 testow) + K7 Autonomy Policy (45 testow)
+- [x] K8 Deliberation (49 testow) + K9 Meta-Cognition (73 testy)
+- [x] K10 Action Safety (52 testy) + K11 Experiment System (67 testow)
+- [x] Storage Manager + 6TB disk
+- [x] Architecture Map (Web UI /architecture)
+- [x] Model Registry + Deployment Order (docs)
+- [x] OpenClaw research (tools/invoke potwierdzone)
+- [ ] Multi-day stability test (K1-K11 on production)
+- [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates
 
-### NASTEPNE: Zmysly i efektory (cognitive core gotowy!)
-- Vision (Warstwa 10) - prerequisites met (K6, K7)
+### NASTEPNE: Efektory (cognitive core + experiment system gotowe!)
+- OpenClaw integration - efektor (browser, shell, messaging) - research done, plan ready
+- Model Registry implementation - ModelScheduler w agent_core/llm/
+- Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
-- Code Agent - prerequisites met (K7, K10)
 
 ## Znane problemy
 
@@ -318,7 +388,8 @@ Usunieto:
 |---------|--------|-------|
 | Emoji w PowerShell | NAPRAWIONE | Usunięto 94 wystąpienia |
 | Polskie znaki | Do sprawdzenia | Encoding issues |
-| Stary laptop 32GB | Ograniczenie | Brak długich testów |
+| Stary laptop 32GB | Nieaktualne | Produkcja na mini PC |
+| Kamery WiFi | Zamkniety system | Czeka na Tapo C200 (RTSP) |
 
 ## Konwencje kodu
 
@@ -370,6 +441,8 @@ python run_ui.py
 - **ADR-012:** Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta)
 - **ADR-013:** Planner v1 rule-based (zero LLM, deterministyczny, testowalny)
 - **ADR-014:** Najpierw mozg, potem zmysly (Vision/Smart Home odlozone do domkniecia cognitive core K6-K10)
+- **ADR-015:** Multi-organ model stack (5 rol, heavy mutex, RAM tiers) zamiast single-model
+- **ADR-016:** OpenClaw jako efektor (tools/invoke bez LLM), Maria jako mozg strategiczny
 
 ## Notatki Claude'a (brudnopis)
 
@@ -400,6 +473,9 @@ claude_notes/
   2026-03-11_k6_world_model.md
   2026-03-18_oom_crash_fix.md
   2026-03-19_k8_deliberation.md
+  2026-03-20_k9_k10_complete.md
+  2026-03-21_session_bugs_storage_k11.md
+  2026-03-21_k11_complete_architecture_map.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -680,4 +756,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-20 (K9 Meta-Cognition + K10 Action Safety, Cognitive Core K1-K10 COMPLETE, 1427 testow)*
+*Ostatnia aktualizacja: 2026-03-21 (K11 Experiment System, Architecture Map, Storage Manager, Model Registry, OpenClaw research, 1512 testow)*
