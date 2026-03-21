@@ -33,6 +33,7 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
     "maintenance": ActionClassification.GUARDED,
     "fetch": ActionClassification.GUARDED,
     "experiment": ActionClassification.GUARDED,
+    "effector": ActionClassification.RESTRICTED,
 }
 
 

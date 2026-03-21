@@ -41,6 +41,7 @@ class SharedContext:
     action_safety: Any = None        # ActionSafety (Kontrakt K10)
     experiment_system: Any = None    # ExperimentSystem (Kontrakt K11)
     model_scheduler: Any = None      # ModelScheduler (multi-organ model stack)
+    openclaw_client: Any = None      # OpenClawClient (effector, ADR-016)
 
     # REPL state
     last_result: Any = None

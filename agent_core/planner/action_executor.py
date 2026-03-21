@@ -34,6 +34,7 @@ class ActionExecutor:
         self._goal_store = None
         self._knowledge_analyzer = None
         self._experiment_system = None
+        self._openclaw_client = None
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -58,6 +59,10 @@ class ActionExecutor:
     def set_experiment_system(self, system) -> None:
         """Set experiment system for K11 experiment actions."""
         self._experiment_system = system
+
+    def set_openclaw_client(self, client) -> None:
+        """Set OpenClaw client for EFFECTOR actions (ADR-016)."""
+        self._openclaw_client = client
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
@@ -87,6 +92,8 @@ class ActionExecutor:
                 result = self._exec_fetch(plan)
             elif action == ActionType.EXPERIMENT:
                 result = self._exec_experiment(plan)
+            elif action == ActionType.EFFECTOR:
+                result = self._exec_effector(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -303,3 +310,31 @@ class ActionExecutor:
             "health_score": health,
             "mode": state.mode.value,
         }
+
+    def _exec_effector(self, plan: Plan) -> Dict[str, Any]:
+        """Execute OpenClaw tool via effector client (ADR-016)."""
+        if self._openclaw_client is None:
+            return {"success": False, "error": "No OpenClaw client configured"}
+
+        tool_name = plan.action_params.get("tool_name")
+        tool_args = plan.action_params.get("tool_args", {})
+
+        if not tool_name:
+            return {"success": False, "error": "No tool_name in action_params"}
+
+        try:
+            response = self._openclaw_client.invoke_tool(
+                tool_name=tool_name,
+                args=tool_args,
+            )
+            return {
+                "success": response.get("ok", False),
+                "tool_name": tool_name,
+                "tool_result": response.get("result"),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "tool_name": tool_name,
+                "error": str(e),
+            }

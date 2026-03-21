@@ -141,6 +141,10 @@ class PlannerCore:
         self._experiment_system = experiment_system
         self.executor.set_experiment_system(experiment_system)
 
+    def set_openclaw_client(self, client) -> None:
+        """Set OpenClaw client for EFFECTOR actions (ADR-016)."""
+        self.executor.set_openclaw_client(client)
+
     # -- Internal: pre-check autonomy policy ----------------
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:

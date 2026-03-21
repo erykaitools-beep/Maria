@@ -34,15 +34,16 @@
 | **2026-03-21** | Model Registry v1.1 + Deployment Order v1.1 (multi-organ local model stack) |
 | **2026-03-21** | OpenClaw research - potwierdzona integracja jako efektor (tools/invoke bez LLM) |
 | **2026-03-21** | ModelScheduler - multi-organ model stack infrastructure (75 testow) |
+| **2026-03-21** | OpenClaw Effector Client - HTTP client + planner integration (47 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K11 COMPLETE + Architecture Map + ModelScheduler |
-| **Testy** | 1587 passing |
-| **Faza** | ModelScheduler deployed, Stage 2 benchmark next, then OpenClaw |
+| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw Effector |
+| **Testy** | 1634 passing |
+| **Faza** | Efektory deployed, Stage 2 benchmark + OpenClaw install next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -85,8 +86,9 @@ project/
 │   ├── introspection/   # Code self-awareness (READ-ONLY) + Architecture Map data source
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
+│   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1587 tests
+│   └── tests/           # 1634 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -276,15 +278,22 @@ Multi-organ local model stack zaimplementowany w `agent_core/llm/`:
 - **Wiring:** SharedContext.model_scheduler, HomeostasisCore Phase 9.5, auto-register MODEL-02 na starcie
 - **75 testow** (all mocked, zero external deps)
 
-## OpenClaw Integration (2026-03-21, research done)
+## OpenClaw Effector (2026-03-21, IMPLEMENTED)
 
-OpenClaw jako efektor pod kontrola Marii (zbadane, nie zaimplementowane):
+OpenClaw jako efektor pod kontrola Marii (klient zaimplementowany, gateway do zainstalowania):
 
-- **Kluczowe:** `POST /tools/invoke` pozwala wywolywac narzedzia BEZ LLM
-- **Narzedzia:** browser (Chromium), exec (shell), web_fetch, message (Telegram/Slack/Discord), 20+ wiecej
-- **Integracja:** Maria HTTP -> OpenClaw Gateway (:18789) -> tool execution -> JSON result
-- **Plan:** `agent_core/effector/openclaw_client.py` (ActionType.EFFECTOR, K7 RESTRICTED)
-- **Repo:** github.com/openclaw/openclaw (MIT, 247k stars)
+- **API:** `POST http://127.0.0.1:18789/tools/invoke` z Bearer token auth
+- **Klient:** `agent_core/effector/openclaw_client.py` - HTTP client z retry, whitelist, validation
+- **Tool specs:** `agent_core/effector/tool_specs.py` - 7 dozwolonych narzedzi + walidacja args
+- **Dozwolone:** exec, web_fetch, web_search, message, read, write, cron
+- **Zablokowane:** browser (HTTP policy), sessions_spawn, gateway
+- **Planner:** ActionType.EFFECTOR + _exec_effector() w action_executor.py
+- **K7:** RESTRICTED (wymaga warunkow), rate limit 10/h
+- **K10:** AUDIT_ONLY, EffectType.EXTERNAL_API, snapshots before/after
+- **Wiring:** Graceful fallback - Maria dziala bez OpenClaw, auto-podlacza gdy gateway dostepny
+- **Env vars:** `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`
+- **47 testow** (all mocked HTTP)
+- **Repo:** github.com/openclaw/openclaw (MIT)
 
 ## Web Content Fetcher (zbudowany 2026-03-08, podlaczony do planner)
 
@@ -386,9 +395,9 @@ Usunieto:
 - [x] ModelScheduler implementation (75 testow) - load/unload, RAM guard, mutex, idle timeout
 - [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
 
-### NASTEPNE: Efektory (ModelScheduler deployed!)
-- OpenClaw integration - efektor (browser, shell, messaging) - research done, plan ready
-- Model Registry Stage 2 - benchmark triage candidates, wybrac MODEL-04
+### NASTEPNE: Deployment + kolejne warstwy
+- OpenClaw install na mini PC (npm install -g openclaw, token, .env)
+- Model Registry Stage 2 - benchmark triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
 
@@ -766,4 +775,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-21 (ModelScheduler deployed, K11, Architecture Map, Storage Manager, Model Registry, OpenClaw research, 1587 testow)*
+*Ostatnia aktualizacja: 2026-03-21 (OpenClaw Effector + ModelScheduler deployed, K11, Architecture Map, Storage Manager, 1634 testow)*

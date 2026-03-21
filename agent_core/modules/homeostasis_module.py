@@ -279,6 +279,19 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"ExperimentSystem not initialized: {e}")
 
+                # OpenClaw Effector (ADR-016) - optional, graceful fallback
+                try:
+                    from agent_core.effector import OpenClawClient
+                    openclaw = OpenClawClient()
+                    if openclaw.health_check():
+                        planner.set_openclaw_client(openclaw)
+                        ctx.openclaw_client = openclaw
+                        print("[Homeostasis] [OK] OpenClaw effector wired")
+                    else:
+                        logger.debug("OpenClaw gateway not reachable, effector disabled")
+                except Exception as e:
+                    logger.debug(f"OpenClaw not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

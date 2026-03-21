@@ -21,6 +21,7 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "fetch": 5,
     "maintenance": 10,
     "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
+    "effector": 10,   # OpenClaw: max 10 tool invocations per hour
 }
 
 # Sliding window size

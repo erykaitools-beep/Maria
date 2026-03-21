@@ -30,6 +30,7 @@ class ActionType(Enum):
     NOOP = "noop"                # Nothing to do (idle)
     FETCH = "fetch"              # Fetch web content (agent_core/web_source/)
     EXPERIMENT = "experiment"    # K11: Run parameter experiment
+    EFFECTOR = "effector"        # Execute via OpenClaw tools (ADR-016)
 
 
 @dataclass
