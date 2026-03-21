@@ -472,6 +472,7 @@ class PlannerCore:
             try:
                 gaps = self._world_model.query.get_knowledge_gaps()
                 delib_context["weak_topics"] = [g.get("topic", "") for g in gaps[:5]]
+                delib_context["_knowledge_gaps"] = gaps[:5]
             except Exception:
                 pass
 

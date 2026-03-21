@@ -413,6 +413,8 @@ class TeacherAgent:
             if result.get("passed", False):
                 self._stats["exams_passed"] += 1
             self._stats["reviews_done"] += 1
+            self._stats["last_exam_score"] = result.get("score", 0)
+            self._stats["last_exam_file"] = result.get("file_id", file_id)
             return {"success": True, "file_id": file_id, "type": "exam",
                     "score": result.get("score", 0),
                     "passed": result.get("passed", False)}

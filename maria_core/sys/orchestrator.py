@@ -136,7 +136,8 @@ def maria_learning_cycle(
         # Uruchamiaj egzamin co N krokow nauki lub jesli nie ma juz czego uczyc
         if learn_counter >= learn_steps_per_exam or not learned_something:
             logger.info("\n[4/5] [EXAM] Sprawdzam egzaminy...")
-            exam_done = run_exam_if_ready(KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS)
+            exam_result = run_exam_if_ready(KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS)
+            exam_done = exam_result.get("executed", False) if isinstance(exam_result, dict) else bool(exam_result)
 
             if exam_done:
                 learn_counter = 0  # resetuj licznik

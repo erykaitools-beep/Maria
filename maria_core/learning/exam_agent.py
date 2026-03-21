@@ -300,7 +300,7 @@ def run_exam_if_ready(
     exam_path: Path,
     ollama_model: str = OLLAMA_MODEL,
     llm_fn=None,
-) -> bool:
+) -> Dict[str, Any]:
     """
     Uruchamia egzamin dla pliku, który jest gotowy (status=learned).
 
@@ -323,7 +323,13 @@ def run_exam_if_ready(
         ollama_model: Model Ollama
 
     Returns:
-        True jeśli przeprowadzono egzamin, False jeśli brak pracy
+        Dict with keys:
+        - "executed": bool - whether an exam was run
+        - "passed": bool - whether exam score >= threshold
+        - "score": float - exam score (0.0-1.0)
+        - "file_id": str - which file was examined
+        For backward compatibility, also evaluates as truthy/falsy
+        via __bool__ (executed).
     """
     logger.info("[EXAM] Sprawdzam czy jest plik gotowy na egzamin...")
 
@@ -338,7 +344,7 @@ def run_exam_if_ready(
 
     if not candidates:
         logger.info("[OK] Brak plikow gotowych na egzamin")
-        return False
+        return {"executed": False, "passed": False, "score": 0.0, "file_id": ""}
 
     # Wybierz pierwszy (lub najwyższy priorytet)
     candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
@@ -347,11 +353,13 @@ def run_exam_if_ready(
     file_id = target['id']
     logger.info(f"[EXAM] Egzamin z: {file_id}")
 
+    no_exam = {"executed": False, "passed": False, "score": 0.0, "file_id": file_id}
+
     # Pobierz pamięci
     memories = get_memories_for_file(file_id, memory_path)
     if not memories:
         logger.error(f"Brak pamięci dla {file_id}!")
-        return False
+        return no_exam
 
     # Zbuduj kontekst
     context = build_context_from_memories(memories)
@@ -363,21 +371,22 @@ def run_exam_if_ready(
     exam = generate_exam(context, num_questions, llm_fn=llm_fn)
     if not exam:
         logger.error("Nie udało się wygenerować egzaminu")
-        return False
+        return no_exam
 
     # Odpowiedz
     answers = answer_exam(context, exam, llm_fn=llm_fn)
     if not answers:
         logger.error("Nie udało się odpowiedzieć na egzamin")
-        return False
+        return no_exam
 
     # Oceń
     grading = grade_exam(exam, answers, llm_fn=llm_fn)
     if not grading:
         logger.error("Nie udało się ocenić egzaminu")
-        return False
+        return no_exam
 
     final_score = grading['final_score']
+    passed = final_score >= EXAM_PASS_THRESHOLD
     logger.info(f"[SCORE] Wynik egzaminu: {final_score:.2%}")
 
     # Zapisz wynik
@@ -398,7 +407,7 @@ def run_exam_if_ready(
     target['last_scores'].append(final_score)
 
     # Logika statusu
-    if final_score >= EXAM_PASS_THRESHOLD:
+    if passed:
         # Zaliczony!
         target['status'] = STATUS_COMPLETED
         logger.info(f"[PASS] Egzamin ZALICZONY ({final_score:.2%})")
@@ -418,9 +427,9 @@ def run_exam_if_ready(
     if check_for_looping(target):
         target['status'] = STATUS_HARD_TOPIC
         target['priority'] -= 20
-        logger.warning(f"🔁 Wykryto zapętlenie - oznaczam jako HARD TOPIC")
+        logger.warning(f"Wykryto zapetlenie - oznaczam jako HARD TOPIC")
 
     target['updated_at'] = get_timestamp()
     save_index(index, index_path)
 
-    return True
+    return {"executed": True, "passed": passed, "score": final_score, "file_id": file_id}

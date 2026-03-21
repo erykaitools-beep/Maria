@@ -254,11 +254,12 @@ class Deliberator:
         """
         Match context to a template name.
 
-        v1 rules (priority order):
-        1. If new_files_available -> explore_new
-        2. If weak_topics -> consolidate
+        v1.1 rules (priority order):
+        1. If new_files_available -> learn_topic (learn local files first)
+        2. If weak_topics with confidence < 0.5 -> consolidate
         3. If topic specified -> learn_topic
-        4. Default for learning goals -> learn_topic
+        4. If no new files and no weak topics -> explore_new (fetch from web)
+        5. Default for learning goals -> learn_topic
 
         v2 path: pluggable matchers, LLM selection.
         """
@@ -267,21 +268,44 @@ class Deliberator:
         topic = context.get("topic", "")
         goal_type = context.get("goal_type", "")
 
+        # Filter weak_topics: only truly weak ones (confidence < 0.5)
+        # Knowledge gaps come from world model with confidence values
+        snapshot = context.get("knowledge_snapshot")
+        knowledge_gaps = context.get("_knowledge_gaps", [])
+        truly_weak = [
+            t for t in weak_topics
+            if any(g.get("topic") == t and g.get("confidence", 0) < 0.5
+                   for g in knowledge_gaps)
+        ] if knowledge_gaps else weak_topics
+
         # Check if template was already tried and abandoned too many times
         def _not_exhausted(name: str) -> bool:
-            return self._intent_tracker.count_failed_template(goal_id, name) < 3
+            return self._intent_tracker.count_failed_template(goal_id, name) < 5
 
-        if new_files and _not_exhausted("explore_new"):
-            return "explore_new"
+        # P1: New local files -> learn them first
+        if new_files and _not_exhausted("learn_topic"):
+            return "learn_topic"
 
-        if weak_topics and _not_exhausted("consolidate"):
+        # P2: Truly weak topics -> consolidate
+        if truly_weak and _not_exhausted("consolidate"):
             return "consolidate"
 
+        # P3: Specific topic requested
         if topic and _not_exhausted("learn_topic"):
             return "learn_topic"
 
-        # Default for learning-type goals
-        if goal_type in ("LEARNING", "META", "") and _not_exhausted("learn_topic"):
+        # P4: Default for LEARNING goals (specific learning goal)
+        if goal_type == "LEARNING" and _not_exhausted("learn_topic"):
+            return "learn_topic"
+
+        # P5: META goal with nothing to learn/consolidate -> explore web
+        if (goal_type in ("META", "")
+                and not new_files and not truly_weak
+                and _not_exhausted("explore_new")):
+            return "explore_new"
+
+        # P6: Fallback learn_topic
+        if _not_exhausted("learn_topic"):
             return "learn_topic"
 
         return None

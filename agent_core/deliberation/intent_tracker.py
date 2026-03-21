@@ -128,14 +128,16 @@ class IntentTracker:
         return self._cache[-limit:]
 
     def count_failed_template(self, goal_id: str, template_name: str) -> int:
-        """Count how many times a template was abandoned for a goal."""
+        """Count how many times a template was abandoned for a goal recently (last 24h)."""
         self._ensure_loaded()
+        cutoff = time.time() - 86400  # 24h window
         return sum(
             1
             for r in self._cache
             if r.goal_id == goal_id
             and r.template_name == template_name
             and r.outcome == "abandoned"
+            and r.timestamp >= cutoff
         )
 
     def _append_jsonl(self, rec: IntentRecord) -> None:

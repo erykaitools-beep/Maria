@@ -304,9 +304,25 @@ class TestDeliberator:
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
         d = Deliberator(intent_tracker=tracker)
 
+        # new_files_available -> learn_topic (learn local files first)
         action = d.get_next_action("g-1", {
             "new_files_available": True,
             "intent": "Eksploracja",
+        })
+        assert action is not None
+        assert action["action_type"] == "learn"  # learn_topic starts with learn
+        assert "strategy_id" in action
+
+    def test_select_strategy_explore_new_when_nothing_to_do(self, tmp_path):
+        tracker = IntentTracker(path=tmp_path / "intents.jsonl")
+        d = Deliberator(intent_tracker=tracker)
+
+        # No new files, no weak topics -> explore_new (fetch from web)
+        action = d.get_next_action("g-1", {
+            "new_files_available": False,
+            "weak_topics": [],
+            "intent": "Szukam nowych materialow",
+            "goal_type": "META",
         })
         assert action is not None
         assert action["action_type"] == "fetch"  # explore_new starts with fetch
@@ -316,12 +332,35 @@ class TestDeliberator:
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
         d = Deliberator(intent_tracker=tracker)
 
+        # weak_topics with low confidence -> consolidate
         action = d.get_next_action("g-1", {
             "weak_topics": ["fizyka", "chemia"],
+            "_knowledge_gaps": [
+                {"topic": "fizyka", "confidence": 0.2},
+                {"topic": "chemia", "confidence": 0.3},
+            ],
             "intent": "Konsolidacja",
         })
         assert action is not None
         assert action["action_type"] == "review"  # consolidate starts with review
+
+    def test_select_strategy_weak_topics_high_confidence_skipped(self, tmp_path):
+        tracker = IntentTracker(path=tmp_path / "intents.jsonl")
+        d = Deliberator(intent_tracker=tracker)
+
+        # weak_topics but with high confidence (>= 0.5) -> NOT consolidate
+        action = d.get_next_action("g-1", {
+            "weak_topics": ["fizyka", "chemia"],
+            "_knowledge_gaps": [
+                {"topic": "fizyka", "confidence": 0.7},
+                {"topic": "chemia", "confidence": 0.8},
+            ],
+            "new_files_available": False,
+            "intent": "Konsolidacja",
+            "goal_type": "META",
+        })
+        assert action is not None
+        assert action["action_type"] == "fetch"  # explore_new (nothing truly weak)
 
     def test_select_strategy_with_topic(self, tmp_path):
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
@@ -349,9 +388,9 @@ class TestDeliberator:
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
         d = Deliberator(intent_tracker=tracker)
 
-        # Exhaust all templates for this goal
+        # Exhaust all templates for this goal (limit is 5 abandons per template)
         for name in ["learn_topic", "explore_new", "consolidate"]:
-            for i in range(3):
+            for i in range(5):
                 tracker.record(f"g-1", f"s-{name}-{i}", name, "test")
                 tracker.update_outcome(f"s-{name}-{i}", "abandoned")
 
@@ -363,7 +402,7 @@ class TestDeliberator:
         d = Deliberator(intent_tracker=tracker)
 
         # Start with explore_new: FETCH -> LEARN -> EXAM
-        action1 = d.get_next_action("g-1", {"new_files_available": True})
+        action1 = d.get_next_action("g-1", {"new_files_available": False, "weak_topics": [], "goal_type": "META"})
         assert action1["action_type"] == "fetch"
         strategy_id = action1["strategy_id"]
 
@@ -380,7 +419,7 @@ class TestDeliberator:
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
         d = Deliberator(intent_tracker=tracker)
 
-        action = d.get_next_action("g-1", {"new_files_available": True})
+        action = d.get_next_action("g-1", {"new_files_available": False, "weak_topics": [], "goal_type": "META"})
         sid = action["strategy_id"]
 
         # Complete all 3 steps
@@ -396,7 +435,7 @@ class TestDeliberator:
         tracker = IntentTracker(path=tmp_path / "intents.jsonl")
         d = Deliberator(intent_tracker=tracker)
 
-        action = d.get_next_action("g-1", {"new_files_available": True})
+        action = d.get_next_action("g-1", {"new_files_available": False, "weak_topics": [], "goal_type": "META"})
         sid = action["strategy_id"]
 
         # Fetch step has max_retries=2, first fail should retry
@@ -414,7 +453,7 @@ class TestDeliberator:
         d = Deliberator(intent_tracker=tracker)
 
         # explore_new: FETCH -> LEARN -> EXAM (exam fallback_step_order=1)
-        action = d.get_next_action("g-1", {"new_files_available": True})
+        action = d.get_next_action("g-1", {"new_files_available": False, "weak_topics": [], "goal_type": "META"})
         sid = action["strategy_id"]
 
         # Pass fetch and learn

@@ -104,13 +104,18 @@ class TeacherModule(MariaModule):
             if router and hasattr(router, "_ask_once"):
                 llm_fn = lambda prompt: router._ask_once(prompt, temperature=0.3)
 
-            success = run_exam_if_ready(
+            result = run_exam_if_ready(
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
                 exam_path=EXAM_RESULTS,
                 llm_fn=llm_fn,
             )
-            return {"success": success, "passed": success}
+            return {
+                "success": result["executed"],
+                "passed": result["passed"],
+                "score": result["score"],
+                "file_id": result["file_id"],
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 

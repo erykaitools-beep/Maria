@@ -170,6 +170,8 @@ class ActionExecutor:
             "success": stats.get("exams_run", 0) > 0,
             "exams_run": stats.get("exams_run", 0),
             "exams_passed": stats.get("exams_passed", 0),
+            "score": stats.get("last_exam_score", 0.0),
+            "file": stats.get("last_exam_file", ""),
         }
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
