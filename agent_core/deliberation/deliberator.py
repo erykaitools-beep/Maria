@@ -220,6 +220,13 @@ class Deliberator:
         # Build strategy from template
         intent = context.get("intent", "")
         topic = context.get("topic", "")
+
+        # If explore_new was chosen because of weak topics, pass first weak topic
+        if template_name == "explore_new" and not topic:
+            weak_topics = context.get("weak_topics", [])
+            if weak_topics:
+                topic = weak_topics[0]
+
         strategy = template_fn(goal_id=goal_id, intent=intent, topic=topic)
 
         # Register
@@ -254,12 +261,13 @@ class Deliberator:
         """
         Match context to a template name.
 
-        v1.1 rules (priority order):
+        v1.2 rules (priority order):
         1. If new_files_available -> learn_topic (learn local files first)
         2. If weak_topics with confidence < 0.5 -> consolidate
-        3. If topic specified -> learn_topic
-        4. If no new files and no weak topics -> explore_new (fetch from web)
-        5. Default for learning goals -> learn_topic
+        3. If weak_topics but consolidate exhausted -> explore_new (fetch about weak topic)
+        4. If topic specified -> learn_topic
+        5. If no new files and no weak topics -> explore_new (fetch from web)
+        6. Default for learning goals -> learn_topic
 
         v2 path: pluggable matchers, LLM selection.
         """
@@ -270,7 +278,6 @@ class Deliberator:
 
         # Filter weak_topics: only truly weak ones (confidence < 0.5)
         # Knowledge gaps come from world model with confidence values
-        snapshot = context.get("knowledge_snapshot")
         knowledge_gaps = context.get("_knowledge_gaps", [])
         truly_weak = [
             t for t in weak_topics
@@ -286,25 +293,29 @@ class Deliberator:
         if new_files and _not_exhausted("learn_topic"):
             return "learn_topic"
 
-        # P2: Truly weak topics -> consolidate
+        # P2: Truly weak topics -> consolidate (if not exhausted)
         if truly_weak and _not_exhausted("consolidate"):
             return "consolidate"
 
-        # P3: Specific topic requested
+        # P3: Truly weak topics but consolidate exhausted -> fetch new materials
+        # about the weak topic instead of looping consolidate/learn on empty data
+        if truly_weak and _not_exhausted("explore_new"):
+            return "explore_new"
+
+        # P4: Specific topic requested
         if topic and _not_exhausted("learn_topic"):
             return "learn_topic"
 
-        # P4: Default for LEARNING goals (specific learning goal)
+        # P5: Default for LEARNING goals (specific learning goal)
         if goal_type == "LEARNING" and _not_exhausted("learn_topic"):
             return "learn_topic"
 
-        # P5: META goal with nothing to learn/consolidate -> explore web
+        # P6: META goal with nothing to learn/consolidate -> explore web
         if (goal_type in ("META", "")
-                and not new_files and not truly_weak
                 and _not_exhausted("explore_new")):
             return "explore_new"
 
-        # P6: Fallback learn_topic
+        # P7: Fallback learn_topic
         if _not_exhausted("learn_topic"):
             return "learn_topic"
 

@@ -76,29 +76,48 @@ def build_learn_topic(
 def build_explore_new(
     goal_id: str,
     intent: str = "",
+    topic: str = "",
     **kwargs,
 ) -> Strategy:
     """
     Explore new content from the web.
 
     Flow: FETCH -> LEARN -> EXAM
+    If topic is provided, fetch targets that topic specifically
+    (used when consolidate is exhausted for a weak topic).
     """
+    fetch_params = {}
+    learn_params = {}
+    if topic:
+        fetch_params["topics"] = [topic]
+        learn_params["topics"] = [topic]
+        fetch_desc = f"Pobieranie materialow o: {topic}"
+        learn_desc = f"Nauka materialu o: {topic}"
+        exam_desc = f"Egzamin z: {topic}"
+    else:
+        fetch_desc = "Pobieranie nowych materialow z internetu"
+        learn_desc = "Nauka pobranego materialu"
+        exam_desc = "Egzamin z nowego materialu"
+
     steps = [
         create_step(
             order=0,
             action_type="fetch",
-            description="Pobieranie nowych materialow z internetu",
+            description=fetch_desc,
+            action_params=fetch_params,
             max_retries=2,
         ),
         create_step(
             order=1,
             action_type="learn",
-            description="Nauka pobranego materialu",
+            description=learn_desc,
+            action_params=learn_params,
         ),
         create_step(
             order=2,
             action_type="exam",
-            description="Egzamin z nowego materialu",
+            description=exam_desc,
+            action_params=learn_params,
             fallback_step_order=1,  # on fail, re-learn
         ),
     ]
@@ -106,7 +125,8 @@ def build_explore_new(
         goal_id=goal_id,
         template_name="explore_new",
         steps=steps,
-        intent=intent or "Eksploracja nowych materialow z internetu",
+        intent=intent or (f"Eksploracja materialow o: {topic}" if topic else "Eksploracja nowych materialow z internetu"),
+        metadata={"topic": topic} if topic else {},
     )
 
 

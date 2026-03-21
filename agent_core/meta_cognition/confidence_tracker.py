@@ -118,6 +118,12 @@ class ConfidenceTracker:
 
         reflections should be newest-first (as returned by store queries).
         Oldest reflections get lower weight.
+
+        Uses outcome_match for nuanced scoring:
+        - match: 1.0 (prediction correct)
+        - partial: 0.5 (partial success)
+        - mismatch: 0.0 (prediction wrong)
+        - If outcome_match not set, falls back to binary success.
         """
         if len(reflections) < MIN_SAMPLES:
             return DEFAULT_CONFIDENCE
@@ -127,15 +133,26 @@ class ConfidenceTracker:
         n = len(ordered)
 
         weight_sum = 0.0
-        success_sum = 0.0
+        score_sum = 0.0
 
         for i, r in enumerate(ordered):
             weight = DECAY_WEIGHT ** (n - 1 - i)
             weight_sum += weight
-            if r.actual_success:
-                success_sum += weight
+
+            # Use outcome_match for nuanced scoring if available
+            match_val = r.outcome_match.value if hasattr(r.outcome_match, 'value') else str(r.outcome_match)
+            if match_val == "match":
+                score_sum += weight * 1.0
+            elif match_val == "partial":
+                score_sum += weight * 0.5
+            elif match_val in ("mismatch", "surprising"):
+                pass  # 0.0
+            else:
+                # UNKNOWN or not reflected yet: fallback to binary success
+                if r.actual_success:
+                    score_sum += weight
 
         if weight_sum == 0:
             return DEFAULT_CONFIDENCE
 
-        return success_sum / weight_sum
+        return score_sum / weight_sum

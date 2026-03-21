@@ -563,10 +563,26 @@ class PlannerCore:
         # K9: Record assumptions BEFORE execution
         if self._meta_cognition:
             try:
+                # Extract topic from multiple sources (action_params, goal, strategy)
                 topic = ""
                 topics = plan.action_params.get("topics", [])
                 if topics:
                     topic = topics[0]
+                # Fallback: goal metadata may have topics
+                if not topic and plan.goal_id and self._goal_store:
+                    goal = self._goal_store.get(plan.goal_id)
+                    if goal and goal.metadata.get("topics"):
+                        topic = goal.metadata["topics"][0]
+                # Fallback: strategy intent may describe topic
+                if not topic and plan.metadata.get("strategy_intent"):
+                    intent = plan.metadata["strategy_intent"]
+                    # Extract topic from "Nauka tematu: X" or "Konsolidacja wiedzy: X"
+                    for prefix in ("Nauka tematu: ", "Konsolidacja wiedzy: ",
+                                   "Eksploracja materialow o: "):
+                        if intent.startswith(prefix):
+                            topic = intent[len(prefix):]
+                            break
+
                 mc_context = {
                     "action_params": plan.action_params,
                     "topic": topic,
