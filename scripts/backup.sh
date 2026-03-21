@@ -25,10 +25,10 @@ set -e
 
 # Konfiguracja
 MARIA_DIR="/home/maria/maria"
-BACKUP_ROOT="${1:-$HOME/maria_backups}"
+BACKUP_ROOT="${1:-/mnt/storage/backups}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_ROOT/maria_backup_$TIMESTAMP"
-MAX_BACKUPS=7  # ile backupow trzymac (starsze kasowane)
+MAX_BACKUPS=30  # ile backupow trzymac (starsze kasowane) - duzy dysk
 
 # Kolory
 GREEN='\033[0;32m'

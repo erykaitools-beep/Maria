@@ -20,6 +20,22 @@ from agent_core.consciousness.dream_generator import DreamGenerator
 
 logger = logging.getLogger(__name__)
 
+# Storage archival (lazy import to avoid circular deps)
+_log_archiver = None
+
+
+def _get_archiver():
+    """Lazy-init LogArchiver (only if /mnt/storage is mounted)."""
+    global _log_archiver
+    if _log_archiver is not None:
+        return _log_archiver
+    archive_path = Path("/mnt/storage/data/logs")
+    if archive_path.parent.exists():
+        from agent_core.storage import LogArchiver
+        _log_archiver = LogArchiver()
+        return _log_archiver
+    return None
+
 # Thresholds for NREM phases
 EDGE_BOOST_MIN_ACCESS = 2       # Boost edges accessed 2+ times
 EDGE_BOOST_AMOUNT = 0.1         # Weight increase per boost
@@ -104,6 +120,13 @@ class SleepProcessor:
         except Exception as e:
             logger.warning(f"NREM3 failed: {e}")
             report["phases"]["nrem3"] = {"error": str(e)}
+
+        # Phase 3.5: Log archival (if storage available)
+        try:
+            report["phases"]["archival"] = self._phase_archival()
+        except Exception as e:
+            logger.warning(f"Archival failed: {e}")
+            report["phases"]["archival"] = {"error": str(e)}
 
         # Phase 4: REM - Dreams
         try:
@@ -231,6 +254,32 @@ class SleepProcessor:
 
         logger.debug(f"NREM3: marked {marked} nodes as outdated")
         return result
+
+    def _phase_archival(self) -> Dict[str, Any]:
+        """
+        Log archival phase - compact old logs to external storage.
+
+        Runs only if /mnt/storage is available.
+        Moves old JSONL records to archive, creates daily summaries.
+        """
+        archiver = _get_archiver()
+        if archiver is None:
+            return {"phase": "archival", "skipped": True, "reason": "no storage"}
+
+        result = archiver.run_archival()
+        logger.info(
+            f"Archival: {result.get('total_archived', 0)} records archived, "
+            f"{result.get('total_kept', 0)} kept"
+        )
+        return {
+            "phase": "archival",
+            "total_archived": result.get("total_archived", 0),
+            "total_kept": result.get("total_kept", 0),
+            "files": {
+                k: v for k, v in result.get("files", {}).items()
+                if not v.get("skipped")
+            },
+        }
 
     def _phase_rem(self) -> Dict[str, Any]:
         """
