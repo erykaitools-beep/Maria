@@ -1418,6 +1418,265 @@ def handle_clear_history():
 # =============================================================================
 
 # =============================================================================
+# ARCHITECTURE MAP (READ-ONLY)
+# =============================================================================
+
+_architecture_cache = None
+_architecture_cache_ts = 0
+
+# JSONL data flow: which module reads/writes which files
+# This is static knowledge about the architecture, not runtime data
+_JSONL_DATA_FLOW = {
+    "meta_data/homeostasis_events.jsonl": {
+        "writers": ["agent_core.homeostasis.core"],
+        "readers": ["agent_core.evaluation.observer", "agent_core.storage"],
+        "label": "System state snapshots",
+    },
+    "meta_data/goals.jsonl": {
+        "writers": ["agent_core.goals.store"],
+        "readers": ["agent_core.planner.planner_core"],
+        "label": "Goal system",
+    },
+    "meta_data/planner_decisions.jsonl": {
+        "writers": ["agent_core.planner.planner_core"],
+        "readers": ["agent_core.evaluation.observer"],
+        "label": "Planner decisions",
+    },
+    "meta_data/planner_state.json": {
+        "writers": ["agent_core.planner.planner_core"],
+        "readers": ["agent_core.planner.planner_core"],
+        "label": "Planner checkpoint",
+    },
+    "meta_data/deliberation_intents.jsonl": {
+        "writers": ["agent_core.deliberation.intent_tracker"],
+        "readers": ["agent_core.deliberation.deliberator"],
+        "label": "Multi-step strategies (K8)",
+    },
+    "meta_data/beliefs.jsonl": {
+        "writers": ["agent_core.world_model.belief_store"],
+        "readers": ["agent_core.world_model.query", "agent_core.planner.planner_core"],
+        "label": "World model beliefs (K6)",
+    },
+    "meta_data/reflections.jsonl": {
+        "writers": ["agent_core.meta_cognition.reflection_store"],
+        "readers": ["agent_core.meta_cognition.reflector"],
+        "label": "Self-reflection (K9)",
+    },
+    "meta_data/action_audit.jsonl": {
+        "writers": ["agent_core.action_safety.audit_log"],
+        "readers": ["agent_core.action_safety"],
+        "label": "Action safety audit (K10)",
+    },
+    "meta_data/autonomy_decisions.jsonl": {
+        "writers": ["agent_core.autonomy.escalation"],
+        "readers": ["agent_core.autonomy"],
+        "label": "Autonomy policy (K7)",
+    },
+    "meta_data/teacher_plans.jsonl": {
+        "writers": ["agent_core.teacher.teacher_agent"],
+        "readers": ["agent_core.evaluation.observer"],
+        "label": "Teacher execution log",
+    },
+    "meta_data/web_fetch_registry.jsonl": {
+        "writers": ["agent_core.web_source.fetch_registry"],
+        "readers": ["agent_core.web_source.topic_suggester"],
+        "label": "Web fetch dedup",
+    },
+    "meta_data/evaluation_reports.jsonl": {
+        "writers": ["agent_core.evaluation.observer"],
+        "readers": ["agent_core.planner.planner_core"],
+        "label": "K4 evaluation reports",
+    },
+    "meta_data/experiment_proposals.jsonl": {
+        "writers": ["agent_core.experiment.proposal_engine"],
+        "readers": ["agent_core.experiment"],
+        "label": "K11 experiment proposals",
+    },
+    "meta_data/experiment_reports.jsonl": {
+        "writers": ["agent_core.experiment"],
+        "readers": ["agent_core.experiment"],
+        "label": "K11 experiment reports",
+    },
+    "memory/knowledge_index.jsonl": {
+        "writers": ["maria_core.learning"],
+        "readers": ["agent_core.teacher.knowledge_analyzer", "agent_core.world_model.belief_builder"],
+        "label": "Knowledge index (legacy)",
+    },
+    "memory/exam_results.jsonl": {
+        "writers": ["maria_core.learning"],
+        "readers": ["agent_core.evaluation.observer"],
+        "label": "Exam results",
+    },
+}
+
+# Decision pipeline (ordered steps)
+_DECISION_PIPELINE = [
+    {"id": "sense", "label": "SENSE", "module": "agent_core.homeostasis.core", "phase": 1,
+     "description": "Read sensors: RAM, CPU, disk, temperature, idle time"},
+    {"id": "interpret", "label": "INTERPRET", "module": "agent_core.homeostasis.interpreter", "phase": 2,
+     "description": "Convert raw metrics to semantic state"},
+    {"id": "validate", "label": "VALIDATE", "module": "agent_core.homeostasis.constraints", "phase": 3,
+     "description": "Check constraints, generate alerts"},
+    {"id": "mode", "label": "DECIDE MODE", "module": "agent_core.homeostasis.mode_regulator", "phase": 4,
+     "description": "ACTIVE / REDUCED / SLEEP / SURVIVAL"},
+    {"id": "perceive", "label": "PERCEIVE", "module": "agent_core.perception.buffer", "phase": 8,
+     "description": "Aggregate events into PerceptionBuffer (K1)"},
+    {"id": "guard", "label": "GUARD", "module": "agent_core.planner.planner_guard", "phase": 10,
+     "description": "Can planning happen? Health, mode, sandbox, retention"},
+    {"id": "context", "label": "GATHER CONTEXT", "module": "agent_core.planner.planner_core", "phase": 10,
+     "description": "Read K4 metrics, K6 beliefs, K9 confidence"},
+    {"id": "goal", "label": "SELECT GOAL", "module": "agent_core.planner.goal_selector", "phase": 10,
+     "description": "Pick best goal by priority with aging factor"},
+    {"id": "deliberate", "label": "DELIBERATE", "module": "agent_core.deliberation.deliberator", "phase": 10,
+     "description": "Multi-step strategy from K8 templates"},
+    {"id": "plan", "label": "CREATE PLAN", "module": "agent_core.planner.planner_core", "phase": 10,
+     "description": "Map goal+strategy to single-step Plan"},
+    {"id": "k7_check", "label": "K7 CHECK", "module": "agent_core.autonomy", "phase": 10,
+     "description": "Rate limit + policy rules + classification"},
+    {"id": "k10_before", "label": "K10 BEFORE", "module": "agent_core.action_safety", "phase": 10,
+     "description": "Classify safety, capture before-state"},
+    {"id": "execute", "label": "EXECUTE", "module": "agent_core.planner.action_executor", "phase": 10,
+     "description": "Delegate to Teacher/Sandbox/WebSource/Experiment"},
+    {"id": "k9_reflect", "label": "K9 REFLECT", "module": "agent_core.meta_cognition.reflector", "phase": 10,
+     "description": "Compare expected vs actual outcome"},
+    {"id": "k6_update", "label": "K6 UPDATE", "module": "agent_core.world_model", "phase": 10,
+     "description": "Update beliefs after exam/evaluate"},
+]
+
+
+def _build_architecture_data():
+    """Build architecture data using CodeAnalyzer. Cached for 5 min."""
+    global _architecture_cache, _architecture_cache_ts
+    import time as _time
+
+    now = _time.time()
+    if _architecture_cache and (now - _architecture_cache_ts) < 300:
+        return _architecture_cache
+
+    try:
+        from agent_core.introspection.analyzer import CodeAnalyzer
+        analyzer = CodeAnalyzer(str(PROJECT_ROOT))
+        model = analyzer.analyze()
+
+        # Build package groups (agent_core.planner -> planner)
+        packages = {}
+        for pkg_name, module_info in model.modules.items():
+            parts = pkg_name.split(".")
+            if len(parts) >= 2 and parts[0] == "agent_core":
+                group = parts[1]
+            elif parts[0] == "maria_core":
+                group = "maria_core"
+            elif parts[0] == "maria_ui":
+                group = "maria_ui"
+            else:
+                group = parts[0]
+
+            if group not in packages:
+                packages[group] = {
+                    "name": group,
+                    "files": [],
+                    "total_lines": 0,
+                    "total_functions": 0,
+                    "total_classes": 0,
+                }
+
+            file_data = {
+                "package": pkg_name,
+                "file": module_info.relative_path,
+                "lines": module_info.line_count,
+                "docstring": (module_info.docstring or "")[:200],
+                "functions": [
+                    {"name": f.name, "line": f.line_start, "params": f.parameters,
+                     "doc": (f.docstring or "")[:100]}
+                    for f in module_info.functions
+                ],
+                "classes": [
+                    {"name": c.name, "line": c.line_start, "methods": [m.name for m in c.methods],
+                     "doc": (c.docstring or "")[:100]}
+                    for c in module_info.classes
+                ],
+            }
+            packages[group]["files"].append(file_data)
+            packages[group]["total_lines"] += module_info.line_count
+            packages[group]["total_functions"] += module_info.function_count
+            packages[group]["total_classes"] += module_info.class_count
+
+        # Build dependency edges (only internal)
+        edges = []
+        seen = set()
+        for dep in model.dependencies:
+            # Normalize to group level
+            from_parts = dep.from_module.split(".")
+            to_parts = dep.to_module.split(".")
+
+            if len(from_parts) >= 2 and from_parts[0] == "agent_core":
+                from_group = from_parts[1]
+            else:
+                from_group = from_parts[0]
+
+            if len(to_parts) >= 2 and to_parts[0] == "agent_core":
+                to_group = to_parts[1]
+            else:
+                to_group = to_parts[0]
+
+            # Skip self-edges and external
+            if from_group == to_group:
+                continue
+            if from_group not in packages or to_group not in packages:
+                continue
+
+            key = f"{from_group}->{to_group}"
+            if key not in seen:
+                seen.add(key)
+                edges.append({
+                    "from": from_group,
+                    "to": to_group,
+                    "type": "import",
+                })
+
+        result = {
+            "packages": packages,
+            "edges": edges,
+            "data_flow": _JSONL_DATA_FLOW,
+            "pipeline": _DECISION_PIPELINE,
+            "stats": model.get_statistics(),
+        }
+
+        _architecture_cache = result
+        _architecture_cache_ts = now
+        return result
+
+    except Exception as e:
+        return {"error": str(e), "packages": {}, "edges": [], "data_flow": {}, "pipeline": [], "stats": {}}
+
+
+@app.route('/architecture')
+@require_auth
+def architecture_page():
+    """Architecture map page."""
+    return render_template('architecture.html')
+
+
+@app.route('/api/architecture')
+@require_auth
+def api_architecture():
+    """Get full architecture data for interactive map."""
+    data = _build_architecture_data()
+    return jsonify(data)
+
+
+@app.route('/api/architecture/package/<name>')
+@require_auth
+def api_architecture_package(name):
+    """Get detailed info about a specific package."""
+    data = _build_architecture_data()
+    pkg = data.get("packages", {}).get(name)
+    if pkg is None:
+        return jsonify({"error": f"Package '{name}' not found"}), 404
+    return jsonify(pkg)
+
+
+# =============================================================================
 # EXPERIMENT SYSTEM (K11)
 # =============================================================================
 
