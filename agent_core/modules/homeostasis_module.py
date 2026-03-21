@@ -258,6 +258,17 @@ class HomeostasisModule(MariaModule):
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")
+
+                # Wire work context provider to OllamaBrain (chat knows what planner does)
+                # ctx.brain may be LLMRouter wrapping OllamaBrain
+                _brain = ctx.brain
+                if hasattr(_brain, 'ollama'):
+                    _brain = _brain.ollama  # Unwrap LLMRouter -> OllamaBrain
+                if _brain and hasattr(_brain, 'set_work_context_provider'):
+                    _brain.set_work_context_provider(
+                        lambda: _build_work_context(ctx)
+                    )
+                    print("[Homeostasis] [OK] Work context wired to chat")
             except Exception as e:
                 logger.debug(f"PlannerCore not wired: {e}")
 
@@ -455,3 +466,75 @@ class HomeostasisModule(MariaModule):
     def cleanup(self):
         if self._running:
             self._running = False
+
+
+def _build_work_context(ctx) -> str:
+    """
+    Build short work status text for chat system prompt.
+
+    Reads planner, deliberation, experiment, and learning state.
+    Returns max ~300 chars so it doesn't bloat the prompt.
+    """
+    parts = []
+
+    # Last planner action
+    if ctx.planner_core:
+        try:
+            history = ctx.planner_core.get_history(limit=1)
+            if history:
+                last = history[-1]
+                action = last.get("action_type", "?")
+                msg = last.get("message", "")
+                status = last.get("status", "?")
+                if action != "skip" and msg:
+                    parts.append(f"Ostatnia akcja: {msg}")
+        except Exception:
+            pass
+
+    # Active deliberation strategy
+    if ctx.deliberation:
+        try:
+            status = ctx.deliberation.get_status()
+            active = status.get("active_details", [])
+            if active:
+                s = active[0]
+                tmpl = s.get("template", "?")
+                step = s.get("current_step", "?")
+                parts.append(f"Strategia: {tmpl} - {step}")
+        except Exception:
+            pass
+
+    # Experiment proposals waiting
+    if ctx.experiment_system:
+        try:
+            proposals = ctx.experiment_system.proposal_engine.get_active_proposals()
+            if proposals:
+                parts.append(f"{len(proposals)} propozycji eksperymentow czeka na zatwierdzenie")
+
+            if ctx.experiment_system.runner.is_running:
+                exp = ctx.experiment_system.runner.get_current()
+                if exp:
+                    parts.append(f"Eksperyment w toku: {exp.parameter_id}")
+        except Exception:
+            pass
+
+    # Knowledge snapshot
+    if ctx.knowledge_analyzer:
+        try:
+            snap = ctx.knowledge_analyzer.get_knowledge_snapshot()
+            if snap:
+                by_status = snap.get("files_by_status", {})
+                learning = len(by_status.get("learning", []))
+                completed = len(by_status.get("completed", []))
+                total = snap.get("total_files", 0)
+                if learning > 0:
+                    parts.append(f"Ucze sie: {learning} plikow w toku, {completed}/{total} ukonczonych")
+                elif total > 0:
+                    parts.append(f"Wiedza: {completed}/{total} plikow ukonczonych")
+        except Exception:
+            pass
+
+    if not parts:
+        return ""
+
+    return "; ".join(parts)

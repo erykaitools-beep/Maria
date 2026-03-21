@@ -47,6 +47,9 @@ class OllamaBrain:
             "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
         )
 
+        # Work context provider (set via set_work_context_provider)
+        self._work_context_provider = None
+
         # Session tracking for time awareness
         self._session_start = datetime.now()
         self._last_interaction = datetime.now()
@@ -125,6 +128,24 @@ class OllamaBrain:
                 for msg in restored:
                     self.history.append(msg)
 
+    def set_work_context_provider(self, provider) -> None:
+        """
+        Set a callable that returns current work status as text.
+
+        Called during system prompt build to inject planner/experiment/learning context.
+        The provider should return a short string (max ~200 chars) or empty string.
+        """
+        self._work_context_provider = provider
+
+    def _get_work_context(self) -> str:
+        """Get current work status from planner/experiment/learning systems."""
+        if self._work_context_provider is None:
+            return ""
+        try:
+            return self._work_context_provider()
+        except Exception:
+            return ""
+
     def _get_awareness_context(self) -> str:
         """Get self-awareness context (files, memory, code, system)."""
         if not AWARENESS_AVAILABLE or _AWARENESS_BUILDER is None:
@@ -135,15 +156,18 @@ class OllamaBrain:
             return ""
 
     def _build_system_prompt(self) -> str:
-        """Build full system prompt with time, identity, conversation, and awareness context."""
+        """Build full system prompt with time, identity, conversation, work, and awareness context."""
         time_ctx = self._get_time_context()
         identity_ctx = self._get_identity_context()
         conversation_ctx = self._get_conversation_context()
+        work_ctx = self._get_work_context()
         awareness_ctx = self._get_awareness_context()
 
         prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
         if identity_ctx:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
+        if work_ctx:
+            prompt += f"\n[Aktualna praca: {work_ctx}]"
         if conversation_ctx:
             prompt += f"\n{conversation_ctx}"
         if awareness_ctx:
