@@ -38,8 +38,8 @@ class TestModelRegistry:
         spec = get_model(ModelRole.PLANNER)
         assert spec is not None
         assert spec.role == ModelRole.PLANNER
-        assert spec.ollama_tag == "qwen2.5:14b"
-        assert spec.ram_estimate_gb == 9.0
+        assert spec.ollama_tag == "qwen3:8b"
+        assert spec.ram_estimate_gb == 5.5
         assert spec.concurrency_class == ConcurrencyClass.HEAVY
 
     def test_get_model_executor(self):
@@ -56,10 +56,11 @@ class TestModelRegistry:
         assert spec.block_if_heavy_active is True
         assert spec.fallback_role == ModelRole.EXECUTOR
 
-    def test_get_model_triage_tbd(self):
+    def test_get_model_triage_rule_based(self):
         spec = get_model(ModelRole.TRIAGE)
         assert spec is not None
-        assert spec.ollama_tag == "TBD"
+        assert spec.ollama_tag == ""  # rule-based, no LLM
+        assert spec.ram_estimate_gb == 0.0
 
     def test_get_model_memory_shared(self):
         spec = get_model(ModelRole.MEMORY)
@@ -85,7 +86,7 @@ class TestModelRegistry:
     def test_get_warm_models(self):
         warm = get_warm_models()
         roles = {m.role for m in warm}
-        # EXECUTOR is warm, TRIAGE has TBD tag so excluded, MEMORY shares EXECUTOR
+        # EXECUTOR is warm, TRIAGE is rule-based (no ollama_tag)
         assert ModelRole.EXECUTOR in roles
 
     def test_get_heavy_models(self):
@@ -97,11 +98,11 @@ class TestModelRegistry:
         local = get_local_models()
         roles = {m.role for m in local}
         assert ModelRole.EXTERNAL not in roles
-        assert ModelRole.TRIAGE not in roles  # TBD tag excluded
+        assert ModelRole.TRIAGE not in roles  # rule-based, no ollama_tag
         assert ModelRole.EXECUTOR in roles
 
-    def test_is_triage_configured_false(self):
-        assert is_triage_configured() is False
+    def test_is_triage_configured_true(self):
+        assert is_triage_configured() is True  # rule-based always available
 
     def test_set_triage_model(self):
         # Save original
@@ -124,10 +125,10 @@ class TestModelRegistry:
 
     def test_latency_budgets(self):
         """Verify latency budgets match MODEL_REGISTRY.md."""
-        assert get_model(ModelRole.TRIAGE).latency_budget_s == 3.0
+        assert get_model(ModelRole.TRIAGE).latency_budget_s == 0.001  # rule-based
         assert get_model(ModelRole.EXECUTOR).latency_budget_s == 20.0
         assert get_model(ModelRole.CODER).latency_budget_s == 30.0
-        assert get_model(ModelRole.PLANNER).latency_budget_s == 45.0
+        assert get_model(ModelRole.PLANNER).latency_budget_s == 60.0
         assert get_model(ModelRole.MEMORY).latency_budget_s == 15.0
 
     def test_idle_unload_times(self):
@@ -182,7 +183,7 @@ class TestModelSchedulerEnsureReady:
         """Cold model should be loaded via Ollama."""
         result = scheduler.ensure_ready(ModelRole.PLANNER)
         assert result.success is True
-        assert result.ollama_tag == "qwen2.5:14b"
+        assert result.ollama_tag == "qwen3:8b"
         mock_ollama.generate.assert_called_once()
 
     def test_external_model_always_ready(self, scheduler, mock_psutil, mock_ollama):
@@ -192,13 +193,14 @@ class TestModelSchedulerEnsureReady:
         assert result.reason == "External model (NIM)"
         mock_ollama.generate.assert_not_called()
 
-    def test_triage_tbd_fallback(self, scheduler, mock_psutil, mock_ollama):
-        """Triage with TBD tag should fallback to EXECUTOR."""
-        scheduler.register_running_model(ModelRole.EXECUTOR, "llama3.1:8b")
+    def test_triage_rule_based_no_load(self, scheduler, mock_psutil, mock_ollama):
+        """Triage is rule-based (no ollama_tag) - always ready, no model needed."""
         result = scheduler.ensure_ready(ModelRole.TRIAGE)
         assert result.success is True
-        assert result.fallback_used is True
-        assert result.role == ModelRole.EXECUTOR
+        assert result.fallback_used is False
+        assert result.role == ModelRole.TRIAGE
+        assert "Rule-based" in result.reason
+        mock_ollama.generate.assert_not_called()
 
     def test_insufficient_ram_fallback(self, scheduler, mock_psutil, mock_ollama):
         """If not enough RAM, should try fallback."""
@@ -250,7 +252,7 @@ class TestModelSchedulerRelease:
     def test_release_heavy_releases_mutex(self, scheduler, mock_psutil, mock_ollama):
         """Release on a heavy model should release heavy mutex."""
         scheduler._heavy_lock.acquire()
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         scheduler.release(ModelRole.PLANNER)
         # Mutex should be released - we should be able to acquire it
         acquired = scheduler._heavy_lock.acquire(timeout=0.1)
@@ -262,7 +264,7 @@ class TestModelSchedulerForceUnload:
     """Tests for force_unload()."""
 
     def test_force_unload_removes_model(self, scheduler, mock_psutil, mock_ollama):
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         assert ModelRole.PLANNER in scheduler._loaded
 
         result = scheduler.force_unload(ModelRole.PLANNER)
@@ -316,7 +318,7 @@ class TestModelSchedulerTick:
 
     def test_tick_unloads_idle_cold_model(self, scheduler, mock_psutil, mock_ollama):
         """Cold model past idle timeout should be unloaded."""
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         # Fake the last_used to be 6 minutes ago (timeout is 5 min = 300s)
         scheduler._loaded[ModelRole.PLANNER].last_used = time.time() - 360
 
@@ -336,7 +338,7 @@ class TestModelSchedulerTick:
         # Set free RAM below threshold
         mock_psutil.virtual_memory.return_value.available = 5 * (1024 ** 3)
 
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         scheduler.tick()
 
         assert scheduler._ram_pressure_events == 1
@@ -375,7 +377,7 @@ class TestModelSchedulerRAM:
 
     def test_can_load_heavy_mutex_conflict(self, scheduler, mock_psutil, mock_ollama):
         """Can't load CODER if PLANNER is already loaded."""
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         spec = get_model(ModelRole.CODER)
         ok, reason = scheduler._can_load(spec)
         assert ok is False
@@ -383,10 +385,10 @@ class TestModelSchedulerRAM:
 
     def test_try_free_ram_unloads_cold(self, scheduler, mock_psutil, mock_ollama):
         """try_free_ram should unload cold models."""
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         scheduler._loaded[ModelRole.PLANNER].last_used = time.time() - 100
 
-        freed = scheduler._try_free_ram(8.0)
+        freed = scheduler._try_free_ram(5.0)
         assert freed is True
         assert ModelRole.PLANNER not in scheduler._loaded
 
@@ -405,9 +407,9 @@ class TestModelSchedulerRAM:
 
     def test_get_total_loaded_ram(self, scheduler, mock_psutil, mock_ollama):
         scheduler.register_running_model(ModelRole.EXECUTOR, "llama3.1:8b")
-        scheduler.register_running_model(ModelRole.PLANNER, "qwen2.5:14b")
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         total = scheduler._get_total_loaded_ram_gb()
-        assert total == 14.0  # 5 + 9
+        assert total == 10.5  # 5.0 + 5.5
 
 
 class TestModelSchedulerHealth:
@@ -471,10 +473,10 @@ class TestModelSchedulerOllama:
     """Tests for Ollama integration."""
 
     def test_ollama_load(self, scheduler, mock_psutil, mock_ollama):
-        result = scheduler._ollama_load("qwen2.5:14b")
+        result = scheduler._ollama_load("qwen3:8b")
         assert result is True
         mock_ollama.generate.assert_called_once_with(
-            model="qwen2.5:14b",
+            model="qwen3:8b",
             prompt=" ",
             options={"num_predict": 1},
             keep_alive="10m",
@@ -482,14 +484,14 @@ class TestModelSchedulerOllama:
 
     def test_ollama_load_failure(self, scheduler, mock_psutil, mock_ollama):
         mock_ollama.generate.side_effect = Exception("Connection refused")
-        result = scheduler._ollama_load("qwen2.5:14b")
+        result = scheduler._ollama_load("qwen3:8b")
         assert result is False
 
     def test_ollama_unload(self, scheduler, mock_psutil, mock_ollama):
-        result = scheduler._ollama_unload("qwen2.5:14b")
+        result = scheduler._ollama_unload("qwen3:8b")
         assert result is True
         mock_ollama.generate.assert_called_once_with(
-            model="qwen2.5:14b",
+            model="qwen3:8b",
             prompt="",
             options={"num_predict": 1},
             keep_alive="0",
@@ -497,10 +499,10 @@ class TestModelSchedulerOllama:
 
     def test_ollama_list_running(self, scheduler, mock_psutil, mock_ollama):
         mock_ollama.ps.return_value = {
-            "models": [{"name": "llama3.1:8b"}, {"name": "qwen2.5:14b"}]
+            "models": [{"name": "llama3.1:8b"}, {"name": "qwen3:8b"}]
         }
         running = scheduler._ollama_list_running()
-        assert running == ["llama3.1:8b", "qwen2.5:14b"]
+        assert running == ["llama3.1:8b", "qwen3:8b"]
 
     def test_ollama_not_available(self, scheduler, mock_psutil):
         """If ollama library is None, methods should handle gracefully."""
@@ -638,7 +640,7 @@ class TestLLMRouterWithScheduler:
         mock_brain = Mock()
         mock_scheduler = Mock()
         mock_scheduler.ensure_ready.return_value = EnsureResult(
-            success=True, ollama_tag="qwen2.5:14b", role=ModelRole.PLANNER,
+            success=True, ollama_tag="qwen3:8b", role=ModelRole.PLANNER,
         )
 
         mock_ollama_router.chat.return_value = {

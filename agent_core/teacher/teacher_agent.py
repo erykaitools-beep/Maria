@@ -116,6 +116,17 @@ class TeacherAgent:
         self._iteration = 0
         self._filter_file_ids = set(filter_file_ids) if filter_file_ids else None
 
+        # Reset stats for this session (prevent cross-session accumulation)
+        self._stats = {
+            "chunks_learned": 0,
+            "exams_run": 0,
+            "exams_passed": 0,
+            "reviews_done": 0,
+            "strategies_executed": 0,
+            "nim_planning_calls": 0,
+            "errors": 0,
+        }
+
         logger.info(f"[TEACHER] Starting session (max {max_iterations} iterations)")
         if self._filter_file_ids:
             logger.info(f"[TEACHER] Topic filter active: {len(self._filter_file_ids)} files")

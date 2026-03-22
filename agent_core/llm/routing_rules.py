@@ -53,28 +53,51 @@ def route_task(task_type: TaskType) -> ModelRole:
     return _ROUTE_TABLE.get(task_type, ModelRole.EXECUTOR)
 
 
-# Keyword patterns for heuristic classification
+# Keyword patterns for heuristic classification (PL + EN)
 _CODE_KEYWORDS = re.compile(
     r'\b(pytest|def |class |import |\.py|patch|diff|refactor|'
-    r'test_|bug|fix|syntax|compile|function|method|variable)\b',
+    r'test_|bug|fix|syntax|compile|function|method|variable|'
+    r'napraw|napisz.?funkcj|napisz.?kod|zrefaktoruj|kod|skrypt|algorytm|parsuj|parser|funkcj\w|'
+    r'pip.?install|error|exception|traceback|debug)\b',
     re.IGNORECASE,
 )
 
 _PLAN_KEYWORDS = re.compile(
     r'\b(plan|design|architecture|proposal|strategy|'
-    r'multi.?step|reasoning|analyze|evaluate|decision)\b',
+    r'multi.?step|reasoning|analyze|evaluate|decision|'
+    r'zaplanuj|architektur|przeanalizuj|pipeline|deployment|'
+    r'migracja|wdrozeni|jak.?powinien|projekt|wizja|roadmap|'
+    r'modul|warstwa|jaka.?powinna)\b',
     re.IGNORECASE,
 )
 
 _SUMMARY_KEYWORDS = re.compile(
     r'\b(summarize|compress|extract|condense|'
-    r'brief|summary|key.?points|highlights)\b',
+    r'brief|summary|key.?points|highlights|'
+    r'podsumuj|skompresuj|wyciagnij.?fakt|wyciagnij.?klucz|'
+    r'stresz|skroc|brief|zrob.?brief|kluczowe|wyciagnij)\b',
     re.IGNORECASE,
 )
 
 _CLASSIFY_KEYWORDS = re.compile(
     r'\b(classify|categorize|tag|label|route|'
-    r'intent|type|kind|sort)\b',
+    r'intent|type|kind|sort|'
+    r'sklasyfikuj|kategoryz|oznacz.?tag|tagami|etykiet|'
+    r'jaki.?typ|posortuj)\b',
+    re.IGNORECASE,
+)
+
+_LEARN_KEYWORDS = re.compile(
+    r'\b(learn|study|naucz|ucz.?si|przeczytaj|'
+    r'przetworz|chunk|material|artykul|tekst.?do.?nauki|'
+    r'wiedza|przyswoj|zapamietaj)\b',
+    re.IGNORECASE,
+)
+
+_EXAM_KEYWORDS = re.compile(
+    r'\b(exam|quiz|test|egzamin|sprawdzian|'
+    r'przygotuj.?egzamin|pytania|ocen|grading|'
+    r'sprawdz.?wiedz|powtorka|powtork)\b',
     re.IGNORECASE,
 )
 
@@ -102,12 +125,16 @@ def heuristic_classify(prompt: str) -> TaskType:
     plan_score = len(_PLAN_KEYWORDS.findall(text))
     summary_score = len(_SUMMARY_KEYWORDS.findall(text))
     classify_score = len(_CLASSIFY_KEYWORDS.findall(text))
+    learn_score = len(_LEARN_KEYWORDS.findall(text))
+    exam_score = len(_EXAM_KEYWORDS.findall(text))
 
     scores = {
         TaskType.CODE: code_score,
         TaskType.PLAN: plan_score,
         TaskType.SUMMARIZE: summary_score,
         TaskType.CLASSIFY: classify_score,
+        TaskType.LEARN: learn_score,
+        TaskType.EXAM: exam_score,
     }
 
     best = max(scores, key=scores.get)

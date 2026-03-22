@@ -300,12 +300,16 @@ def run_exam_if_ready(
     exam_path: Path,
     ollama_model: str = OLLAMA_MODEL,
     llm_fn=None,
+    target_file_id: str = None,
 ) -> Dict[str, Any]:
     """
     Uruchamia egzamin dla pliku, który jest gotowy (status=learned).
 
+    If target_file_id is provided (spaced repetition), examines that specific
+    file even if its status is 'completed'. Otherwise searches for 'learned' files.
+
     Logika:
-    1. Znajdź plik ze statusem LEARNED
+    1. Znajdź plik ze statusem LEARNED (lub target_file_id)
     2. Wygeneruj egzamin na podstawie pamięci
     3. Odpowiedz na pytania
     4. Oceń odpowiedzi
@@ -317,10 +321,12 @@ def run_exam_if_ready(
        - wykryto looping → HARD_TOPIC
 
     Args:
-        index_path: Ścieżka do indeksu
-        memory_path: Ścieżka do pamięci
-        exam_path: Ścieżka do wyników egzaminów
+        index_path: Sciezka do indeksu
+        memory_path: Sciezka do pamieci
+        exam_path: Sciezka do wynikow egzaminow
         ollama_model: Model Ollama
+        llm_fn: Optional LLM function
+        target_file_id: Optional specific file to examine (for spaced repetition)
 
     Returns:
         Dict with keys:
@@ -336,21 +342,34 @@ def run_exam_if_ready(
     # Wczytaj indeks
     index = load_index(index_path)
 
-    # Znajdź kandydatów
-    candidates = []
-    for rec in index:
-        if rec['status'] == STATUS_LEARNED and rec['exam_attempts'] < EXAM_MAX_ATTEMPTS:
-            candidates.append(rec)
+    # If specific file requested (spaced repetition), find it directly
+    if target_file_id:
+        target = None
+        for rec in index:
+            if rec['id'] == target_file_id:
+                target = rec
+                break
+        if target is None:
+            logger.info(f"[EXAM] Plik {target_file_id} nie znaleziony w indeksie")
+            return {"executed": False, "passed": False, "score": 0.0, "file_id": target_file_id}
+        file_id = target['id']
+        logger.info(f"[EXAM] Spaced repetition egzamin z: {file_id}")
+    else:
+        # Znajdz kandydatow (standard flow)
+        candidates = []
+        for rec in index:
+            if rec['status'] == STATUS_LEARNED and rec['exam_attempts'] < EXAM_MAX_ATTEMPTS:
+                candidates.append(rec)
 
-    if not candidates:
-        logger.info("[OK] Brak plikow gotowych na egzamin")
-        return {"executed": False, "passed": False, "score": 0.0, "file_id": ""}
+        if not candidates:
+            logger.info("[OK] Brak plikow gotowych na egzamin")
+            return {"executed": False, "passed": False, "score": 0.0, "file_id": ""}
 
-    # Wybierz pierwszy (lub najwyższy priorytet)
-    candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
-    target = candidates[0]
+        # Wybierz pierwszy (lub najwyzszy priorytet)
+        candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
+        target = candidates[0]
+        file_id = target['id']
 
-    file_id = target['id']
     logger.info(f"[EXAM] Egzamin z: {file_id}")
 
     no_exam = {"executed": False, "passed": False, "score": 0.0, "file_id": file_id}
@@ -407,7 +426,15 @@ def run_exam_if_ready(
     target['last_scores'].append(final_score)
 
     # Logika statusu
-    if passed:
+    is_spaced_repetition = target_file_id is not None
+    if is_spaced_repetition:
+        # Spaced repetition: keep completed status, just update scores/timestamp
+        target['status'] = STATUS_COMPLETED
+        if passed:
+            logger.info(f"[REVIEW PASS] Powtorka ZALICZONA ({final_score:.2%})")
+        else:
+            logger.warning(f"[REVIEW FAIL] Powtorka NIEZALICZONA ({final_score:.2%}) - zostaje completed")
+    elif passed:
         # Zaliczony!
         target['status'] = STATUS_COMPLETED
         logger.info(f"[PASS] Egzamin ZALICZONY ({final_score:.2%})")

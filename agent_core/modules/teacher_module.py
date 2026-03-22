@@ -109,6 +109,7 @@ class TeacherModule(MariaModule):
                 memory_path=LONGTERM_MEMORY,
                 exam_path=EXAM_RESULTS,
                 llm_fn=llm_fn,
+                target_file_id=file_id,
             )
             return {
                 "success": result["executed"],

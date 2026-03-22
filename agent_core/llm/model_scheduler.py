@@ -119,9 +119,16 @@ class ModelScheduler:
                 reason="External model (NIM)"
             )
 
-        # Triage not yet configured
-        if spec.ollama_tag == "TBD":
-            return self._try_fallback(spec, start, "Triage not yet configured")
+        # Model without ollama_tag (rule-based triage or unconfigured)
+        if not spec.ollama_tag:
+            if spec.fallback_role is not None:
+                return self._try_fallback(spec, start, "No ollama_tag configured")
+            # Rule-based (no fallback needed) - always ready
+            return EnsureResult(
+                success=True, ollama_tag="", role=role,
+                reason="Rule-based (no model needed)",
+                wait_time_s=time.time() - start,
+            )
 
         # Already loaded and healthy?
         with self._lock:

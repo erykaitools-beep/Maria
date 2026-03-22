@@ -59,15 +59,15 @@ class ModelSpec:
 
 _REGISTRY: Dict[ModelRole, ModelSpec] = {
     ModelRole.PLANNER: ModelSpec(
-        model_id="qwen2.5-14b-instruct",
+        model_id="qwen3-8b",
         role=ModelRole.PLANNER,
-        ollama_tag="qwen2.5:14b",
-        ram_estimate_gb=9.0,
-        latency_budget_s=45.0,
+        ollama_tag="qwen3:8b",
+        ram_estimate_gb=5.5,
+        latency_budget_s=60.0,
         concurrency_class=ConcurrencyClass.HEAVY,
         warm_state=WarmState.COLD,
         idle_unload_s=300.0,   # 5 min
-        min_free_ram_gb=12.0,
+        min_free_ram_gb=8.0,
         fallback_role=ModelRole.EXECUTOR,
         block_if_heavy_active=True,
     ),
@@ -98,26 +98,26 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         block_if_heavy_active=True,
     ),
     ModelRole.TRIAGE: ModelSpec(
-        model_id="TBD_AFTER_BENCHMARK",
+        model_id="rule-based-classifier",
         role=ModelRole.TRIAGE,
-        ollama_tag="TBD",
-        ram_estimate_gb=3.0,
-        latency_budget_s=3.0,
+        ollama_tag="",         # no LLM - rule-based heuristic_classify() won benchmark
+        ram_estimate_gb=0.0,
+        latency_budget_s=0.001,
         concurrency_class=ConcurrencyClass.LIGHT_GATE,
-        warm_state=WarmState.WARM,
-        idle_unload_s=0.0,     # keep warm
-        min_free_ram_gb=8.0,
-        fallback_role=ModelRole.EXECUTOR,
+        warm_state=WarmState.WARM,  # always available (code, not model)
+        idle_unload_s=0.0,
+        min_free_ram_gb=0.0,
+        fallback_role=None,    # no fallback needed - always available
         block_if_heavy_active=False,
     ),
     ModelRole.MEMORY: ModelSpec(
         model_id="SHARED_BY_DEFAULT",
         role=ModelRole.MEMORY,
-        ollama_tag="llama3.1:8b",  # reuses MODEL-02 by default
+        ollama_tag="llama3.1:8b",  # reuses MODEL-02 by default (future: nomic-embed-text)
         ram_estimate_gb=0.0,       # shared, no extra RAM
         latency_budget_s=15.0,
         concurrency_class=ConcurrencyClass.BACKGROUND,
-        warm_state=WarmState.WARM,  # shared on EXECUTOR
+        warm_state=WarmState.COLD,  # future: WARM when semantic memory deployed
         idle_unload_s=0.0,
         min_free_ram_gb=8.0,
         fallback_role=ModelRole.EXECUTOR,
@@ -180,9 +180,12 @@ def get_local_models() -> List[ModelSpec]:
 
 
 def is_triage_configured() -> bool:
-    """Check if MODEL-04 triage has been benchmarked and configured."""
-    spec = _REGISTRY.get(ModelRole.TRIAGE)
-    return spec is not None and spec.ollama_tag != "TBD"
+    """Check if MODEL-04 triage has been benchmarked and configured.
+
+    Since Stage 2 benchmark (2026-03-22), triage is rule-based
+    (heuristic_classify in routing_rules.py) - always available.
+    """
+    return True
 
 
 def set_triage_model(ollama_tag: str, ram_estimate_gb: float) -> None:

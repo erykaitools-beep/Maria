@@ -1,16 +1,17 @@
 """
 Tests for OpenClaw Effector Client, Tool Specs, and Planner Integration.
 
-All HTTP calls are mocked - zero external dependencies.
+All subprocess calls are mocked - zero external dependencies.
 """
 
 import json
+import subprocess
 from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 
 from agent_core.effector.openclaw_client import (
-    OpenClawClient, OpenClawError, DEFAULT_GATEWAY_URL,
+    OpenClawClient, OpenClawError, NODE_TOOLS, AGENT_TOOLS,
 )
 from agent_core.effector.tool_specs import (
     ToolSpec, TOOL_SPECS, ALLOWED_TOOLS, DENIED_TOOLS,
@@ -106,78 +107,180 @@ class TestToolSpecs:
 
 
 # ============================================================
+# TOOL ROUTING TESTS
+# ============================================================
+
+class TestToolRouting:
+    """Tests for node vs agent tool routing."""
+
+    def test_node_tools(self):
+        assert NODE_TOOLS == {"exec", "read", "write"}
+
+    def test_agent_tools(self):
+        assert AGENT_TOOLS == {"web_fetch", "web_search", "message", "cron"}
+
+    def test_all_allowed_tools_routed(self):
+        """Every allowed tool must be in NODE_TOOLS or AGENT_TOOLS."""
+        assert ALLOWED_TOOLS == NODE_TOOLS | AGENT_TOOLS
+
+
+# ============================================================
 # OPENCLAW CLIENT TESTS
 # ============================================================
+
+def _make_node_result(stdout="", stderr="", exit_code=0, ok=True):
+    """Helper to create mock node JSON output."""
+    payload = {
+        "exitCode": exit_code,
+        "timedOut": False,
+        "success": exit_code == 0,
+        "stdout": stdout,
+        "stderr": stderr,
+        "error": None,
+    }
+    return json.dumps({
+        "ok": ok,
+        "nodeId": "test-node-id",
+        "command": "system.run",
+        "payload": payload,
+    })
+
+
+def _make_subprocess_result(stdout="", stderr="", returncode=0):
+    """Helper to create mock subprocess.CompletedProcess."""
+    return subprocess.CompletedProcess(
+        args=["openclaw"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
 
 @pytest.fixture
 def client():
     """Create client with test config."""
     return OpenClawClient(
-        base_url="http://test-gateway:18789",
-        token="test-token-123",
+        node_name="test-node",
         timeout_s=5,
+        openclaw_bin="/usr/bin/openclaw",
     )
-
-
-@pytest.fixture
-def mock_response():
-    """Create a mock requests.Response."""
-    resp = Mock()
-    resp.status_code = 200
-    resp.json.return_value = {"ok": True, "result": "test output"}
-    resp.text = '{"ok": true, "result": "test output"}'
-    resp.headers = {}
-    return resp
 
 
 class TestOpenClawClientInit:
     """Tests for client initialization."""
 
-    def test_default_url(self):
+    def test_default_node_name(self):
         with patch.dict("os.environ", {}, clear=True):
-            c = OpenClawClient(token="tok")
-            assert c.base_url == DEFAULT_GATEWAY_URL
-
-    def test_env_url(self):
-        with patch.dict("os.environ", {"OPENCLAW_GATEWAY_URL": "http://custom:9999"}):
-            c = OpenClawClient(token="tok")
-            assert c.base_url == "http://custom:9999"
-
-    def test_env_token(self):
-        with patch.dict("os.environ", {"OPENCLAW_GATEWAY_TOKEN": "env-token"}):
             c = OpenClawClient()
-            assert c.token == "env-token"
+            assert c.node_name == "maria"
+
+    def test_env_node_name(self):
+        with patch.dict("os.environ", {"OPENCLAW_NODE_NAME": "custom-node"}):
+            c = OpenClawClient()
+            assert c.node_name == "custom-node"
 
     def test_explicit_overrides_env(self):
-        with patch.dict("os.environ", {"OPENCLAW_GATEWAY_URL": "http://env:1234"}):
-            c = OpenClawClient(base_url="http://explicit:5678", token="tok")
-            assert c.base_url == "http://explicit:5678"
+        with patch.dict("os.environ", {"OPENCLAW_NODE_NAME": "env-node"}):
+            c = OpenClawClient(node_name="explicit-node")
+            assert c.node_name == "explicit-node"
 
-    def test_trailing_slash_stripped(self):
-        c = OpenClawClient(base_url="http://test:18789/", token="tok")
-        assert c.base_url == "http://test:18789"
+    @patch("shutil.which", return_value="/usr/local/bin/openclaw")
+    def test_auto_detect_binary(self, mock_which):
+        c = OpenClawClient()
+        assert c.openclaw_bin == "/usr/local/bin/openclaw"
+
+    def test_default_run_as_user(self):
+        with patch.dict("os.environ", {}, clear=True):
+            c = OpenClawClient()
+            assert c.run_as_user == "deployadmin"
+
+    def test_env_run_as_user(self):
+        with patch.dict("os.environ", {"OPENCLAW_RUN_AS": "admin"}):
+            c = OpenClawClient()
+            assert c.run_as_user == "admin"
+
+    def test_cli_prefix_with_user(self):
+        c = OpenClawClient(openclaw_bin="/usr/bin/openclaw", run_as_user="deployadmin")
+        assert c._cli_prefix() == ["sudo", "-u", "deployadmin", "/usr/bin/openclaw"]
+
+    def test_cli_prefix_without_user(self):
+        c = OpenClawClient(openclaw_bin="/usr/bin/openclaw", run_as_user="")
+        assert c._cli_prefix() == ["/usr/bin/openclaw"]
 
 
-class TestOpenClawClientInvoke:
-    """Tests for invoke_tool()."""
+class TestOpenClawClientInvokeNode:
+    """Tests for invoke_tool() with node tools (exec, read, write)."""
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_exec_success(self, mock_post, client, mock_response):
-        mock_post.return_value = mock_response
-        result = client.invoke_tool("exec", {"command": "echo hello"})
+    @patch("subprocess.run")
+    def test_invoke_exec_success(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="hello world\n"),
+        )
 
-        assert result == {"ok": True, "result": "test output"}
-        mock_post.assert_called_once()
-        call_kwargs = mock_post.call_args
-        assert call_kwargs[1]["json"]["tool"] == "exec"
-        assert call_kwargs[1]["json"]["args"]["command"] == "echo hello"
-        assert "Bearer test-token-123" in call_kwargs[1]["headers"]["Authorization"]
+        result = client.invoke_tool("exec", {"command": "echo hello world"})
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_web_fetch(self, mock_post, client, mock_response):
-        mock_post.return_value = mock_response
-        result = client.invoke_tool("web_fetch", {"url": "https://example.com"})
         assert result["ok"] is True
+        assert result["result"] == "hello world"
+        assert result["exit_code"] == 0
+        mock_run.assert_called_once()
+
+        # Verify CLI args contain expected parts
+        call_args = mock_run.call_args[0][0]
+        assert "--node" in call_args
+        assert "test-node" in call_args
+        assert "--security" in call_args
+        assert "full" in call_args
+        assert "--json" in call_args
+
+    @patch("subprocess.run")
+    def test_invoke_read_success(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="file contents here\n"),
+        )
+
+        result = client.invoke_tool("read", {"path": "/tmp/test.txt"})
+
+        assert result["ok"] is True
+        assert result["result"] == "file contents here"
+
+        # Verify cat is used for read
+        call_args = mock_run.call_args[0][0]
+        assert "cat" in call_args
+        assert "/tmp/test.txt" in call_args
+
+    @patch("subprocess.run")
+    def test_invoke_exec_nonzero_exit(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(
+                stdout="", stderr="command not found", exit_code=127,
+            ),
+        )
+
+        result = client.invoke_tool("exec", {"command": "nonexistent"})
+        assert result["exit_code"] == 127
+        assert result["stderr"] == "command not found"
+
+    @patch("subprocess.run")
+    def test_invoke_exec_cli_error(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout="",
+            stderr="openclaw: error connecting",
+            returncode=1,
+        )
+
+        with pytest.raises(OpenClawError, match="Node command failed"):
+            client.invoke_tool("exec", {"command": "ls"})
+
+    @patch("subprocess.run")
+    def test_invoke_exec_node_error(self, mock_run, client):
+        error_json = json.dumps({
+            "ok": False,
+            "error": {"type": "not_found", "message": "Node not connected"},
+        })
+        mock_run.return_value = _make_subprocess_result(stdout=error_json)
+
+        with pytest.raises(OpenClawError, match="Node not connected"):
+            client.invoke_tool("exec", {"command": "ls"})
 
     def test_invoke_denied_tool(self, client):
         with pytest.raises(ValueError, match="explicitly denied"):
@@ -191,106 +294,161 @@ class TestOpenClawClientInvoke:
         with pytest.raises(ValueError, match="Missing required"):
             client.invoke_tool("exec", {})  # missing "command"
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_auth_error(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 401
-        resp.json.return_value = {"ok": False, "error": {"message": "Unauthorized"}}
-        resp.text = "Unauthorized"
-        mock_post.return_value = resp
+    @patch("subprocess.run")
+    def test_invoke_timeout(self, mock_run, client):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="openclaw", timeout=5)
 
-        with pytest.raises(OpenClawError) as exc_info:
-            client.invoke_tool("exec", {"command": "ls"})
-        assert exc_info.value.status_code == 401
-        assert "Authentication" in str(exc_info.value)
+        with pytest.raises(OpenClawError, match="Failed after"):
+            client.invoke_tool("exec", {"command": "sleep 100"})
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_tool_not_found(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 404
-        resp.json.return_value = {"ok": False, "error": {"message": "Not found"}}
-        resp.text = "Not found"
-        mock_post.return_value = resp
+    @patch("subprocess.run")
+    def test_invoke_retry_on_exception(self, mock_run, client):
+        """Generic exceptions should retry once."""
+        mock_run.side_effect = OSError("broken pipe")
 
-        with pytest.raises(OpenClawError) as exc_info:
-            client.invoke_tool("exec", {"command": "ls"})
-        assert exc_info.value.status_code == 404
-
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_rate_limited(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 429
-        resp.json.return_value = {"ok": False}
-        resp.text = "Rate limited"
-        resp.headers = {"Retry-After": "60"}
-        mock_post.return_value = resp
-
-        with pytest.raises(OpenClawError) as exc_info:
-            client.invoke_tool("exec", {"command": "ls"})
-        assert exc_info.value.status_code == 429
-
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_server_error(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 500
-        resp.json.return_value = {"ok": False, "error": {"type": "internal", "message": "crash"}}
-        resp.text = "Internal error"
-        mock_post.return_value = resp
-
-        with pytest.raises(OpenClawError) as exc_info:
-            client.invoke_tool("exec", {"command": "ls"})
-        assert exc_info.value.status_code == 500
-
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_connection_error_retry(self, mock_post, client):
-        """Connection errors should retry once."""
-        import requests as req
-        mock_post.side_effect = req.ConnectionError("Connection refused")
-
-        with pytest.raises(OpenClawError, match="unreachable"):
+        with pytest.raises(OpenClawError, match="Failed after"):
             client.invoke_tool("exec", {"command": "ls"})
 
         # Should have tried twice (1 original + 1 retry)
-        assert mock_post.call_count == 2
+        assert mock_run.call_count == 2
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_invoke_tracks_stats(self, mock_post, client, mock_response):
-        mock_post.return_value = mock_response
-        client.invoke_tool("exec", {"command": "ls"})
-        client.invoke_tool("web_fetch", {"url": "https://example.com"})
+    @patch("subprocess.run")
+    def test_invoke_tracks_stats(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="ok\n"),
+        )
+        client.invoke_tool("exec", {"command": "echo ok"})
 
         stats = client.get_stats()
-        assert stats["total_calls"] == 2
-        assert stats["successful_calls"] == 2
+        assert stats["total_calls"] == 1
+        assert stats["successful_calls"] == 1
         assert stats["failed_calls"] == 0
-        assert stats["token_configured"] is True
+
+    @patch("subprocess.run")
+    def test_invoke_invalid_json(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(stdout="not json at all")
+
+        with pytest.raises(OpenClawError, match="Invalid JSON"):
+            client.invoke_tool("exec", {"command": "ls"})
+
+    @patch("subprocess.run")
+    def test_cli_uses_sudo(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="ok\n"),
+        )
+        client.run_as_user = "deployadmin"
+        client.invoke_tool("exec", {"command": "echo ok"})
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "sudo"
+        assert call_args[1] == "-u"
+        assert call_args[2] == "deployadmin"
+
+    @patch("subprocess.run")
+    def test_cli_no_sudo_when_no_user(self, mock_run):
+        c = OpenClawClient(node_name="test", openclaw_bin="/usr/bin/openclaw", run_as_user="")
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="ok\n"),
+        )
+        c.invoke_tool("exec", {"command": "echo ok"})
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "/usr/bin/openclaw"
+
+
+class TestOpenClawClientInvokeAgent:
+    """Tests for invoke_tool() with agent tools (web_fetch, web_search, etc.)."""
+
+    @patch("subprocess.run")
+    def test_invoke_web_fetch(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({"response": "Page content here"}),
+        )
+
+        result = client.invoke_tool("web_fetch", {"url": "https://example.com"})
+        assert result["ok"] is True
+        assert result["result"] == "Page content here"
+
+        # Verify agent CLI args
+        call_args = mock_run.call_args[0][0]
+        assert "agent" in call_args
+        assert "--session-id" in call_args
+        assert "--json" in call_args
+
+    @patch("subprocess.run")
+    def test_invoke_web_search(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({"response": "search results"}),
+        )
+
+        result = client.invoke_tool("web_search", {"query": "python tutorial"})
+        assert result["ok"] is True
+
+    @patch("subprocess.run")
+    def test_invoke_message(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({"response": "sent"}),
+        )
+
+        result = client.invoke_tool("message", {"content": "hello", "channel": "telegram"})
+        assert result["ok"] is True
+
+    @patch("subprocess.run")
+    def test_invoke_agent_error(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout="", stderr="Agent error: no model", returncode=1,
+        )
+
+        with pytest.raises(OpenClawError, match="Agent command failed"):
+            client.invoke_tool("web_fetch", {"url": "https://example.com"})
+
+    @patch("subprocess.run")
+    def test_invoke_agent_non_json_response(self, mock_run, client):
+        """Agent may return plain text."""
+        mock_run.return_value = _make_subprocess_result(
+            stdout="Plain text response from agent",
+        )
+
+        result = client.invoke_tool("web_search", {"query": "test"})
+        assert result["ok"] is True
+        assert result["result"] == "Plain text response from agent"
+
+    @patch("subprocess.run")
+    def test_invoke_cron(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({"response": "job scheduled"}),
+        )
+
+        result = client.invoke_tool("cron", {"action": "list"})
+        assert result["ok"] is True
 
 
 class TestOpenClawClientHealth:
     """Tests for health_check()."""
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_health_check_success(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 200
-        mock_post.return_value = resp
+    @patch("subprocess.run")
+    @patch("shutil.which", return_value="/usr/bin/openclaw")
+    def test_health_check_success(self, mock_which, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout="ok\n"),
+        )
         assert client.health_check() is True
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_health_check_failure(self, mock_post, client):
-        import requests as req
-        mock_post.side_effect = req.ConnectionError("refused")
+    @patch("subprocess.run")
+    @patch("shutil.which", return_value="/usr/bin/openclaw")
+    def test_health_check_failure(self, mock_which, mock_run, client):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="openclaw", timeout=10)
         assert client.health_check() is False
 
-    def test_health_check_no_token(self):
-        c = OpenClawClient(token="")
+    @patch("shutil.which", return_value=None)
+    def test_health_check_no_binary(self, mock_which):
+        c = OpenClawClient(openclaw_bin="openclaw")
         assert c.health_check() is False
 
-    @patch("agent_core.effector.openclaw_client.requests.post")
-    def test_health_check_server_error(self, mock_post, client):
-        resp = Mock()
-        resp.status_code = 500
-        mock_post.return_value = resp
+    @patch("subprocess.run")
+    @patch("shutil.which", return_value="/usr/bin/openclaw")
+    def test_health_check_cli_error(self, mock_which, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(returncode=1, stderr="error")
         assert client.health_check() is False
 
 
@@ -300,9 +458,32 @@ class TestOpenClawClientStats:
     def test_initial_stats(self, client):
         stats = client.get_stats()
         assert stats["total_calls"] == 0
-        assert stats["base_url"] == "http://test-gateway:18789"
-        assert stats["token_configured"] is True
+        assert stats["node_name"] == "test-node"
         assert stats["last_error"] is None
+
+
+class TestOpenClawClientHelpers:
+    """Tests for internal helper methods."""
+
+    def test_escape_shell_quotes(self):
+        assert OpenClawClient._escape_shell("it's a test") == "it'\\''s a test"
+
+    def test_escape_shell_normal(self):
+        assert OpenClawClient._escape_shell("hello world") == "hello world"
+
+    def test_build_agent_message_web_fetch(self, client):
+        msg = client._build_agent_message("web_fetch", {"url": "https://example.com"})
+        assert "https://example.com" in msg
+
+    def test_build_agent_message_web_search(self, client):
+        msg = client._build_agent_message("web_search", {"query": "test", "count": 3})
+        assert "test" in msg
+        assert "3" in msg
+
+    def test_build_agent_message_message(self, client):
+        msg = client._build_agent_message("message", {"content": "hi", "channel": "telegram"})
+        assert "telegram" in msg
+        assert "hi" in msg
 
 
 # ============================================================
