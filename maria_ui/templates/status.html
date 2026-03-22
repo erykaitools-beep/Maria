@@ -42,20 +42,8 @@
       <span class="mo-metric__label">System Uptime</span>
       <span class="mo-metric__value" id="sysUptimeSys">--</span>
     </div>
-    <div class="mo-alerts" id="sysAlerts">
-      <div class="mo-alert-count mo-alert-count--critical">
-        <span class="mo-alert-count__num" id="alertCritical">0</span>
-        <span class="mo-alert-count__label">CRIT</span>
-      </div>
-      <div class="mo-alert-count mo-alert-count--alert">
-        <span class="mo-alert-count__num" id="alertAlert">0</span>
-        <span class="mo-alert-count__label">ALERT</span>
-      </div>
-      <div class="mo-alert-count mo-alert-count--warning">
-        <span class="mo-alert-count__num" id="alertWarning">0</span>
-        <span class="mo-alert-count__label">WARN</span>
-      </div>
-    </div>
+    <!-- Alert counters removed: homeostasis does not persist alert events to JSONL,
+         so these always showed 0. Will re-add when alert persistence is implemented. -->
   </section>
 
   <!-- B. Models / Routing -->

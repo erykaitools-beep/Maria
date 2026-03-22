@@ -71,11 +71,7 @@
     M.$('sysUptimeSys').textContent = M.fmtUptime(sys.uptime.system_sec);
 
     // Alerts
-    if (homeo && homeo.alerts) {
-      M.$('alertCritical').textContent = homeo.alerts.CRITICAL || 0;
-      M.$('alertAlert').textContent = homeo.alerts.ALERT || 0;
-      M.$('alertWarning').textContent = homeo.alerts.WARNING || 0;
-    }
+    // Alert counters removed: homeostasis does not persist alerts to JSONL
   }
 
   function updateMetricBar(valueId, barId, value, unit, warnT, errorT, subtitle) {
