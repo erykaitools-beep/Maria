@@ -59,6 +59,10 @@ DEFAULT_SAFETY_PROFILES: Dict[str, SafetyProfile] = {
         SafetyMode.AUDIT_ONLY, Reversibility.PARTIALLY_REVERSIBLE,
         EffectType.EXTERNAL_API, True, True,
     ),
+    "self_analyze": SafetyProfile(
+        SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
+        EffectType.CONFIGURATION, True, True,  # K12: creates goals + topic hints
+    ),
 }
 
 # Safe-by-default profile for unknown action types

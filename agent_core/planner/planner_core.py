@@ -90,6 +90,7 @@ class PlannerCore:
         self._meta_cognition = None
         self._action_safety = None
         self._experiment_system = None
+        self._self_analysis = None
 
         # Load persisted state
         self._load_state()
@@ -144,6 +145,11 @@ class PlannerCore:
     def set_openclaw_client(self, client) -> None:
         """Set OpenClaw client for EFFECTOR actions (ADR-016)."""
         self.executor.set_openclaw_client(client)
+
+    def set_self_analysis(self, sa) -> None:
+        """Set K12 SelfAnalysis for cognitive loop."""
+        self._self_analysis = sa
+        self.executor.set_self_analysis(sa)
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -232,6 +238,11 @@ class PlannerCore:
 
         # -- STEP 5: EVALUATE as fallback (no actionable goals) --
         plan = self._maybe_evaluate(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # K12: Self-analysis (after evaluation, before giving up)
+        plan = self._maybe_self_analyze(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -370,6 +381,64 @@ class PlannerCore:
                 action_type=ActionType.EVALUATE,
                 action_params={"period_hours": since_eval / 3600.0},
             )
+        return None
+
+    # K12: Self-analysis trigger
+    SELF_ANALYSIS_INTERVAL_SEC = 86400  # 24h default
+
+    def _maybe_self_analyze(self, context: Dict) -> Optional[Plan]:
+        """
+        Check if K12 self-analysis should trigger.
+
+        Triggers when:
+        - Cooldown expired (24h)
+        - K9 signals needs_human()
+        - Retention rate dropped below 0.3 in two consecutive reports
+        """
+        if self._self_analysis is None:
+            return None
+
+        now = time.time()
+        since_analysis = now - self._state.last_self_analysis_ts
+
+        # Absolute minimum cooldown: 1h
+        if since_analysis < 3600:
+            return None
+
+        trigger = False
+        trigger_reason = ""
+
+        # Periodic trigger
+        if since_analysis >= self.SELF_ANALYSIS_INTERVAL_SEC:
+            trigger = True
+            trigger_reason = "periodic"
+
+        # K9 needs_human trigger
+        if not trigger and self._meta_cognition and hasattr(self._meta_cognition, "needs_human"):
+            try:
+                if self._meta_cognition.needs_human():
+                    trigger = True
+                    trigger_reason = "k9_needs_human"
+            except Exception:
+                pass
+
+        # Low retention trigger
+        if not trigger:
+            retention = context.get("retention_rate")
+            if retention is not None and retention < 0.3:
+                trigger = True
+                trigger_reason = "low_retention"
+
+        if trigger:
+            self._state.last_self_analysis_ts = now
+            logger.info(f"[K12] Self-analysis triggered: {trigger_reason}")
+            return create_plan(
+                goal_id=None,
+                goal_description=f"K12 Self-analysis ({trigger_reason})",
+                action_type=ActionType.SELF_ANALYZE,
+                action_params={"trigger": trigger_reason, "period_days": 7},
+            )
+
         return None
 
     # -- Internal: goal selection ---------------------------

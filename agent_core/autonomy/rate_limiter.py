@@ -22,6 +22,7 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "maintenance": 10,
     "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
     "effector": 10,   # OpenClaw: max 10 tool invocations per hour
+    "self_analyze": 2,  # K12: max 2 per hour (practically 1/day via planner cooldown)
 }
 
 # Sliding window size

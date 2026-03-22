@@ -31,6 +31,7 @@ class ActionType(Enum):
     FETCH = "fetch"              # Fetch web content (agent_core/web_source/)
     EXPERIMENT = "experiment"    # K11: Run parameter experiment
     EFFECTOR = "effector"        # Execute via OpenClaw tools (ADR-016)
+    SELF_ANALYZE = "self_analyze"  # K12: Self-analysis cognitive loop
 
 
 @dataclass
@@ -120,6 +121,7 @@ class PlannerState:
     last_cycle_tick: int = 0
     last_evaluation_ts: float = 0.0        # Last EvaluationObserver report
     last_recommendation_ts: float = 0.0    # Last acted-on recommendation
+    last_self_analysis_ts: float = 0.0     # K12: Last self-analysis cycle
     total_cycles: int = 0
     total_plans_executed: int = 0
     current_plan_id: Optional[str] = None
@@ -129,6 +131,7 @@ class PlannerState:
             "last_cycle_tick": self.last_cycle_tick,
             "last_evaluation_ts": self.last_evaluation_ts,
             "last_recommendation_ts": self.last_recommendation_ts,
+            "last_self_analysis_ts": self.last_self_analysis_ts,
             "total_cycles": self.total_cycles,
             "total_plans_executed": self.total_plans_executed,
             "current_plan_id": self.current_plan_id,
@@ -140,6 +143,7 @@ class PlannerState:
             last_cycle_tick=d.get("last_cycle_tick", 0),
             last_evaluation_ts=d.get("last_evaluation_ts", 0.0),
             last_recommendation_ts=d.get("last_recommendation_ts", 0.0),
+            last_self_analysis_ts=d.get("last_self_analysis_ts", 0.0),
             total_cycles=d.get("total_cycles", 0),
             total_plans_executed=d.get("total_plans_executed", 0),
             current_plan_id=d.get("current_plan_id"),

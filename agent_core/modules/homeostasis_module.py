@@ -300,6 +300,33 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"OpenClaw not initialized: {e}")
 
+                # K12 Self-Analysis (cognitive loop)
+                try:
+                    from agent_core.self_analysis import SelfAnalysis
+                    sa = SelfAnalysis(project_root=str(project_root))
+
+                    # Wire LLM function: use router.ask_as_role if available
+                    _brain = ctx.brain
+                    if hasattr(_brain, "ask_as_role"):
+                        sa.set_llm_fn(
+                            lambda prompt: _brain.ask_as_role("planner", prompt)
+                        )
+                    elif hasattr(_brain, "_ask_once"):
+                        sa.set_llm_fn(
+                            lambda prompt: _brain._ask_once(prompt, temperature=0.3)
+                        )
+
+                    if ctx.goal_store:
+                        sa.set_goal_store(ctx.goal_store)
+                    if ctx.world_model:
+                        sa.set_world_model(ctx.world_model)
+
+                    planner.set_self_analysis(sa)
+                    ctx.self_analysis = sa
+                    print("[Homeostasis] [OK] SelfAnalysis wired (K12)")
+                except Exception as e:
+                    logger.debug(f"SelfAnalysis not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

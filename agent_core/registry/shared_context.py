@@ -42,6 +42,7 @@ class SharedContext:
     experiment_system: Any = None    # ExperimentSystem (Kontrakt K11)
     model_scheduler: Any = None      # ModelScheduler (multi-organ model stack)
     openclaw_client: Any = None      # OpenClawClient (effector, ADR-016)
+    self_analysis: Any = None        # SelfAnalysis (K12, cognitive loop)
 
     # REPL state
     last_result: Any = None

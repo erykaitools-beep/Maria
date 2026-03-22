@@ -35,6 +35,7 @@ class ActionExecutor:
         self._knowledge_analyzer = None
         self._experiment_system = None
         self._openclaw_client = None
+        self._self_analysis = None
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -63,6 +64,10 @@ class ActionExecutor:
     def set_openclaw_client(self, client) -> None:
         """Set OpenClaw client for EFFECTOR actions (ADR-016)."""
         self._openclaw_client = client
+
+    def set_self_analysis(self, sa) -> None:
+        """Set SelfAnalysis for K12 cognitive loop."""
+        self._self_analysis = sa
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
@@ -94,6 +99,8 @@ class ActionExecutor:
                 result = self._exec_experiment(plan)
             elif action == ActionType.EFFECTOR:
                 result = self._exec_effector(plan)
+            elif action == ActionType.SELF_ANALYZE:
+                result = self._exec_self_analyze(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -338,3 +345,29 @@ class ActionExecutor:
                 "tool_name": tool_name,
                 "error": str(e),
             }
+
+    def _exec_self_analyze(self, plan: Plan) -> Dict[str, Any]:
+        """Run K12 self-analysis cycle."""
+        if self._self_analysis is None:
+            return {"success": False, "error": "No self_analysis configured"}
+
+        try:
+            period = plan.action_params.get("period_days", 7)
+            report = self._self_analysis.run_analysis(period_days=period)
+
+            if report.error:
+                return {
+                    "success": False,
+                    "error": report.error,
+                    "report_id": report.report_id,
+                }
+
+            return {
+                "success": True,
+                "report_id": report.report_id,
+                "recommendations": len(report.recommendations),
+                "goals_created": report.goals_created,
+                "duration_ms": report.duration_ms,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
