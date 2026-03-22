@@ -3,6 +3,51 @@
 
 ---
 
+## [2026-03-22] - Sesja 16: Web UI v2 Metaoperator Panel + Learning Fixes
+
+### Added - Web UI v2 Metaoperator Panel
+- **`maria_ui/templates/base.html`** - Jinja2 base template z topbar + blocks
+- **`maria_ui/static/css/maria_ui.css`** - Design system: 28 komponentow, design tokens, dark premium (~900 lines)
+- **`maria_ui/static/js/maria_ui.js`** - Shared utilities: toast (dedup), apiFetch, formatters, socket
+- **`maria_ui/static/js/status.js`** - 8-panel Metaoperator dashboard
+- **`maria_ui/static/js/chat.js`** - WebSocket chat + model badge
+- **`maria_ui/static/js/experiments.js`** - K11 proposals/reports/params
+- **`maria_ui/static/js/architecture.js`** - Force graph + pipeline + data flow
+- 7 nowych data helperow w app.py: _get_models_data, _get_openclaw_data, _get_goals_summary, _get_cognitive_counts, _get_unified_events, _get_memory_integrity_flags, _get_homeostasis_cause, _get_traits_data
+- /api/status/full rozszerzony o: models, openclaw, goals, event_stream, memory.cognitive, memory.integrity, identity.traits, homeostasis.cause
+
+### Changed - Web UI Templates
+- Wszystkie 5 templates przepisane na extends base.html
+- CSS/JS extracted z inline do static/ files
+- status.html: kompletny rewrite -> 8-panel command deck
+- Templates: 3364 -> ~600 linii (reszta w static/)
+
+### Added - Markdown Learning Fallback
+- **`maria_core/learning/learning_agent.py`** - _parse_markdown_to_learning_dict()
+  - Fallback parser: markdown -> dict gdy LLM ignoruje JSON format
+  - Rozpoznaje sekcje (Streszczenie, Kluczowe punkty, Tagi, Pytania)
+  - Parsuje bold, bullet points, numeracje
+- extract_json_from_response() rozszerzony: markdown fences gdziekolwiek + fallback na oryginal
+- format:"json" dodany do call_ollama()
+
+### Fixed - OpenClaw Lightweight Health Check
+- **`agent_core/modules/homeostasis_module.py`** - pgrep zamiast health_check() w init
+- **`maria_ui/app.py`** - pgrep zamiast health_check() w status polling
+- Przyczyna: health_check() ladowal qwen2.5:3b (3GB, 6 CPU cores) przy kazdym pollu/init
+- Efekt: health score spadal z 83% do 60% z powodu saturacji CPU
+
+### Added - Educational Material
+- **`input/edu_modele_jezykowe_role_orkiestracja_v2.txt`** - 12 chunkow, 1500 slow
+  - Modele jezykowe, role, instancje, RAM, routing, fallbacki, OpenClaw, bezpieczenstwo
+  - Maria przyswoila autonomicznie w 17 minut
+
+### Stats
+- 1654 testow passing (zero regresji)
+- +4284 / -3380 linii kodu
+- ADR-017 (Web UI v2), ADR-018 (markdown fallback), ADR-019 (lightweight OpenClaw check)
+
+---
+
 ## [2026-03-01] - Sesja 14: Kontrakty K1-K4 implementacja
 
 ### Added - Warstwa 1: Unified Perception (Kontrakt K1)

@@ -39,15 +39,19 @@
 | **2026-03-22** | OpenClaw LIVE: subprocess client, gateway+node, model separation (qwen2.5:3b) |
 | **2026-03-22** | Model Registry v2: qwen3:8b planner, rule-based triage (benchmark done) |
 | **2026-03-22** | Routing rules: PL+EN keywords, +LEARN/EXAM categories (38%->100% accuracy) |
+| **2026-03-22** | **Web UI v2 Metaoperator Panel** - 8-panel command deck, design system, base template |
+| **2026-03-22** | Markdown learning fallback - Maria parsuje odpowiedzi LLM w dowolnym formacie |
+| **2026-03-22** | OpenClaw lightweight check (pgrep) - fix CPU saturation from health_check |
+| **2026-03-22** | Material edukacyjny o LLM - 12 chunkow, Maria przyswoila autonomicznie |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 |
+| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
 | **Testy** | 1654 passing |
-| **Faza** | Multi-model stack operational, materialy edukacyjne next |
+| **Faza** | Metaoperator Panel live, analiza logow nauki, UI polish next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -92,7 +96,7 @@ project/
 │   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1634 tests
+│   └── tests/           # 1654 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -345,25 +349,34 @@ Szczegoly: `docs/MODEL_REGISTRY.md`, `docs/CODE_AGENT_SPEC.md` (legacy)
 - [x] **Sprint 4:** Panel statusu (`/status`) - RAM, CPU, Disk, Homeostasis, Memory stats
 - [x] **Sprint 5:** Proaktywne powiadomienia (toast notifications, auto-alerty)
 
-### Nowa struktura `maria_ui/`:
+### Struktura `maria_ui/` (v2 - Metaoperator Panel, 2026-03-22):
 ```
 maria_ui/
-├── __init__.py
-├── app.py              # Flask + SocketIO + notifications
+├── app.py              # Flask + SocketIO + 7 data helpers + notifications
 ├── config.py           # PIN, rate limits, paths
 ├── requirements.txt    # flask, flask-socketio, psutil
+├── static/
+│   ├── css/
+│   │   └── maria_ui.css    # Design system (tokens, 28 components, ~900 lines)
+│   └── js/
+│       ├── maria_ui.js     # Shared utilities (toast, fetch, format, socket)
+│       ├── status.js       # 8-panel Metaoperator dashboard
+│       ├── chat.js         # WebSocket chat + model badge
+│       ├── experiments.js  # K11 proposals/reports/params
+│       └── architecture.js # Force graph + pipeline + data flow
 └── templates/
-    ├── login.html      # PIN authentication
-    ├── index.html      # Chat interface + toasts
-    └── status.html     # Full dashboard
+    ├── base.html           # Jinja2 base (topbar, blocks, shared assets)
+    ├── login.html          # PIN auth (extends base, no topbar)
+    ├── index.html          # Chat (extends base)
+    ├── status.html         # 8-panel command deck (extends base)
+    ├── experiments.html    # K11 experiment UI (extends base)
+    └── architecture.html   # Interactive map (extends base, fullbleed)
 ```
 
 ### Uruchomienie Web UI:
 ```bash
-cd "C:\MariaLocal\Moja AI. Maria Ver.4"
-pip install -r maria_ui/requirements.txt
 python run_ui.py
-# Otworz http://localhost:5000 (PIN: 1234)
+# -> http://192.168.178.32:5000 (PIN z .env)
 ```
 
 ## Sesja 2026-02-01 (3/3) - Introspection + Cleanup
@@ -388,26 +401,24 @@ Usunieto:
 - `nul` - pusty plik
 - `futures/` - pusty folder
 
-## Nastepne kroki (2026-03-21)
+## Nastepne kroki (2026-03-22)
 
-### DONE: Cognitive Core K1-K11 (2026-03-21)
-- [x] K1-K5.1: Perception, Sandbox, Goals, Evaluation, Planner, Topic-Aware Learning
-- [x] K6 World Model (69 testow) + K7 Autonomy Policy (45 testow)
-- [x] K8 Deliberation (49 testow) + K9 Meta-Cognition (73 testy)
-- [x] K10 Action Safety (52 testy) + K11 Experiment System (67 testow)
-- [x] Storage Manager + 6TB disk
-- [x] Architecture Map (Web UI /architecture)
-- [x] Model Registry + Deployment Order (docs)
-- [x] OpenClaw research (tools/invoke potwierdzone)
-- [x] Multi-day stability test (K1-K11 on production) - 2 dni stabilne logi
-- [x] ModelScheduler implementation (75 testow) - load/unload, RAM guard, mutex, idle timeout
-- [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
+### DONE: Cognitive Core + Infrastructure
+- [x] K1-K11: Pelny cognitive core (1654 testow)
+- [x] ModelScheduler + Model Registry v2 (75 testow)
+- [x] OpenClaw LIVE: subprocess client, gateway+node (67 testow)
+- [x] Web UI v2 Metaoperator Panel - 8 paneli, design system, base template
+- [x] Markdown learning fallback - Maria parsuje markdown od LLM
+- [x] OpenClaw lightweight health check (pgrep zamiast nodes run)
+- [x] Material edukacyjny o LLM (12 chunkow, Maria przyswoila)
+- [x] Model Registry Stage 2: rule-based triage wygral benchmark
 
-### NASTEPNE: Edukacja + kolejne warstwy
-- Material edukacyjny o LLM dla Marii (czeka na wrzucenie do input/)
+### NASTEPNE: Polish + kolejne warstwy
+- Web UI v2 polish (dense mode, sidebar, wizualne poprawki po testach)
+- Analiza logow nauki Marii (jak radzi sobie z materialem o LLM, egzaminy)
+- Semantic memory (nomic-embed-text) - przyszlosc, po walidacji potrzeby
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
-- Semantic memory (nomic-embed-text) - przyszlosc, po walidacji potrzeby
 
 ## Znane problemy
 
@@ -470,6 +481,9 @@ python run_ui.py
 - **ADR-014:** Najpierw mozg, potem zmysly (Vision/Smart Home odlozone do domkniecia cognitive core K6-K10)
 - **ADR-015:** Multi-organ model stack (5 rol, heavy mutex, RAM tiers) zamiast single-model
 - **ADR-016:** OpenClaw jako efektor (tools/invoke bez LLM), Maria jako mozg strategiczny
+- **ADR-017:** Web UI v2 - base template + design tokens + extracted CSS/JS (nie React/Vue)
+- **ADR-018:** Markdown learning fallback - parsuj odpowiedzi LLM w dowolnym formacie (nie wymuszaj JSON)
+- **ADR-019:** OpenClaw lightweight check - pgrep zamiast health_check (nie laduj modelu przy pollingu)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -505,6 +519,7 @@ claude_notes/
   2026-03-21_k11_complete_architecture_map.md
   2026-03-21_openclaw_setup_blocker.md
   2026-03-22_openclaw_live_bugfixes.md
+  2026-03-22_webui_v2_learning_fix.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -785,4 +800,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-22 (OpenClaw LIVE, Model Registry v2, bug fixes, benchmark done, 1654 testow)*
+*Ostatnia aktualizacja: 2026-03-22 (Web UI v2 Metaoperator Panel, markdown learning fallback, OpenClaw lightweight check, 1654 testow)*
