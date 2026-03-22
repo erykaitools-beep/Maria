@@ -108,7 +108,9 @@ def run_fetch_session(
     registry = FetchRegistry(registry_path=registry_path)
     wiki = WikiClient()
     writer = ContentWriter(input_dir=input_dir, fetch_registry=registry)
-    suggester = TopicSuggester(knowledge_analyzer)
+    # Derive project root from input_dir for topic hints (K12)
+    _project_root = str(input_dir.parent) if input_dir else "."
+    suggester = TopicSuggester(knowledge_analyzer, project_root=_project_root)
 
     # Step 1: Get topic suggestions
     suggestions = suggester.suggest_topics(

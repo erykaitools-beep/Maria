@@ -610,6 +610,83 @@ class TestTopicSuggester:
         topics = [s["topic"] for s in suggestions]
         assert "ab" not in topics  # too short (< 3 chars)
 
+    def test_hint_topics_from_file(self, tmp_path):
+        """K12 hints are read from topic_hints.jsonl."""
+        # Write hints file
+        hints_path = tmp_path / "meta_data" / "topic_hints.jsonl"
+        hints_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        with open(hints_path, "w") as f:
+            f.write(json.dumps({"topic": "fizyka kwantowa", "priority": 0.9,
+                                "source": "self_analysis", "consumed": False}) + "\n")
+            f.write(json.dumps({"topic": "chemia organiczna", "priority": 0.7,
+                                "source": "self_analysis", "consumed": False}) + "\n")
+            f.write(json.dumps({"topic": "already done", "priority": 0.5,
+                                "source": "self_analysis", "consumed": True}) + "\n")
+
+        analyzer = _make_mock_analyzer(topic_map={"logika": ["f1"]})
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
+        suggestions = suggester.suggest_topics()
+
+        # Hints should come first, consumed hints skipped
+        topics = [s["topic"] for s in suggestions]
+        assert topics[0] == "fizyka kwantowa"  # highest priority hint
+        assert "chemia organiczna" in topics
+        assert "already done" not in topics
+
+        # Strategy should be "hint"
+        hint_suggestions = [s for s in suggestions if s["strategy"] == "hint"]
+        assert len(hint_suggestions) == 2
+
+    def test_hint_topics_empty_file(self, tmp_path):
+        """No hints file = no hint suggestions."""
+        analyzer = _make_mock_analyzer(topic_map={"logika": ["f1", "f2"]})
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
+        suggestions = suggester.suggest_topics()
+
+        hint_suggestions = [s for s in suggestions if s["strategy"] == "hint"]
+        assert len(hint_suggestions) == 0
+
+    def test_hint_topics_sorted_by_priority(self, tmp_path):
+        """Hints are sorted by priority (highest first)."""
+        hints_path = tmp_path / "meta_data" / "topic_hints.jsonl"
+        hints_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        with open(hints_path, "w") as f:
+            f.write(json.dumps({"topic": "low prio", "priority": 0.3, "consumed": False}) + "\n")
+            f.write(json.dumps({"topic": "high prio", "priority": 0.95, "consumed": False}) + "\n")
+
+        analyzer = _make_mock_analyzer()
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
+        suggestions = suggester.suggest_topics()
+
+        hints = [s for s in suggestions if s["strategy"] == "hint"]
+        assert hints[0]["topic"] == "high prio"
+
+    def test_mark_hint_consumed(self, tmp_path):
+        """Already-fetched hints are marked consumed."""
+        hints_path = tmp_path / "meta_data" / "topic_hints.jsonl"
+        hints_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        with open(hints_path, "w") as f:
+            f.write(json.dumps({"topic": "fetched topic", "priority": 0.9, "consumed": False}) + "\n")
+
+        analyzer = _make_mock_analyzer()
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
+
+        # Simulate: registry says this topic was already fetched
+        mock_registry = MagicMock()
+        mock_registry.is_topic_fetched = MagicMock(return_value=True)
+
+        suggestions = suggester.suggest_topics(fetch_registry=mock_registry)
+        hint_suggestions = [s for s in suggestions if s["strategy"] == "hint"]
+        assert len(hint_suggestions) == 0  # skipped because already fetched
+
+        # Verify hint was marked consumed in file
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["consumed"] is True
+
 
 # ══════════════════════════════════════════════════════
 # Integration: run_fetch_session
