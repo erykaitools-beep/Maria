@@ -35,15 +35,19 @@
 | **2026-03-21** | OpenClaw research - potwierdzona integracja jako efektor (tools/invoke bez LLM) |
 | **2026-03-21** | ModelScheduler - multi-organ model stack infrastructure (75 testow) |
 | **2026-03-21** | OpenClaw Effector Client - HTTP client + planner integration (47 testow) |
+| **2026-03-22** | Bug fixes: TeacherAgent stats reset + spaced repetition exam loop |
+| **2026-03-22** | OpenClaw LIVE: subprocess client, gateway+node, model separation (qwen2.5:3b) |
+| **2026-03-22** | Model Registry v2: qwen3:8b planner, rule-based triage (benchmark done) |
+| **2026-03-22** | Routing rules: PL+EN keywords, +LEARN/EXAM categories (38%->100% accuracy) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw Effector |
-| **Testy** | 1634 passing |
-| **Faza** | Efektory deployed, Stage 2 benchmark + OpenClaw install next |
+| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 |
+| **Testy** | 1654 passing |
+| **Faza** | Multi-model stack operational, materialy edukacyjne next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -256,19 +260,20 @@ System archiwizacji logow (w `agent_core/storage/`):
 - **Dysk:** 6TB ext4 "maria-storage" zamontowany na /mnt/storage/
 - **Backup:** 30 kopii zamiast 7
 
-## Model Registry + ModelScheduler (2026-03-21, IMPLEMENTED)
+## Model Registry v2 + ModelScheduler (2026-03-22, DEPLOYED)
 
 Multi-organ local model stack zaimplementowany w `agent_core/llm/`:
 
-- **MODEL-01:** Strategic Planner (qwen2.5:14b, 9GB, cold)
-- **MODEL-02:** Executor (llama3.1:8b, 5GB, warm) - obecny jedyny model
+- **MODEL-01:** Strategic Planner (qwen3:8b, 5.5GB, cold) - upgraded po benchmark
+- **MODEL-02:** Executor (llama3.1:8b, 5GB, warm) - core brain
 - **MODEL-03:** Coder (qwen2.5-coder:7b, 5GB, cold)
-- **MODEL-04:** Triage (TBD 3B, 2-3GB, warm) - czeka na benchmark Stage 2
-- **MODEL-05:** Memory (shared on MODEL-02 by default)
+- **MODEL-04:** Triage = rule-based classifier (0GB, 0.1ms) - LLM przegral benchmark
+- **MODEL-05:** Memory (shared on MODEL-02, future: nomic-embed-text, cold)
 - **MODEL-06:** NIM external API (z-ai/glm5, 0GB, expiry Aug 2026)
-- **Golden rule:** MODEL-02 + MODEL-04 warm, reszta on-demand
+- **OpenClaw:** qwen2.5:3b (2GB, cold) - osobna instancja efektora
+- **Golden rule:** MODEL-02 warm, reszta on-demand
 - **Heavy model mutex:** MODEL-01 i MODEL-03 nigdy jednoczesnie
-- **Deployment:** 7 stage'ow w `docs/DEPLOYMENT_ORDER.md`
+- **Benchmark (2026-03-22):** qwen3:8b > llama3.1:8b na reasoning, rule-based > qwen3:1.7b na triage
 
 ### Implementacja (`agent_core/llm/`):
 - **model_registry.py:** ModelRole(6), ModelSpec (frozen dataclass), statyczny REGISTRY, RAM tiery
@@ -278,21 +283,24 @@ Multi-organ local model stack zaimplementowany w `agent_core/llm/`:
 - **Wiring:** SharedContext.model_scheduler, HomeostasisCore Phase 9.5, auto-register MODEL-02 na starcie
 - **75 testow** (all mocked, zero external deps)
 
-## OpenClaw Effector (2026-03-21, IMPLEMENTED)
+## OpenClaw Effector (2026-03-22, LIVE)
 
-OpenClaw jako efektor pod kontrola Marii (klient zaimplementowany, gateway do zainstalowania):
+OpenClaw jako efektor pod kontrola Marii - **dzialajacy na produkcji**:
 
-- **API:** `POST http://127.0.0.1:18789/tools/invoke` z Bearer token auth
-- **Klient:** `agent_core/effector/openclaw_client.py` - HTTP client z retry, whitelist, validation
+- **Integracja:** Subprocess via `sudo -u deployadmin openclaw` (nie HTTP)
+- **Node tools:** exec, read, write -> `openclaw nodes run --security full --json`
+- **Agent tools:** web_fetch, web_search, message, cron -> `openclaw agent --json`
+- **Klient:** `agent_core/effector/openclaw_client.py` - subprocess client z retry, whitelist
 - **Tool specs:** `agent_core/effector/tool_specs.py` - 7 dozwolonych narzedzi + walidacja args
-- **Dozwolone:** exec, web_fetch, web_search, message, read, write, cron
-- **Zablokowane:** browser (HTTP policy), sessions_spawn, gateway
+- **Model:** qwen2.5:3b (2GB) - osobna instancja, nie koliduje z Maria (llama3.1:8b)
+- **Gateway:** deployadmin, port 18789, loopback, systemd user service
+- **Node:** deployadmin, paired, exec approvals (/bin/*, /usr/bin/*)
+- **Sudoers:** `/etc/sudoers.d/maria-openclaw` - maria -> deployadmin NOPASSWD
 - **Planner:** ActionType.EFFECTOR + _exec_effector() w action_executor.py
 - **K7:** RESTRICTED (wymaga warunkow), rate limit 10/h
 - **K10:** AUDIT_ONLY, EffectType.EXTERNAL_API, snapshots before/after
 - **Wiring:** Graceful fallback - Maria dziala bez OpenClaw, auto-podlacza gdy gateway dostepny
-- **Env vars:** `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`
-- **47 testow** (all mocked HTTP)
+- **67 testow** (all mocked subprocess)
 - **Repo:** github.com/openclaw/openclaw (MIT)
 
 ## Web Content Fetcher (zbudowany 2026-03-08, podlaczony do planner)
@@ -395,11 +403,11 @@ Usunieto:
 - [x] ModelScheduler implementation (75 testow) - load/unload, RAM guard, mutex, idle timeout
 - [ ] Model Registry Stage 2: benchmark MODEL-04 triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
 
-### NASTEPNE: Deployment + kolejne warstwy
-- OpenClaw install na mini PC (npm install -g openclaw, token, .env)
-- Model Registry Stage 2 - benchmark triage candidates (phi3:mini vs qwen2.5:3b vs gemma2:2b)
+### NASTEPNE: Edukacja + kolejne warstwy
+- Material edukacyjny o LLM dla Marii (czeka na wrzucenie do input/)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
+- Semantic memory (nomic-embed-text) - przyszlosc, po walidacji potrzeby
 
 ## Znane problemy
 
@@ -775,4 +783,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-21 (OpenClaw Effector + ModelScheduler deployed, K11, Architecture Map, Storage Manager, 1634 testow)*
+*Ostatnia aktualizacja: 2026-03-22 (OpenClaw LIVE, Model Registry v2, bug fixes, benchmark done, 1654 testow)*
