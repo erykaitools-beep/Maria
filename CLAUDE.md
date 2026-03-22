@@ -503,6 +503,8 @@ claude_notes/
   2026-03-20_k9_k10_complete.md
   2026-03-21_session_bugs_storage_k11.md
   2026-03-21_k11_complete_architecture_map.md
+  2026-03-21_openclaw_setup_blocker.md
+  2026-03-22_openclaw_live_bugfixes.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
