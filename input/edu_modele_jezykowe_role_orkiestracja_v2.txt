@@ -1,0 +1,290 @@
+TEMAT: Modele jezykowe - role, instancje, orkiestracja i bezpieczenstwo
+MATERIAL EDUKACYJNY DLA M.A.R.I.A. v2
+Data: 2026-03-21
+================================================================
+
+CZESC 1: CZYM JEST MODEL JEZYKOWY
+
+Model jezykowy (LLM) to program komputerowy ktory rozumie i generuje tekst.
+Rozne modele maja rozne rozmiary, umiejetnosci i koszty zasobow.
+
+Nie istnieje jeden "najlepszy" model.
+Istnieja modele najlepsze DO KONKRETNEGO ZADANIA.
+
+Przyklad z zycia:
+- Lekarz ogolny rozwiazuje wiele problemow, ale do operacji potrzebujesz chirurga.
+- Chirurg jest lepszy w operacjach, ale wolniejszy i drozszy przy zwyklej konsultacji.
+- Tak samo: duzy model jest lepszy w zlozonym rozumowaniu,
+  ale zajmuje wiecej RAM i jest wolniejszy.
+
+================================================================
+CZESC 2: TRZY WAZNE POJECIA - ROLA, MODEL, INSTANCJA
+
+To sa ROZNE rzeczy i trzeba je rozroznic.
+
+ROLA LOGICZNA = funkcja w architekturze.
+  Co system ma robic? Planowac? Wykonywac? Klasyfikowac?
+  Przyklad: "PLANNER" to rola - system potrzebuje kogos do planowania.
+
+MODEL = konkretna rodzina oprogramowania AI.
+  Jaki program realizuje te role?
+  Przyklad: qwen3:8b to model ktory realizuje role PLANNER.
+
+INSTANCJA RUNTIME = konkretny uruchomiony proces w RAM.
+  Czy ten model jest teraz faktycznie zaladowany i aktywny?
+  Przyklad: qwen3:8b zaladowany do RAM = instancja runtime PLANNER.
+
+DLACZEGO TO WAZNE:
+  Jeden model moze teoretycznie pelniac wiele rol.
+  Ale w praktyce - kazda rola powinna miec OSOBNA instancje runtime.
+  Wspoldzielenie instancji prowadzi do konfliktow RAM i nieprzewidywalnosci.
+
+ZASADA: Separacja instancji = separacja odpowiedzialnosci.
+  Jesli dwie role wspoldzielaja jedna instancje - to jest potencjalny problem.
+  Jesli dwie role maja osobne instancje - mozna je niezaleznie testowac i wymieniac.
+
+================================================================
+CZESC 3: CZYM JEST RAM I DLACZEGO MA ZNACZENIE
+
+RAM (pamiec operacyjna) to przestrzen robocza komputera.
+Kazdy model zajmuje okreslona ilosc RAM gdy jest aktywny.
+
+Przyklad:
+- Masz 32GB RAM.
+- System i M.A.R.I.A. zajmuja 4GB.
+- Model executor (llama3.1:8b) zajmuje 5GB - zawsze aktywny.
+- Zostaje ~23GB dla pozostalych modeli i bufora.
+
+Dlatego M.A.R.I.A. sprawdza RAM przed zaladowaniem kazdego modelu.
+Jesli brak miejsca - model sie nie laduje. To sie nazywa RAM guard.
+
+================================================================
+CZESC 4: ROLE MODELI W M.A.R.I.A.
+
+PLANNER (priorytet P2)
+  Model: qwen3:8b (~5.5GB)
+  Zadanie: Planowanie wieloetapowych dzialan, analiza problemu, strategia.
+  Kiedy uzyc: Gdy problem jest zlozony i wymaga przemyslenia krok po kroku.
+  Tryb: Cold (laduje sie tylko gdy potrzebny, zwalniany po bezczynnosci)
+  Fallback: llama3.1:8b w trybie ograniczonym
+
+EXECUTOR (priorytet P0 - nie ubijac)
+  Model: llama3.1:8b (~5GB)
+  Zadanie: Wykonywanie zadan, odpowiedzi, ogolna praca operacyjna.
+  Kiedy uzyc: Codzienne zadania, rozmowy, proste operacje.
+  Tryb: WARM (zawsze aktywny - ostatnia linia obrony)
+  Fallback: brak (to jest ostatnia linia)
+
+CODER (priorytet P3)
+  Model: qwen2.5-coder:7b (~5GB)
+  Zadanie: Pisanie, analiza i naprawianie kodu programistycznego.
+  Kiedy uzyc: Gdy zadanie dotyczy kodu, skryptow, algorytmow.
+  Tryb: Cold (tylko na zadania kodowania)
+  Fallback: llama3.1:8b bez specjalizacji
+  Uwaga: NIGDY nie dziala rownoczesnie z PLANNER (heavy mutex)
+
+TRIAGE (priorytet P1)
+  Model: qwen3:1.7b (~1.4GB)
+  Zadanie: Szybka klasyfikacja - "do ktorej roli trafi to zadanie?"
+  Kiedy uzyc: Na poczatku kazdego zadania, przed wybraniem glownego modelu.
+  Tryb: Cold lub WARM (bardzo lekki)
+  Fallback: keyword classifier oparty o reguly (rule-based, bez LLM)
+  WAZNE: TRIAGE ma OSOBNA instancje runtime od OpenClaw.
+         Nawet jesli uzywaja podobnego modelu - to sa dwa osobne procesy.
+
+MEMORY (priorytet P0 - nie ubijac)
+  Model: nomic-embed-text (~274MB)
+  Zadanie: Zamiana tekstu na embeddingi dla pamieci semantycznej.
+  Kiedy uzyc: Przy zapisywaniu i wyszukiwaniu w pamieci dlugoterminowej.
+  Tryb: WARM (zawsze dostepny)
+  Fallback: queue/retry (nie ma substytutu embeddingu)
+  UWAGA: Ten model NIE generuje tekstu. Tylko przetwarza znaczenie.
+
+EXTERNAL (priorytet P4)
+  Model: z-ai/glm5 przez NVIDIA NIM API
+  Zadanie: Bardzo trudne zadania wymagajace duzego modelu w chmurze.
+  Kiedy uzyc: Gdy lokalne modele sa niewystarczajace.
+  Tryb: Cloud on-demand
+  Fallback: brak (to jest ostatni fallback)
+
+================================================================
+CZESC 5: OPENCLAW - RECE MARII
+
+OpenClaw to system ktory daje M.A.R.I.A. mozliwosc dzialania w swiecie.
+
+Bez OpenClaw: M.A.R.I.A. mysli, planuje, rozmawia - ale nic nie robi fizycznie.
+Z OpenClaw: M.A.R.I.A. moze wykonywac komendy, wysylac wiadomosci, szukac w sieci.
+
+Narzedzia OpenClaw:
+  exec       - wykonaj komende w systemie
+  web_fetch  - pobierz zawartosc strony internetowej
+  web_search - przeszukaj internet
+  message    - wyslij wiadomosc (Telegram, Slack, Discord)
+  read/write - czytaj i pisz pliki
+  cron       - zaplanuj zadanie na pozniej
+
+KLUCZOWA ZASADA:
+  OpenClaw ma WLASNY model - OSOBNA instancja runtime.
+  OpenClaw NIE wspoldzieli modelu z TRIAGE ani zadna inna rola.
+  OpenClaw model: qwen2.5:3b (~2GB) - priorytet P4
+
+DLACZEGO SEPARACJA JEST KRYTYCZNA:
+  Jesli OpenClaw wspoldzieli instancje z inna rola:
+  - Konflikty RAM podczas jednoczesnego uzywania
+  - Brak mozliwosci niezaleznego testowania
+  - Powrot do problemu wspoldzielonej Ollamy
+  Dlatego: dwie role = dwie osobne instancje. Zawsze.
+
+OPENCLAW TO EFECTOR, NIE ORGAN ZYCIOWY:
+  M.A.R.I.A. zyje i dziala BEZ OpenClaw.
+  OpenClaw jest aktywny TYLKO gdy homeostaza jest OK.
+  Gdy system pod presja RAM - OpenClaw jest ubijany pierwszy (P4).
+
+================================================================
+CZESC 6: POZIOMY AUTONOMII OPENCLAW
+
+OpenClaw ma trzy tryby dzialania.
+Tryb moze tylko DEGRADOWAC automatycznie (homeostaza).
+Tryb moze tylko PODNOSIC operator (Eryk).
+
+OFF
+  OpenClaw jest nieaktywny.
+  Kiedy: homeostaza ponizej progu, brak zgody operatora, presja RAM.
+  M.A.R.I.A. dziala normalnie - OpenClaw nie istnieje dla systemu.
+
+ASSISTED
+  OpenClaw aktywny, ale kazda akcja wymaga potwierdzenia operatora.
+  To jest tryb domyslny przy pierwszym wdrozeniu.
+  Dobry do nauki i weryfikacji zachowania systemu.
+  Limit: 10 akcji na godzine.
+
+AUTONOMOUS-LIMITED
+  OpenClaw moze dzialac bez potwierdzenia w ramach dozwolonych profili.
+  Dozwolone bez pytania: web_fetch, web_search, read (czytanie plikow).
+  Wymaga potwierdzenia: exec (komendy), write (zapis plikow), message (wysylanie).
+  Wszystkie akcje sa logowane (audit log).
+  Limit: 10 akcji na godzine.
+
+================================================================
+CZESC 7: WARM I COLD - STANY MODELI
+
+WARM = model jest zaladowany do RAM, gotowy natychmiast.
+COLD = model nie jest w RAM, musi byc zaladowany (kilka sekund).
+
+Przyklad:
+  Executor jest zawsze WARM - uzywa sie go najczesciej.
+  Planner jest COLD - laduje sie tylko gdy jest potrzebny.
+  Gdy planner skonczy i nie jest uzywany - automatycznie sie zwalnia (idle timeout).
+
+Dlaczego idle timeout jest wazny:
+  Zwalnia RAM dla innych zadan.
+  Homeostasis tick (co 1 sekunde) sprawdza bezczynne modele.
+  Model bezczynny zbyt dlugo = zwolniony z RAM automatycznie.
+
+================================================================
+CZESC 8: PRIORYTETY I UBIJANIE MODELI
+
+Gdy brakuje RAM, modele sa zatrzymywane w kolejnosci od najnizszego priorytetu.
+
+P0 = NIE UBIJAC (core systemu - bez nich M.A.R.I.A. nie dziala)
+  executor (llama3.1:8b)
+  memory (nomic-embed-text)
+
+P1 = Ubijac ostatni z nie-core (moze byc zastapiony ruleami)
+  triage (qwen3:1.7b) - fallback: keyword classifier
+
+P2 = Ubijac przy sredniej presji
+  planner (qwen3:8b) - fallback: executor
+
+P3 = Ubijac wczesnie
+  coder (qwen2.5-coder:7b) - fallback: executor
+
+P4 = Ubijac pierwszy (efektory i chmura)
+  OpenClaw model (qwen2.5:3b)
+  external (NIM cloud)
+
+ZASADA: Im wyzszy numer priorytetu, tym model mniej krytyczny,
+        tym szybciej zostanie zatrzymany gdy brakuje zasobow.
+
+================================================================
+CZESC 9: ROUTING - JAK M.A.R.I.A. WYBIERA MODEL
+
+Krok 1: Zadanie wpada do systemu.
+
+Krok 2: TRIAGE klasyfikuje zadanie.
+  Kategorie: planning / coding / simple_qa / memory_search / tool_use
+  Jesli triage niedostepny -> keyword classifier (rule-based, deterministyczny)
+
+Krok 3: Routing table dopasowuje kategorie do roli.
+  planning       -> PLANNER (qwen3:8b)
+  coding         -> CODER (qwen2.5-coder:7b)
+  simple_qa      -> EXECUTOR (llama3.1:8b)
+  memory_search  -> MEMORY (nomic-embed-text)
+  tool_use       -> OPENCLAW model (qwen2.5:3b)
+
+Krok 4: RAM guard sprawdza dostepna pamiec.
+  Jesli model zmiesci sie -> zaladuj i wykonaj zadanie
+  Jesli brak RAM -> fallback na nizszy model lub czekaj
+
+Krok 5: Heavy mutex sprawdza konflikty.
+  Jesli PLANNER aktywny i chcesz CODER -> czekaj az PLANNER skonczy.
+  PLANNER i CODER NIGDY nie pracuja jednoczesnie.
+
+Krok 6: Wykonaj zadanie. Po idle timeout - zwolnij model z RAM.
+
+================================================================
+CZESC 10: TABELA FALLBACKOW
+
+Jesli glowny model jest niedostepny, system uzywa fallbacku.
+Fallback jest slabszy, ale lepszy niz brak odpowiedzi.
+
+Rola PLANNER:  glowny qwen3:8b | fallback llama3.1:8b (ograniczony)
+Rola EXECUTOR: glowny llama3.1:8b | fallback BRAK (ostatnia linia)
+Rola CODER:    glowny qwen2.5-coder:7b | fallback llama3.1:8b (bez specj.)
+Rola TRIAGE:   glowny qwen3:1.7b | fallback keyword classifier (reguly)
+Rola MEMORY:   glowny nomic-embed-text | fallback queue/retry
+Rola EXTERNAL: glowny z-ai/glm5 | fallback BRAK
+OpenClaw:      glowny qwen2.5:3b | fallback rule-based tool router
+
+================================================================
+CZESC 11: BACKENDY - GDZIE MODELE SIE URUCHAMIAJA
+
+OLLAMA (lokalny)
+  Programy uruchamiane na komputerze M.A.R.I.A.
+  Zalety: prywatnosc, brak kosztow, zawsze dostepny offline.
+  Wady: ograniczony RAM, mniejsze modele niz chmura.
+  Uzycie: domyslne dla wszystkich codziennych zadan.
+
+NVIDIA NIM (chmura)
+  Zewnetrzny serwer w internecie.
+  Zalety: duze modele, wysoka moc obliczeniowa.
+  Wady: koszt za uzycie, wymaga internetu, dane wychodza z sieci lokalnej.
+  Uzycie: tylko fallback premium gdy lokalne modele niewystarczajace.
+
+================================================================
+SLOWNICZEK
+
+LLM              - Large Language Model, duzy model jezykowy
+RAM              - pamiec operacyjna, przestrzen robocza komputera
+Ollama           - lokalny program do uruchamiania modeli AI
+Rola logiczna    - funkcja w architekturze (co system ma robic)
+Model            - tag Ollama / konkretna rodzina AI
+Instancja runtime- konkretny zaladowany proces w RAM
+Backend          - miejsce gdzie model jest uruchomiony
+Routing          - wybieranie wlasciwego modelu do zadania
+Heavy mutex      - zakaz rownoczaesnej pracy dwoch ciezkich modeli
+Idle timeout     - automatyczne zwolnienie nieuzywane modelu z RAM
+RAM guard        - sprawdzenie dostepnej pamieci przed zaladowaniem
+Embedding        - liczby reprezentujace znaczenie tekstu (dla pamieci)
+Efector          - czesc systemu ktora dziala w swiecie (OpenClaw)
+Homeostaza       - stan rownowagi i zdrowia systemu M.A.R.I.A.
+Warm/Cold        - stan modelu: zaladowany w RAM (warm) lub nie (cold)
+Orkiestracja     - zarzadzanie wieloma modelami jak dyrygent orkiestra
+Fallback         - model zastepczy gdy glowny jest niedostepny
+Priorytet        - kolejnosc ubijania modeli gdy brakuje RAM (P0=core)
+Separacja        - zasada ze kazda rola ma osobna instancje runtime
+Triage           - szybka klasyfikacja i routing zadan
+
+================================================================
+KONIEC MATERIALU EDUKACYJNEGO v2
+================================================================

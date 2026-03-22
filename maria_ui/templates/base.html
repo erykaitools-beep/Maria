@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}M.A.R.I.A.{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/maria_ui.css') }}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <div class="mo-toast-container" id="toastContainer"></div>
+
+  {% block topbar %}
+  <nav class="mo-topbar">
+    <div class="mo-topbar__brand">
+      <span class="mo-topbar__logo">M.A.R.I.A.</span>
+      <span class="mo-topbar__version">v2</span>
+    </div>
+    <div class="mo-topbar__nav">
+      <a href="/status" class="mo-topbar__link {% if active_page == 'status' %}mo-topbar__link--active{% endif %}">Status</a>
+      <a href="/" class="mo-topbar__link {% if active_page == 'chat' %}mo-topbar__link--active{% endif %}">Chat</a>
+      <a href="/experiments" class="mo-topbar__link {% if active_page == 'experiments' %}mo-topbar__link--active{% endif %}">Experiments</a>
+      <a href="/architecture" class="mo-topbar__link {% if active_page == 'architecture' %}mo-topbar__link--active{% endif %}">Architecture</a>
+    </div>
+    <div class="mo-topbar__right">
+      <span class="mo-topbar__status" id="topbarStatus"></span>
+      <a href="/logout" class="mo-topbar__link mo-topbar__link--logout">Wyloguj</a>
+    </div>
+  </nav>
+  {% endblock %}
+
+  <div class="mo-page {% block page_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="{{ url_for('static', filename='js/maria_ui.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

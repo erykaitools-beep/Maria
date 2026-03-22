@@ -280,15 +280,23 @@ class HomeostasisModule(MariaModule):
                     logger.debug(f"ExperimentSystem not initialized: {e}")
 
                 # OpenClaw Effector (ADR-016) - optional, graceful fallback
+                # NOTE: Do NOT use openclaw.health_check() here - it triggers
+                # `nodes run -- echo ok` which loads qwen2.5:3b (3GB, 6 CPU cores)
+                # and causes mode transition to REDUCED. Use lightweight pgrep instead.
                 try:
                     from agent_core.effector import OpenClawClient
-                    openclaw = OpenClawClient()
-                    if openclaw.health_check():
+                    import subprocess as _sp
+                    _gw_check = _sp.run(
+                        ["pgrep", "-f", "openclaw.*gateway"],
+                        capture_output=True, timeout=2,
+                    )
+                    if _gw_check.returncode == 0:
+                        openclaw = OpenClawClient()
                         planner.set_openclaw_client(openclaw)
                         ctx.openclaw_client = openclaw
-                        print("[Homeostasis] [OK] OpenClaw effector wired")
+                        print("[Homeostasis] [OK] OpenClaw effector wired (gateway detected)")
                     else:
-                        logger.debug("OpenClaw gateway not reachable, effector disabled")
+                        logger.debug("OpenClaw gateway not running, effector disabled")
                 except Exception as e:
                     logger.debug(f"OpenClaw not initialized: {e}")
 

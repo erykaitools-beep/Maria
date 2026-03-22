@@ -1,1122 +1,321 @@
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>M.A.R.I.A. - Status</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            color: #eee;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            margin-bottom: 20px;
-        }
-
-        .header-left h1 {
-            font-size: 2em;
-            color: #00d4ff;
-            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-        }
-
-        .header-left .subtitle {
-            color: #888;
-            font-size: 0.85em;
-        }
-
-        .header-right {
-            display: flex;
-            gap: 15px;
-        }
-
-        .nav-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            color: #aaa;
-            padding: 8px 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.9em;
-            text-decoration: none;
-            transition: all 0.2s;
-        }
-
-        .nav-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            color: #fff;
-        }
-
-        .nav-btn.primary {
-            background: #00d4ff;
-            color: #000;
-        }
-
-        .nav-btn.primary:hover {
-            background: #00b8e6;
-        }
-
-        /* Dashboard Grid */
-        .dashboard {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
-        }
-
-        .card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 20px;
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .card-title {
-            font-size: 1.1em;
-            color: #00d4ff;
-        }
-
-        .card-badge {
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.75em;
-            font-weight: bold;
-        }
-
-        .badge-ok { background: #00ff88; color: #000; }
-        .badge-warn { background: #ffaa00; color: #000; }
-        .badge-error { background: #ff4444; color: #fff; }
-        .badge-info { background: #6666ff; color: #fff; }
-
-        /* Metrics */
-        .metric-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .metric-row:last-child {
-            border-bottom: none;
-        }
-
-        .metric-label {
-            color: #888;
-            font-size: 0.9em;
-        }
-
-        .metric-value {
-            font-size: 1.1em;
-            font-weight: bold;
-            color: #00d4ff;
-        }
-
-        .metric-value.ok { color: #00ff88; }
-        .metric-value.warn { color: #ffaa00; }
-        .metric-value.error { color: #ff4444; }
-
-        /* Progress bars */
-        .progress-container {
-            margin-top: 5px;
-        }
-
-        .progress-bar {
-            height: 6px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: #00d4ff;
-            transition: width 0.5s ease;
-        }
-
-        .progress-fill.ok { background: #00ff88; }
-        .progress-fill.warn { background: #ffaa00; }
-        .progress-fill.error { background: #ff4444; }
-
-        /* Events list */
-        .events-list {
-            max-height: 250px;
-            overflow-y: auto;
-        }
-
-        .event-item {
-            display: flex;
-            gap: 10px;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            font-size: 0.85em;
-        }
-
-        .event-time {
-            color: #666;
-            min-width: 70px;
-        }
-
-        .event-type {
-            color: #00d4ff;
-            min-width: 100px;
-        }
-
-        .event-details {
-            color: #aaa;
-            flex: 1;
-        }
-
-        /* Mode indicator */
-        .mode-display {
-            text-align: center;
-            padding: 20px;
-        }
-
-        .mode-name {
-            font-size: 2em;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-
-        .mode-ACTIVE { color: #00ff88; }
-        .mode-REDUCED { color: #ffaa00; }
-        .mode-SLEEP { color: #6666ff; }
-        .mode-SURVIVAL { color: #ff4444; }
-
-        .health-score {
-            font-size: 3em;
-            font-weight: bold;
-            color: #00d4ff;
-        }
-
-        .health-label {
-            color: #888;
-            font-size: 0.9em;
-        }
-
-        /* Stats grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            text-align: center;
-        }
-
-        .stat-item {
-            background: rgba(0,0,0,0.2);
-            padding: 15px;
-            border-radius: 10px;
-        }
-
-        .stat-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #00d4ff;
-        }
-
-        .stat-label {
-            font-size: 0.75em;
-            color: #888;
-            margin-top: 5px;
-        }
-
-        /* Alerts summary */
-        .alerts-row {
-            display: flex;
-            gap: 15px;
-            margin-top: 15px;
-        }
-
-        .alert-count {
-            flex: 1;
-            text-align: center;
-            padding: 10px;
-            border-radius: 8px;
-            background: rgba(0,0,0,0.2);
-        }
-
-        .alert-count.critical { border-left: 3px solid #ff4444; }
-        .alert-count.alert { border-left: 3px solid #ffaa00; }
-        .alert-count.warning { border-left: 3px solid #00d4ff; }
-
-        .alert-number {
-            font-size: 1.5em;
-            font-weight: bold;
-        }
-
-        .alert-label {
-            font-size: 0.75em;
-            color: #888;
-        }
-
-        /* Refresh indicator */
-        .refresh-indicator {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.5);
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-size: 0.8em;
-            color: #888;
-        }
-
-        .refresh-dot {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            background: #00ff88;
-            border-radius: 50%;
-            margin-right: 8px;
-            animation: blink 2s infinite;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-
-        /* Proactive Notifications (Toast) */
-        .notification-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            max-width: 350px;
-        }
-
-        .notification-toast {
-            background: rgba(30, 30, 50, 0.95);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            padding: 15px 20px;
-            animation: slideIn 0.3s ease, fadeOut 0.5s ease 4.5s forwards;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            cursor: pointer;
-        }
-
-        .notification-toast.mode_change { border-left: 4px solid #00d4ff; }
-        .notification-toast.warning { border-left: 4px solid #ffaa00; }
-        .notification-toast.alert { border-left: 4px solid #ff4444; }
-        .notification-toast.planner_decision { border-left: 4px solid #aa66ff; }
-
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-
-        @keyframes fadeOut {
-            to { opacity: 0; transform: translateX(100%); }
-        }
-
-        .notification-title {
-            font-weight: bold;
-            font-size: 0.95em;
-            margin-bottom: 5px;
-        }
-
-        .notification-toast.mode_change .notification-title { color: #00d4ff; }
-        .notification-toast.warning .notification-title { color: #ffaa00; }
-        .notification-toast.alert .notification-title { color: #ff4444; }
-        .notification-toast.planner_decision .notification-title { color: #aa66ff; }
-
-        .notification-message {
-            color: #ccc;
-            font-size: 0.85em;
-        }
-
-        /* Mobile */
-        @media (max-width: 768px) {
-            .dashboard {
-                grid-template-columns: 1fr;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            header {
-                flex-direction: column;
-                gap: 15px;
-                text-align: center;
-            }
-        }
-
-        /* Scrollbar */
-        .events-list::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .events-list::-webkit-scrollbar-track {
-            background: rgba(255,255,255,0.05);
-        }
-
-        .events-list::-webkit-scrollbar-thumb {
-            background: rgba(0,212,255,0.3);
-            border-radius: 2px;
-        }
-    </style>
-</head>
-<body>
-    <!-- Notification Container -->
-    <div class="notification-container" id="notificationContainer"></div>
-
-    <div class="container">
-        <header>
-            <div class="header-left">
-                <h1>M.A.R.I.A. Status</h1>
-                <p class="subtitle">Panel monitorowania systemu</p>
-            </div>
-            <div class="header-right">
-                <a href="/" class="nav-btn primary">Chat</a>
-                <a href="/experiments" class="nav-btn">Experiments</a>
-                <a href="/architecture" class="nav-btn">Architecture</a>
-                <a href="/logout" class="nav-btn">Wyloguj</a>
-            </div>
-        </header>
-
-        <div class="dashboard">
-            <!-- System Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">System</span>
-                    <span class="card-badge badge-ok" id="systemBadge">OK</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">RAM</span>
-                    <span class="metric-value" id="ramValue">-</span>
-                </div>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="ramBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">CPU</span>
-                    <span class="metric-value" id="cpuValue">-</span>
-                </div>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="cpuBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Dysk</span>
-                    <span class="metric-value" id="diskValue">-</span>
-                </div>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="diskBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Uptime UI</span>
-                    <span class="metric-value" id="uptimeUi">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Uptime System</span>
-                    <span class="metric-value" id="uptimeSystem">-</span>
-                </div>
-            </div>
-
-            <!-- Homeostasis Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Homeostasis</span>
-                    <span class="card-badge" id="homeostasisBadge">-</span>
-                </div>
-
-                <div class="mode-display">
-                    <div class="mode-name mode-ACTIVE" id="modeName">ACTIVE</div>
-                    <div class="health-score" id="healthScore">100%</div>
-                    <div class="health-label">Health Score</div>
-                </div>
-
-                <div class="alerts-row">
-                    <div class="alert-count critical">
-                        <div class="alert-number" id="alertCritical">0</div>
-                        <div class="alert-label">CRITICAL</div>
-                    </div>
-                    <div class="alert-count alert">
-                        <div class="alert-number" id="alertAlert">0</div>
-                        <div class="alert-label">ALERT</div>
-                    </div>
-                    <div class="alert-count warning">
-                        <div class="alert-number" id="alertWarning">0</div>
-                        <div class="alert-label">WARNING</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Brain Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Brain (LLM)</span>
-                    <span class="card-badge" id="brainBadge">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Model</span>
-                    <span class="metric-value" id="brainModel">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Historia chatu</span>
-                    <span class="metric-value" id="brainHistory">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Wywolan API</span>
-                    <span class="metric-value" id="brainCalls">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Zapisanych rozmow</span>
-                    <span class="metric-value" id="chatLogs">-</span>
-                </div>
-            </div>
-
-            <!-- NIM Token Budget Card -->
-            <div class="card" id="nimCard">
-                <div class="card-header">
-                    <span class="card-title">NIM API / Token Budget</span>
-                    <span class="card-badge" id="nimBadge">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Backend</span>
-                    <span class="metric-value" id="nimBackend">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Model NIM</span>
-                    <span class="metric-value" id="nimModel">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Tokeny dzis</span>
-                    <span class="metric-value" id="nimDailyValue">-</span>
-                </div>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill ok" id="nimDailyBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Tokeny miesiac</span>
-                    <span class="metric-value" id="nimMonthlyValue">-</span>
-                </div>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill ok" id="nimMonthlyBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="stats-grid" style="margin-top: 15px;">
-                    <div class="stat-item">
-                        <div class="stat-value" id="nimCalls">0</div>
-                        <div class="stat-label">NIM calls</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="nimOllamaCalls">0</div>
-                        <div class="stat-label">Ollama calls</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="nimFallbacks">0</div>
-                        <div class="stat-label">Fallbacks</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Identity / Consciousness Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Tozsamosc</span>
-                    <span class="card-badge" id="identityBadge">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Imie</span>
-                    <span class="metric-value" id="identityName">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Urodziny</span>
-                    <span class="metric-value" id="identityBirth">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Sesja</span>
-                    <span class="metric-value" id="identitySession">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Calkowity uptime</span>
-                    <span class="metric-value" id="identityUptime">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Restartow</span>
-                    <span class="metric-value" id="identityRestarts">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Operator</span>
-                    <span class="metric-value" id="identityUser">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Samopoczucie</span>
-                    <span class="metric-value" id="identityFeeling" style="font-size: 0.9em; color: #ccc;">-</span>
-                </div>
-            </div>
-
-            <!-- Planner Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Planner</span>
-                    <span class="card-badge" id="plannerBadge">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Cykle</span>
-                    <span class="metric-value" id="plannerCycles">0</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Wykonane plany</span>
-                    <span class="metric-value" id="plannerPlans">0</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Ostatnia akcja</span>
-                    <span class="metric-value" id="plannerAction">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Czas</span>
-                    <span class="metric-value" id="plannerTime" style="font-size: 0.9em;">-</span>
-                </div>
-
-                <div class="metric-row">
-                    <span class="metric-label">Komunikat</span>
-                    <span class="metric-value" id="plannerMessage" style="font-size: 0.85em; color: #ccc;">-</span>
-                </div>
-            </div>
-
-            <!-- Memory Card -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Pamiec Marii</span>
-                    <span class="card-badge badge-info">MEMORY</span>
-                </div>
-
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <div class="stat-value" id="memNodes">0</div>
-                        <div class="stat-label">Wezly grafu</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="memEdges">0</div>
-                        <div class="stat-label">Polaczenia</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="memKnowledge">0</div>
-                        <div class="stat-label">Pliki wiedzy</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="memLongterm">0</div>
-                        <div class="stat-label">Longterm</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="memGraphSize">0</div>
-                        <div class="stat-label">Graf (KB)</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="memTotalSize">0</div>
-                        <div class="stat-label">Total (KB)</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Learning Queue Card (full width) -->
-            <div class="card" style="grid-column: 1 / -1;" id="learningCard">
-                <div class="card-header">
-                    <span class="card-title">Kolejka nauki</span>
-                    <span class="card-badge badge-info" id="learningBadge">-</span>
-                </div>
-
-                <div class="stats-grid" style="margin-bottom: 15px;">
-                    <div class="stat-item">
-                        <div class="stat-value ok" id="lqCompleted">0</div>
-                        <div class="stat-label">Ukonczone</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" style="color:#00d4ff" id="lqLearning">0</div>
-                        <div class="stat-label">W trakcie</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="lqNew">0</div>
-                        <div class="stat-label">Nowe</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value warn" id="lqHard">0</div>
-                        <div class="stat-label">Trudne</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="lqTotal">0</div>
-                        <div class="stat-label">Razem</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value ok" id="lqPercent">0%</div>
-                        <div class="stat-label">Postep</div>
-                    </div>
-                </div>
-
-                <div class="progress-container" style="margin-bottom: 15px;">
-                    <div class="progress-bar" style="height: 10px;">
-                        <div class="progress-fill ok" id="lqProgressBar" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="events-list" id="lqFilesList" style="max-height: 200px;">
-                    <div class="event-item">
-                        <span class="event-details">Ladowanie...</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Events Card (full width) -->
-            <div class="card" style="grid-column: 1 / -1;">
-                <div class="card-header">
-                    <span class="card-title">Ostatnie wydarzenia</span>
-                    <span class="card-badge badge-info" id="eventsCount">0</span>
-                </div>
-
-                <div class="events-list" id="eventsList">
-                    <div class="event-item">
-                        <span class="event-time">-</span>
-                        <span class="event-type">-</span>
-                        <span class="event-details">Ladowanie...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+{% extends "base.html" %}
+{% block title %}Status - Metaoperator Panel{% endblock %}
+{% block page_class %}mo-page--status{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="mo-dashboard">
+
+  <!-- A. System Overview -->
+  <section class="mo-card mo-panel-system">
+    <div class="mo-sh">
+      <span class="mo-sh__title">System</span>
+      <span class="mo-badge mo-badge--off" id="sysHealthBadge">--</span>
+    </div>
+    <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+      <span class="mo-text-sm mo-secondary">Health</span>
+      <span class="mo-big-value" id="sysHealth">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">RAM</span>
+      <span class="mo-metric__value" id="sysRam">--</span>
+    </div>
+    <div class="mo-progress"><div class="mo-progress__fill mo-progress__fill--ok" id="sysRamBar" style="width:0"></div></div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">CPU</span>
+      <span class="mo-metric__value" id="sysCpu">--</span>
+    </div>
+    <div class="mo-progress"><div class="mo-progress__fill mo-progress__fill--ok" id="sysCpuBar" style="width:0"></div></div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Disk</span>
+      <span class="mo-metric__value" id="sysDisk">--</span>
+    </div>
+    <div class="mo-progress"><div class="mo-progress__fill mo-progress__fill--ok" id="sysDiskBar" style="width:0"></div></div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">UI Uptime</span>
+      <span class="mo-metric__value" id="sysUptimeUi">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">System Uptime</span>
+      <span class="mo-metric__value" id="sysUptimeSys">--</span>
+    </div>
+    <div class="mo-alerts" id="sysAlerts">
+      <div class="mo-alert-count mo-alert-count--critical">
+        <span class="mo-alert-count__num" id="alertCritical">0</span>
+        <span class="mo-alert-count__label">CRIT</span>
+      </div>
+      <div class="mo-alert-count mo-alert-count--alert">
+        <span class="mo-alert-count__num" id="alertAlert">0</span>
+        <span class="mo-alert-count__label">ALERT</span>
+      </div>
+      <div class="mo-alert-count mo-alert-count--warning">
+        <span class="mo-alert-count__num" id="alertWarning">0</span>
+        <span class="mo-alert-count__label">WARN</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- B. Models / Routing -->
+  <section class="mo-card mo-panel-models">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Models / Routing</span>
+      <span class="mo-badge mo-badge--off" id="modelsBadge">--</span>
     </div>
 
-    <div class="refresh-indicator">
-        <span class="refresh-dot"></span>
-        Auto-refresh: <span id="refreshTimer">3</span>s
+    <!-- B1. Active Routing strip -->
+    <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3" style="flex-wrap:wrap;gap:var(--mo-sp-2)">
+      <div class="mo-flex mo-flex-center mo-gap-2">
+        <span class="mo-text-xs mo-muted">Backend:</span>
+        <span class="mo-badge mo-badge--accent" id="modelsBackend">--</span>
+      </div>
+      <div class="mo-flex mo-flex-center mo-gap-2">
+        <span class="mo-text-xs mo-muted">Executor:</span>
+        <span class="mo-opstate mo-opstate--idle" id="modelsExecutorState">IDLE</span>
+      </div>
+      <div class="mo-flex mo-flex-center mo-gap-2">
+        <span class="mo-text-xs mo-muted">Free RAM:</span>
+        <span class="mo-metric__value mo-text-sm" id="modelsFreeRam">--</span>
+      </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
-    <script>
-        // =====================================================================
-        // SOCKET.IO FOR NOTIFICATIONS
-        // =====================================================================
-        const socket = io();
+    <!-- Token budget -->
+    <div class="mo-flex mo-flex-between mo-flex-center mo-text-xs mo-muted">
+      <span>Daily tokens</span><span id="modelsDailyBudget">--</span>
+    </div>
+    <div class="mo-progress mo-progress--inline"><div class="mo-progress__fill mo-progress__fill--accent" id="modelsDailyBar" style="width:0"></div></div>
+    <div class="mo-flex mo-flex-between mo-flex-center mo-text-xs mo-muted mo-mt-2">
+      <span>Monthly tokens</span><span id="modelsMonthlyBudget">--</span>
+    </div>
+    <div class="mo-progress mo-progress--inline"><div class="mo-progress__fill mo-progress__fill--accent" id="modelsMonthlyBar" style="width:0"></div></div>
 
-        socket.on('proactive_notification', (data) => {
-            console.log('Notification received:', data);
-            showToastNotification(data);
+    <!-- B2. Model list -->
+    <div class="mo-mt-3 mo-text-xs mo-muted" style="margin-bottom:var(--mo-sp-2)">LOADED / AVAILABLE</div>
+    <div id="modelsList">
+      <!-- Populated by JS -->
+    </div>
 
-            // Refresh data immediately on mode change
-            if (data.type === 'mode_change') {
-                fetchStatus();
-            }
-        });
+    <!-- B3. Fallback chain -->
+    <div class="mo-mt-3 mo-text-xs mo-muted" style="margin-bottom:var(--mo-sp-1)">FALLBACK CHAIN</div>
+    <div class="mo-chain" id="modelsFallback">
+      <!-- Populated by JS -->
+    </div>
 
-        function showToastNotification(data) {
-            const container = document.getElementById('notificationContainer');
+    <!-- Mutex -->
+    <div class="mo-metric mo-mt-2">
+      <span class="mo-metric__label">Heavy Mutex</span>
+      <span class="mo-metric__value mo-text-sm" id="modelsMutex">--</span>
+    </div>
+  </section>
 
-            const toast = document.createElement('div');
-            toast.className = `notification-toast ${data.type}`;
-            toast.innerHTML = `
-                <div class="notification-title">${escapeHtml(data.title)}</div>
-                <div class="notification-message">${escapeHtml(data.message)}</div>
-            `;
+  <!-- C. OpenClaw -->
+  <section class="mo-card mo-panel-openclaw">
+    <div class="mo-sh">
+      <span class="mo-sh__title">OpenClaw</span>
+      <span class="mo-badge mo-badge--off" id="clawBadge">--</span>
+    </div>
+    <div class="mo-flex mo-flex-center mo-gap-2 mo-mb-3">
+      <span class="mo-opstate mo-opstate--idle" id="clawState">IDLE</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Model</span>
+      <span class="mo-metric__value mo-text-sm mo-muted">qwen2.5:3b</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Calls</span>
+      <span class="mo-metric__value" id="clawCalls">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Success</span>
+      <span class="mo-metric__value" id="clawSuccess">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Failed</span>
+      <span class="mo-metric__value" id="clawFailed">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Last Error</span>
+      <span class="mo-metric__value mo-text-xs mo-muted mo-truncate" id="clawError" style="max-width:120px">--</span>
+    </div>
+  </section>
 
-            toast.addEventListener('click', () => toast.remove());
-            container.appendChild(toast);
+  <!-- D. Homeostasis -->
+  <section class="mo-card mo-panel-homeo">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Homeostasis</span>
+      <span class="mo-pulse mo-pulse--ok" id="homeoPulse"></span>
+    </div>
+    <div style="text-align:center;margin-bottom:var(--mo-sp-3)">
+      <span class="mo-badge" id="homeoMode" style="font-size:var(--mo-text-lg);padding:4px 16px">--</span>
+      <div class="mo-cause" id="homeoCause">--</div>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Health</span>
+      <span class="mo-metric__value" id="homeoHealth">--</span>
+    </div>
+    <div class="mo-progress"><div class="mo-progress__fill mo-progress__fill--ok" id="homeoHealthBar" style="width:0"></div></div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Mode Changes</span>
+      <span class="mo-metric__value" id="homeoModeChanges">0</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Connected</span>
+      <span class="mo-metric__value" id="homeoConnected">--</span>
+    </div>
+  </section>
 
-            setTimeout(() => {
-                if (toast.parentNode) toast.remove();
-            }, 5000);
+  <!-- E. Planner -->
+  <section class="mo-card mo-panel-planner">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Planner</span>
+      <span class="mo-opstate mo-opstate--idle" id="plannerState">IDLE</span>
+    </div>
+    <div class="mo-flex mo-gap-4 mo-mb-3">
+      <div>
+        <span class="mo-text-xs mo-muted">Cycles</span>
+        <div class="mo-metric__value" id="plannerCycles">0</div>
+      </div>
+      <div>
+        <span class="mo-text-xs mo-muted">Plans</span>
+        <div class="mo-metric__value" id="plannerPlans">0</div>
+      </div>
+      <div>
+        <span class="mo-text-xs mo-muted">Last Decision</span>
+        <div class="mo-metric__value mo-text-sm" id="plannerLastTime">--</div>
+      </div>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Current Action</span>
+      <span class="mo-metric__value mo-text-sm" id="plannerAction">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Message</span>
+      <span class="mo-metric__value mo-text-xs mo-secondary mo-truncate" id="plannerMessage" style="max-width:250px">--</span>
+    </div>
 
-            while (container.children.length > 5) {
-                container.firstChild.remove();
-            }
-        }
+    <!-- Human Gate -->
+    <div class="mo-gate mo-gate--clear" id="plannerGate">
+      <span class="mo-gate__count" id="plannerGateCount">0</span>
+      <div>
+        <div class="mo-text-sm" style="color:var(--mo-accent)">Human Gate</div>
+        <div class="mo-text-xs mo-muted" id="plannerGateLabel">no pending approvals</div>
+      </div>
+    </div>
+  </section>
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
+  <!-- F. Memory -->
+  <section class="mo-card mo-panel-memory">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Memory</span>
+      <span class="mo-badge mo-badge--off" id="memIntegrity">--</span>
+    </div>
+    <div class="mo-stats-grid">
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memNodes">0</div>
+        <div class="mo-stat__label">Graph Nodes</div>
+      </div>
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memEdges">0</div>
+        <div class="mo-stat__label">Graph Edges</div>
+      </div>
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memKnowledge">0</div>
+        <div class="mo-stat__label">Knowledge</div>
+      </div>
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memLongterm">0</div>
+        <div class="mo-stat__label">Longterm</div>
+      </div>
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memBeliefs">0</div>
+        <div class="mo-stat__label">Beliefs</div>
+      </div>
+      <div class="mo-stat">
+        <div class="mo-stat__value" id="memReflections">0</div>
+        <div class="mo-stat__label">Reflections</div>
+      </div>
+    </div>
+    <div class="mo-metric mo-mt-3">
+      <span class="mo-metric__label">Action Audit</span>
+      <span class="mo-metric__value mo-text-sm" id="memAudit">0</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Autonomy Decisions</span>
+      <span class="mo-metric__value mo-text-sm" id="memAutonomy">0</span>
+    </div>
+  </section>
 
-        // =====================================================================
-        // UTILITY FUNCTIONS
-        // =====================================================================
+  <!-- G. Event Stream -->
+  <section class="mo-card mo-panel-events">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Event Stream</span>
+      <span class="mo-badge mo-badge--off" id="eventCount">0</span>
+    </div>
+    <div class="mo-filter" id="eventFilter">
+      <button class="mo-filter__tab mo-filter__tab--active" data-filter="ALL">ALL</button>
+      <button class="mo-filter__tab" data-filter="system">SYSTEM</button>
+      <button class="mo-filter__tab" data-filter="planner">PLANNER</button>
+      <button class="mo-filter__tab" data-filter="homeostasis">HOMEO</button>
+      <button class="mo-filter__tab" data-filter="safety">SAFETY</button>
+      <button class="mo-filter__tab" data-filter="openclaw">CLAW</button>
+      <button class="mo-filter__tab" data-filter="models">MODELS</button>
+    </div>
+    <div class="mo-list" id="eventStream">
+      <!-- Populated by JS -->
+    </div>
+  </section>
 
-        // Utility functions
-        function getColorClass(value, warnThreshold, errorThreshold) {
-            if (value >= errorThreshold) return 'error';
-            if (value >= warnThreshold) return 'warn';
-            return 'ok';
-        }
+  <!-- H. Identity / Operator -->
+  <section class="mo-card mo-panel-identity">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Identity</span>
+      <span class="mo-badge mo-badge--accent">OPERATOR</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Name</span>
+      <span class="mo-metric__value mo-text-sm" id="idName">M.A.R.I.A.</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Born</span>
+      <span class="mo-metric__value mo-text-sm" id="idBorn">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Sessions</span>
+      <span class="mo-metric__value" id="idSessions">0</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Restarts</span>
+      <span class="mo-metric__value" id="idRestarts">0</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Total Uptime</span>
+      <span class="mo-metric__value" id="idUptime">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Operator</span>
+      <span class="mo-metric__value mo-text-sm" id="idOperator">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Feeling</span>
+      <span class="mo-metric__value mo-text-sm mo-secondary" id="idFeeling">--</span>
+    </div>
 
-        function updateMetric(valueId, barId, value, unit, warnThreshold, errorThreshold) {
-            const valueEl = document.getElementById(valueId);
-            const barEl = document.getElementById(barId);
-            const colorClass = getColorClass(value, warnThreshold, errorThreshold);
+    <div class="mo-mt-3 mo-text-xs mo-muted" style="margin-bottom:var(--mo-sp-2)">PERSONALITY</div>
+    <div id="idTraits">
+      <!-- Populated by JS -->
+    </div>
+  </section>
 
-            valueEl.textContent = value.toFixed(1) + (unit || '');
-            valueEl.className = 'metric-value ' + colorClass;
+</div>
 
-            if (barEl) {
-                barEl.style.width = Math.min(value, 100) + '%';
-                barEl.className = 'progress-fill ' + colorClass;
-            }
-        }
+<div class="mo-refresh-bar">
+  <span class="mo-pulse mo-pulse--ok"></span>
+  <span>Auto-refresh: <span id="refreshTimer">3</span>s</span>
+</div>
+{% endblock %}
 
-        // Fetch and update status
-        async function fetchStatus() {
-            try {
-                const response = await fetch('/api/status/full');
-                const data = await response.json();
-
-                // System metrics
-                const sys = data.system;
-                updateMetric('ramValue', 'ramBar', sys.ram.percent, '%', 70, 85);
-                updateMetric('cpuValue', 'cpuBar', sys.cpu.percent, '%', 70, 90);
-                updateMetric('diskValue', 'diskBar', sys.disk.percent, '%', 80, 90);
-
-                document.getElementById('uptimeUi').textContent = sys.uptime.ui_formatted;
-                document.getElementById('uptimeSystem').textContent = sys.uptime.system_formatted;
-
-                // System badge
-                const sysStatus = Math.max(sys.ram.percent, sys.cpu.percent) > 85 ? 'warn' :
-                                  Math.max(sys.ram.percent, sys.cpu.percent) > 70 ? 'ok' : 'ok';
-                const sysBadge = document.getElementById('systemBadge');
-                sysBadge.textContent = sysStatus === 'warn' ? 'WARN' : 'OK';
-                sysBadge.className = 'card-badge badge-' + sysStatus;
-
-                // Homeostasis
-                const homeo = data.homeostasis;
-                const modeName = document.getElementById('modeName');
-                modeName.textContent = homeo.mode;
-                modeName.className = 'mode-name mode-' + homeo.mode;
-
-                document.getElementById('healthScore').textContent =
-                    (homeo.health_score * 100).toFixed(0) + '%';
-
-                document.getElementById('alertCritical').textContent = homeo.alerts.CRITICAL;
-                document.getElementById('alertAlert').textContent = homeo.alerts.ALERT;
-                document.getElementById('alertWarning').textContent = homeo.alerts.WARNING;
-
-                const homeoBadge = document.getElementById('homeostasisBadge');
-                if (homeo.connected) {
-                    homeoBadge.textContent = homeo.mode;
-                    homeoBadge.className = 'card-badge badge-' +
-                        (homeo.mode === 'ACTIVE' ? 'ok' :
-                         homeo.mode === 'REDUCED' ? 'warn' : 'error');
-                } else {
-                    homeoBadge.textContent = 'OFFLINE';
-                    homeoBadge.className = 'card-badge badge-error';
-                }
-
-                // Brain
-                const brain = data.brain;
-                document.getElementById('brainModel').textContent = brain.model;
-                document.getElementById('brainHistory').textContent = brain.history_count + ' msg';
-                document.getElementById('brainCalls').textContent = brain.call_count;
-                document.getElementById('chatLogs').textContent = data.chat_logs_count;
-
-                const brainBadge = document.getElementById('brainBadge');
-                brainBadge.textContent = brain.connected ? 'ONLINE' : 'OFFLINE';
-                brainBadge.className = 'card-badge badge-' + (brain.connected ? 'ok' : 'error');
-
-                // NIM / Token Budget
-                const nim = data.nim;
-                if (nim) {
-                    const nimBadge = document.getElementById('nimBadge');
-                    if (nim.available && nim.backend === 'hybrid') {
-                        nimBadge.textContent = 'HYBRID';
-                        nimBadge.className = 'card-badge badge-ok';
-                    } else if (nim.available) {
-                        nimBadge.textContent = 'NIM';
-                        nimBadge.className = 'card-badge badge-info';
-                    } else {
-                        nimBadge.textContent = 'OLLAMA';
-                        nimBadge.className = 'card-badge badge-warn';
-                    }
-
-                    const backendEl = document.getElementById('nimBackend');
-                    if (nim.backend === 'hybrid') {
-                        backendEl.textContent = 'Hybrid (NIM + Ollama)';
-                        backendEl.className = 'metric-value ok';
-                    } else {
-                        backendEl.textContent = 'Ollama only';
-                        backendEl.className = 'metric-value warn';
-                    }
-
-                    document.getElementById('nimModel').textContent =
-                        nim.nim_model || 'nie skonfigurowany';
-
-                    // Daily budget
-                    const dailyPct = nim.budget.daily_percent;
-                    const dailyUsed = nim.budget.daily_used;
-                    const dailyLimit = nim.budget.daily_limit;
-                    const dailyEl = document.getElementById('nimDailyValue');
-                    if (dailyLimit > 0) {
-                        dailyEl.textContent = dailyUsed.toLocaleString() + ' / ' + dailyLimit.toLocaleString();
-                    } else {
-                        dailyEl.textContent = 'brak limitu';
-                    }
-                    const dailyColor = dailyPct > 90 ? 'error' : dailyPct > 70 ? 'warn' : 'ok';
-                    dailyEl.className = 'metric-value ' + dailyColor;
-                    const dailyBar = document.getElementById('nimDailyBar');
-                    dailyBar.style.width = Math.min(dailyPct, 100) + '%';
-                    dailyBar.className = 'progress-fill ' + dailyColor;
-
-                    // Monthly budget
-                    const monthlyPct = nim.budget.monthly_percent;
-                    const monthlyUsed = nim.budget.monthly_used;
-                    const monthlyLimit = nim.budget.monthly_limit;
-                    const monthlyEl = document.getElementById('nimMonthlyValue');
-                    if (monthlyLimit > 0) {
-                        monthlyEl.textContent = monthlyUsed.toLocaleString() + ' / ' + monthlyLimit.toLocaleString();
-                    } else {
-                        monthlyEl.textContent = 'brak limitu';
-                    }
-                    const monthlyColor = monthlyPct > 90 ? 'error' : monthlyPct > 70 ? 'warn' : 'ok';
-                    monthlyEl.className = 'metric-value ' + monthlyColor;
-                    const monthlyBar = document.getElementById('nimMonthlyBar');
-                    monthlyBar.style.width = Math.min(monthlyPct, 100) + '%';
-                    monthlyBar.className = 'progress-fill ' + monthlyColor;
-
-                    // Routing stats
-                    document.getElementById('nimCalls').textContent = nim.nim_calls;
-                    document.getElementById('nimOllamaCalls').textContent = nim.ollama_calls;
-                    document.getElementById('nimFallbacks').textContent = nim.nim_fallbacks;
-
-                    // Budget status badge color
-                    const budgetStatus = nim.budget.status;
-                    if (budgetStatus === 'DEPLETED') {
-                        nimBadge.textContent = 'DEPLETED';
-                        nimBadge.className = 'card-badge badge-error';
-                    } else if (budgetStatus === 'LOW') {
-                        nimBadge.textContent = 'LOW';
-                        nimBadge.className = 'card-badge badge-warn';
-                    }
-                }
-
-                // Identity / Consciousness
-                const identity = data.identity;
-                if (identity) {
-                    const identityBadge = document.getElementById('identityBadge');
-                    if (identity.available) {
-                        identityBadge.textContent = 'Sesja ' + identity.session_count;
-                        identityBadge.className = 'card-badge badge-ok';
-                    } else {
-                        identityBadge.textContent = 'OFFLINE';
-                        identityBadge.className = 'card-badge badge-error';
-                    }
-
-                    document.getElementById('identityName').textContent =
-                        identity.name || 'M.A.R.I.A.';
-                    document.getElementById('identityBirth').textContent =
-                        identity.birth_date || '-';
-                    document.getElementById('identitySession').textContent =
-                        '#' + (identity.session_count || 0);
-                    document.getElementById('identityUptime').textContent =
-                        (identity.total_uptime_hours || 0).toFixed(1) + 'h';
-                    document.getElementById('identityRestarts').textContent =
-                        identity.restart_count || 0;
-                    document.getElementById('identityUser').textContent =
-                        identity.primary_user || '-';
-                    document.getElementById('identityFeeling').textContent =
-                        identity.feeling || '-';
-                }
-
-                // Planner
-                const planner = data.planner;
-                if (planner) {
-                    const plannerBadge = document.getElementById('plannerBadge');
-                    if (planner.available) {
-                        plannerBadge.textContent = planner.total_plans + ' planow';
-                        plannerBadge.className = 'card-badge badge-ok';
-                    } else {
-                        plannerBadge.textContent = 'CZEKA';
-                        plannerBadge.className = 'card-badge badge-info';
-                    }
-
-                    document.getElementById('plannerCycles').textContent = planner.total_cycles;
-                    document.getElementById('plannerPlans').textContent = planner.total_plans;
-
-                    if (planner.last_decision) {
-                        const d = planner.last_decision;
-                        const actionEl = document.getElementById('plannerAction');
-                        actionEl.textContent = d.action.toUpperCase();
-                        actionEl.className = 'metric-value ' +
-                            (d.success ? 'ok' : d.status === 'failed' ? 'error' : '');
-                        document.getElementById('plannerTime').textContent = d.datetime || '-';
-                        document.getElementById('plannerMessage').textContent = d.message || d.goal || '-';
-                    } else {
-                        document.getElementById('plannerAction').textContent = '-';
-                        document.getElementById('plannerTime').textContent = '-';
-                        document.getElementById('plannerMessage').textContent = 'Jeszcze nie uruchomiony';
-                    }
-                }
-
-                // Memory
-                const mem = data.memory;
-                document.getElementById('memNodes').textContent = mem.semantic_graph.nodes;
-                document.getElementById('memEdges').textContent = mem.semantic_graph.edges;
-                document.getElementById('memKnowledge').textContent = mem.knowledge_index.entries;
-                document.getElementById('memLongterm').textContent = mem.longterm_memory.entries;
-                document.getElementById('memGraphSize').textContent =
-                    mem.semantic_graph.size_kb.toFixed(1);
-
-                const totalSize = mem.semantic_graph.size_kb +
-                                  mem.knowledge_index.size_kb +
-                                  mem.longterm_memory.size_kb;
-                document.getElementById('memTotalSize').textContent = totalSize.toFixed(1);
-
-                // Events
-                const eventsList = document.getElementById('eventsList');
-                const events = homeo.recent_events;
-                document.getElementById('eventsCount').textContent = events.length;
-
-                if (events.length > 0) {
-                    eventsList.innerHTML = events.map(e => `
-                        <div class="event-item">
-                            <span class="event-time">${e.datetime}</span>
-                            <span class="event-type">${e.type}</span>
-                            <span class="event-details">${e.details || '-'}</span>
-                        </div>
-                    `).join('');
-                } else {
-                    eventsList.innerHTML = `
-                        <div class="event-item">
-                            <span class="event-time">-</span>
-                            <span class="event-type">-</span>
-                            <span class="event-details">Brak zarejestrowanych wydarzen</span>
-                        </div>
-                    `;
-                }
-
-                // Learning Queue
-                const lq = data.learning_queue;
-                if (lq && lq.available) {
-                    const total = lq.total || 0;
-                    const done = (lq.completed || 0) + (lq.learned || 0);
-                    const pct = total > 0 ? Math.round(done / total * 100) : 0;
-
-                    document.getElementById('lqCompleted').textContent = done;
-                    document.getElementById('lqLearning').textContent = lq.learning || 0;
-                    document.getElementById('lqNew').textContent = lq.new || 0;
-                    document.getElementById('lqHard').textContent = lq.hard_topic || 0;
-                    document.getElementById('lqTotal').textContent = total;
-                    document.getElementById('lqPercent').textContent = pct + '%';
-                    document.getElementById('lqProgressBar').style.width = pct + '%';
-
-                    const badge = document.getElementById('learningBadge');
-                    badge.textContent = done + '/' + total;
-                    badge.className = 'card-badge badge-' + (pct === 100 ? 'ok' : pct > 0 ? 'info' : 'warn');
-
-                    const STATUS_LABEL = {
-                        'completed': '[DONE]',
-                        'learned':   '[OK]  ',
-                        'learning':  '[TRWA]',
-                        'new':       '[NOWE]',
-                        'hard_topic':'[HARD]',
-                        'exam_failed':'[FAIL]'
-                    };
-                    const STATUS_COLOR = {
-                        'completed': '#00ff88',
-                        'learned':   '#00ff88',
-                        'learning':  '#00d4ff',
-                        'new':       '#aaa',
-                        'hard_topic':'#ffaa00',
-                        'exam_failed':'#ff4444'
-                    };
-
-                    const filesList = document.getElementById('lqFilesList');
-                    if (lq.files && lq.files.length > 0) {
-                        filesList.innerHTML = lq.files.map(f => {
-                            const label = STATUS_LABEL[f.status] || '[?]';
-                            const color = STATUS_COLOR[f.status] || '#aaa';
-                            const score = f.exam_score != null ? ` <span style="color:#888">(${Math.round(f.exam_score*100)}%)</span>` : '';
-                            const chunks = f.total_chunks > 0 ? ` <span style="color:#555">[${f.chunks_learned}/${f.total_chunks}]</span>` : '';
-                            return `<div class="event-item">
-                                <span class="event-type" style="color:${color};min-width:70px">${label}</span>
-                                <span class="event-details">${escapeHtml(f.file)}${score}${chunks}</span>
-                            </div>`;
-                        }).join('');
-                    } else {
-                        filesList.innerHTML = '<div class="event-item"><span class="event-details">Brak plikow w kolejce</span></div>';
-                    }
-                }
-
-            } catch (error) {
-                console.error('Status fetch error:', error);
-            }
-        }
-
-        // Refresh countdown
-        let countdown = 3;
-        function updateCountdown() {
-            countdown--;
-            if (countdown <= 0) {
-                fetchStatus();
-                countdown = 3;
-            }
-            document.getElementById('refreshTimer').textContent = countdown;
-        }
-
-        // Initial fetch
-        fetchStatus();
-
-        // Auto-refresh every second (countdown), fetch every 3 seconds
-        setInterval(updateCountdown, 1000);
-    </script>
-</body>
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/status.js') }}"></script>
+{% endblock %}

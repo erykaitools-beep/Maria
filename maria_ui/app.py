@@ -580,7 +580,7 @@ def logout():
 @require_auth
 def index():
     """Main page - chat interface."""
-    return render_template('index.html')
+    return render_template('index.html', active_page='chat')
 
 
 @app.route('/api/status')
@@ -718,7 +718,7 @@ def api_notify_send():
 @require_auth
 def status_page():
     """Full status dashboard page."""
-    return render_template('status.html')
+    return render_template('status.html', active_page='status')
 
 
 @app.route('/api/status/full')
@@ -900,6 +900,33 @@ def api_status_full():
     # Planner data
     planner_data = _get_planner_data()
 
+    # --- New v2 Metaoperator data ---
+    models_data = _get_models_data()
+    openclaw_data = _get_openclaw_data()
+    goals_data = _get_goals_summary()
+    cognitive_data = _get_cognitive_counts()
+    integrity_data = _get_memory_integrity_flags()
+    event_stream = _get_unified_events(30)
+    traits_data = _get_traits_data()
+
+    # Homeostasis cause (WHY)
+    raw_events = []
+    if HOMEOSTASIS_AVAILABLE:
+        try:
+            raw_events = get_event_logger().get_recent_events(limit=10)
+        except Exception:
+            pass
+    homeostasis_data["cause"] = _get_homeostasis_cause(
+        homeostasis_data.get("mode", "ACTIVE"), raw_events
+    )
+
+    # Extend memory with cognitive counts and integrity
+    memory_data["cognitive"] = cognitive_data
+    memory_data["integrity"] = integrity_data
+
+    # Extend identity with traits
+    identity_data["traits"] = traits_data
+
     return jsonify({
         "timestamp": time.time(),
         "system": {
@@ -932,6 +959,10 @@ def api_status_full():
         "identity": identity_data,
         "memory": memory_data,
         "planner": planner_data,
+        "models": models_data,
+        "openclaw": openclaw_data,
+        "goals": goals_data,
+        "event_stream": event_stream,
         "chat_logs_count": chat_logs_count,
         "introspection": introspection_data,
         "learning_queue": _get_learning_queue()
@@ -1270,6 +1301,366 @@ def _get_memory_stats():
             pass
 
     return stats
+
+
+# =============================================================================
+# NEW DATA HELPERS FOR METAOPERATOR PANEL (v2)
+# =============================================================================
+
+def _get_models_data():
+    """Get model registry specs + scheduler status for Metaoperator Panel."""
+    result = {
+        "registry": [],
+        "scheduler": {
+            "loaded_models": {},
+            "loaded_count": 0,
+            "total_loaded_ram_gb": 0,
+            "free_ram_gb": 0,
+            "ram_pressure_events": 0,
+        },
+    }
+
+    # Registry (static model specs)
+    try:
+        from agent_core.llm.model_registry import list_models
+        for spec in list_models():
+            result["registry"].append({
+                "role": spec.role.value,
+                "model_id": spec.model_id,
+                "ollama_tag": spec.ollama_tag,
+                "ram_estimate_gb": spec.ram_estimate_gb,
+                "warm_state": spec.warm_state.value,
+                "concurrency_class": spec.concurrency_class.value,
+                "fallback_role": spec.fallback_role.value if spec.fallback_role else None,
+                "latency_budget_s": spec.latency_budget_s,
+            })
+    except Exception as e:
+        print(f"[UI] [WARN] Could not read model registry: {e}")
+
+    # Scheduler status (from persisted health file)
+    health_path = PROJECT_ROOT / "meta_data" / "model_health.json"
+    if health_path.exists():
+        try:
+            with open(health_path, 'r', encoding='utf-8') as f:
+                health = json.load(f)
+            result["scheduler"]["ram_pressure_events"] = health.get("ram_pressure_events", 0)
+            models = health.get("models", {})
+            result["scheduler"]["loaded_models"] = models
+            result["scheduler"]["loaded_count"] = len(models)
+            total_ram = sum(
+                m.get("ram_estimate_gb", 0) for m in models.values()
+                if m.get("healthy", True)
+            )
+            result["scheduler"]["total_loaded_ram_gb"] = round(total_ram, 1)
+        except (IOError, json.JSONDecodeError):
+            pass
+
+    # Free RAM from psutil
+    try:
+        result["scheduler"]["free_ram_gb"] = round(
+            psutil.virtual_memory().available / (1024**3), 1
+        )
+    except Exception:
+        pass
+
+    return result
+
+
+# OpenClaw cache
+_openclaw_cache = None
+_openclaw_cache_ts = 0
+_OPENCLAW_CACHE_TTL = 10  # seconds
+
+
+def _get_openclaw_data():
+    """Get OpenClaw effector status.
+
+    Uses lightweight process check instead of full health_check() to avoid
+    loading the OpenClaw agent model (qwen2.5:3b) which consumes 3GB RAM
+    and 6 CPU cores. Full health_check() goes through gateway->node->exec
+    pipeline and keeps the model warm.
+    """
+    global _openclaw_cache, _openclaw_cache_ts
+
+    now = time.time()
+    if _openclaw_cache and (now - _openclaw_cache_ts) < _OPENCLAW_CACHE_TTL:
+        return _openclaw_cache
+
+    result = {
+        "connected": False,
+        "node_name": "maria",
+        "total_calls": 0,
+        "successful_calls": 0,
+        "failed_calls": 0,
+        "last_error": None,
+    }
+
+    # Lightweight check: is the OpenClaw gateway process running?
+    # This avoids triggering model loading via nodes run / agent commands.
+    import subprocess as _sp
+    try:
+        check = _sp.run(
+            ["pgrep", "-f", "openclaw.*gateway"],
+            capture_output=True, timeout=2,
+        )
+        result["connected"] = check.returncode == 0
+    except Exception:
+        pass
+
+    # Stats from client (does NOT trigger subprocess, just returns in-memory counters)
+    try:
+        from agent_core.effector.openclaw_client import OpenClawClient
+        client = OpenClawClient()
+        stats = client.get_stats()
+        result["node_name"] = stats.get("node_name", "maria")
+        result["total_calls"] = stats.get("total_calls", 0)
+        result["successful_calls"] = stats.get("successful_calls", 0)
+        result["failed_calls"] = stats.get("failed_calls", 0)
+        result["last_error"] = stats.get("last_error")
+    except Exception:
+        pass
+
+    _openclaw_cache = result
+    _openclaw_cache_ts = now
+    return result
+
+
+def _get_goals_summary():
+    """Get goal counts from goals.jsonl (MERGE semantics: last record per id wins)."""
+    result = {"active_count": 0, "proposed_count": 0, "completed_count": 0, "total": 0}
+
+    goals_path = PROJECT_ROOT / "meta_data" / "goals.jsonl"
+    if not goals_path.exists():
+        return result
+
+    try:
+        goals_by_id = {}
+        with open(goals_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    g = json.loads(line)
+                    gid = g.get("id") or g.get("goal_id", "")
+                    if gid:
+                        goals_by_id[gid] = g.get("status", "")
+                except json.JSONDecodeError:
+                    continue
+
+        result["total"] = len(goals_by_id)
+        for status in goals_by_id.values():
+            s = status.upper()
+            if s in ("ACTIVE", "PENDING"):
+                result["active_count"] += 1
+            elif s == "PROPOSED":
+                result["proposed_count"] += 1
+            elif s in ("COMPLETED", "ACHIEVED"):
+                result["completed_count"] += 1
+    except IOError:
+        pass
+
+    return result
+
+
+def _get_cognitive_counts():
+    """Count records in K6-K10 JSONL files."""
+    counts = {"beliefs": 0, "reflections": 0, "action_audit": 0, "autonomy_decisions": 0}
+    files_map = {
+        "beliefs": "beliefs.jsonl",
+        "reflections": "reflections.jsonl",
+        "action_audit": "action_audit.jsonl",
+        "autonomy_decisions": "autonomy_decisions.jsonl",
+    }
+    for key, filename in files_map.items():
+        path = PROJECT_ROOT / "meta_data" / filename
+        if path.exists():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    counts[key] = sum(1 for line in f if line.strip())
+            except IOError:
+                pass
+    return counts
+
+
+def _get_memory_integrity_flags():
+    """Raw boolean flags for memory integrity heuristic (computed in JS)."""
+    flags = {
+        "has_graph_nodes": False,
+        "has_longterm": False,
+        "has_knowledge": False,
+        "has_reflections": False,
+        "last_memory_update_ts": None,
+    }
+
+    # Semantic graph
+    sg_path = PROJECT_ROOT / "semantic_graph.json"
+    if sg_path.exists():
+        try:
+            with open(sg_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            flags["has_graph_nodes"] = len(data.get("nodes", {})) > 0
+            flags["last_memory_update_ts"] = sg_path.stat().st_mtime
+        except Exception:
+            pass
+
+    # Knowledge index
+    ki_path = PROJECT_ROOT / "memory" / "knowledge_index.jsonl"
+    if ki_path.exists():
+        try:
+            flags["has_knowledge"] = ki_path.stat().st_size > 100
+            mtime = ki_path.stat().st_mtime
+            if flags["last_memory_update_ts"] is None or mtime > flags["last_memory_update_ts"]:
+                flags["last_memory_update_ts"] = mtime
+        except Exception:
+            pass
+
+    # Longterm memory
+    ltm_path = PROJECT_ROOT / "memory" / "maria_longterm_memory.jsonl"
+    if ltm_path.exists():
+        try:
+            flags["has_longterm"] = ltm_path.stat().st_size > 100
+        except Exception:
+            pass
+
+    # Reflections
+    refl_path = PROJECT_ROOT / "meta_data" / "reflections.jsonl"
+    if refl_path.exists():
+        try:
+            flags["has_reflections"] = refl_path.stat().st_size > 100
+        except Exception:
+            pass
+
+    return flags
+
+
+def _get_unified_events(limit=30):
+    """Merge recent events from multiple JSONL sources into unified timeline."""
+    events = []
+
+    # Homeostasis events
+    if HOMEOSTASIS_AVAILABLE:
+        try:
+            event_logger = get_event_logger()
+            for evt in event_logger.get_recent_events(limit=15):
+                evt_type = evt.get("event", evt.get("event_type", "unknown"))
+                ts = evt.get("timestamp", evt.get("ts", 0))
+                events.append({
+                    "source": "homeostasis",
+                    "type": evt_type,
+                    "timestamp": ts,
+                    "details": _get_event_details(evt),
+                    "severity": "warning" if evt_type == "alert" else "info",
+                })
+        except Exception:
+            pass
+
+    # Planner decisions
+    if _PLANNER_DECISIONS_PATH.exists():
+        try:
+            last_lines = []
+            with open(_PLANNER_DECISIONS_PATH, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        last_lines.append(line.strip())
+            for line in last_lines[-15:]:
+                try:
+                    d = json.loads(line)
+                    action = d.get("action_type", "")
+                    ts = d.get("timestamp", 0)
+                    success = d.get("result", {}).get("success", False)
+                    msg = d.get("message", "")[:100]
+                    events.append({
+                        "source": "planner",
+                        "type": action,
+                        "timestamp": ts,
+                        "details": msg or f"{action} ({'OK' if success else 'FAIL'})",
+                        "severity": "ok" if success else "warning",
+                    })
+                except json.JSONDecodeError:
+                    continue
+        except IOError:
+            pass
+
+    # Action audit (last few)
+    audit_path = PROJECT_ROOT / "meta_data" / "action_audit.jsonl"
+    if audit_path.exists():
+        try:
+            last_lines = []
+            with open(audit_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        last_lines.append(line.strip())
+            for line in last_lines[-10:]:
+                try:
+                    a = json.loads(line)
+                    ts = a.get("timestamp", 0)
+                    action = a.get("action_type", "")
+                    safety = a.get("safety_mode", "")
+                    success = a.get("success", False)
+                    events.append({
+                        "source": "safety",
+                        "type": f"{action}/{safety}",
+                        "timestamp": ts,
+                        "details": f"{'OK' if success else 'FAIL'} [{safety}]",
+                        "severity": "ok" if success else "warning",
+                    })
+                except json.JSONDecodeError:
+                    continue
+        except IOError:
+            pass
+
+    # Sort by timestamp descending, take limit
+    events.sort(key=lambda e: e.get("timestamp", 0), reverse=True)
+    return events[:limit]
+
+
+def _get_homeostasis_cause(mode, recent_events):
+    """Derive WHY for current homeostasis mode from recent events."""
+    if mode == "ACTIVE":
+        return "no issue"
+    if mode == "SLEEP":
+        return "consolidation phase"
+
+    # Look for alerts in recent events
+    for evt in recent_events:
+        evt_type = evt.get("event", evt.get("event_type", ""))
+        if evt_type == "alert":
+            msg = evt.get("message", "")
+            if "ram" in msg.lower() or "memory" in msg.lower():
+                return "ram pressure"
+            if "cpu" in msg.lower():
+                return "cpu overload"
+            if "token" in msg.lower():
+                return "token depletion"
+            if "temp" in msg.lower():
+                return "thermal throttle"
+            return msg[:60] if msg else "alert triggered"
+
+    if mode == "REDUCED":
+        return "resource conservation"
+    if mode == "SURVIVAL":
+        return "critical resources"
+    return "unknown"
+
+
+def _get_traits_data():
+    """Get personality trait scores from consciousness identity."""
+    traits = {}
+    identity_path = PROJECT_ROOT / "meta_data" / "consciousness_identity.json"
+    if identity_path.exists():
+        try:
+            with open(identity_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            trait_scores = data.get("trait_scores", {})
+            for name, info in trait_scores.items():
+                if isinstance(info, dict):
+                    traits[name] = round(info.get("score", 0), 2)
+                else:
+                    traits[name] = round(float(info), 2)
+        except Exception:
+            pass
+    return traits
 
 
 # =============================================================================
@@ -1654,7 +2045,7 @@ def _build_architecture_data():
 @require_auth
 def architecture_page():
     """Architecture map page."""
-    return render_template('architecture.html')
+    return render_template('architecture.html', active_page='architecture')
 
 
 @app.route('/api/architecture')
@@ -1699,7 +2090,7 @@ def _get_experiment_system():
 @require_auth
 def experiments_page():
     """Experiment dashboard page."""
-    return render_template('experiments.html')
+    return render_template('experiments.html', active_page='experiments')
 
 
 @app.route('/api/experiments/proposals')
