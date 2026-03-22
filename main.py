@@ -184,6 +184,12 @@ def register_modules(registry):
     registry.try_register(make_planner, "planner")
     registry.try_register(make_experiment, "experiment")
 
+    def make_self_analysis():
+        from agent_core.modules.self_analysis_module import SelfAnalysisModule
+        return SelfAnalysisModule()
+
+    registry.try_register(make_self_analysis, "self_analysis")
+
 
 # ====== POMOC ======
 
