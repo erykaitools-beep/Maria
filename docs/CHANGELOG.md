@@ -41,10 +41,24 @@
   - Modele jezykowe, role, instancje, RAM, routing, fallbacki, OpenClaw, bezpieczenstwo
   - Maria przyswoila autonomicznie w 17 minut
 
+### Added - K12 Self-Analysis (Cognitive Loop)
+- **`agent_core/self_analysis/`** - 5 nowych plikow:
+  - `recommendation_model.py` - AnalysisRecommendation, AnalysisReport dataclasses
+  - `state_collector.py` - zbieranie stanu z 8 JSONL files (zero LLM, ~2-4KB output)
+  - `external_analyzer.py` - analiza przez silniejszy model (MVP: qwen3:8b local)
+  - `recommendation_applier.py` - PROPOSED goals + topic hints + K6 beliefs
+  - `__init__.py` - SelfAnalysis facade z run_analysis() + should_analyze()
+- Planner: ActionType.SELF_ANALYZE, _exec_self_analyze(), _maybe_self_analyze() trigger
+- PlannerState.last_self_analysis_ts dla cooldown (24h periodic + event-driven)
+- K7: GUARDED classification, rate limit 2/hour
+- K10: AUDIT_ONLY, EffectType.CONFIGURATION
+- SharedContext.self_analysis field
+- Homeostasis module wiring z LLM function injection
+- 45 nowych testow
+
 ### Stats
-- 1654 testow passing (zero regresji)
-- +4284 / -3380 linii kodu
-- ADR-017 (Web UI v2), ADR-018 (markdown fallback), ADR-019 (lightweight OpenClaw check)
+- 1699 testow passing (zero regresji)
+- ADR-017 (Web UI v2), ADR-018 (markdown fallback), ADR-019 (lightweight OpenClaw), ADR-020 (K12 Self-Analysis)
 
 ---
 

@@ -48,10 +48,27 @@ Rezultat: Maria przyswoila 12/12 chunkow materialu o modelach jezykowych w 17 mi
 - Eryk ma problem z haslem deployadmin (nie moze restartowac serwisow)
 - Teacher nie przekazuje file_id do learn_next_chunk - planner wybiera plik, ale learn bierze sam
 
+## K12 Self-Analysis (ta sama sesja, wieczor)
+
+Eryk zaproponowal zamkniecie petli poznawczej Marii:
+1. Maria zbiera swoj stan z logow (StateCollector - zero LLM)
+2. Wysyla skompresowane dane do silniejszego modelu (qwen3:8b MVP)
+3. Otrzymuje rekomendacje (knowledge gaps, strategy changes)
+4. Tworzy PROPOSED goals (human gate - Eryk zatwierdza)
+5. Normalny pipeline: learn/fetch -> K4 eval -> petla zamknieta
+
+Kluczowa decyzja: MVP uzywa lokalnego qwen3:8b (zero kosztu), Phase 2 doda Claude CLI.
+Eryk chce to jako open source - petla poznawcza to core feature.
+
+5 nowych plikow, 45 testow, 1699 total. Trigger: co 24h lub K9.needs_human() lub retention < 0.3.
+
 ## Pomysly na przyszlosc
 
+- K12 Phase 2: Claude CLI backend via OpenClaw exec
+- K12 Phase 2: TopicSuggester hint integration
 - Backoff na failing chunks (po N probach -> skip lub mark as hard_topic)
 - Teacher powinien przekazywac file_id do learn_next_chunk (teraz ignorowany)
 - Dense mode w UI (CSS custom properties juz gotowe)
 - Sidebar w UI (layout przygotowany: mo-page--with-sidebar)
+- REPL /analyze command
 - Analiza egzaminow z materialu o modelach (jak Maria odtworzy wiedze?)

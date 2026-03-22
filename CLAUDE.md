@@ -43,15 +43,16 @@
 | **2026-03-22** | Markdown learning fallback - Maria parsuje odpowiedzi LLM w dowolnym formacie |
 | **2026-03-22** | OpenClaw lightweight check (pgrep) - fix CPU saturation from health_check |
 | **2026-03-22** | Material edukacyjny o LLM - 12 chunkow, Maria przyswoila autonomicznie |
+| **2026-03-22** | **K12 Self-Analysis** - zamkniecie petli poznawczej (45 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K11 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
-| **Testy** | 1654 passing |
-| **Faza** | Metaoperator Panel live, analiza logow nauki, UI polish next |
+| **Etap** | K1-K12 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
+| **Testy** | 1699 passing |
+| **Faza** | Petla poznawcza zamknieta, analiza logow, Claude CLI backend next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -94,6 +95,7 @@ project/
 │   ├── introspection/   # Code self-awareness (READ-ONLY) + Architecture Map data source
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
+│   ├── self_analysis/   # K12 Self-Analysis: state collector, analyzer, recommendation applier
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── adapters/        # Wrappers for legacy maria_core
 │   └── tests/           # 1654 tests
@@ -197,7 +199,9 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
 - **K11 Experiment System:** Proposal engine (4 rules), parameter registry (12 params), experiment runner (setattr+restore), report generator (ADOPT/REJECT/INCONCLUSIVE), ExperimentSystem facade, human gate (PROPOSED goals), REPL /experiments, Web UI /experiments
 
-Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K11 kompletny (1512 testow).**
+- **K12 Self-Analysis:** StateCollector (8 JSONL sources, zero LLM), ExternalAnalyzer (local_planner qwen3:8b MVP, Claude CLI Phase 2), RecommendationApplier (PROPOSED goals + topic hints + beliefs), SelfAnalysis facade, triggers (24h periodic + K9 needs_human + low retention), planner ActionType.SELF_ANALYZE, K7 GUARDED, K10 AUDIT_ONLY
+
+Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K12 kompletny (1699 testow).**
 
 ## Planner - Warstwa 2 (K5)
 
@@ -413,12 +417,16 @@ Usunieto:
 - [x] Material edukacyjny o LLM (12 chunkow, Maria przyswoila)
 - [x] Model Registry Stage 2: rule-based triage wygral benchmark
 
-### NASTEPNE: Polish + kolejne warstwy
-- Web UI v2 polish (dense mode, sidebar, wizualne poprawki po testach)
-- Analiza logow nauki Marii (jak radzi sobie z materialem o LLM, egzaminy)
-- Semantic memory (nomic-embed-text) - przyszlosc, po walidacji potrzeby
+### NASTEPNE: Core maturity + Claude CLI integration
+- K12 Phase 2: Claude CLI backend (instalacja na mini PC, OpenClaw exec integracja)
+- K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl)
+- K12 Phase 2: Web UI /analysis page (raporty, rekomendacje)
+- REPL `/analyze` command (reczny trigger self-analysis)
+- Analiza logow nauki Marii (egzaminy z materialu o LLM)
+- Web UI v2 polish (dense mode, sidebar)
+- Semantic memory (nomic-embed-text) - przyszlosc
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
-- Smart Home (Warstwa 11) - prerequisites met (K6, K7, K10)
+- Smart Home (Warstwa 11) - czeka na sprzet
 
 ## Znane problemy
 
@@ -484,6 +492,7 @@ python run_ui.py
 - **ADR-017:** Web UI v2 - base template + design tokens + extracted CSS/JS (nie React/Vue)
 - **ADR-018:** Markdown learning fallback - parsuj odpowiedzi LLM w dowolnym formacie (nie wymuszaj JSON)
 - **ADR-019:** OpenClaw lightweight check - pgrep zamiast health_check (nie laduj modelu przy pollingu)
+- **ADR-020:** K12 Self-Analysis - Maria analizuje wlasne logi silniejszym modelem, tworzy PROPOSED goals (human gate)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -800,4 +809,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-22 (Web UI v2 Metaoperator Panel, markdown learning fallback, OpenClaw lightweight check, 1654 testow)*
+*Ostatnia aktualizacja: 2026-03-22 (K12 Self-Analysis, Web UI v2 Metaoperator Panel, markdown learning fallback, 1699 testow)*
