@@ -1,41 +1,37 @@
 """
 DEAMONMARIA V2 - Learning Agent Module
-Inteligentne uczenie się z plików tekstowych przez Ollama.
-Chunking adaptacyjny, overlapping, wywołania do modelu.
+Uczenie sie z plikow tekstowych: wybor pliku, chunking, nauka przez LLM.
+
+Utilities (call_ollama, JSON parsing) przeniesione do llm_utils.py.
+Chunking przeniesiony do chunking.py.
 """
 
-import re
-import requests
-import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 import logging
 import gc
 import time
 from maria_core.sys.config import (
     INPUT_DIR,
     OLLAMA_MODEL,
-    OLLAMA_HOST,
-    OLLAMA_TIMEOUT,
-    OLLAMA_TEMPERATURE,
-    MIN_CHUNK_SIZE,
-    MAX_CHUNK_SIZE,
-    TARGET_CHUNK_SIZE,
-    CHUNK_OVERLAP,
-    CHUNK_SEPARATORS,
     STATUS_NEW,
     STATUS_LEARNING,
     STATUS_LEARNED,
     STATUS_EXAM_FAILED,
-    MAX_RETRIES_OLLAMA,
     get_timestamp,
 )
 from maria_core.memory_engine.memory_store import (
     load_index,
     save_index,
     append_memory,
-    get_memories_for_file
+    get_memories_for_file,
 )
+from maria_core.learning.llm_utils import (
+    call_ollama,
+    extract_json_from_response,
+    _parse_markdown_to_learning_dict,
+)
+from maria_core.learning.chunking import intelligent_chunk_text
 
 logger = logging.getLogger(__name__)
 
@@ -84,280 +80,6 @@ Odpowiedz w JSON (bez markdown):
   "core_ideas": ["...", "...", "..."],
   "tags": ["...", "..."]
 }}"""
-
-
-def call_ollama(prompt: str, model: str = OLLAMA_MODEL, temperature: float = OLLAMA_TEMPERATURE) -> Optional[str]:
-    """
-    Wywołuje Ollama API z obsługą błędów i retry.
-
-    Args:
-        prompt: Prompt dla modelu
-        model: Nazwa modelu
-        temperature: Temperatura generowania
-
-    Returns:
-        Odpowiedź modelu (string) lub None w razie błędu
-    """
-    url = f"{OLLAMA_HOST}/api/generate"
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",  # Force JSON output mode (Ollama native)
-        "options": {
-            "temperature": temperature,
-            "num_ctx": 4096,
-        }
-    }
-
-    for attempt in range(MAX_RETRIES_OLLAMA):
-        try:
-            response = requests.post(url, json=payload, timeout=OLLAMA_TIMEOUT)
-            response.raise_for_status()
-            result = response.json()
-            return result.get('response', '').strip()
-        except requests.exceptions.Timeout:
-            logger.warning(f"Ollama timeout (próba {attempt + 1}/{MAX_RETRIES_OLLAMA})")
-            if attempt == MAX_RETRIES_OLLAMA - 1:
-                logger.error("Ollama nie odpowiada po wszystkich próbach")
-                return None
-        except Exception as e:
-            logger.error(f"Błąd wywołania Ollama: {e}")
-            return None
-
-    return None
-
-
-def _parse_markdown_to_learning_dict(text: str) -> Optional[Dict[str, Any]]:
-    """
-    Parse markdown/text response into learning dict when LLM ignores JSON format.
-
-    Extracts summary (first paragraph or bold section), key_points (bullet points),
-    tags (from Keywords/Tags section or inferred), and questions if present.
-
-    Returns dict with 'summary', 'key_points', 'tags' or None if extraction fails.
-    """
-    if not text or len(text) < 50:
-        return None
-
-    lines = text.strip().split('\n')
-    summary_parts = []
-    key_points = []
-    tags = []
-    questions = []
-    current_section = 'summary'
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        lower = stripped.lower()
-
-        # Detect section headers (bold or plain)
-        is_header = stripped.startswith('**') and stripped.endswith('**')
-        if any(kw in lower for kw in ['kluczowe punkty', 'key_points', 'bullet', 'kluczowe informacje']):
-            current_section = 'points'
-            continue
-        if any(kw in lower for kw in ['tag', 'keyword', 'pojec', 'slowa kluczowe']):
-            current_section = 'tags'
-            continue
-        if any(kw in lower for kw in ['pytani', 'question', 'sprawdzaj']):
-            current_section = 'questions'
-            continue
-        if any(kw in lower for kw in ['streszczenie', 'summary', 'podsumowanie']):
-            current_section = 'summary'
-            continue
-
-        # Clean markdown formatting
-        clean = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped)  # **bold**
-        clean = re.sub(r'^\*\s+', '', clean)  # * bullet
-        clean = re.sub(r'^-\s+', '', clean)   # - bullet
-        clean = re.sub(r'^\d+\.\s+', '', clean)  # 1. numbered
-        clean = clean.strip()
-        if not clean:
-            continue
-
-        if current_section == 'summary':
-            # First section header switches to points
-            if stripped.startswith('*') or stripped.startswith('-') or re.match(r'^\d+\.', stripped):
-                current_section = 'points'
-                key_points.append(clean)
-            else:
-                summary_parts.append(clean)
-        elif current_section == 'points':
-            key_points.append(clean)
-        elif current_section == 'tags':
-            # Tags can be comma-separated or one per line
-            for tag in re.split(r'[,;]', clean):
-                tag = tag.strip().strip('"').strip("'")
-                if tag and len(tag) < 50:
-                    tags.append(tag)
-        elif current_section == 'questions':
-            questions.append(clean)
-
-    summary = ' '.join(summary_parts).strip()
-    if not summary and key_points:
-        summary = key_points[0]
-
-    # Need at least summary or key_points
-    if not summary and not key_points:
-        return None
-
-    # If no tags extracted, take first words from key_points
-    if not tags and key_points:
-        for kp in key_points[:5]:
-            words = kp.split()[:2]
-            if words:
-                tags.append(' '.join(words))
-
-    result = {
-        "summary": summary[:2000],
-        "key_points": key_points[:15],
-        "tags": tags[:15],
-    }
-    if questions:
-        result["questions"] = questions[:5]
-
-    return result
-
-
-def extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
-    """
-    Wyciąga JSON z odpowiedzi modelu (obsługuje markdown ```json```).
-    Zwraca dict albo None.
-    """
-    # 0. Bezpiecznik na None / pusty tekst
-    if response is None:
-        logger.error("[JSON] Otrzymano None zamiast tekstu odpowiedzi.")
-        return None
-
-    response = response.strip()
-    if not response:
-        logger.error("[JSON] Pusta odpowiedź z modelu – brak treści do parsowania.")
-        return None
-
-    original_response = response  # kopia do logów
-
-    # 1. Obsługa bloków ```json ... ``` (gdziekolwiek w tekście, nie tylko na poczatku)
-    #    LLM czesto dodaje tekst przed/po bloku markdown mimo instrukcji "bez markdown".
-    md_match = re.search(r'```(?:json)?\s*(.+?)\s*```', response, re.DOTALL | re.IGNORECASE)
-    if md_match:
-        response = md_match.group(1).strip()
-
-    # 2. Pierwsza próba: cały tekst jako JSON
-    try:
-        return json.loads(response)
-    except json.JSONDecodeError as e:
-        logger.warning(f"[JSON] Nie udało się sparsować pełnej odpowiedzi jako JSON: {e}")
-
-    # 3. Druga próba: fragment między pierwszym '{' a ostatnim '}'
-    #    Łapie JSON nawet gdy LLM doda tekst typu "Oto odpowiedz:" przed/po.
-    start = response.find("{")
-    end = response.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidate = response[start:end+1].strip()
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            logger.warning(f"[JSON] Nie udało się sparsować wycinka {{...}}: {e}")
-
-    # 3b. Fallback: sprobuj na ORYGINALNEJ odpowiedzi (przed ekstrakcja markdown)
-    #     Na wypadek gdyby krok 1 uszkodzil odpowiedz.
-    if response != original_response:
-        start = original_response.find("{")
-        end = original_response.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            candidate = original_response[start:end+1].strip()
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                pass
-
-    # 4. Fallback: parsuj markdown/tekst do struktury JSON
-    #    LLM czesto odpowiada w markdown zamiast JSON mimo instrukcji.
-    #    Zamiast tracic te odpowiedz, wyciagamy z niej dane.
-    result = _parse_markdown_to_learning_dict(original_response)
-    if result:
-        logger.info(f"[JSON] Fallback: sparsowano markdown do JSON (keys: {list(result.keys())})")
-        return result
-
-    # 5. Ostatecznie: oddaj None
-    logger.error(f"[JSON] Nie udalo sie wyciagnac JSON ani markdown. Odpowiedz ({len(original_response)} chars): {original_response[:200]}...")
-    return None
-
-
-
-def intelligent_chunk_text(text: str) -> List[Tuple[str, int, int]]:
-    """
-    Inteligentny podział tekstu na chunki z overlapem.
-
-    Priorytetyzuje naturalne granice (paragrafy, zdania) zamiast sztywnego podziału.
-
-    Args:
-        text: Tekst do podzielenia
-
-    Returns:
-        Lista krotek: (chunk_text, start_pos, end_pos)
-    """
-    if len(text) <= MAX_CHUNK_SIZE:
-        return [(text, 0, len(text))]
-
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        # Określ koniec chunka
-        end = min(start + TARGET_CHUNK_SIZE, len(text))
-
-        # Jeśli to nie koniec tekstu, znajdź najlepszy punkt podziału
-        if end < len(text):
-            best_split = end
-
-            # Szukaj separatorów w kolejności priorytetu
-            for separator in CHUNK_SEPARATORS:
-                # Szukaj w oknie [end-200, end+200]
-                search_start = max(end - 200, start)
-                search_end = min(end + 200, len(text))
-                search_text = text[search_start:search_end]
-
-                # Znajdź ostatnie wystąpienie separatora
-                sep_pos = search_text.rfind(separator)
-                if sep_pos != -1:
-                    actual_pos = search_start + sep_pos + len(separator)
-                    # Sprawdź czy nie za mały/duży chunk
-                    chunk_size = actual_pos - start
-                    if MIN_CHUNK_SIZE <= chunk_size <= MAX_CHUNK_SIZE * 1.5:
-                        best_split = actual_pos
-                        break
-
-            end = best_split
-
-        # Wytnij chunk
-        chunk_text = text[start:end].strip()
-        if chunk_text:
-            chunks.append((chunk_text, start, end))
-
-        # Następny chunk z overlapem
-        # KLUCZOWE: start musi ZAWSZE przesunac sie do przodu
-        prev_start = start
-        start = end - CHUNK_OVERLAP
-
-        # Zabezpieczenie przed nieskończoną pętlą:
-        # jesli overlap cofnal nas do tego samego miejsca (lub wczesniej),
-        # wymuszamy postep o co najmniej 1 pozycje
-        if start <= prev_start:
-            start = prev_start + max(MIN_CHUNK_SIZE, 1)
-
-        # Hard limit: max 100 chunkow (bezpiecznik na wypadek regresji)
-        if len(chunks) >= 100:
-            logger.warning(
-                f"Chunk limit (100) reached for text of {len(text)} chars, stopping"
-            )
-            break
-
-    logger.debug(f"Podzielono tekst na {len(chunks)} chunków")
-    return chunks
 
 
 def learn_chunk(chunk_text: str, use_simple: bool = False, llm_fn=None) -> Optional[Dict[str, Any]]:

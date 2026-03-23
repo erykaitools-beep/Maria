@@ -16,7 +16,7 @@ from maria_core.sys.config import (
     get_timestamp,
 )
 from maria_core.memory_engine.memory_store import load_index, save_index
-from maria_core.learning.learning_agent import call_ollama, extract_json_from_response
+from maria_core.learning.llm_utils import call_ollama, extract_json_from_response
 
 logger = logging.getLogger(__name__)
 
