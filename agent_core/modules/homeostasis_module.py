@@ -68,6 +68,27 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"ModelScheduler not initialized: {e}")
 
+        # Initialize LLM Tape (raw interaction logging)
+        if core:
+            try:
+                from agent_core.llm.llm_tape import LLMTape
+                from pathlib import Path
+                tape_path = Path(ctx.config.BASE_DIR) / "meta_data" / "llm_tape.jsonl"
+                tape = LLMTape(path=tape_path)
+                ctx.llm_tape = tape
+
+                # Wire to LLMRouter
+                if ctx.brain and hasattr(ctx.brain, 'set_llm_tape'):
+                    ctx.brain.set_llm_tape(tape)
+                # Wire to OllamaBrain (for direct brain usage / Web UI)
+                _brain = getattr(ctx.brain, 'ollama', ctx.brain)
+                if _brain and hasattr(_brain, 'set_llm_tape'):
+                    _brain.set_llm_tape(tape)
+
+                print("[Homeostasis] [OK] LLM Tape initialized")
+            except Exception as e:
+                logger.debug(f"LLM Tape not initialized: {e}")
+
         # Initialize PerceptionBuffer (Warstwa 1)
         if core:
             try:
@@ -321,6 +342,20 @@ class HomeostasisModule(MariaModule):
                     if ctx.world_model:
                         sa.set_world_model(ctx.world_model)
 
+                    # Wire Claude CLI client (K12 Phase 2)
+                    try:
+                        from agent_core.self_analysis.claude_cli_client import ClaudeCLIClient
+                        claude_cli = ClaudeCLIClient()
+                        if ctx.openclaw_client:
+                            claude_cli.set_openclaw_client(ctx.openclaw_client)
+                        sa._analyzer.set_claude_cli(claude_cli)
+                        if claude_cli.is_available():
+                            print("[Homeostasis] [OK] Claude CLI wired (K12 Phase 2)")
+                        else:
+                            print("[Homeostasis] [--] Claude CLI not available (fallback: local)")
+                    except Exception as e2:
+                        logger.debug(f"Claude CLI not wired: {e2}")
+
                     planner.set_self_analysis(sa)
                     ctx.self_analysis = sa
                     print("[Homeostasis] [OK] SelfAnalysis wired (K12)")
@@ -343,6 +378,45 @@ class HomeostasisModule(MariaModule):
                     print("[Homeostasis] [OK] Work context wired to chat")
             except Exception as e:
                 logger.debug(f"PlannerCore not wired: {e}")
+
+        # Wire state-grounded operator response pipeline (Phase 2)
+        try:
+            from agent_core.introspection.query_router import OperationalQueryRouter
+            from agent_core.introspection.evidence_collector import EvidenceCollector
+            from agent_core.introspection.response_builder import ResponseBuilder
+
+            qr = OperationalQueryRouter()
+            ec = EvidenceCollector(project_root=str(Path(ctx.config.BASE_DIR)))
+            rb = ResponseBuilder()
+
+            # Wire runtime objects for full evidence access
+            if ctx.homeostasis_core:
+                ec.set_homeostasis_core(ctx.homeostasis_core)
+            if ctx.planner_core:
+                ec.set_planner_core(ctx.planner_core)
+            if ctx.knowledge_analyzer:
+                ec.set_knowledge_analyzer(ctx.knowledge_analyzer)
+            if ctx.evaluation_observer:
+                ec.set_evaluation_observer(ctx.evaluation_observer)
+            if ctx.llm_tape:
+                ec.set_llm_tape(ctx.llm_tape)
+            if ctx.self_analysis:
+                ec.set_self_analysis(ctx.self_analysis)
+            if ctx.goal_store:
+                ec.set_goal_store(ctx.goal_store)
+
+            ctx.evidence_collector = ec
+
+            # Wire to OllamaBrain
+            _brain = ctx.brain
+            if hasattr(_brain, 'ollama'):
+                _brain = _brain.ollama
+            if _brain and hasattr(_brain, 'set_grounding_pipeline'):
+                _brain.set_grounding_pipeline(qr, ec, rb)
+
+            print("[Homeostasis] [OK] Grounding pipeline wired (Phase 2)")
+        except Exception as e:
+            logger.debug(f"Grounding pipeline not wired: {e}")
 
         return True
 

@@ -62,6 +62,7 @@ class LLMRouter:
         self.nim = nim_client
         self.budget = token_budget
         self._model_scheduler = None
+        self._llm_tape = None
 
         # Stats
         self._nim_calls = 0
@@ -84,7 +85,10 @@ class LLMRouter:
             Response text
         """
         self._ollama_calls += 1
-        return self.ollama.think(prompt, temperature=temperature, **kwargs)
+        start = time.time()
+        response = self.ollama.think(prompt, temperature=temperature, **kwargs)
+        self._record_tape("chat", self.ollama.model, prompt, response, start)
+        return response
 
     def _ask_once(
         self, prompt: str, temperature: float = 0.3, **kwargs
@@ -99,6 +103,7 @@ class LLMRouter:
         Returns:
             Response text
         """
+        start = time.time()
         if self._should_use_nim():
             try:
                 result = self.nim._ask_once(
@@ -106,6 +111,7 @@ class LLMRouter:
                 )
                 self._record_nim_usage()
                 self._nim_calls += 1
+                self._record_tape("learning", self.nim.model, prompt, result, start)
                 return result
             except Exception as e:
                 logger.warning(f"NIM _ask_once failed, falling back to Ollama: {e}")
@@ -113,9 +119,11 @@ class LLMRouter:
 
         # Fallback to Ollama
         self._ollama_calls += 1
-        return self.ollama._ask_once(
+        result = self.ollama._ask_once(
             prompt, temperature=temperature, **kwargs
         )
+        self._record_tape("learning", self.ollama.model, prompt, result, start)
+        return result
 
     def analyze_task(self, task: str, retries: int = 2) -> Dict[str, Any]:
         """
@@ -185,6 +193,33 @@ class LLMRouter:
     # MODEL SCHEDULER (multi-organ routing)
     # -------------------------------------------------
 
+    def set_llm_tape(self, tape) -> None:
+        """Attach LLM Tape for recording all model interactions."""
+        self._llm_tape = tape
+
+    def _record_tape(
+        self, role: str, model: str, prompt: str, response: str,
+        start_time: float, success: bool = True,
+    ) -> None:
+        """Record LLM interaction to tape (if attached)."""
+        if self._llm_tape is None:
+            return
+        try:
+            from agent_core.llm.llm_tape import make_tape_entry
+            latency_ms = (time.time() - start_time) * 1000
+            is_success = success and bool(response and response.strip())
+            entry = make_tape_entry(
+                model=model or "unknown",
+                role=role,
+                prompt=prompt or "",
+                response=response or "",
+                latency_ms=latency_ms,
+                success=is_success,
+            )
+            self._llm_tape.record(entry)
+        except Exception:
+            pass
+
     def set_model_scheduler(self, scheduler) -> None:
         """
         Attach ModelScheduler for multi-model routing.
@@ -215,10 +250,15 @@ class LLMRouter:
         Returns:
             Response text from the selected model
         """
+        role_name = role.value if hasattr(role, "value") else str(role)
+
         if self._model_scheduler is None:
             # No scheduler - fall through to default Ollama
             self._ollama_calls += 1
-            return self.ollama._ask_once(prompt, temperature=temperature)
+            ask_start = time.time()
+            text = self.ollama._ask_once(prompt, temperature=temperature)
+            self._record_tape(role_name, self.ollama.model, prompt, text, ask_start)
+            return text
 
         result = self._model_scheduler.ensure_ready(role)
 
@@ -228,7 +268,10 @@ class LLMRouter:
                 f"falling back to Ollama"
             )
             self._ollama_calls += 1
-            return self.ollama._ask_once(prompt, temperature=temperature)
+            ask_start = time.time()
+            text = self.ollama._ask_once(prompt, temperature=temperature)
+            self._record_tape(role_name, self.ollama.model, prompt, text, ask_start)
+            return text
 
         # Use the model tag from scheduler (may be fallback)
         try:
@@ -243,13 +286,18 @@ class LLMRouter:
             self._ollama_calls += 1
 
             text = resp.get("message", {}).get("content", "")
-            return text.strip()
+            text = text.strip()
+            self._record_tape(role_name, result.ollama_tag, prompt, text, start)
+            return text
         except Exception as e:
             logger.warning(
                 f"[LLMRouter] ask_as_role({role.value}) inference failed: {e}"
             )
             self._ollama_calls += 1
-            return self.ollama._ask_once(prompt, temperature=temperature)
+            ask_start = time.time()
+            text = self.ollama._ask_once(prompt, temperature=temperature)
+            self._record_tape(role_name, self.ollama.model, prompt, text, ask_start, success=False)
+            return text
         finally:
             self._model_scheduler.release(result.role)
 

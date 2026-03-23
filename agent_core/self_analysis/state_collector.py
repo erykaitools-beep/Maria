@@ -78,6 +78,48 @@ class StateCollector:
         )
         return summary
 
+    def collect_with_code_context(self, period_days: int = 7) -> Dict[str, Any]:
+        """Collect state + code context for Claude CLI analysis (K12 Phase 2)."""
+        summary = self.collect_with_prompt(period_days)
+
+        # Add code self-model issues (from introspection v1)
+        code_model_path = self._meta / "code_self_model.json"
+        if code_model_path.exists():
+            try:
+                with open(code_model_path, "r", encoding="utf-8") as f:
+                    model = json.load(f)
+                summary["code_context"] = {
+                    "total_files": model.get("statistics", {}).get("total_files", 0),
+                    "total_lines": model.get("statistics", {}).get("total_lines", 0),
+                    "issues": model.get("issues", [])[:10],
+                    "packages": list(model.get("packages", {}).keys()),
+                }
+            except Exception:
+                pass
+
+        # Add recent LLM tape errors
+        tape_path = self._meta / "llm_tape.jsonl"
+        if tape_path.exists():
+            try:
+                errors = []
+                for line in open(tape_path, "r", encoding="utf-8"):
+                    try:
+                        d = json.loads(line.strip())
+                        if not d.get("success", True):
+                            errors.append({
+                                "model": d.get("model", "?"),
+                                "role": d.get("role", "?"),
+                                "response_preview": d.get("raw_response", "")[:100],
+                            })
+                    except json.JSONDecodeError:
+                        pass
+                if errors:
+                    summary["recent_llm_errors"] = errors[-5:]  # last 5
+            except Exception:
+                pass
+
+        return summary
+
     # --- Internal collectors ---
 
     def _collect_metrics_trend(self, cutoff: float) -> Dict[str, List[float]]:

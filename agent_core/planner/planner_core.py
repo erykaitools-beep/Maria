@@ -155,18 +155,18 @@ class PlannerCore:
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:
         """
-        Quick check if action would be rate-limited by K7.
+        Quick check if action would be blocked by K7 (rate limit or consecutive failures).
 
         Used to avoid creating plans we know will be blocked.
         """
-        if not self._autonomy_policy:
+        if not getattr(self, '_autonomy_policy', None):
             return False
         try:
             check = self._autonomy_policy.check(
                 action_type=action_type_value,
                 action_params={},
             )
-            return not check.allowed and check.decision == "rate_limited"
+            return not check.allowed
         except Exception:
             return False
 
@@ -479,12 +479,19 @@ class PlannerCore:
             if delib_action is not None:
                 action_type_str = delib_action["action_type"]
 
-                # Pre-check: skip rate-limited actions from deliberation
+                # Pre-check: skip blocked actions from deliberation
                 if self._is_action_rate_limited(action_type_str):
                     logger.debug(
                         f"Planner: deliberation suggested {action_type_str} "
-                        f"but it's rate-limited, falling through"
+                        f"but it's blocked by K7, abandoning strategy"
                     )
+                    # Abandon strategy entirely to prevent retry loops
+                    strategy_id = delib_action.get("strategy_id")
+                    if strategy_id:
+                        self._deliberation.abandon_strategy(
+                            strategy_id,
+                            reason=f"K7 blocks {action_type_str}",
+                        )
                 else:
                     try:
                         action = ActionType(action_type_str)
@@ -579,9 +586,12 @@ class PlannerCore:
         if by_status.get("learning"):
             return ActionType.LEARN
 
-        # P2: Exam ready
+        # P2: Exam ready (only if not blocked by K7)
         if by_status.get("learned"):
-            return ActionType.EXAM
+            if not self._is_action_rate_limited("exam"):
+                return ActionType.EXAM
+            # Exam blocked by K7 -> force review to break deadlock
+            return ActionType.REVIEW
 
         # P3: New files (indexed "new" status OR unindexed files in input/)
         if snapshot.get("new_files_available"):
@@ -626,6 +636,15 @@ class PlannerCore:
                 }
                 plan.message = self._format_message(plan)
                 self._state.total_plans_executed += 1
+
+                # Abandon K8 strategy entirely when K7 blocks
+                # (prevents retry loops where strategy keeps suggesting blocked actions)
+                if self._deliberation and plan.metadata.get("strategy_id"):
+                    self._deliberation.abandon_strategy(
+                        plan.metadata["strategy_id"],
+                        reason=f"K7 blocked {plan.action_type.value}",
+                    )
+
                 self._emit_cycle_complete(
                     self._state.last_cycle_tick, plan=plan,
                 )

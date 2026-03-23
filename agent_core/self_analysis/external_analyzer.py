@@ -49,14 +49,21 @@ class ExternalAnalyzer:
         """
         self._llm_fn = llm_fn
         self._backend = backend
+        self._claude_cli = None
 
     def set_llm_fn(self, fn: Callable[[str], str]):
         """Set LLM function (dependency injection from homeostasis wiring)."""
         self._llm_fn = fn
 
+    def set_claude_cli(self, client):
+        """Set Claude CLI client for stronger analysis (K12 Phase 2)."""
+        self._claude_cli = client
+
     def analyze(self, state_summary: Dict[str, Any]) -> AnalysisReport:
         """
         Send compressed state to external AI and parse recommendations.
+
+        Tries Claude CLI first (stronger), falls back to local planner.
 
         Args:
             state_summary: Output from StateCollector.collect_with_prompt()
@@ -64,6 +71,21 @@ class ExternalAnalyzer:
         Returns:
             AnalysisReport with recommendations (may be empty on failure)
         """
+        # Try Claude CLI first if available
+        if self._claude_cli:
+            try:
+                claude_report = self._analyze_with_claude(state_summary)
+                if claude_report and not claude_report.error:
+                    return claude_report
+                logger.info("[K12] Claude CLI returned error, falling back to local")
+            except Exception as e:
+                logger.info(f"[K12] Claude CLI failed, falling back to local: {e}")
+
+        # Fallback: local planner (existing code path)
+        return self._analyze_with_local(state_summary)
+
+    def _analyze_with_local(self, state_summary: Dict[str, Any]) -> AnalysisReport:
+        """Analyze using local planner model (qwen3:8b)."""
         report = AnalysisReport(
             analyzer=self._backend,
             input_summary_hash=state_summary.get("input_hash", ""),
@@ -98,6 +120,62 @@ class ExternalAnalyzer:
 
         report.duration_ms = time.time() * 1000 - start_ms
         return report
+
+    def _analyze_with_claude(self, state_summary: Dict[str, Any]) -> Optional[AnalysisReport]:
+        """Analyze using Claude Code CLI (stronger model, K12 Phase 2)."""
+        if not self._claude_cli or not self._claude_cli.is_available():
+            return None
+
+        report = AnalysisReport(
+            analyzer="claude_cli",
+            input_summary_hash=state_summary.get("input_hash", ""),
+        )
+
+        start_ms = time.time() * 1000
+        prompt = self._build_claude_prompt(state_summary)
+
+        try:
+            raw_response = self._claude_cli.analyze(prompt)
+            if raw_response is None:
+                report.error = "Claude CLI returned None (rate limited or unavailable)"
+                return report
+
+            report.raw_response = (raw_response or "")[:4000]
+
+            if not raw_response:
+                report.error = "Empty response from Claude CLI"
+                return report
+
+            recommendations = self._parse_response(raw_response)
+            report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+
+        except Exception as e:
+            report.error = f"Claude CLI analysis failed: {str(e)[:200]}"
+            logger.error(f"[K12] Claude CLI error: {e}")
+
+        report.duration_ms = time.time() * 1000 - start_ms
+        return report
+
+    def _build_claude_prompt(self, state_summary: Dict[str, Any]) -> str:
+        """Build enhanced prompt for Claude CLI (handles larger context)."""
+        analysis_prompt = state_summary.pop("analysis_prompt", "")
+        state_json = json.dumps(state_summary, indent=None, default=str, ensure_ascii=False)
+
+        return (
+            "You are analyzing M.A.R.I.A., an autonomous AI learning agent "
+            "running on a local mini PC with Ollama (llama3.1:8b). "
+            "Analyze the operational data below and return actionable recommendations.\n\n"
+            "Return JSON with:\n"
+            '- "recommendations": [{rec_id, category, topic, description, priority (0-1), '
+            'suggested_action (learn/fetch/review/experiment), '
+            'file_paths (list of relevant source files), '
+            'line_hints (dict of file->line_range)}]\n'
+            '- "systemic_issues": [strings]\n'
+            '- "summary": one paragraph\n\n'
+            f"=== AGENT STATE DATA ===\n{state_json}\n\n"
+            f"=== ANALYSIS TASK ===\n{analysis_prompt}\n\n"
+            "Be specific. Reference file paths and line numbers where possible."
+        )
 
     def _build_prompt(self, state_summary: Dict[str, Any]) -> str:
         """Build analysis prompt from state summary."""

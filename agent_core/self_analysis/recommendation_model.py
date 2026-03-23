@@ -51,6 +51,8 @@ class AnalysisRecommendation:
     suggested_action: str  # SuggestedAction value
     evidence: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    file_paths: list = field(default_factory=list)        # files related to recommendation
+    line_hints: Dict[str, str] = field(default_factory=dict)  # {"file.py": "120-135"}
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -66,6 +68,8 @@ class AnalysisRecommendation:
             suggested_action=d.get("suggested_action", "learn"),
             evidence=d.get("evidence", {}),
             metadata=d.get("metadata", {}),
+            file_paths=d.get("file_paths", []),
+            line_hints=d.get("line_hints", {}),
         )
 
 

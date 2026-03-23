@@ -312,6 +312,31 @@ def get_maria_brain():
                         ),
                         verify_model=False
                     )
+                    # Wire state-grounded operator response pipeline
+                    try:
+                        from agent_core.introspection.query_router import OperationalQueryRouter
+                        from agent_core.introspection.evidence_collector import EvidenceCollector
+                        from agent_core.introspection.response_builder import ResponseBuilder
+
+                        _qr = OperationalQueryRouter()
+                        _ec = EvidenceCollector(project_root="/home/maria/maria")
+                        _rb = ResponseBuilder()
+
+                        # Wire LLM tape if available
+                        try:
+                            from agent_core.llm.llm_tape import LLMTape
+                            from pathlib import Path as _Path
+                            _tape = LLMTape(path=_Path("/home/maria/maria/meta_data/llm_tape.jsonl"))
+                            _ec.set_llm_tape(_tape)
+                            brain.set_llm_tape(_tape)
+                        except Exception:
+                            pass
+
+                        brain.set_grounding_pipeline(_qr, _ec, _rb)
+                        print("[UI] [OK] Grounding pipeline wired")
+                    except Exception as e:
+                        print(f"[UI] Grounding pipeline not available: {e}")
+
                     # Wrap with LLM Router if NIM available
                     router = _create_ui_router(brain)
                     _maria_brain = router if router else brain

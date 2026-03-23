@@ -50,6 +50,14 @@ class OllamaBrain:
         # Work context provider (set via set_work_context_provider)
         self._work_context_provider = None
 
+        # LLM Tape for recording interactions (set via set_llm_tape)
+        self._llm_tape = None
+
+        # State-grounded operator response pipeline (Phase 2)
+        self._query_router = None
+        self._evidence_collector = None
+        self._response_builder = None
+
         # Session tracking for time awareness
         self._session_start = datetime.now()
         self._last_interaction = datetime.now()
@@ -128,6 +136,44 @@ class OllamaBrain:
                 for msg in restored:
                     self.history.append(msg)
 
+    def set_llm_tape(self, tape) -> None:
+        """Attach LLM Tape for recording chat interactions."""
+        self._llm_tape = tape
+
+    def _record_tape(self, role: str, prompt: str, response: str,
+                     start_time: float, success: bool = True) -> None:
+        """Record interaction to tape if attached."""
+        if self._llm_tape is None:
+            return
+        try:
+            from agent_core.llm.llm_tape import make_tape_entry
+            import time as _time
+            entry = make_tape_entry(
+                model=self.model,
+                role=role,
+                prompt=prompt or "",
+                response=response or "",
+                latency_ms=(_time.time() - start_time) * 1000,
+                success=success and bool(response and response.strip()),
+            )
+            self._llm_tape.record(entry)
+        except Exception:
+            pass
+
+    def set_grounding_pipeline(self, query_router, evidence_collector, response_builder):
+        """
+        Wire the state-grounded operator response pipeline.
+
+        When operator asks about Maria's state, the pipeline:
+        1. QueryRouter classifies the question (rule-based, zero LLM)
+        2. EvidenceCollector gathers facts from logs/runtime
+        3. ResponseBuilder creates structured answer from evidence
+        4. Optional: LLM formats the answer (but evidence is the truth)
+        """
+        self._query_router = query_router
+        self._evidence_collector = evidence_collector
+        self._response_builder = response_builder
+
     def set_work_context_provider(self, provider) -> None:
         """
         Set a callable that returns current work status as text.
@@ -170,8 +216,28 @@ class OllamaBrain:
             prompt += f"\n[Aktualna praca: {work_ctx}]"
         if conversation_ctx:
             prompt += f"\n{conversation_ctx}"
-        if awareness_ctx:
+
+        # Compact operational summary (replaces/supplements awareness context)
+        op_summary = ""
+        if self._evidence_collector:
+            try:
+                op_summary = self._evidence_collector.build_compact_summary()
+            except Exception:
+                pass
+        if op_summary:
+            prompt += f"\n{op_summary}"
+        elif awareness_ctx:
             prompt += f"\n{awareness_ctx}"
+
+        # Grounding instruction
+        if self._query_router:
+            prompt += (
+                "\nGdy operator pyta o Twoj stan, logi lub bledy, "
+                "odpowiadaj na podstawie danych operacyjnych. "
+                "Mow 'Widze w logach...', 'Zrodlo danych: ...'. "
+                "Nigdy nie wymyslaj informacji o wlasnym stanie."
+            )
+
         return prompt
 
     def refresh_time_context(self) -> None:
@@ -226,11 +292,15 @@ class OllamaBrain:
         Jednorazowe pytanie: system + user (bez historii).
         Idealne do zadań typu: 'zwróć mi JSON wg schematu'.
         """
+        import time as _time
+        start = _time.time()
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
-        return self._chat(messages, temperature=temperature, **kwargs)
+        result = self._chat(messages, temperature=temperature, **kwargs)
+        self._record_tape("learning", prompt, result, start)
+        return result
 
     # === GŁÓWNE API – THINK Z HISTORIĄ ===
 
@@ -238,12 +308,28 @@ class OllamaBrain:
         """
         Myslenie z historia rozmowy (do ogolnego dialogu i rozumowania).
         NIE uzywamy tego do strukturalnego JSON (tam jest _ask_once).
+
+        If the grounding pipeline is wired and the question is about
+        Maria's operational state, the answer is built from evidence
+        (logs, runtime objects) instead of letting LLM hallucinate.
         """
         self.call_count += 1
+        import time as _time
+        start = _time.time()
 
         # Refresh time context before each interaction
         self.refresh_time_context()
 
+        # State-grounded pipeline: check if this is an operational query
+        if self._query_router and self._evidence_collector and self._response_builder:
+            try:
+                mode = self._query_router.classify(prompt)
+                if self._query_router.is_grounded(mode):
+                    return self._grounded_think(prompt, mode, temperature, start, **kwargs)
+            except Exception:
+                pass  # Fallback to normal chat
+
+        # Normal chat path
         self.history.append({"role": "user", "content": prompt})
         if self._conversation_memory:
             self._conversation_memory.save_turn("user", prompt)
@@ -253,10 +339,68 @@ class OllamaBrain:
             self.history.append({"role": "assistant", "content": content})
             if self._conversation_memory:
                 self._conversation_memory.save_turn("assistant", content)
+            self._record_tape("chat", prompt, content, start)
             return content
         except Exception as e:
             self.log_fn(f"[OllamaBrain] [ERROR] Blad krytyczny API: {e}")
+            self._record_tape("chat", prompt, "", start, success=False)
             return ""
+
+    def _grounded_think(self, prompt: str, mode, temperature: float,
+                        start_time: float, **kwargs) -> str:
+        """
+        Answer operational question from evidence, not hallucination.
+
+        Pipeline:
+        1. Collect evidence for the detected mode
+        2. Build structured grounded response (no LLM)
+        3. Try LLM formatting for nicer output (optional)
+        4. Fallback: return raw grounded text
+        """
+        import time as _time
+
+        # 1. Collect evidence
+        evidence = self._evidence_collector.collect_for_mode(mode)
+        grounded = self._response_builder.build(mode, evidence, prompt)
+
+        # 2. Try LLM formatting (optional improvement)
+        try:
+            format_prompt = (
+                f"Operator pyta: {prompt}\n\n"
+                f"Odpowiedz WYLACZNIE na podstawie tych danych operacyjnych:\n"
+                f"{grounded.text}\n\n"
+                f"Formatuj naturalnie po polsku. NIE dodawaj informacji spoza danych. "
+                f"Uzyj zwrotow: 'Widze w logach...', 'Ostatnia akcja to...'. "
+                f"Podaj zrodla danych."
+            )
+            # Use a fresh message list (not history) for grounded formatting
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": format_prompt},
+            ]
+            formatted = self._chat(messages, temperature=0.2, **kwargs)
+
+            if formatted and formatted.strip():
+                grounded.formatted_text = formatted
+                # Save to history as if normal conversation
+                self.history.append({"role": "user", "content": prompt})
+                self.history.append({"role": "assistant", "content": formatted})
+                if self._conversation_memory:
+                    self._conversation_memory.save_turn("user", prompt)
+                    self._conversation_memory.save_turn("assistant", formatted)
+                self._record_tape("chat_grounded", prompt, formatted, start_time)
+                return formatted
+        except Exception:
+            pass
+
+        # 3. Fallback: raw grounded text (always works, no LLM needed)
+        self.history.append({"role": "user", "content": prompt})
+        self.history.append({"role": "assistant", "content": grounded.text})
+        if self._conversation_memory:
+            self._conversation_memory.save_turn("user", prompt)
+            self._conversation_memory.save_turn("assistant", grounded.text)
+        self._record_tape("chat_grounded_raw", prompt, grounded.text, start_time)
+        return grounded.text
 
     # === JSON HELPER ===
 
