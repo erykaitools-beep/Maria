@@ -188,7 +188,22 @@ def generate_exam(context: str, num_questions: int, llm_fn=None) -> Optional[Lis
         logger.error("Pole 'exam' nie jest niepustą listą")
         return None
 
-    return exam
+    # Normalize keys: LLM may return "answer"/"correct" instead of "expected"
+    normalized = []
+    for item in exam:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("q", item.get("question", item.get("pytanie", "")))
+        expected = item.get("expected",
+                           item.get("answer", item.get("a",
+                           item.get("correct", item.get("odpowiedz", "")))))
+        if q and expected:
+            normalized.append({"q": str(q), "expected": str(expected)})
+    if not normalized:
+        logger.error("Nie udalo sie znormalizowac pytan egzaminacyjnych")
+        return None
+
+    return normalized
 
 
 def answer_exam(context: str, questions: List[Dict[str, str]], llm_fn=None) -> Optional[List[Dict[str, str]]]:
@@ -247,9 +262,9 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], l
     # Zbuduj pary pytanie-odpowiedź wzorcowa-odpowiedź ucznia
     qa_pairs = []
     for i, (q, a) in enumerate(zip(questions, answers), 1):
-        pair = f"Pytanie {i}: {q['q']}\n"
-        pair += f"Odpowiedź wzorcowa: {q['expected']}\n"
-        pair += f"Odpowiedź ucznia: {a['a']}\n"
+        pair = f"Pytanie {i}: {q.get('q', '?')}\n"
+        pair += f"Odpowiedź wzorcowa: {q.get('expected', '?')}\n"
+        pair += f"Odpowiedź ucznia: {a.get('a', '?')}\n"
         qa_pairs.append(pair)
 
     qa_text = "\n".join(qa_pairs)

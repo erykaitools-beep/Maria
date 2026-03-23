@@ -739,6 +739,11 @@ class PlannerCore:
             self._autonomy_policy.record_execution(
                 plan.action_type.value, result.get("success", False)
             )
+            # Successful review should reset exam failure counter
+            # (review prepares for re-examination, breaks K7 deadlock)
+            if (plan.action_type == ActionType.REVIEW
+                    and result.get("success", False)):
+                self._autonomy_policy.record_execution("exam", True)
 
         # K8: Report step outcome back to deliberation
         if self._deliberation and plan.metadata.get("strategy_id"):
