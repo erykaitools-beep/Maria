@@ -479,6 +479,24 @@ class PlannerCore:
             if delib_action is not None:
                 action_type_str = delib_action["action_type"]
 
+                # Pre-check: skip exam if nothing to examine
+                if action_type_str == "exam":
+                    has_exam_candidates = bool(
+                        snapshot and snapshot.get("files_by_status", {}).get("learned")
+                    )
+                    if not has_exam_candidates:
+                        strategy_id = delib_action.get("strategy_id")
+                        if strategy_id:
+                            self._deliberation.abandon_strategy(
+                                strategy_id, reason="no files to examine",
+                            )
+                        return create_plan(
+                            goal_id=goal.id,
+                            goal_description=goal.description,
+                            action_type=ActionType.NOOP,
+                            action_params={"reason": "no exam candidates"},
+                        )
+
                 # Pre-check: skip blocked actions from deliberation
                 if self._is_action_rate_limited(action_type_str):
                     logger.debug(
