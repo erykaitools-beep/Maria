@@ -483,15 +483,21 @@ class PlannerCore:
                 if self._is_action_rate_limited(action_type_str):
                     logger.debug(
                         f"Planner: deliberation suggested {action_type_str} "
-                        f"but it's blocked by K7, abandoning strategy"
+                        f"but it's blocked by K7, abandoning strategy -> NOOP"
                     )
-                    # Abandon strategy entirely to prevent retry loops
+                    # Abandon strategy and return NOOP to break the loop
                     strategy_id = delib_action.get("strategy_id")
                     if strategy_id:
                         self._deliberation.abandon_strategy(
                             strategy_id,
                             reason=f"K7 blocks {action_type_str}",
                         )
+                    return create_plan(
+                        goal_id=goal.id,
+                        goal_description=goal.description,
+                        action_type=ActionType.NOOP,
+                        action_params={"reason": f"K7 blocks {action_type_str}"},
+                    )
                 else:
                     try:
                         action = ActionType(action_type_str)
