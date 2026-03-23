@@ -219,7 +219,7 @@ def answer_exam(context: str, questions: List[Dict[str, str]], llm_fn=None) -> O
     Returns:
         Lista odpowiedzi [{"a": "..."}] lub None
     """
-    questions_list = "\n".join([f"{i+1}. {q['q']}" for i, q in enumerate(questions)])
+    questions_list = "\n".join([f"{i+1}. {q.get('q', '?')}" for i, q in enumerate(questions)])
 
     prompt = PROMPT_ANSWER_EXAM.format(
         context=context,
@@ -309,6 +309,109 @@ def check_for_looping(record: Dict[str, Any]) -> bool:
     return False
 
 
+def _find_exam_candidate(index, target_file_id=None):
+    """
+    Find a file to examine.
+
+    Args:
+        index: Knowledge index records
+        target_file_id: Specific file (spaced repetition) or None (auto-select)
+
+    Returns:
+        (target_record, file_id) or (None, file_id) if not found
+    """
+    if target_file_id:
+        for rec in index:
+            if rec['id'] == target_file_id:
+                return rec, rec['id']
+        logger.info(f"[EXAM] Plik {target_file_id} nie znaleziony w indeksie")
+        return None, target_file_id
+
+    candidates = [
+        r for r in index
+        if r['status'] == STATUS_LEARNED and r['exam_attempts'] < EXAM_MAX_ATTEMPTS
+    ]
+    if not candidates:
+        logger.info("[OK] Brak plikow gotowych na egzamin")
+        return None, ""
+
+    candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
+    target = candidates[0]
+    return target, target['id']
+
+
+def _execute_exam(file_id, memory_path, llm_fn=None):
+    """
+    Run the 3-step exam pipeline: generate -> answer -> grade.
+
+    Returns:
+        (score, exam_questions, answers, grading) or (None, ...) on failure
+    """
+    memories = get_memories_for_file(file_id, memory_path)
+    if not memories:
+        logger.error(f"Brak pamięci dla {file_id}!")
+        return None, None, None, None
+
+    context = build_context_from_memories(memories)
+    num_questions = calculate_num_questions(len(memories))
+
+    exam = generate_exam(context, num_questions, llm_fn=llm_fn)
+    if not exam:
+        logger.error("Nie udalo sie wygenerowac egzaminu")
+        return None, None, None, None
+
+    answers = answer_exam(context, exam, llm_fn=llm_fn)
+    if not answers:
+        logger.error("Nie udalo sie odpowiedziec na egzamin")
+        return None, exam, None, None
+
+    grading = grade_exam(exam, answers, llm_fn=llm_fn)
+    if not grading:
+        logger.error("Nie udalo sie ocenic egzaminu")
+        return None, exam, answers, None
+
+    return grading['final_score'], exam, answers, grading
+
+
+def _update_status_after_exam(target, final_score, passed, is_spaced_repetition):
+    """
+    Update file status in index based on exam result.
+
+    Rules:
+    - spaced repetition: always keep COMPLETED
+    - passed: COMPLETED
+    - 1st fail: EXAM_FAILED (second chance)
+    - 2nd+ fail or looping: HARD_TOPIC
+    """
+    target['exam_attempts'] += 1
+    target['last_scores'].append(final_score)
+
+    if is_spaced_repetition:
+        target['status'] = STATUS_COMPLETED
+        if passed:
+            logger.info(f"[REVIEW PASS] Powtorka ZALICZONA ({final_score:.2%})")
+        else:
+            logger.warning(f"[REVIEW FAIL] Powtorka NIEZALICZONA ({final_score:.2%}) - zostaje completed")
+    elif passed:
+        target['status'] = STATUS_COMPLETED
+        logger.info(f"[PASS] Egzamin ZALICZONY ({final_score:.2%})")
+    else:
+        if target['exam_attempts'] == 1:
+            target['status'] = STATUS_EXAM_FAILED
+            logger.warning(f"[FAIL] Egzamin NIEZALICZONY ({final_score:.2%}) - druga szansa")
+        else:
+            target['status'] = STATUS_HARD_TOPIC
+            target['priority'] -= 30
+            logger.warning(f"[HARD] Egzamin NIEZALICZONY ({final_score:.2%}) - HARD TOPIC")
+
+    if check_for_looping(target):
+        target['status'] = STATUS_HARD_TOPIC
+        target['priority'] -= 20
+        logger.warning(f"Wykryto zapetlenie - oznaczam jako HARD TOPIC")
+
+    target['updated_at'] = get_timestamp()
+
+
 def run_exam_if_ready(
     index_path: Path,
     memory_path: Path,
@@ -318,113 +421,34 @@ def run_exam_if_ready(
     target_file_id: str = None,
 ) -> Dict[str, Any]:
     """
-    Uruchamia egzamin dla pliku, który jest gotowy (status=learned).
+    Run exam for a file that is ready (status=learned) or specific file (spaced repetition).
 
-    If target_file_id is provided (spaced repetition), examines that specific
-    file even if its status is 'completed'. Otherwise searches for 'learned' files.
-
-    Logika:
-    1. Znajdź plik ze statusem LEARNED (lub target_file_id)
-    2. Wygeneruj egzamin na podstawie pamięci
-    3. Odpowiedz na pytania
-    4. Oceń odpowiedzi
-    5. Zapisz wynik
-    6. Zaktualizuj status:
-       - score >= 0.6 → COMPLETED
-       - score < 0.6 i attempt=1 → EXAM_FAILED (ponowna nauka)
-       - score < 0.6 i attempt=2 → HARD_TOPIC
-       - wykryto looping → HARD_TOPIC
-
-    Args:
-        index_path: Sciezka do indeksu
-        memory_path: Sciezka do pamieci
-        exam_path: Sciezka do wynikow egzaminow
-        ollama_model: Model Ollama
-        llm_fn: Optional LLM function
-        target_file_id: Optional specific file to examine (for spaced repetition)
+    Pipeline: find candidate -> generate/answer/grade -> save result -> update status.
 
     Returns:
-        Dict with keys:
-        - "executed": bool - whether an exam was run
-        - "passed": bool - whether exam score >= threshold
-        - "score": float - exam score (0.0-1.0)
-        - "file_id": str - which file was examined
-        For backward compatibility, also evaluates as truthy/falsy
-        via __bool__ (executed).
+        Dict: executed, passed, score, file_id
     """
     logger.info("[EXAM] Sprawdzam czy jest plik gotowy na egzamin...")
-
-    # Wczytaj indeks
     index = load_index(index_path)
 
-    # If specific file requested (spaced repetition), find it directly
-    if target_file_id:
-        target = None
-        for rec in index:
-            if rec['id'] == target_file_id:
-                target = rec
-                break
-        if target is None:
-            logger.info(f"[EXAM] Plik {target_file_id} nie znaleziony w indeksie")
-            return {"executed": False, "passed": False, "score": 0.0, "file_id": target_file_id}
-        file_id = target['id']
-        logger.info(f"[EXAM] Spaced repetition egzamin z: {file_id}")
-    else:
-        # Znajdz kandydatow (standard flow)
-        candidates = []
-        for rec in index:
-            if rec['status'] == STATUS_LEARNED and rec['exam_attempts'] < EXAM_MAX_ATTEMPTS:
-                candidates.append(rec)
-
-        if not candidates:
-            logger.info("[OK] Brak plikow gotowych na egzamin")
-            return {"executed": False, "passed": False, "score": 0.0, "file_id": ""}
-
-        # Wybierz pierwszy (lub najwyzszy priorytet)
-        candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
-        target = candidates[0]
-        file_id = target['id']
+    # 1. Find candidate
+    target, file_id = _find_exam_candidate(index, target_file_id)
+    no_exam = {"executed": False, "passed": False, "score": 0.0, "file_id": file_id}
+    if target is None:
+        return no_exam
 
     logger.info(f"[EXAM] Egzamin z: {file_id}")
 
-    no_exam = {"executed": False, "passed": False, "score": 0.0, "file_id": file_id}
-
-    # Pobierz pamięci
-    memories = get_memories_for_file(file_id, memory_path)
-    if not memories:
-        logger.error(f"Brak pamięci dla {file_id}!")
+    # 2. Execute exam pipeline
+    final_score, exam, answers, grading = _execute_exam(file_id, memory_path, llm_fn)
+    if final_score is None:
         return no_exam
 
-    # Zbuduj kontekst
-    context = build_context_from_memories(memories)
-
-    # Oblicz liczbę pytań
-    num_questions = calculate_num_questions(len(memories))
-
-    # Generuj egzamin
-    exam = generate_exam(context, num_questions, llm_fn=llm_fn)
-    if not exam:
-        logger.error("Nie udało się wygenerować egzaminu")
-        return no_exam
-
-    # Odpowiedz
-    answers = answer_exam(context, exam, llm_fn=llm_fn)
-    if not answers:
-        logger.error("Nie udało się odpowiedzieć na egzamin")
-        return no_exam
-
-    # Oceń
-    grading = grade_exam(exam, answers, llm_fn=llm_fn)
-    if not grading:
-        logger.error("Nie udało się ocenić egzaminu")
-        return no_exam
-
-    final_score = grading['final_score']
     passed = final_score >= EXAM_PASS_THRESHOLD
     logger.info(f"[SCORE] Wynik egzaminu: {final_score:.2%}")
 
-    # Zapisz wynik
-    exam_record = {
+    # 3. Save exam result
+    append_exam_result({
         "file": file_id,
         "timestamp": get_timestamp(),
         "attempt": target['exam_attempts'] + 1,
@@ -433,45 +457,11 @@ def run_exam_if_ready(
         "questions": exam,
         "answers": answers,
         "grading": grading['graded'],
-    }
-    append_exam_result(exam_record, exam_path)
+    }, exam_path)
 
-    # Aktualizuj indeks
-    target['exam_attempts'] += 1
-    target['last_scores'].append(final_score)
-
-    # Logika statusu
-    is_spaced_repetition = target_file_id is not None
-    if is_spaced_repetition:
-        # Spaced repetition: keep completed status, just update scores/timestamp
-        target['status'] = STATUS_COMPLETED
-        if passed:
-            logger.info(f"[REVIEW PASS] Powtorka ZALICZONA ({final_score:.2%})")
-        else:
-            logger.warning(f"[REVIEW FAIL] Powtorka NIEZALICZONA ({final_score:.2%}) - zostaje completed")
-    elif passed:
-        # Zaliczony!
-        target['status'] = STATUS_COMPLETED
-        logger.info(f"[PASS] Egzamin ZALICZONY ({final_score:.2%})")
-    else:
-        # Niezaliczony
-        if target['exam_attempts'] == 1:
-            # Pierwsza próba - daj drugą szansę
-            target['status'] = STATUS_EXAM_FAILED
-            logger.warning(f"[FAIL] Egzamin NIEZALICZONY ({final_score:.2%}) - druga szansa")
-        else:
-            # Druga próba lub więcej - hard topic
-            target['status'] = STATUS_HARD_TOPIC
-            target['priority'] -= 30  # obniż priorytet
-            logger.warning(f"[HARD] Egzamin NIEZALICZONY ({final_score:.2%}) - HARD TOPIC")
-
-    # Sprawdź zapętlenie
-    if check_for_looping(target):
-        target['status'] = STATUS_HARD_TOPIC
-        target['priority'] -= 20
-        logger.warning(f"Wykryto zapetlenie - oznaczam jako HARD TOPIC")
-
-    target['updated_at'] = get_timestamp()
+    # 4. Update status
+    is_spaced = target_file_id is not None
+    _update_status_after_exam(target, final_score, passed, is_spaced)
     save_index(index, index_path)
 
     return {"executed": True, "passed": passed, "score": final_score, "file_id": file_id}
