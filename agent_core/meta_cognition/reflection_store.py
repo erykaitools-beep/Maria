@@ -16,7 +16,7 @@ from agent_core.meta_cognition.reflection_model import Reflection
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = Path("meta_data/reflections.jsonl")
-MAX_RECORDS = 1000
+MAX_RECORDS = 5000
 
 
 class ReflectionStore:
