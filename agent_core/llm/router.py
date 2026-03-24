@@ -252,6 +252,14 @@ class LLMRouter:
         """
         role_name = role.value if hasattr(role, "value") else str(role)
 
+        # Normalize string role to ModelRole enum for scheduler
+        if isinstance(role, str) and self._model_scheduler is not None:
+            try:
+                from agent_core.llm.model_registry import ModelRole
+                role = ModelRole(role)
+            except (ValueError, ImportError):
+                pass  # Keep as string, will fall through to Ollama
+
         if self._model_scheduler is None:
             # No scheduler - fall through to default Ollama
             self._ollama_calls += 1
@@ -264,7 +272,7 @@ class LLMRouter:
 
         if not result.success:
             logger.warning(
-                f"[LLMRouter] Cannot load {role.value}: {result.reason}, "
+                f"[LLMRouter] Cannot load {role_name}: {result.reason}, "
                 f"falling back to Ollama"
             )
             self._ollama_calls += 1

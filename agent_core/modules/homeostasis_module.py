@@ -324,18 +324,20 @@ class HomeostasisModule(MariaModule):
                 # K12 Self-Analysis (cognitive loop)
                 try:
                     from agent_core.self_analysis import SelfAnalysis
-                    sa = SelfAnalysis(project_root=str(project_root))
+                    from maria_core.sys.config import BASE_DIR as _BASE_DIR
+                    sa = SelfAnalysis(project_root=str(_BASE_DIR))
 
                     # Wire LLM function: use router.ask_as_role if available
-                    _brain = ctx.brain
-                    if hasattr(_brain, "ask_as_role"):
-                        sa.set_llm_fn(
-                            lambda prompt: _brain.ask_as_role("planner", prompt)
-                        )
-                    elif hasattr(_brain, "_ask_once"):
-                        sa.set_llm_fn(
-                            lambda prompt: _brain._ask_once(prompt, temperature=0.3)
-                        )
+                    # Capture reference at wire time to avoid late-binding issues
+                    _sa_brain = ctx.brain
+                    if hasattr(_sa_brain, "ask_as_role"):
+                        def _sa_llm_fn(prompt, _b=_sa_brain):
+                            return _b.ask_as_role("planner", prompt)
+                        sa.set_llm_fn(_sa_llm_fn)
+                    elif hasattr(_sa_brain, "_ask_once"):
+                        def _sa_llm_fn(prompt, _b=_sa_brain):
+                            return _b._ask_once(prompt, temperature=0.3)
+                        sa.set_llm_fn(_sa_llm_fn)
 
                     if ctx.goal_store:
                         sa.set_goal_store(ctx.goal_store)
@@ -360,7 +362,7 @@ class HomeostasisModule(MariaModule):
                     ctx.self_analysis = sa
                     print("[Homeostasis] [OK] SelfAnalysis wired (K12)")
                 except Exception as e:
-                    logger.debug(f"SelfAnalysis not initialized: {e}")
+                    logger.warning(f"SelfAnalysis not initialized: {e}")
 
                 core.set_planner_core(planner)
                 ctx.planner_core = planner

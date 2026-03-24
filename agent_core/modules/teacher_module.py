@@ -88,6 +88,7 @@ class TeacherModule(MariaModule):
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
                 llm_fn=llm_fn,
+                target_file_id=file_id if file_id else None,
             )
             return {"success": success}
         except Exception as e:

@@ -1512,3 +1512,92 @@ class TestRateLimitPreCheck:
         }
         action = planner._decide_learning_action(snapshot, {"retention_rate": 0.9})
         assert action == ActionType.FETCH
+
+
+# ══════════════════════════════════════════════════════
+# K7 Block Fallthrough to K12/Evaluate
+# ══════════════════════════════════════════════════════
+
+
+class TestK7FallthroughToK12:
+    """When K7 blocks a goal's plan, planner should fall through to evaluate/self_analyze."""
+
+    def test_k7_blocked_noop_falls_through_to_self_analyze(self, planner_env):
+        """When goal maps to NOOP (e.g. FETCH rate-limited), K12 should trigger."""
+        planner, tmp_path = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()  # Skip evaluate
+
+        # Goal exists -> will map to NOOP (all completed, fetch rate-limited)
+        goal = _make_goal(goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        # Mock K12 self_analysis with proper return value
+        mock_sa = MagicMock()
+        mock_report = MagicMock()
+        mock_report.error = None
+        mock_report.report_id = "report-test"
+        mock_report.recommendations = []
+        mock_report.goals_created = []
+        mock_report.duration_ms = 100
+        mock_sa.run_analysis.return_value = mock_report
+        planner.set_self_analysis(mock_sa)
+        planner._state.last_self_analysis_ts = 0.0  # Never analyzed
+
+        # Real KnowledgeAnalyzer with empty input dir (all completed scenario)
+        from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+        import json
+        index_path = tmp_path / "ki.jsonl"
+        with open(index_path, "w") as f:
+            f.write(json.dumps({"id": "f1.txt", "file": "f1.txt", "status": "completed",
+                                "priority": 50, "chunks_learned": 1, "total_chunks": 1}) + "\n")
+        input_dir = tmp_path / "input"
+        input_dir.mkdir(exist_ok=True)
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=index_path, input_dir=input_dir,
+        )
+        planner.set_knowledge_analyzer(analyzer)
+
+        result = planner.run_cycle(60)
+        assert result is not None
+        # Should be self_analyze (K12) since NOOP fell through
+        assert result.action_type == ActionType.SELF_ANALYZE
+
+    def test_k7_blocked_fetch_falls_through(self, planner_env):
+        """When K7 blocks FETCH, planner should try evaluate/self_analyze."""
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        # K7: block LEARN but allow SELF_ANALYZE
+        mock_k7 = MagicMock()
+        blocked = MagicMock()
+        blocked.allowed = False
+        blocked.blocked_result = {"success": False, "blocked_by": "autonomy_policy"}
+        allowed = MagicMock()
+        allowed.allowed = True
+        mock_k7.check.side_effect = lambda **kw: (
+            allowed if kw.get("action_type") == "self_analyze" else blocked
+        )
+        planner.set_autonomy_policy(mock_k7)
+
+        # K12: ready to analyze
+        mock_sa = MagicMock()
+        mock_report = MagicMock()
+        mock_report.error = None
+        mock_report.report_id = "report-test"
+        mock_report.recommendations = []
+        mock_report.goals_created = []
+        mock_report.duration_ms = 100
+        mock_sa.run_analysis.return_value = mock_report
+        planner.set_self_analysis(mock_sa)
+        planner._state.last_self_analysis_ts = 0.0
+
+        result = planner.run_cycle(60)
+        assert result is not None
+        assert result.action_type == ActionType.SELF_ANALYZE

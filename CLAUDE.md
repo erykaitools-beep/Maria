@@ -44,15 +44,19 @@
 | **2026-03-22** | OpenClaw lightweight check (pgrep) - fix CPU saturation from health_check |
 | **2026-03-22** | Material edukacyjny o LLM - 12 chunkow, Maria przyswoila autonomicznie |
 | **2026-03-22** | **K12 Self-Analysis** - zamkniecie petli poznawczej (45 testow) |
+| **2026-03-24** | K12 LIVE: 5 bugow naprawionych, Maria analizuje sie sama (qwen3:8b, 3 rekomendacje) |
+| **2026-03-24** | Fix: teacher file_id passthrough + chunk failure backoff (skip po 5 failach) |
+| **2026-03-24** | Fix: planner fallthrough - NOOP/K7-blocked -> evaluate -> K12 (zamiast slepego NOOP) |
+| **2026-03-24** | Creative Module spec received (docs/plans/) - 19 plikow, pelny organ strategiczny |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K12 COMPLETE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
-| **Testy** | 1699 passing |
-| **Faza** | Petla poznawcza zamknieta, analiza logow, Claude CLI backend next |
+| **Etap** | K1-K12 LIVE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
+| **Testy** | 1813 passing |
+| **Faza** | K12 LIVE (self-analysis dziala), Creative Module spec ready, implementacja next |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -417,12 +421,15 @@ Usunieto:
 - [x] Material edukacyjny o LLM (12 chunkow, Maria przyswoila)
 - [x] Model Registry Stage 2: rule-based triage wygral benchmark
 
-### NASTEPNE: Core maturity + Claude CLI integration
+### NASTEPNE: Creative Module + Phase 2 improvements
+- **Creative Module (K13)** - 19 plikow, pelny organ strategiczny (`agent_core/creative/`)
+  - Spec: `docs/plans/MARIA_Creative_Module_Developer_Technical_Spec.pdf`
+  - Meta-goals, tension detection, reflective workspace, strategic journal
+  - LLM: qwen3:8b (PLANNER role), Phase 11 w tick loop
 - K12 Phase 2: Claude CLI backend (instalacja na mini PC, OpenClaw exec integracja)
-- K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl)
+- K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl) - CZESCIOWO DONE (hints sa zapisywane)
 - K12 Phase 2: Web UI /analysis page (raporty, rekomendacje)
-- REPL `/analyze` command (reczny trigger self-analysis)
-- Analiza logow nauki Marii (egzaminy z materialu o LLM)
+- K12: GoalStore integration w RecommendationApplier (goals_created puste)
 - Web UI v2 polish (dense mode, sidebar)
 - Semantic memory (nomic-embed-text) - przyszlosc
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
@@ -809,4 +816,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-22 (K12 Self-Analysis, Web UI v2 Metaoperator Panel, markdown learning fallback, 1699 testow)*
+*Ostatnia aktualizacja: 2026-03-24 (K12 LIVE - self-analysis dziala, planner fallthrough fix, teacher file_id + backoff, Creative Module spec, 1813 testow)*

@@ -234,9 +234,23 @@ class PlannerCore:
         if goal is not None:
             # -- STEP 4: CREATE PLAN for goal --
             plan = self._create_plan_for_goal(goal, context)
-            return self._finalize_plan(plan)
+            if plan.action_type == ActionType.NOOP:
+                # Goal mapped to NOOP (e.g. all files completed, FETCH rate-limited)
+                # -> fall through to evaluate/self_analyze before idling
+                pass
+            else:
+                result = self._finalize_plan(plan)
+                # If K7 blocked (autonomy_policy), fall through to evaluate/self_analyze
+                blocked_by_k7 = (
+                    result.status == PlanStatus.FAILED
+                    and isinstance(result.result, dict)
+                    and result.result.get("blocked_by") == "autonomy_policy"
+                )
+                if not blocked_by_k7:
+                    return result
+                # K7 blocked -> try evaluate or self_analyze instead
 
-        # -- STEP 5: EVALUATE as fallback (no actionable goals) --
+        # -- STEP 5: EVALUATE as fallback (no actionable goals or goal plan blocked) --
         plan = self._maybe_evaluate(context)
         if plan is not None:
             return self._finalize_plan(plan)
@@ -245,6 +259,16 @@ class PlannerCore:
         plan = self._maybe_self_analyze(context)
         if plan is not None:
             return self._finalize_plan(plan)
+
+        # If goal existed but resulted in NOOP, execute it
+        if goal is not None:
+            noop_plan = create_plan(
+                goal_id=goal.id if goal else None,
+                goal_description=goal.description if goal else "",
+                action_type=ActionType.NOOP,
+                action_params={},
+            )
+            return self._finalize_plan(noop_plan)
 
         # Nothing to do
         logger.debug("Planner: no feasible goal and no evaluation needed")
@@ -384,7 +408,7 @@ class PlannerCore:
         return None
 
     # K12: Self-analysis trigger
-    SELF_ANALYSIS_INTERVAL_SEC = 86400  # 24h default
+    SELF_ANALYSIS_INTERVAL_SEC = 14400  # 4h between self-analyses
 
     def _maybe_self_analyze(self, context: Dict) -> Optional[Plan]:
         """
@@ -401,8 +425,8 @@ class PlannerCore:
         now = time.time()
         since_analysis = now - self._state.last_self_analysis_ts
 
-        # Absolute minimum cooldown: 1h
-        if since_analysis < 3600:
+        # Absolute minimum cooldown: 10 min (prevents rapid re-trigger)
+        if since_analysis < 600:
             return None
 
         trigger = False

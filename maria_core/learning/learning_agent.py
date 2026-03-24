@@ -128,33 +128,47 @@ def learn_next_chunk(
     memory_path: Path,
     ollama_model: str = OLLAMA_MODEL,
     llm_fn=None,
+    target_file_id: str = None,
 ) -> bool:
     """
-    Uczy się następnego chunka z pliku o najwyższym priorytecie.
+    Uczy sie nastepnego chunka z pliku.
 
     Args:
         base_dir: Katalog bazowy (INPUT_DIR)
-        index_path: Ścieżka do indeksu
-        memory_path: Ścieżka do pamięci długoterminowej
+        index_path: Sciezka do indeksu
+        memory_path: Sciezka do pamieci dlugoterminowej
         ollama_model: Nazwa modelu Ollama
+        llm_fn: Optional LLM function
+        target_file_id: Optional file ID to learn from (overrides priority selection)
 
     Returns:
-        True jeśli coś przetworzono, False jeśli brak pracy
+        True jesli cos przetworzono, False jesli brak pracy
     """
     logger.info("[BRAIN] Rozpoczynam nauke nastepnego chunka...")
 
     # Wczytaj indeks
     index = load_index(index_path)
 
-    # Znajdź plik do nauki
+    # Znajdz plik do nauki
     candidates = [r for r in index if r['status'] in [STATUS_NEW, STATUS_LEARNING, STATUS_EXAM_FAILED]]
     if not candidates:
         logger.info("[OK] Brak plikow do nauki")
         return False
 
-    # Sortuj po priorytecie
-    candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
-    target = candidates[0]
+    # Jesli podano konkretny plik, uzyj go
+    target = None
+    if target_file_id:
+        for r in candidates:
+            if r['id'] == target_file_id:
+                target = r
+                break
+        if target is None:
+            logger.warning(f"[LEARN] Requested file {target_file_id} not in candidates, falling back to priority")
+
+    # Fallback: sortuj po priorytecie
+    if target is None:
+        candidates.sort(key=lambda x: x.get('priority', 0), reverse=True)
+        target = candidates[0]
 
     file_id = target['id']
     filepath = base_dir / file_id
@@ -197,14 +211,49 @@ def learn_next_chunk(
     # Określ czy użyć prostego prompta
     use_simple = (target['status'] == STATUS_EXAM_FAILED)
 
-    # Ucz się chunka
+    # Backoff: skip chunk po zbyt wielu probach
+    MAX_CHUNK_RETRIES = 5
+    fail_key = f"{file_id}#chunk_{chunk_idx}"
+    chunk_failures = target.get("chunk_failures", {})
+    fail_count = chunk_failures.get(fail_key, 0)
+    if fail_count >= MAX_CHUNK_RETRIES:
+        logger.warning(f"[SKIP] Chunk {chunk_idx} z {file_id} failowal {fail_count}x, pomijam")
+        # Zapisz jako nauczony z adnotacja skip (zeby nie blokowac)
+        memory_record = {
+            "source_file": file_id,
+            "folder": target['folder'],
+            "chunk_id": fail_key,
+            "chunk_index": chunk_idx,
+            "timestamp": get_timestamp(),
+            "learned_simple": True,
+            "summary": f"[SKIPPED] Chunk pominity po {fail_count} nieudanych probach",
+            "key_points": [],
+            "tags": ["skipped", "hard_chunk"],
+            "questions": [],
+        }
+        append_memory(memory_record, memory_path)
+        target['chunks_learned'] = len(learned_chunk_ids) + 1
+        target['status'] = STATUS_LEARNING
+        target['updated_at'] = get_timestamp()
+        # Wyczysc failure counter dla tego chunka
+        chunk_failures.pop(fail_key, None)
+        target['chunk_failures'] = chunk_failures
+        save_index(index, index_path)
+        logger.info(f"[OK] Pominieto chunk {chunk_idx + 1}/{len(chunks)} z {file_id}")
+        return True
+
+    # Ucz sie chunka
     learned_data = learn_chunk(chunk_to_learn, use_simple=use_simple, llm_fn=llm_fn)
-    
+
     gc.collect()
     time.sleep(0.1)
 
     if not learned_data:
-        logger.error(f"Nie udało się nauczyć chunka {chunk_idx}")
+        # Trackuj failure count
+        chunk_failures[fail_key] = fail_count + 1
+        target['chunk_failures'] = chunk_failures
+        save_index(index, index_path)
+        logger.error(f"Nie udalo sie nauczyc chunka {chunk_idx} ({fail_count + 1}/{MAX_CHUNK_RETRIES})")
         return False
 
     # Zapisz do pamięci

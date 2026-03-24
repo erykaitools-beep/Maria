@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 _REPORTS_FILENAME = "self_analysis_reports.jsonl"
 
 # Cooldown
-DEFAULT_COOLDOWN_SEC = 86400  # 24 hours between analyses
+DEFAULT_COOLDOWN_SEC = 14400  # 4 hours between analyses
 
 
 class SelfAnalysis:
