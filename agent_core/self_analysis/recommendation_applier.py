@@ -139,40 +139,48 @@ class RecommendationApplier:
             )
 
             # Use GoalStore API to create PROPOSED goal
-            # GoalStore.propose() or create() depending on implementation
-            goal_id = None
+            from agent_core.goals.goal_model import (
+                Goal, GoalType, GoalStatus, AuditEntry,
+            )
+            import uuid
 
+            goal_id_str = f"goal-k12-{uuid.uuid4().hex[:8]}"
+            now = time.time()
+
+            goal = Goal(
+                id=goal_id_str,
+                type=GoalType.LEARNING,
+                description=description,
+                priority=rec.priority,
+                status=GoalStatus.PROPOSED,
+                progress=0.0,
+                parent_goal_id=None,
+                created_by="self_analysis",
+                created_at=now,
+                updated_at=now,
+                audit_trail=[
+                    AuditEntry(
+                        timestamp=now,
+                        old_status=None,
+                        new_status="proposed",
+                        reason=f"K12: {rec.category} - {rec.topic}",
+                        actor="self_analysis",
+                    )
+                ],
+                metadata={
+                    "source": "self_analysis",
+                    "report_id": report_id,
+                    "rec_id": rec.rec_id,
+                    "category": rec.category,
+                    "topic": rec.topic,
+                    "suggested_action": rec.suggested_action,
+                },
+            )
+
+            goal_id = None
             if hasattr(self._goal_store, "propose"):
-                goal_id = self._goal_store.propose(
-                    description=description,
-                    goal_type="LEARNING",
-                    priority=rec.priority,
-                    metadata={
-                        "source": "self_analysis",
-                        "report_id": report_id,
-                        "rec_id": rec.rec_id,
-                        "category": rec.category,
-                        "topic": rec.topic,
-                        "suggested_action": rec.suggested_action,
-                    },
-                )
+                goal_id = self._goal_store.propose(goal)
             elif hasattr(self._goal_store, "create"):
-                # Fallback: create with PROPOSED status
-                from agent_core.goals.goal_model import Goal, GoalType, GoalStatus
-                goal = Goal(
-                    type=GoalType.LEARNING,
-                    description=description,
-                    priority=rec.priority,
-                    status=GoalStatus.PROPOSED,
-                    metadata={
-                        "source": "self_analysis",
-                        "report_id": report_id,
-                        "rec_id": rec.rec_id,
-                        "category": rec.category,
-                        "topic": rec.topic,
-                        "suggested_action": rec.suggested_action,
-                    },
-                )
                 self._goal_store.create(goal)
                 goal_id = goal.id
 
