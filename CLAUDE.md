@@ -48,15 +48,17 @@
 | **2026-03-24** | Fix: teacher file_id passthrough + chunk failure backoff (skip po 5 failach) |
 | **2026-03-24** | Fix: planner fallthrough - NOOP/K7-blocked -> evaluate -> K12 (zamiast slepego NOOP) |
 | **2026-03-24** | Creative Module spec received (docs/plans/) - 19 plikow, pelny organ strategiczny |
+| **2026-03-25** | **K13 Creative Module** - strategic reflection organ, tension detection, meta-goals (67 testow) |
+| **2026-03-25** | K13 LIVE: 3 tensions detected (repetition, misalignment, over_restriction), 42ms/cycle |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K12 LIVE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
-| **Testy** | 1813 passing |
-| **Faza** | K12 LIVE (self-analysis dziala), Creative Module spec ready, implementacja next |
+| **Etap** | K1-K13 LIVE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
+| **Testy** | 1876 passing |
+| **Faza** | K13 LIVE (Creative reflection dziala), rule-based v1, zero LLM |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -100,6 +102,7 @@ project/
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
 │   ├── self_analysis/   # K12 Self-Analysis: state collector, analyzer, recommendation applier
+│   ├── creative/        # K13 Creative Module: tensions, insights, meta-goals, journal, reflection
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── adapters/        # Wrappers for legacy maria_core
 │   └── tests/           # 1654 tests
@@ -205,7 +208,9 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
 - **K12 Self-Analysis:** StateCollector (8 JSONL sources, zero LLM), ExternalAnalyzer (local_planner qwen3:8b MVP, Claude CLI Phase 2), RecommendationApplier (PROPOSED goals + topic hints + beliefs), SelfAnalysis facade, triggers (24h periodic + K9 needs_human + low retention), planner ActionType.SELF_ANALYZE, K7 GUARDED, K10 AUDIT_ONLY
 
-Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K12 kompletny (1699 testow).**
+- **K13 Creative Module:** StrategicContext (6 data sources), TensionDetector (7 categories), ReflectionWorkspace (bounded sessions), CreativeJournal (strategic diary), NoveltyFilter (dedup+flood), CreativeEvaluator (5 dimensions), GoalAdapter (K3 PROPOSED), CreativeStore (6 JSONL), facade (10-step reflect cycle), ConversationMemory (operator dialogue), K7 GUARDED, K10 AUDIT_ONLY, planner Step 2.5 (before goal selection)
+
+Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K13 kompletny (1876 testow).**
 
 ## Planner - Warstwa 2 (K5)
 
@@ -421,11 +426,15 @@ Usunieto:
 - [x] Material edukacyjny o LLM (12 chunkow, Maria przyswoila)
 - [x] Model Registry Stage 2: rule-based triage wygral benchmark
 
-### NASTEPNE: Creative Module + Phase 2 improvements
-- **Creative Module (K13)** - 19 plikow, pelny organ strategiczny (`agent_core/creative/`)
-  - Spec: `docs/plans/MARIA_Creative_Module_Developer_Technical_Spec.pdf`
-  - Meta-goals, tension detection, reflective workspace, strategic journal
-  - LLM: qwen3:8b (PLANNER role), Phase 11 w tick loop
+### DONE: K13 Creative Module
+- [x] K13 Creative Module (12 modulow, 67 testow) - rule-based v1, zero LLM, 42ms/cycle
+- [x] K13 LIVE: tension detection (repetition, misalignment, over_restriction)
+- [x] Planner integration: Step 2.5 (before goal selection), K7 GUARDED, K10 AUDIT_ONLY
+
+### NASTEPNE: K13 Phase 2 + improvements
+- K13 Phase 2: LLM-based engines (meta_goal_engine, reframe_engine, exploration_engine) via qwen3:8b
+- K13 Phase 2: identity_profile.py, personality_policy.py (cognitive development style)
+- K13 Phase 2: memory_retriever.py, memory_summarizer.py (selective retrieval)
 - K12 Phase 2: Claude CLI backend (instalacja na mini PC, OpenClaw exec integracja)
 - K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl) - CZESCIOWO DONE (hints sa zapisywane)
 - K12 Phase 2: Web UI /analysis page (raporty, rekomendacje)
@@ -816,4 +825,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-24 (K12 LIVE - self-analysis dziala, planner fallthrough fix, teacher file_id + backoff, Creative Module spec, 1813 testow)*
+*Ostatnia aktualizacja: 2026-03-25 (K13 Creative Module LIVE - tension detection, meta-goals, strategic journal, 1876 testow)*
