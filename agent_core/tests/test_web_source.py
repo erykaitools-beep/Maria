@@ -525,7 +525,7 @@ def _make_mock_analyzer(
 class TestTopicSuggester:
     """TopicSuggester tests with mocked KnowledgeAnalyzer."""
 
-    def test_suggest_expand_from_topic_map(self):
+    def test_suggest_expand_from_topic_map(self, tmp_path):
         analyzer = _make_mock_analyzer(
             topic_map={
                 "logika": ["file1", "file2", "file3"],
@@ -533,7 +533,7 @@ class TestTopicSuggester:
                 "biologia": ["file6"],
             }
         )
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics()
 
         # Should pick top topics by file count
@@ -546,7 +546,7 @@ class TestTopicSuggester:
             if s["strategy"] == "expand":
                 assert "poglebienie" in s["reason"]
 
-    def test_suggest_explore_from_tag_frequency(self):
+    def test_suggest_explore_from_tag_frequency(self, tmp_path):
         analyzer = _make_mock_analyzer(
             topic_map={"logika": ["f1"]},
             tag_freq={
@@ -556,7 +556,7 @@ class TestTopicSuggester:
                 "rzadki": 1,
             },
         )
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics()
 
         # Should include explore topics
@@ -574,20 +574,20 @@ class TestTopicSuggester:
         reg = FetchRegistry(registry_path=tmp_path / "reg.jsonl")
         reg.register("https://x.com", "X", "wiki", "x.txt", 100, topic="logika")
 
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics(fetch_registry=reg)
 
         topics = [s["topic"] for s in suggestions]
         assert "logika" not in topics
         assert "fizyka" in topics
 
-    def test_suggest_empty_topic_map(self):
+    def test_suggest_empty_topic_map(self, tmp_path):
         analyzer = _make_mock_analyzer()
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics()
         assert suggestions == []
 
-    def test_suggest_respects_max_suggestions(self):
+    def test_suggest_respects_max_suggestions(self, tmp_path):
         analyzer = _make_mock_analyzer(
             topic_map={
                 "t1": ["f1", "f2"],
@@ -597,15 +597,15 @@ class TestTopicSuggester:
             },
             tag_freq={"tag1": 5, "tag2": 4, "tag3": 3},
         )
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics(max_suggestions=2)
         assert len(suggestions) <= 2
 
-    def test_suggest_skips_short_tags(self):
+    def test_suggest_skips_short_tags(self, tmp_path):
         analyzer = _make_mock_analyzer(
             topic_map={"ab": ["f1"], "logika": ["f2"]},
         )
-        suggester = TopicSuggester(analyzer)
+        suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
         suggestions = suggester.suggest_topics()
         topics = [s["topic"] for s in suggestions]
         assert "ab" not in topics  # too short (< 3 chars)
