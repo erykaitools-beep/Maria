@@ -364,6 +364,21 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning(f"SelfAnalysis not initialized: {e}")
 
+                # K13 Creative Module (strategic reflection)
+                try:
+                    from agent_core.creative.facade import CreativeModule
+                    from maria_core.sys.config import BASE_DIR as _BASE_DIR
+                    creative = CreativeModule(
+                        data_dir=str(_BASE_DIR / "meta_data"),
+                        memory_dir=str(_BASE_DIR / "memory"),
+                        goal_store=ctx.goal_store,
+                    )
+                    planner.set_creative_module(creative)
+                    ctx.creative_module = creative
+                    print("[Homeostasis] [OK] CreativeModule wired (K13)")
+                except Exception as e:
+                    logger.warning(f"CreativeModule not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

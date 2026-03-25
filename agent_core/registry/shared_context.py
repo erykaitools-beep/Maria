@@ -43,6 +43,7 @@ class SharedContext:
     model_scheduler: Any = None      # ModelScheduler (multi-organ model stack)
     openclaw_client: Any = None      # OpenClawClient (effector, ADR-016)
     self_analysis: Any = None        # SelfAnalysis (K12, cognitive loop)
+    creative_module: Any = None      # CreativeModule (K13, strategic reflection)
     llm_tape: Any = None             # LLMTape (raw LLM interaction log)
     evidence_collector: Any = None   # EvidenceCollector (Phase 2, grounded responses)
 

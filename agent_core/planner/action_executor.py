@@ -36,6 +36,7 @@ class ActionExecutor:
         self._experiment_system = None
         self._openclaw_client = None
         self._self_analysis = None
+        self._creative_module = None
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -69,6 +70,10 @@ class ActionExecutor:
         """Set SelfAnalysis for K12 cognitive loop."""
         self._self_analysis = sa
 
+    def set_creative_module(self, creative) -> None:
+        """Set Creative module for K13 reflection cycle."""
+        self._creative_module = creative
+
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
         Execute a plan. Returns result dict.
@@ -101,6 +106,8 @@ class ActionExecutor:
                 result = self._exec_effector(plan)
             elif action == ActionType.SELF_ANALYZE:
                 result = self._exec_self_analyze(plan)
+            elif action == ActionType.CREATIVE:
+                result = self._exec_creative(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -369,5 +376,17 @@ class ActionExecutor:
                 "goals_created": report.goals_created,
                 "duration_ms": report.duration_ms,
             }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _exec_creative(self, plan: Plan) -> Dict[str, Any]:
+        """Run K13 Creative reflection cycle."""
+        if self._creative_module is None:
+            return {"success": False, "error": "No creative module configured"}
+
+        try:
+            trigger = plan.action_params.get("trigger", "planner")
+            result = self._creative_module.reflect(trigger=trigger)
+            return result
         except Exception as e:
             return {"success": False, "error": str(e)}

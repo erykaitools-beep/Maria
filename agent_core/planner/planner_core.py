@@ -91,6 +91,7 @@ class PlannerCore:
         self._action_safety = None
         self._experiment_system = None
         self._self_analysis = None
+        self._creative_module = None
 
         # Load persisted state
         self._load_state()
@@ -150,6 +151,11 @@ class PlannerCore:
         """Set K12 SelfAnalysis for cognitive loop."""
         self._self_analysis = sa
         self.executor.set_self_analysis(sa)
+
+    def set_creative_module(self, creative) -> None:
+        """Set K13 Creative module for strategic reflection."""
+        self._creative_module = creative
+        self.executor.set_creative_module(creative)
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -223,6 +229,12 @@ class PlannerCore:
         # -- STEP 2: PERCEIVE --
         context = self._gather_context()
 
+        # -- STEP 2.5: CREATIVE CHECK (independent of goal cycle) --
+        # Creative runs on its own cooldown, not competing with learn/fetch
+        plan = self._maybe_creative(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
         # -- STEP 3: SELECT GOAL (learning/exam/review first) --
         goal = self._select_goal(context)
         if goal is None:
@@ -257,6 +269,11 @@ class PlannerCore:
 
         # K12: Self-analysis (after evaluation, before giving up)
         plan = self._maybe_self_analyze(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # K13: Creative reflection (after self-analysis, before NOOP)
+        plan = self._maybe_creative(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -464,6 +481,37 @@ class PlannerCore:
             )
 
         return None
+
+    # K13: Creative reflection trigger
+    CREATIVE_INTERVAL_SEC = 7200  # 2h between creative reflections
+
+    def _maybe_creative(self, context: Dict) -> Optional[Plan]:
+        """
+        Check if K13 Creative reflection should trigger.
+
+        Triggers when:
+        - Creative module is available
+        - Cooldown expired (2h)
+        - Not rate-limited by K7
+        """
+        if self._creative_module is None:
+            return None
+
+        # Check K7 rate limit
+        if self._is_action_rate_limited("creative"):
+            return None
+
+        # Check if creative module itself says it's ready
+        if not self._creative_module.should_reflect():
+            return None
+
+        logger.info("[K13] Creative reflection triggered")
+        return create_plan(
+            goal_id=None,
+            goal_description="K13 Creative reflection",
+            action_type=ActionType.CREATIVE,
+            action_params={"trigger": "planner_idle"},
+        )
 
     # -- Internal: goal selection ---------------------------
 

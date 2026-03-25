@@ -63,6 +63,10 @@ DEFAULT_SAFETY_PROFILES: Dict[str, SafetyProfile] = {
         SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
         EffectType.CONFIGURATION, True, True,  # K12: creates goals + topic hints
     ),
+    "creative": SafetyProfile(
+        SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
+        EffectType.GOAL_STATE, True, True,  # K13: creates PROPOSED goals + journal
+    ),
 }
 
 # Safe-by-default profile for unknown action types

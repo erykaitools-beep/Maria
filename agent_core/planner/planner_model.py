@@ -32,6 +32,7 @@ class ActionType(Enum):
     EXPERIMENT = "experiment"    # K11: Run parameter experiment
     EFFECTOR = "effector"        # Execute via OpenClaw tools (ADR-016)
     SELF_ANALYZE = "self_analyze"  # K12: Self-analysis cognitive loop
+    CREATIVE = "creative"        # K13: Creative reflection cycle
 
 
 @dataclass

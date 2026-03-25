@@ -35,6 +35,7 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
     "experiment": ActionClassification.GUARDED,
     "effector": ActionClassification.RESTRICTED,
     "self_analyze": ActionClassification.GUARDED,  # K12: local model in MVP
+    "creative": ActionClassification.GUARDED,      # K13: strategic reflection
 }
 
 
