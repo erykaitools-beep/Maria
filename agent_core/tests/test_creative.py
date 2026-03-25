@@ -235,12 +235,12 @@ class TestCreativeStore:
         )
         store.save_meta_goal(old_mg)
 
-        # Recent goal
+        # Recent goal (PROPOSED - should appear in dedup check)
         recent_mg = MetaGoal.create(
             title="Recent", goal_type=MetaGoalType.EXPLORATION_META,
             priority=0.7, why_now="recent", evidence_refs=["e1"],
             expected_value="recent",
-        )
+        ).with_status(MetaGoalStatus.PROPOSED)
         store.save_meta_goal(recent_mg)
 
         recent = store.get_recent_meta_goals(hours=24.0)
@@ -287,6 +287,30 @@ class TestCreativeStore:
         high = store.get_memories_by_importance(0.7)
         assert len(high) == 1
         assert high[0]["importance"] == 0.9
+
+    def test_get_recent_meta_goals_excludes_rejected(self, tmp_path):
+        """REJECTED goals should not block future proposals."""
+        store = CreativeStore(str(tmp_path))
+
+        # Save a rejected goal
+        rejected = MetaGoal.create(
+            title="Rejected goal", goal_type=MetaGoalType.EXPLORATION_META,
+            priority=0.5, why_now="test", evidence_refs=["e1"],
+            expected_value="test",
+        ).with_status(MetaGoalStatus.REJECTED)
+        store.save_meta_goal(rejected)
+
+        # Save an accepted goal
+        accepted = MetaGoal.create(
+            title="Accepted goal", goal_type=MetaGoalType.EPISTEMIC_META,
+            priority=0.7, why_now="test", evidence_refs=["e1"],
+            expected_value="test",
+        ).with_status(MetaGoalStatus.ACCEPTED)
+        store.save_meta_goal(accepted)
+
+        recent = store.get_recent_meta_goals(hours=24.0)
+        assert len(recent) == 1
+        assert recent[0]["title"] == "Accepted goal"
 
 
 # --- Strategic Context ---
@@ -569,13 +593,13 @@ class TestNoveltyFilter:
     def test_reject_exact_duplicate(self, tmp_path):
         store = CreativeStore(str(tmp_path))
 
-        # Save existing meta-goal
+        # Save existing meta-goal (PROPOSED - counts for dedup)
         existing = MetaGoal.create(
             title="Explore new science topics",
             goal_type=MetaGoalType.EXPLORATION_META,
             priority=0.5, why_now="old", evidence_refs=["e1"],
             expected_value="old",
-        )
+        ).with_status(MetaGoalStatus.PROPOSED)
         store.save_meta_goal(existing)
 
         nf = NoveltyFilter(store)

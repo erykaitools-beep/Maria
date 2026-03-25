@@ -156,11 +156,16 @@ class CreativeStore:
         return list(self._meta_goals.values())
 
     def get_recent_meta_goals(self, hours: float = 24.0) -> List[Dict]:
-        """Get meta-goals from last N hours (for dedup)."""
+        """Get meta-goals from last N hours (for dedup).
+
+        Only returns PROPOSED or ACCEPTED goals - REJECTED goals
+        should not block future proposals (prevents self-blocking loop).
+        """
         cutoff = time.time() - hours * 3600
         return [
             mg for mg in self.load_meta_goals()
             if mg.get("created_ts", 0) > cutoff
+            and mg.get("status") in ("proposed", "accepted")
         ]
 
     # --- Conversation memory ---
