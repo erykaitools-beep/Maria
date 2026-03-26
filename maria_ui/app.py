@@ -2262,6 +2262,90 @@ def api_experiment_export(report_id):
     )
 
 
+# =============================================
+# K12 Self-Analysis page
+# =============================================
+
+@app.route('/analysis')
+@require_auth
+def analysis_page():
+    """Self-Analysis dashboard page."""
+    return render_template('analysis.html', active_page='analysis')
+
+
+def _read_analysis_reports():
+    """Read all analysis reports from JSONL."""
+    import os
+    reports_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "meta_data", "self_analysis_reports.jsonl"
+    )
+    results = []
+    try:
+        with open(reports_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    results.append(json.loads(line))
+    except (IOError, json.JSONDecodeError):
+        pass
+    return results
+
+
+@app.route('/api/analysis/latest')
+@require_auth
+def api_analysis_latest():
+    """Get most recent analysis report."""
+    reports = _read_analysis_reports()
+    if not reports:
+        return jsonify({"error": "No reports available"}), 404
+    return jsonify(reports[-1])
+
+
+@app.route('/api/analysis/recommendations')
+@require_auth
+def api_analysis_recommendations():
+    """Get recommendations from latest report."""
+    reports = _read_analysis_reports()
+    if not reports:
+        return jsonify([])
+    return jsonify(reports[-1].get("recommendations", []))
+
+
+@app.route('/api/analysis/history')
+@require_auth
+def api_analysis_history():
+    """Get all historical reports (summarized)."""
+    reports = _read_analysis_reports()
+    result = []
+    for r in reports:
+        result.append({
+            "report_id": r.get("report_id"),
+            "timestamp": r.get("timestamp"),
+            "analyzer": r.get("analyzer"),
+            "num_recommendations": len(r.get("recommendations", [])),
+            "num_goals": len(r.get("goals_created", [])),
+            "duration_ms": r.get("duration_ms"),
+            "error": r.get("error"),
+        })
+    return jsonify(result[-20:])  # Last 20
+
+
+@app.route('/api/analysis/status')
+@require_auth
+def api_analysis_status():
+    """Get K12 system status."""
+    reports = _read_analysis_reports()
+    last = reports[-1] if reports else None
+    return jsonify({
+        "available": bool(reports),
+        "total_reports": len(reports),
+        "last_report_id": last.get("report_id") if last else None,
+        "last_analyzer": last.get("analyzer") if last else None,
+        "last_timestamp": last.get("timestamp") if last else None,
+    })
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("[START] M.A.R.I.A. Web UI (Sprint 5)")

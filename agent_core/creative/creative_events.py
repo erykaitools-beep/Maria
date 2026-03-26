@@ -11,5 +11,6 @@ GOAL_REJECTED_DUPLICATE = "creative.goal_rejected_duplicate"
 MEMORY_RETRIEVED = "creative.memory_retrieved"
 JOURNAL_ENTRY_WRITTEN = "creative.journal_entry_written"
 PERSONALITY_SIGNAL_EMITTED = "creative.personality_signal_emitted"
+PERSONALITY_SIGNAL = PERSONALITY_SIGNAL_EMITTED  # alias for facade
 GOAL_PROMOTED = "creative.goal_promoted_to_goalstore"
 REFLECTION_SESSION_COMPLETE = "creative.reflection_session_complete"

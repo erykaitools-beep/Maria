@@ -51,14 +51,21 @@ class CreativeEvaluator:
     """Evaluates meta-goals for promotion to GoalStore."""
 
     def evaluate(self, meta_goal: MetaGoal,
-                 context: Dict[str, Any] = None) -> Dict[str, Any]:
+                 context: Dict[str, Any] = None,
+                 weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """
         Score a meta-goal across multiple dimensions.
+
+        Args:
+            meta_goal: The meta-goal to evaluate
+            context: Strategic context dict
+            weights: Custom weights (from PersonalityPolicy). Default: WEIGHTS.
 
         Returns:
             Dict with dimension scores and final_score.
         """
         context = context or {}
+        w = weights or WEIGHTS
 
         scores = {
             "strategic_value": self._score_strategic_value(meta_goal, context),
@@ -70,7 +77,7 @@ class CreativeEvaluator:
 
         # Weighted average
         final = sum(
-            scores[dim] * WEIGHTS[dim]
+            scores[dim] * w.get(dim, WEIGHTS.get(dim, 0))
             for dim in WEIGHTS
         )
 
@@ -81,9 +88,10 @@ class CreativeEvaluator:
         return scores
 
     def evaluate_batch(self, meta_goals: List[MetaGoal],
-                       context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+                       context: Dict[str, Any] = None,
+                       weights: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
         """Evaluate multiple meta-goals, return sorted by final_score."""
-        results = [self.evaluate(mg, context) for mg in meta_goals]
+        results = [self.evaluate(mg, context, weights) for mg in meta_goals]
         results.sort(key=lambda r: r["final_score"], reverse=True)
         return results
 

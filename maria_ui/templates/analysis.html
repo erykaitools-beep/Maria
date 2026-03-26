@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Self-Analysis (K12){% endblock %}
+{% block page_class %}mo-page--analysis{% endblock %}
+
+{% block content %}
+<div class="mo-analysis">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Self-Analysis (K12)</h2>
+    <span id="analysis-status" class="mo-badge mo-badge--off">---</span>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-latest">Ostatni raport</button>
+    <button class="mo-tab" data-tab="tab-recommendations">Rekomendacje</button>
+    <button class="mo-tab" data-tab="tab-history">Historia</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-latest">
+    <div id="latest-report">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-recommendations">
+    <div id="recommendations-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-history">
+    <div id="history-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+{% endblock %}

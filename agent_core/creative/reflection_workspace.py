@@ -109,7 +109,9 @@ class ReflectionWorkspaceManager:
         return insights
 
     def generate_candidates(self, session: ReflectionSession,
-                            context: Dict[str, Any]) -> List[MetaGoal]:
+                            context: Dict[str, Any],
+                            meta_goal_engine=None,
+                            memories_summary: str = "") -> List[MetaGoal]:
         """Generate candidate meta-goals from insights.
 
         Only insights marked as meta_goal_candidate produce goals.
@@ -140,15 +142,27 @@ class ReflectionWorkspaceManager:
             if coverage:
                 evidence_refs.append(f"knowledge_coverage={coverage:.2f}")
 
+            # Use LLM engine if available, else rule-based
+            if meta_goal_engine is not None:
+                generated = meta_goal_engine.generate(
+                    tension, context, memories_summary
+                )
+            else:
+                generated = {
+                    "title": self._generate_title(tension, context),
+                    "expected_value": self._generate_expected_value(tension),
+                    "decomposition_hint": self._generate_decomposition_hint(tension),
+                }
+
             mg = MetaGoal.create(
-                title=self._generate_title(tension, context),
+                title=generated.get("title", "Nowy kierunek rozwoju"),
                 goal_type=goal_type,
                 priority=insight.confidence,
                 why_now=insight.statement,
                 evidence_refs=evidence_refs,
-                expected_value=self._generate_expected_value(tension),
+                expected_value=generated.get("expected_value", ""),
                 risk_level=RiskLevel.LOW if insight.confidence > 0.5 else RiskLevel.MEDIUM,
-                decomposition_hint=self._generate_decomposition_hint(tension),
+                decomposition_hint=generated.get("decomposition_hint", ""),
             )
             if session.add_meta_goal(mg):
                 candidates.append(mg)

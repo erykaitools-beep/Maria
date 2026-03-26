@@ -80,34 +80,39 @@ class TestTokenBudget:
         budget.record_usage(prompt_tokens=1000, completion_tokens=500)
         assert budget.can_use_nim() is True
 
-    def test_can_use_nim_daily_depleted(self, budget):
-        """can_use_nim returns False when daily budget exhausted."""
-        budget.record_usage(prompt_tokens=6000, completion_tokens=5000)
+    def test_can_use_nim_rpm_depleted(self, budget):
+        """can_use_nim returns False when RPM limit reached."""
+        import time as _time
+        now = _time.time()
+        # Fill up RPM window with 40 timestamps
+        budget._request_timestamps = [now - i * 0.5 for i in range(40)]
         assert budget.can_use_nim() is False
 
-    def test_can_use_nim_monthly_depleted(self, budget_file):
-        """can_use_nim returns False when monthly budget exhausted."""
-        budget = TokenBudget(
-            daily_limit=1_000_000,  # high daily
-            monthly_limit=1_000,    # low monthly
-            budget_file=budget_file,
-        )
-        budget.record_usage(prompt_tokens=600, completion_tokens=500)
-        assert budget.can_use_nim() is False
+    def test_can_use_nim_rpm_window_expires(self, budget):
+        """can_use_nim returns True when old requests fall outside window."""
+        import time as _time
+        # All timestamps are 61 seconds ago -> outside RPM window
+        old = _time.time() - 61.0
+        budget._request_timestamps = [old - i for i in range(40)]
+        assert budget.can_use_nim() is True
 
     def test_budget_status_ok(self, budget):
         """Status is OK when plenty of budget."""
         assert budget.get_budget_status() == "OK"
 
     def test_budget_status_low(self, budget):
-        """Status is LOW when under 20% remaining."""
-        # Use 85% of daily budget
-        budget.record_usage(prompt_tokens=5000, completion_tokens=3500)
+        """Status is LOW when RPM >= 80% of limit."""
+        import time as _time
+        now = _time.time()
+        # 33 requests in last minute = 82.5% of 40 limit
+        budget._request_timestamps = [now - i * 0.5 for i in range(33)]
         assert budget.get_budget_status() == "LOW"
 
     def test_budget_status_depleted(self, budget):
-        """Status is DEPLETED when no budget left."""
-        budget.record_usage(prompt_tokens=6000, completion_tokens=5000)
+        """Status is DEPLETED when RPM limit reached."""
+        import time as _time
+        now = _time.time()
+        budget._request_timestamps = [now - i * 0.5 for i in range(40)]
         assert budget.get_budget_status() == "DEPLETED"
 
     def test_persistence_save_load(self, budget_file):
@@ -152,11 +157,13 @@ class TestTokenBudget:
         text = budget.get_status_text()
         assert "800" in text  # total tokens
         assert "tokenow" in text.lower()
-        assert "Zostalo" in text
+        assert "RPM" in text
 
     def test_status_text_depleted(self, budget):
-        """Status text shows depletion message."""
-        budget.record_usage(prompt_tokens=6000, completion_tokens=5000)
+        """Status text shows RPM depletion message."""
+        import time as _time
+        now = _time.time()
+        budget._request_timestamps = [now - i * 0.5 for i in range(40)]
         text = budget.get_status_text()
         assert "Ollama" in text
 
@@ -166,6 +173,8 @@ class TestTokenBudget:
         d = budget.get_status_dict()
         assert "status" in d
         assert "can_use_nim" in d
+        assert "rpm" in d
+        assert d["rpm"]["limit"] == 40
         assert "daily" in d
         assert "monthly" in d
         assert d["daily"]["used"] == 150
@@ -559,16 +568,18 @@ class TestLLMRouter:
 
     # --- Budget depleted -> Ollama ---
 
-    def test_analyze_task_ollama_when_budget_depleted(
+    def test_analyze_task_ollama_when_rpm_depleted(
         self, ollama, nim, tmp_path
     ):
-        """Uses Ollama when token budget is depleted."""
+        """Uses Ollama when RPM limit is reached."""
+        import time as _time
         budget = TokenBudget(
-            daily_limit=100,
+            daily_limit=100_000,
             monthly_limit=100_000,
             budget_file=str(tmp_path / "b.json"),
         )
-        budget.record_usage(prompt_tokens=60, completion_tokens=50)
+        now = _time.time()
+        budget._request_timestamps = [now - i * 0.5 for i in range(40)]
 
         router = LLMRouter(ollama, nim, budget)
         router.analyze_task("Test")

@@ -4,8 +4,9 @@ K12 Self-Analysis: ExternalAnalyzer.
 Invokes a stronger AI model to analyze Maria's compressed state
 and return structured recommendations.
 
-MVP backend: local_planner (qwen3:8b via ModelScheduler).
-Phase 2: claude_cli (Claude Code CLI via OpenClaw exec).
+Backend cascade: NIM API (z-ai/glm5) -> local_planner (qwen3:8b).
+NIM is stronger and faster (cloud, 40 RPM).
+Local planner is fallback when NIM unavailable or rate-limited.
 """
 
 import json
@@ -38,22 +39,28 @@ class ExternalAnalyzer:
     def __init__(
         self,
         llm_fn: Optional[Callable[[str], str]] = None,
+        nim_fn: Optional[Callable[[str], str]] = None,
         backend: str = "local_planner",
     ):
         """
         Args:
-            llm_fn: Function that takes prompt string, returns response string.
-                     For local_planner: router.ask_as_role(PLANNER, prompt)
-                     For claude_cli: subprocess wrapper (Phase 2)
-            backend: Which backend to use (for reporting).
+            llm_fn: Function for local planner (router.ask_as_role(PLANNER, prompt)).
+            nim_fn: Function for NIM API (router._ask_once(prompt)).
+                    Stronger model, cloud, 40 RPM limit.
+            backend: Which backend to use for local fallback (for reporting).
         """
         self._llm_fn = llm_fn
+        self._nim_fn = nim_fn
         self._backend = backend
         self._claude_cli = None
 
     def set_llm_fn(self, fn: Callable[[str], str]):
-        """Set LLM function (dependency injection from homeostasis wiring)."""
+        """Set local LLM function (dependency injection from homeostasis wiring)."""
         self._llm_fn = fn
+
+    def set_nim_fn(self, fn: Callable[[str], str]):
+        """Set NIM API function for stronger analysis (K12 Phase 2)."""
+        self._nim_fn = fn
 
     def set_claude_cli(self, client):
         """Set Claude CLI client for stronger analysis (K12 Phase 2)."""
@@ -63,7 +70,7 @@ class ExternalAnalyzer:
         """
         Send compressed state to external AI and parse recommendations.
 
-        Tries Claude CLI first (stronger), falls back to local planner.
+        Cascade: NIM API -> local planner (fallback).
 
         Args:
             state_summary: Output from StateCollector.collect_with_prompt()
@@ -71,7 +78,17 @@ class ExternalAnalyzer:
         Returns:
             AnalysisReport with recommendations (may be empty on failure)
         """
-        # Try Claude CLI first if available
+        # Try NIM API first (stronger model, cloud)
+        if self._nim_fn is not None:
+            try:
+                nim_report = self._analyze_with_nim(state_summary)
+                if nim_report and not nim_report.error:
+                    return nim_report
+                logger.info("[K12] NIM returned error, falling back to local")
+            except Exception as e:
+                logger.info(f"[K12] NIM failed, falling back to local: {e}")
+
+        # Try Claude CLI if available
         if self._claude_cli:
             try:
                 claude_report = self._analyze_with_claude(state_summary)
@@ -81,8 +98,41 @@ class ExternalAnalyzer:
             except Exception as e:
                 logger.info(f"[K12] Claude CLI failed, falling back to local: {e}")
 
-        # Fallback: local planner (existing code path)
+        # Fallback: local planner
         return self._analyze_with_local(state_summary)
+
+    def _analyze_with_nim(self, state_summary: Dict[str, Any]) -> Optional[AnalysisReport]:
+        """Analyze using NIM API (z-ai/glm5, stronger cloud model)."""
+        if self._nim_fn is None:
+            return None
+
+        report = AnalysisReport(
+            analyzer="nim_api",
+            input_summary_hash=state_summary.get("input_hash", ""),
+        )
+
+        start_ms = time.time() * 1000
+
+        # Use the same prompt as local, NIM handles it well
+        prompt = self._build_prompt(state_summary)
+
+        try:
+            raw_response = self._nim_fn(prompt)
+            report.raw_response = (raw_response or "")[:4000]
+
+            if not raw_response:
+                report.error = "Empty response from NIM API"
+                return report
+
+            recommendations = self._parse_response(raw_response)
+            report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+
+        except Exception as e:
+            report.error = f"NIM analysis failed: {str(e)[:200]}"
+            logger.error(f"[K12] NIM error: {e}")
+
+        report.duration_ms = time.time() * 1000 - start_ms
+        return report
 
     def _analyze_with_local(self, state_summary: Dict[str, Any]) -> AnalysisReport:
         """Analyze using local planner model (qwen3:8b)."""

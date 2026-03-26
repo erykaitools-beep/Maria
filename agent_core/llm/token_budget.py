@@ -11,8 +11,9 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, date
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ class TokenBudget:
             # fall back to Ollama
     """
 
-    # Budget status thresholds
+    # RPM (requests per minute) limit - primary gate
+    RPM_LIMIT = 40
+    RPM_WINDOW_SEC = 60.0
+
+    # Budget status thresholds (for token observability)
     LOW_THRESHOLD = 0.2   # 20% remaining = LOW
     WARN_THRESHOLD = 0.5  # 50% remaining = WARN (for logging)
 
@@ -67,6 +72,7 @@ class TokenBudget:
 
         self._lock = threading.Lock()
         self._usage: Dict[str, Dict[str, Any]] = {}
+        self._request_timestamps: List[float] = []
         self._load()
 
     # -------------------------------------------------
@@ -118,6 +124,28 @@ class TokenBudget:
                 f"NIM token budget LOW! "
                 f"Remaining today: {remaining:,}/{self.daily_limit:,}"
             )
+
+    def record_request(self) -> None:
+        """
+        Record a NIM API request timestamp for RPM tracking.
+
+        Call this alongside record_usage() after each NIM call.
+        """
+        now = time.time()
+        with self._lock:
+            self._request_timestamps.append(now)
+            # Prune old timestamps (older than RPM window)
+            cutoff = now - self.RPM_WINDOW_SEC
+            self._request_timestamps = [
+                ts for ts in self._request_timestamps if ts > cutoff
+            ]
+
+    def _get_current_rpm(self) -> int:
+        """Get number of requests in the current RPM window."""
+        now = time.time()
+        cutoff = now - self.RPM_WINDOW_SEC
+        with self._lock:
+            return sum(1 for ts in self._request_timestamps if ts > cutoff)
 
     # -------------------------------------------------
     # USAGE QUERIES
@@ -193,30 +221,38 @@ class TokenBudget:
 
     def can_use_nim(self) -> bool:
         """
-        Check if token budget allows NIM API usage.
+        Check if RPM limit allows NIM API usage.
+
+        Primary gate: RPM sliding window (40 req/min).
+        Token tracking remains for observability only.
 
         Returns:
-            True if both daily AND monthly budgets have tokens remaining
+            True if RPM limit not exceeded
         """
-        return self.get_remaining_today() > 0 and self.get_remaining_month() > 0
+        current_rpm = self._get_current_rpm()
+        if current_rpm >= self.RPM_LIMIT:
+            logger.debug(
+                f"NIM RPM limit reached: {current_rpm}/{self.RPM_LIMIT}"
+            )
+            return False
+        return True
 
     def get_budget_status(self) -> str:
         """
-        Get overall budget status.
+        Get overall budget status based on RPM.
 
         Returns:
-            "OK" - budget healthy (>20% remaining)
-            "LOW" - budget getting low (<=20% remaining)
-            "DEPLETED" - no budget left
+            "OK" - RPM healthy (<80% of limit)
+            "LOW" - RPM getting high (>=80% of limit)
+            "DEPLETED" - RPM limit reached
         """
         if not self.can_use_nim():
             return "DEPLETED"
 
-        daily_ratio = self.get_remaining_today() / max(self.daily_limit, 1)
-        monthly_ratio = self.get_remaining_month() / max(self.monthly_limit, 1)
-        min_ratio = min(daily_ratio, monthly_ratio)
+        current_rpm = self._get_current_rpm()
+        rpm_ratio = current_rpm / max(self.RPM_LIMIT, 1)
 
-        if min_ratio <= self.LOW_THRESHOLD:
+        if rpm_ratio >= 0.8:
             return "LOW"
 
         return "OK"
@@ -246,25 +282,29 @@ class TokenBudget:
         if self.monthly_limit > 0:
             month_pct = (month["total_tokens"] / self.monthly_limit) * 100
 
+        current_rpm = self._get_current_rpm()
+
         lines = []
         lines.append(
+            f"NIM RPM: {current_rpm}/{self.RPM_LIMIT} "
+            f"(limit na minute)."
+        )
+        lines.append(
             f"Dzis zuzylam {today['total_tokens']:,} tokenow NIM "
-            f"({today_pct:.0f}% limitu dziennego). "
-            f"Zostalo {max(0, remaining_today):,}."
+            f"({today_pct:.0f}%). "
+            f"Wywolan dzis: {today['calls']}."
         )
         lines.append(
             f"W tym miesiacu: {month['total_tokens']:,} tokenow "
-            f"({month_pct:.0f}% limitu). "
-            f"Zostalo {max(0, remaining_month):,}."
+            f"({month_pct:.0f}%)."
         )
-        lines.append(f"Liczba wywolan dzis: {today['calls']}.")
 
         if status == "DEPLETED":
-            lines.append("Budzet wyczerpany - korzystam z Ollama.")
+            lines.append("RPM limit osiagniety - korzystam z Ollama.")
         elif status == "LOW":
-            lines.append("Budzet niski - oszczedzam tokeny.")
+            lines.append("RPM wysoki - oszczedzam requesty.")
         else:
-            lines.append("Budzet OK - moge korzystac z NIM.")
+            lines.append("RPM OK - moge korzystac z NIM.")
 
         return " ".join(lines)
 
@@ -277,9 +317,15 @@ class TokenBudget:
         """
         today = self.get_today_usage()
         month = self.get_month_usage()
+        current_rpm = self._get_current_rpm()
         return {
             "status": self.get_budget_status(),
             "can_use_nim": self.can_use_nim(),
+            "rpm": {
+                "current": current_rpm,
+                "limit": self.RPM_LIMIT,
+                "headroom": max(0, self.RPM_LIMIT - current_rpm),
+            },
             "daily": {
                 "used": today["total_tokens"],
                 "limit": self.daily_limit,
