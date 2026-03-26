@@ -4,21 +4,24 @@ Public methods:
     reflect()                  - Run full reflection cycle (detect -> insight -> propose)
     should_reflect()           - Check if conditions warrant reflection
     get_status()               - Module status summary
+    set_llm_fn()               - Late-wire LLM function for Phase 2 engines
 
 Integration:
     - Called by Planner via ActionType.CREATIVE
     - Phase 11 in tick loop (after planner, before sleep)
-    - Outputs: GoalStore PROPOSED items, journal entries, strategic observations
+    - Outputs: GoalStore PROPOSED items, journal entries, reframes, explorations
 
 Cooldowns:
     - Minimum 2h between reflections
     - Max 3 meta-goals per cycle
     - Category cooldown 12h (same tension type)
+
+Phase 2: LLM-enhanced engines (NIM API) with rule-based fallback.
 """
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from agent_core.creative.creative_model import MetaGoalStatus
 from agent_core.creative.creative_store import CreativeStore
@@ -27,9 +30,18 @@ from agent_core.creative.tension_detector import TensionDetector
 from agent_core.creative.reflection_workspace import ReflectionWorkspaceManager
 from agent_core.creative.creative_journal import CreativeJournal
 from agent_core.creative.novelty_filter import NoveltyFilter
-from agent_core.creative.creative_evaluator import CreativeEvaluator, PROMOTION_THRESHOLD
+from agent_core.creative.creative_evaluator import CreativeEvaluator
 from agent_core.creative.goal_adapter import GoalAdapter
 from agent_core.creative import creative_events as events
+
+# Phase 2 imports
+from agent_core.creative.identity_profile import IdentityProfile
+from agent_core.creative.personality_policy import PersonalityPolicy
+from agent_core.creative.memory_retriever import MemoryRetriever
+from agent_core.creative.memory_summarizer import MemorySummarizer
+from agent_core.creative.meta_goal_engine import MetaGoalEngine
+from agent_core.creative.reframe_engine import ReframeEngine
+from agent_core.creative.exploration_engine import ExplorationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +52,15 @@ DEBUG_INTERVAL_SEC = 300  # 5min
 
 
 class CreativeModule:
-    """Facade for the Creative Module (K13)."""
+    """Facade for the Creative Module (K13).
+
+    Phase 1: Rule-based reflection (zero LLM, 42ms/cycle).
+    Phase 2: LLM-enhanced engines with rule-based fallback.
+    """
 
     def __init__(self, data_dir: str = "meta_data", memory_dir: str = "memory",
-                 goal_store=None):
-        # Core components
+                 goal_store=None, llm_fn: Optional[Callable[[str], str]] = None):
+        # Core components (Phase 1)
         self._store = CreativeStore(data_dir)
         self._context_builder = StrategicContext(data_dir, memory_dir)
         self._tension_detector = TensionDetector()
@@ -54,15 +70,39 @@ class CreativeModule:
         self._evaluator = CreativeEvaluator()
         self._goal_adapter = GoalAdapter(goal_store)
 
+        # Phase 2 components
+        self._identity_profile = IdentityProfile(data_dir, memory_dir)
+        self._personality_policy = PersonalityPolicy()
+        self._memory_retriever = MemoryRetriever(self._store)
+        self._memory_summarizer = MemorySummarizer(llm_fn)
+        self._meta_goal_engine = MetaGoalEngine(llm_fn)
+        self._reframe_engine = ReframeEngine(llm_fn)
+        self._exploration_engine = ExplorationEngine(llm_fn)
+
         # State
         self._last_reflection_ts: float = 0.0
         self._total_reflections: int = 0
         self._total_meta_goals_proposed: int = 0
         self._total_tensions_detected: int = 0
+        self._total_reframes: int = 0
+        self._total_explorations: int = 0
+        self._has_llm: bool = llm_fn is not None
 
     def set_goal_store(self, goal_store) -> None:
         """Wire GoalStore after initialization."""
         self._goal_adapter.set_goal_store(goal_store)
+
+    def set_llm_fn(self, fn: Optional[Callable[[str], str]]) -> None:
+        """Wire LLM function for Phase 2 engines (late wiring)."""
+        self._has_llm = fn is not None
+        self._memory_summarizer.set_llm_fn(fn)
+        self._meta_goal_engine.set_llm_fn(fn)
+        self._reframe_engine.set_llm_fn(fn)
+        self._exploration_engine.set_llm_fn(fn)
+
+    def set_expert_fn(self, fn: Optional[Callable[[str], str]]) -> None:
+        """Wire expert LLM (ChatGPT) for richer creative exploration."""
+        self._exploration_engine.set_expert_fn(fn)
 
     def should_reflect(self) -> bool:
         """Check if conditions warrant a reflection cycle.
@@ -78,22 +118,28 @@ class CreativeModule:
 
     def reflect(self, trigger: str = "periodic") -> Dict[str, Any]:
         """
-        Run a full reflection cycle.
+        Run a full reflection cycle (Phase 2 enhanced).
 
         Steps:
         1. Build strategic context
         2. Detect tensions
         3. Create reflection session
         4. Form insights from tensions
-        5. Generate candidate meta-goals
+        4.5 Retrieve relevant memories (Phase 2)
+        4.6 Build memory summary (Phase 2)
+        4.7 Build cognitive profile (Phase 2)
+        5. Generate candidate meta-goals (LLM-enhanced)
+        5.5 Generate reframes (Phase 2)
+        5.6 Generate explorations (Phase 2)
         6. Filter for novelty
         7. Evaluate candidates
+        7.5 Personality check (Phase 2)
         8. Promote to GoalStore
         9. Write journal entry
         10. Persist workspace summary
 
         Args:
-            trigger: Why reflection was triggered (periodic/planner/operator/tension)
+            trigger: Why reflection was triggered
 
         Returns:
             Summary dict of the reflection cycle.
@@ -126,6 +172,8 @@ class CreativeModule:
                 "insights": 0,
                 "meta_goals_proposed": 0,
                 "meta_goals_promoted": 0,
+                "reframes": 0,
+                "explorations": 0,
                 "duration_ms": (time.time() - start) * 1000,
                 "trigger": trigger,
             }
@@ -147,8 +195,48 @@ class CreativeModule:
                 "meta_goal_candidate": i.meta_goal_candidate,
             })
 
-        # 5. Generate candidate meta-goals
-        candidates = self._workspace_mgr.generate_candidates(session, context)
+        # 4.5 Retrieve relevant memories (Phase 2)
+        retrieved_memories = self._memory_retriever.retrieve_for_session(
+            tensions, context
+        )
+
+        # 4.6 Build memory summary (Phase 2)
+        memories_summary = self._memory_summarizer.summarize(retrieved_memories)
+
+        # 4.7 Build cognitive profile (Phase 2)
+        profile = self._identity_profile.build()
+
+        # 5. Generate candidate meta-goals (LLM-enhanced)
+        candidates = self._workspace_mgr.generate_candidates(
+            session, context, meta_goal_engine=self._meta_goal_engine,
+            memories_summary=memories_summary,
+        )
+
+        # 5.5 Generate reframes (Phase 2)
+        reframes = self._reframe_engine.generate_reframes(
+            tensions, context, memories_summary
+        )
+        for rf in reframes:
+            session.candidate_reframes.append(rf)
+        self._total_reframes += len(reframes)
+
+        # 5.6 Generate explorations (Phase 2)
+        explorations = self._exploration_engine.generate_programs(
+            tensions, context, profile
+        )
+        self._total_explorations += len(explorations)
+
+        # Log Phase 2 artifacts
+        for rf in reframes:
+            self._store.log_event(events.REFRAME_GENERATED, {
+                "reframe_id": rf.reframe_id,
+                "original_ref": rf.original_ref,
+            })
+        for ep in explorations:
+            self._store.log_event(events.EXPLORATION_PROPOSED, {
+                "program_id": ep.program_id,
+                "title": ep.title,
+            })
 
         # 6. Filter for novelty
         accepted, rejected = self._novelty_filter.filter(candidates)
@@ -159,10 +247,25 @@ class CreativeModule:
                 "title": r.title,
             })
 
-        # 7. Evaluate accepted candidates
+        # 7. Evaluate candidates
+        # 7.5 Personality check (Phase 2) - adjust evaluation weights
+        personality_signals = self._personality_policy.evaluate(profile, tensions)
+        adjusted_weights = self._personality_policy.adjust_evaluation_weights(
+            signals=personality_signals,
+        )
+        for sig in personality_signals:
+            self._store.log_event(events.PERSONALITY_SIGNAL, {
+                "signal_id": sig.signal_id,
+                "dimension": sig.dimension.value,
+                "direction": sig.direction,
+                "magnitude": sig.magnitude,
+            })
+
         promoted_goals = []
         if accepted:
-            evaluations = self._evaluator.evaluate_batch(accepted, context)
+            evaluations = self._evaluator.evaluate_batch(
+                accepted, context, weights=adjusted_weights,
+            )
             for eval_result in evaluations:
                 goal_id = eval_result["goal_id"]
                 mg = next((g for g in accepted if g.goal_id == goal_id), None)
@@ -185,12 +288,10 @@ class CreativeModule:
                             "score": eval_result["final_score"],
                         })
                     else:
-                        # GoalStore full
                         self._store.save_meta_goal(
                             mg.with_status(MetaGoalStatus.REJECTED)
                         )
                 else:
-                    # Below threshold
                     self._store.save_meta_goal(
                         mg.with_status(MetaGoalStatus.REJECTED)
                     )
@@ -212,6 +313,8 @@ class CreativeModule:
             "insights": len(insights),
             "candidates": len(candidates),
             "promoted": len(promoted_goals),
+            "reframes": len(reframes),
+            "explorations": len(explorations),
         })
 
         # Update state
@@ -221,7 +324,8 @@ class CreativeModule:
 
         logger.info(
             f"[CREATIVE] Reflection complete: {len(tensions)} tensions, "
-            f"{len(insights)} insights, {len(promoted_goals)} meta-goals promoted "
+            f"{len(insights)} insights, {len(promoted_goals)} meta-goals, "
+            f"{len(reframes)} reframes, {len(explorations)} explorations "
             f"({duration_ms:.0f}ms)"
         )
 
@@ -233,6 +337,9 @@ class CreativeModule:
             "meta_goals_promoted": len(promoted_goals),
             "promoted_titles": [mg.title for mg in promoted_goals],
             "tension_categories": [t.category.value for t in tensions],
+            "reframes": len(reframes),
+            "explorations": len(explorations),
+            "llm_enhanced": self._has_llm,
             "duration_ms": duration_ms,
             "trigger": trigger,
         }
@@ -247,9 +354,12 @@ class CreativeModule:
             "total_reflections": self._total_reflections,
             "total_meta_goals_proposed": self._total_meta_goals_proposed,
             "total_tensions_detected": self._total_tensions_detected,
+            "total_reframes": self._total_reframes,
+            "total_explorations": self._total_explorations,
             "last_reflection_ts": self._last_reflection_ts,
             "cooldown_remaining_sec": cooldown_remaining,
             "can_reflect": self.should_reflect(),
+            "llm_enhanced": self._has_llm,
         }
 
     def _build_problem_statement(self, tensions, context) -> str:

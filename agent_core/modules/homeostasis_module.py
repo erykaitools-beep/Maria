@@ -404,6 +404,13 @@ class HomeostasisModule(MariaModule):
                     planner.set_creative_module(creative)
                     ctx.creative_module = creative
                     print("[Homeostasis] [OK] CreativeModule wired (K13)")
+
+                    # Wire Codex/ChatGPT as expert for creative exploration
+                    if hasattr(ctx, 'codex_client') and ctx.codex_client and ctx.codex_client.is_available():
+                        creative.set_expert_fn(
+                            lambda p, _c=ctx.codex_client: _c.ask(p, source="creative")
+                        )
+                        print("[Homeostasis] [OK] CreativeModule expert wired (Codex/ChatGPT)")
                 except Exception as e:
                     logger.warning(f"CreativeModule not initialized: {e}")
 
