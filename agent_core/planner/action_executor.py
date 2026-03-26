@@ -37,6 +37,11 @@ class ActionExecutor:
         self._openclaw_client = None
         self._self_analysis = None
         self._creative_module = None
+        self._telegram_notifier = None
+
+    def set_telegram_notifier(self, notifier) -> None:
+        """Set Telegram notifier for operator alerts."""
+        self._telegram_notifier = notifier
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -369,6 +374,15 @@ class ActionExecutor:
                     "report_id": report.report_id,
                 }
 
+            # Notify operator about analysis results
+            if self._telegram_notifier and report.recommendations:
+                try:
+                    summary = report.analysis_text[:300] if report.analysis_text else ""
+                    recs = [r if isinstance(r, str) else str(r) for r in report.recommendations]
+                    self._telegram_notifier.notify_self_analysis(summary, recs)
+                except Exception:
+                    pass
+
             return {
                 "success": True,
                 "report_id": report.report_id,
@@ -387,6 +401,19 @@ class ActionExecutor:
         try:
             trigger = plan.action_params.get("trigger", "planner")
             result = self._creative_module.reflect(trigger=trigger)
+
+            # Notify operator about tensions and meta-goals
+            if self._telegram_notifier and result.get("success"):
+                try:
+                    tensions = result.get("tensions", [])
+                    if tensions:
+                        self._telegram_notifier.notify_creative_tensions(tensions)
+                    meta_goals = result.get("meta_goals_created", [])
+                    if meta_goals:
+                        self._telegram_notifier.notify_creative_meta_goals(meta_goals)
+                except Exception:
+                    pass
+
             return result
         except Exception as e:
             return {"success": False, "error": str(e)}

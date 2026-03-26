@@ -23,6 +23,7 @@ ADR-013: Rule-based, zero LLM, deterministic, testable.
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -65,6 +66,10 @@ class AutonomyPolicy:
     - Escalation handling (logging, blocking, HITL placeholder)
     """
 
+    # After this many seconds without any attempt, consecutive failure
+    # counter resets to 0. Prevents permanent blocking after transient errors.
+    FAILURE_DECAY_SEC = 1800  # 30 minutes
+
     def __init__(
         self,
         engine: Optional[PolicyEngine] = None,
@@ -79,6 +84,8 @@ class AutonomyPolicy:
         )
         # Track consecutive failures per action type
         self._consecutive_failures: Dict[str, int] = {}
+        # Track when the last failure was recorded per action type
+        self._failure_timestamps: Dict[str, float] = {}
 
     def check(
         self,
@@ -106,6 +113,20 @@ class AutonomyPolicy:
             CheckResult with allowed flag and details.
         """
         classification = classify_action(action_type)
+
+        # Step 0: Time-based decay of consecutive failure counter
+        if action_type in self._failure_timestamps:
+            elapsed = time.time() - self._failure_timestamps[action_type]
+            if elapsed >= self.FAILURE_DECAY_SEC:
+                old_count = self._consecutive_failures.get(action_type, 0)
+                if old_count > 0:
+                    logger.info(
+                        "failure_decay: resetting %s consecutive failures "
+                        "(%d -> 0) after %.0fs idle",
+                        action_type, old_count, elapsed,
+                    )
+                self._consecutive_failures[action_type] = 0
+                del self._failure_timestamps[action_type]
 
         # Step 1: Rate limit check (for GUARDED actions)
         if classification == ActionClassification.GUARDED:
@@ -187,10 +208,12 @@ class AutonomyPolicy:
         # Consecutive failure tracking
         if success:
             self._consecutive_failures[action_type] = 0
+            self._failure_timestamps.pop(action_type, None)
         else:
             self._consecutive_failures[action_type] = (
                 self._consecutive_failures.get(action_type, 0) + 1
             )
+            self._failure_timestamps[action_type] = time.time()
 
     def get_status(self) -> Dict[str, Any]:
         """Get autonomy policy status for REPL/Web UI."""

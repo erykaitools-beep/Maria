@@ -339,6 +339,14 @@ class HomeostasisModule(MariaModule):
                             return _b._ask_once(prompt, temperature=0.3)
                         sa.set_llm_fn(_sa_llm_fn)
 
+                    # Wire NIM API for stronger analysis (K12 Phase 2)
+                    _sa_router = ctx.brain
+                    if hasattr(_sa_router, '_ask_once') and getattr(_sa_router, 'nim', None) is not None:
+                        def _sa_nim_fn(prompt, _r=_sa_router):
+                            return _r._ask_once(prompt, temperature=0.3)
+                        sa._analyzer.set_nim_fn(_sa_nim_fn)
+                        print("[Homeostasis] [OK] K12 NIM analyzer wired")
+
                     if ctx.goal_store:
                         sa.set_goal_store(ctx.goal_store)
                     if ctx.world_model:
@@ -373,6 +381,11 @@ class HomeostasisModule(MariaModule):
                         memory_dir=str(_BASE_DIR / "memory"),
                         goal_store=ctx.goal_store,
                     )
+                    # Phase 2: wire NIM LLM function if available
+                    _router = ctx.brain
+                    if hasattr(_router, '_ask_once') and getattr(_router, 'nim', None) is not None:
+                        creative.set_llm_fn(lambda p: _router._ask_once(p))
+                        print("[Homeostasis] [OK] CreativeModule LLM wired (NIM)")
                     planner.set_creative_module(creative)
                     ctx.creative_module = creative
                     print("[Homeostasis] [OK] CreativeModule wired (K13)")
@@ -395,6 +408,30 @@ class HomeostasisModule(MariaModule):
                     print("[Homeostasis] [OK] Work context wired to chat")
             except Exception as e:
                 logger.debug(f"PlannerCore not wired: {e}")
+
+        # Initialize Telegram bridge (operator notifications)
+        if core:
+            try:
+                from agent_core.telegram import TelegramBridge
+                telegram = TelegramBridge()
+                if telegram.configured:
+                    core.set_telegram_bridge(telegram)
+                    ctx.telegram_bridge = telegram
+
+                    # Register basic commands
+                    _register_telegram_commands(telegram, ctx)
+
+                    # Wire notifier to planner's action executor
+                    if ctx.planner_core:
+                        ctx.planner_core.executor.set_telegram_notifier(telegram.notifier)
+
+                    # Send startup notification
+                    telegram.notifier.notify_startup()
+                    print("[Homeostasis] [OK] Telegram bridge wired (ClawBot)")
+                else:
+                    print("[Homeostasis] [--] Telegram not configured (set TELEGRAM_BOT_TOKEN in .env)")
+            except Exception as e:
+                logger.debug(f"Telegram bridge not initialized: {e}")
 
         # Wire state-grounded operator response pipeline (Phase 2)
         try:
@@ -629,6 +666,133 @@ class HomeostasisModule(MariaModule):
     def cleanup(self):
         if self._running:
             self._running = False
+
+
+def _register_telegram_commands(bridge, ctx):
+    """Register Telegram command handlers for operator interaction."""
+
+    def _cmd_status(args):
+        """Return system status summary."""
+        parts = []
+        if ctx.homeostasis_core:
+            state = ctx.homeostasis_core.get_state()
+            parts.append(f"Mode: {state.mode.value}")
+            parts.append(f"Health: {state.health_score:.0%}")
+            if state.alerts:
+                parts.append(f"Alerts: {len(state.alerts)}")
+
+        if ctx.planner_core:
+            status = ctx.planner_core.get_status()
+            parts.append(f"Planner cycles: {status['total_cycles']}")
+            parts.append(f"Plans executed: {status['total_plans_executed']}")
+
+        if ctx.knowledge_analyzer:
+            try:
+                snap = ctx.knowledge_analyzer.get_knowledge_snapshot()
+                if snap:
+                    by_status = snap.get("files_by_status", {})
+                    completed = len(by_status.get("completed", []))
+                    total = snap.get("total_files", 0)
+                    parts.append(f"Knowledge: {completed}/{total} completed")
+            except Exception:
+                pass
+
+        if ctx.goal_store:
+            try:
+                stats = ctx.goal_store.stats()
+                parts.append(f"Goals: {stats.get('active', 0)} active, {stats.get('proposed', 0)} proposed")
+            except Exception:
+                pass
+
+        return "\n".join(parts) if parts else "System OK"
+
+    def _cmd_goals(args):
+        """List active and proposed goals."""
+        if not ctx.goal_store:
+            return "GoalStore not available"
+
+        lines = []
+        active = ctx.goal_store.get_active()
+        if active:
+            lines.append(f"*Active ({len(active)}):*")
+            for g in active[:10]:
+                lines.append(f"- {g.description[:80]}")
+
+        proposed = ctx.goal_store.get_proposed()
+        if proposed:
+            lines.append(f"\n*Proposed ({len(proposed)}):*")
+            for g in proposed[:5]:
+                lines.append(f"- [{g.id[:8]}] {g.description[:80]}")
+
+        return "\n".join(lines) if lines else "Brak celow"
+
+    def _cmd_approve(args):
+        """Approve a proposed goal by ID prefix."""
+        if not ctx.goal_store or not args:
+            return "Uzycie: approve <id-prefix>"
+        prefix = args.strip()
+        proposed = ctx.goal_store.get_proposed()
+        match = [g for g in proposed if g.id.startswith(prefix)]
+        if not match:
+            return f"Nie znaleziono celu: {prefix}"
+        if len(match) > 1:
+            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
+        goal = match[0]
+        ctx.goal_store.confirm(goal.id)
+        ctx.goal_store.save()
+        return f"Zatwierdzono: {goal.description[:80]}"
+
+    def _cmd_reject(args):
+        """Reject a proposed goal by ID prefix."""
+        if not ctx.goal_store or not args:
+            return "Uzycie: reject <id-prefix>"
+        prefix = args.strip()
+        proposed = ctx.goal_store.get_proposed()
+        match = [g for g in proposed if g.id.startswith(prefix)]
+        if not match:
+            return f"Nie znaleziono celu: {prefix}"
+        if len(match) > 1:
+            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
+        goal = match[0]
+        ctx.goal_store.reject(goal.id, reason="operator_telegram")
+        ctx.goal_store.save()
+        return f"Odrzucono: {goal.description[:80]}"
+
+    def _cmd_restart(args):
+        """Restart Maria (systemd will bring her back in 10s)."""
+        import os
+
+        bridge.notifier.send_raw("Restarting M.A.R.I.A. ... (wraca za ~10s)")
+
+        # Give Telegram time to send the message, then exit
+        # sys.exit(1) = failure -> systemd Restart=on-failure kicks in
+        def _delayed_exit():
+            time.sleep(2)
+            os._exit(1)
+
+        t = threading.Thread(target=_delayed_exit, daemon=True)
+        t.start()
+        return None  # Message already sent via send_raw
+
+    def _cmd_help(args):
+        """List available commands."""
+        return (
+            "*Komendy ClawBot:*\n"
+            "/status - stan systemu\n"
+            "/goals - lista celow\n"
+            "/approve <id> - zatwierdz cel\n"
+            "/reject <id> - odrzuc cel\n"
+            "/restart - restart Marii\n"
+            "/help - ta pomoc"
+        )
+
+    bridge.register_command("status", _cmd_status)
+    bridge.register_command("goals", _cmd_goals)
+    bridge.register_command("approve", _cmd_approve)
+    bridge.register_command("reject", _cmd_reject)
+    bridge.register_command("restart", _cmd_restart)
+    bridge.register_command("help", _cmd_help)
+    bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 
 
 def _build_work_context(ctx) -> str:

@@ -144,6 +144,11 @@ class HomeostasisCore:
         # Model Scheduler (multi-organ model stack)
         self._model_scheduler = None
 
+        # Telegram bridge (operator notifications)
+        self._telegram_bridge = None
+        self._telegram_poll_interval = 30  # seconds
+        self._telegram_last_poll = 0.0
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -188,6 +193,15 @@ class HomeostasisCore:
         Called from HomeostasisModule after init.
         """
         self._planner_core = planner_core
+
+    def set_telegram_bridge(self, bridge) -> None:
+        """
+        Set Telegram bridge for operator notifications.
+
+        Bridge polls for messages and sends alerts.
+        Called from HomeostasisModule after init.
+        """
+        self._telegram_bridge = bridge
 
     def set_perception_buffer(self, buffer) -> None:
         """
@@ -388,6 +402,11 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         self._check_planner_trigger()
 
+        # ──────────────────────────────────────
+        # PHASE 11: TELEGRAM (poll + notify)
+        # ──────────────────────────────────────
+        self._check_telegram()
+
     def _aggregate_perception(
         self,
         resource_metrics=None,
@@ -506,6 +525,17 @@ class HomeostasisCore:
             "to": new_mode.value,
         })
 
+        # Notify operator via Telegram
+        if self._telegram_bridge:
+            try:
+                self._telegram_bridge.notifier.notify_mode_change(
+                    from_mode=old_mode.value,
+                    to_mode=new_mode.value,
+                    trigger=", ".join(self.state.alerts[:3]),
+                )
+            except Exception:
+                pass
+
     def _execute_corrective_actions(self, actions: List[CorrectiveAction]) -> None:
         """
         Execute corrective actions.
@@ -566,6 +596,27 @@ class HomeostasisCore:
             )
         except Exception as e:
             logger.warning(f"Sleep cycle failed: {e}")
+
+    def _check_telegram(self) -> None:
+        """
+        Poll Telegram for operator messages (Phase 11).
+
+        Runs every _telegram_poll_interval seconds (default 30).
+        Non-blocking: poll takes ~1s max (short HTTP timeout).
+        """
+        if self._telegram_bridge is None:
+            return
+
+        now = time.time()
+        if (now - self._telegram_last_poll) < self._telegram_poll_interval:
+            return
+
+        self._telegram_last_poll = now
+
+        try:
+            self._telegram_bridge.poll_and_respond()
+        except Exception as e:
+            logger.debug(f"[TELEGRAM] Poll error: {e}")
 
     def _check_planner_trigger(self) -> None:
         """

@@ -479,6 +479,113 @@ class TestPlannerAutonomyIntegration:
 
 
 # ============================================================
+# Failure decay (time-based auto-reset) tests
+# ============================================================
+
+class TestFailureDecay:
+    """Test that consecutive failure counter resets after FAILURE_DECAY_SEC."""
+
+    def test_counter_resets_after_decay_period(self):
+        """After 30min without attempts, failure counter resets to 0."""
+        policy = AutonomyPolicy()
+        policy.record_execution("fetch", False)
+        policy.record_execution("fetch", False)
+        policy.record_execution("fetch", False)
+        assert policy._consecutive_failures["fetch"] == 3
+
+        # Simulate 31 minutes passing
+        policy._failure_timestamps["fetch"] = (
+            time.time() - AutonomyPolicy.FAILURE_DECAY_SEC - 1
+        )
+
+        result = policy.check(action_type="fetch")
+        assert result.allowed is True
+        assert policy._consecutive_failures["fetch"] == 0
+
+    def test_counter_does_not_reset_before_decay_period(self):
+        """Before 30min, failure counter stays intact and blocks."""
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(
+                log_path=Path("/dev/null")
+            ),
+        )
+        policy.record_execution("fetch", False)
+        policy.record_execution("fetch", False)
+        policy.record_execution("fetch", False)
+
+        # Simulate only 10 minutes passing
+        policy._failure_timestamps["fetch"] = time.time() - 600
+
+        result = policy.check(action_type="fetch")
+        assert result.allowed is False
+        assert policy._consecutive_failures["fetch"] == 3
+
+    def test_success_still_resets_counter_immediately(self):
+        """Success resets counter and cleans up timestamp."""
+        policy = AutonomyPolicy()
+        policy.record_execution("fetch", False)
+        policy.record_execution("fetch", False)
+        assert policy._consecutive_failures["fetch"] == 2
+        assert "fetch" in policy._failure_timestamps
+
+        policy.record_execution("fetch", True)
+        assert policy._consecutive_failures["fetch"] == 0
+        assert "fetch" not in policy._failure_timestamps
+
+    def test_multiple_action_types_tracked_independently(self):
+        """Decay for one action type does not affect another."""
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(
+                log_path=Path("/dev/null")
+            ),
+        )
+        # Both fail 3 times
+        for _ in range(3):
+            policy.record_execution("fetch", False)
+            policy.record_execution("maintenance", False)
+
+        # Only fetch decays (31 min ago)
+        policy._failure_timestamps["fetch"] = (
+            time.time() - AutonomyPolicy.FAILURE_DECAY_SEC - 1
+        )
+        # maintenance is recent (5 min ago)
+        policy._failure_timestamps["maintenance"] = time.time() - 300
+
+        fetch_result = policy.check(action_type="fetch")
+        assert fetch_result.allowed is True
+
+        maint_result = policy.check(action_type="maintenance")
+        assert maint_result.allowed is False
+
+    def test_decay_constant_is_30_minutes(self):
+        """Verify the decay constant value."""
+        assert AutonomyPolicy.FAILURE_DECAY_SEC == 1800
+
+    def test_failure_timestamp_set_on_failure(self):
+        """record_execution(success=False) sets failure timestamp."""
+        policy = AutonomyPolicy()
+        before = time.time()
+        policy.record_execution("fetch", False)
+        after = time.time()
+        assert "fetch" in policy._failure_timestamps
+        assert before <= policy._failure_timestamps["fetch"] <= after
+
+    def test_failure_timestamp_cleared_on_success(self):
+        """record_execution(success=True) removes failure timestamp."""
+        policy = AutonomyPolicy()
+        policy.record_execution("fetch", False)
+        assert "fetch" in policy._failure_timestamps
+        policy.record_execution("fetch", True)
+        assert "fetch" not in policy._failure_timestamps
+
+    def test_no_timestamp_no_crash(self):
+        """check() works fine when no failures have been recorded."""
+        policy = AutonomyPolicy()
+        result = policy.check(action_type="fetch")
+        assert result.allowed is True
+
+
+# ============================================================
 # SharedContext integration
 # ============================================================
 

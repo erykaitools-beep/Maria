@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Default hourly limits per action type value.
 # None means unlimited (FREE actions).
 DEFAULT_RATE_LIMITS: Dict[str, int] = {
-    "fetch": 5,
+    "fetch": 10,
     "maintenance": 10,
     "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
     "effector": 10,   # OpenClaw: max 10 tool invocations per hour
