@@ -33,6 +33,7 @@ class ActionType(Enum):
     EFFECTOR = "effector"        # Execute via OpenClaw tools (ADR-016)
     SELF_ANALYZE = "self_analyze"  # K12: Self-analysis cognitive loop
     CREATIVE = "creative"        # K13: Creative reflection cycle
+    ASK_EXPERT = "ask_expert"    # Ask ChatGPT/Codex for knowledge (encyclopedia)
 
 
 @dataclass

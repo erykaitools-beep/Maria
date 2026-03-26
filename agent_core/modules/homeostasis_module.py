@@ -407,6 +407,10 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning(f"CreativeModule not initialized: {e}")
 
+                # Wire LLM router to executor for ASK_EXPERT actions
+                if ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia'):
+                    planner.executor.set_llm_router(ctx.brain)
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

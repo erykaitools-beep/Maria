@@ -623,6 +623,13 @@ class PlannerCore:
         if topics:
             action_params["topics"] = topics
 
+        # ASK_EXPERT: add topic and source
+        if action == ActionType.ASK_EXPERT:
+            topic = self._pick_expert_topic()
+            if topic:
+                action_params["topic"] = topic
+                action_params["source"] = "planner"
+
         return create_plan(
             goal_id=goal.id,
             goal_description=goal.description,
@@ -703,7 +710,37 @@ class PlannerCore:
             if not self._is_action_rate_limited("fetch"):
                 return ActionType.FETCH
 
+        # P6: Ask expert for new knowledge (when fetch exhausted)
+        if not self._is_action_rate_limited("ask_expert"):
+            # Build question from knowledge gaps
+            topic = self._pick_expert_topic()
+            if topic:
+                return ActionType.ASK_EXPERT
+
         return ActionType.NOOP
+
+    def _pick_expert_topic(self) -> Optional[str]:
+        """Pick a topic to ask the expert about, based on knowledge gaps."""
+        # K6: Use world model gaps
+        if self._world_model:
+            try:
+                gaps = self._world_model.query.get_knowledge_gaps()
+                if gaps:
+                    return gaps[0].get("topic", "")
+            except Exception:
+                pass
+
+        # Fallback: use topic suggester from web_source
+        if self._knowledge_analyzer:
+            try:
+                topic_map = self._knowledge_analyzer.get_topic_file_map()
+                if topic_map:
+                    # Pick first topic (most files = most explored)
+                    return next(iter(topic_map))
+            except Exception:
+                pass
+
+        return None
 
     # -- Internal: finalize and persist ---------------------
 
@@ -1068,6 +1105,9 @@ class PlannerCore:
             return "Pobieram nowe materialy z internetu"
         elif action == ActionType.EXPERIMENT:
             return f"Eksperyment: {goal}" if goal else "Eksperyment z parametrem"
+        elif action == ActionType.ASK_EXPERT:
+            topic = plan.action_params.get("topic", "")
+            return f"Pytam eksperta: {topic}" if topic else "Pytam eksperta o wiedze"
         elif action == ActionType.NOOP:
             return "Nic do zrobienia - czekam"
         return f"{action.value}: {goal}"

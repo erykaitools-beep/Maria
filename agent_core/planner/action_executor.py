@@ -38,10 +38,15 @@ class ActionExecutor:
         self._self_analysis = None
         self._creative_module = None
         self._telegram_notifier = None
+        self._llm_router = None
 
     def set_telegram_notifier(self, notifier) -> None:
         """Set Telegram notifier for operator alerts."""
         self._telegram_notifier = notifier
+
+    def set_llm_router(self, router) -> None:
+        """Set LLM router for ASK_EXPERT actions (encyclopedia)."""
+        self._llm_router = router
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -113,6 +118,8 @@ class ActionExecutor:
                 result = self._exec_self_analyze(plan)
             elif action == ActionType.CREATIVE:
                 result = self._exec_creative(plan)
+            elif action == ActionType.ASK_EXPERT:
+                result = self._exec_ask_expert(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -417,3 +424,80 @@ class ActionExecutor:
             return result
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _exec_ask_expert(self, plan: Plan) -> Dict[str, Any]:
+        """Ask ChatGPT/Codex for knowledge via LLMRouter encyclopedia."""
+        if self._llm_router is None or not hasattr(self._llm_router, 'ask_encyclopedia'):
+            return {"success": False, "error": "No LLM router with encyclopedia"}
+
+        try:
+            question = plan.action_params.get("question", "")
+            topic = plan.action_params.get("topic", "")
+            source = plan.action_params.get("source", "planner")
+
+            if not question and topic:
+                question = (
+                    f"Wyjasni w 3-5 zdaniach po polsku: {topic}. "
+                    f"Podaj kluczowe fakty i kontekst."
+                )
+            elif not question:
+                return {"success": False, "error": "No question or topic provided"}
+
+            response = self._llm_router.ask_encyclopedia(
+                prompt=question,
+                source=source,
+                context={
+                    "goal_id": plan.goal_id or "",
+                    "topic": topic,
+                },
+            )
+
+            if not response or not response.strip():
+                return {"success": False, "error": "Empty response from encyclopedia"}
+
+            # Store response as learning material for future use
+            result = {
+                "success": True,
+                "question": question[:200],
+                "response": response[:500],
+                "response_length": len(response),
+                "topic": topic,
+            }
+
+            # Save to input/ as learning material (if topic provided)
+            if topic:
+                try:
+                    self._save_expert_response(topic, question, response)
+                    result["saved_to_input"] = True
+                except Exception:
+                    result["saved_to_input"] = False
+
+            return result
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _save_expert_response(
+        self, topic: str, question: str, response: str
+    ) -> None:
+        """Save expert response as learning material in input/."""
+        from pathlib import Path
+        import re
+        import time as _time
+
+        # Slugify topic
+        slug = re.sub(r'[^a-z0-9]+', '_', topic.lower().strip())[:60].strip('_')
+        filename = f"expert_{slug}.txt"
+        input_dir = Path(__file__).resolve().parents[2] / "input"
+        filepath = input_dir / filename
+
+        # Don't overwrite - append if exists
+        header = (
+            f"# Zrodlo: ChatGPT (Codex CLI)\n"
+            f"# Temat: {topic}\n"
+            f"# Data: {_time.strftime('%Y-%m-%d %H:%M')}\n"
+            f"# Pytanie: {question[:200]}\n\n"
+        )
+        content = header + response + "\n"
+
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(content)
