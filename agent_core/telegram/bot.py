@@ -48,6 +48,24 @@ class TelegramBot:
         """Check if bot has valid token and chat_id."""
         return bool(self._token) and self._chat_id != 0
 
+    def flush_pending(self) -> None:
+        """Skip all pending updates (call on startup to avoid re-processing old commands)."""
+        if not self.configured:
+            return
+        try:
+            resp = requests.get(
+                self._api_url("getUpdates"),
+                params={"offset": -1, "limit": 1, "timeout": 0},
+                timeout=(5, 5),
+            )
+            data = resp.json()
+            results = data.get("result", [])
+            if results:
+                self._last_update_id = results[-1].get("update_id", 0)
+                logger.debug(f"TelegramBot: flushed pending, offset now {self._last_update_id}")
+        except Exception as e:
+            logger.debug(f"TelegramBot: flush error: {e}")
+
     def _api_url(self, method: str) -> str:
         return _API_BASE.format(token=self._token, method=method)
 

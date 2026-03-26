@@ -50,15 +50,22 @@
 | **2026-03-24** | Creative Module spec received (docs/plans/) - 19 plikow, pelny organ strategiczny |
 | **2026-03-25** | **K13 Creative Module** - strategic reflection organ, tension detection, meta-goals (67 testow) |
 | **2026-03-25** | K13 LIVE: 3 tensions detected (repetition, misalignment, over_restriction), 42ms/cycle |
+| **2026-03-25** | **K13 Phase 2** - LLM engines (NIM API, 40 RPM): meta_goal, reframe, exploration (62 testow) |
+| **2026-03-25** | TokenBudget: RPM-based gating (bylo: token-based), identity_profile, personality_policy |
+| **2026-03-25** | K13 Phase 2 LIVE: NIM wired, 1943 testow |
+| **2026-03-25** | K12 Phase 2: NIM backend + Web UI /analysis page |
+| **2026-03-26** | **Telegram Bridge (ClawBot)** - Maria pisze do operatora, komendy /status /goals /approve /reject /restart (42 testy) |
+| **2026-03-26** | K7 improvements: consecutive failure auto-reset (30min), fetch 5->10/h, proposed timeout 24->72h |
+| **2026-03-26** | Zmiany zasugerowane przez creative module Marii (NIM-powered tension detection) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 LIVE + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
-| **Testy** | 1876 passing |
-| **Faza** | K13 LIVE (Creative reflection dziala), rule-based v1, zero LLM |
+| **Etap** | K1-K13 Phase 2 LIVE + Telegram + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
+| **Testy** | 1985 passing |
+| **Faza** | Telegram Bridge LIVE + K7 tuning (Maria's suggestions) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -102,7 +109,8 @@ project/
 │   ├── memory/          # MemoryManager interface
 │   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
 │   ├── self_analysis/   # K12 Self-Analysis: state collector, analyzer, recommendation applier
-│   ├── creative/        # K13 Creative Module: tensions, insights, meta-goals, journal, reflection
+│   ├── creative/        # K13 Creative Module Phase 2: tensions, insights, meta-goals, LLM engines (NIM)
+│   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── adapters/        # Wrappers for legacy maria_core
 │   └── tests/           # 1654 tests
@@ -206,11 +214,38 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 
 - **K11 Experiment System:** Proposal engine (4 rules), parameter registry (12 params), experiment runner (setattr+restore), report generator (ADOPT/REJECT/INCONCLUSIVE), ExperimentSystem facade, human gate (PROPOSED goals), REPL /experiments, Web UI /experiments
 
-- **K12 Self-Analysis:** StateCollector (8 JSONL sources, zero LLM), ExternalAnalyzer (local_planner qwen3:8b MVP, Claude CLI Phase 2), RecommendationApplier (PROPOSED goals + topic hints + beliefs), SelfAnalysis facade, triggers (24h periodic + K9 needs_human + low retention), planner ActionType.SELF_ANALYZE, K7 GUARDED, K10 AUDIT_ONLY
+- **K12 Self-Analysis (Phase 2):** StateCollector (8 JSONL sources, zero LLM), ExternalAnalyzer (cascade: NIM API -> Claude CLI -> local_planner qwen3:8b), RecommendationApplier (PROPOSED goals + topic hints + beliefs), SelfAnalysis facade, triggers (24h periodic + K9 needs_human + low retention), planner ActionType.SELF_ANALYZE, K7 GUARDED, K10 AUDIT_ONLY, Web UI /analysis (3 taby + 4 API endpoints)
 
-- **K13 Creative Module:** StrategicContext (6 data sources), TensionDetector (7 categories), ReflectionWorkspace (bounded sessions), CreativeJournal (strategic diary), NoveltyFilter (dedup+flood), CreativeEvaluator (5 dimensions), GoalAdapter (K3 PROPOSED), CreativeStore (6 JSONL), facade (10-step reflect cycle), ConversationMemory (operator dialogue), K7 GUARDED, K10 AUDIT_ONLY, planner Step 2.5 (before goal selection)
+- **K13 Creative Module (Phase 2):** StrategicContext (6 data sources), TensionDetector (7 categories), ReflectionWorkspace (bounded sessions), CreativeJournal (strategic diary), NoveltyFilter (dedup+flood), CreativeEvaluator (5 dimensions, custom weights), GoalAdapter (K3 PROPOSED), CreativeStore (6 JSONL), facade (15-step reflect cycle), ConversationMemory (operator dialogue), K7 GUARDED, K10 AUDIT_ONLY, planner Step 2.5. **Phase 2:** MetaGoalEngine (NIM+fallback), ReframeEngine (NIM+fallback), ExplorationEngine (NIM+fallback), IdentityProfile (CognitiveProfile), PersonalityPolicy (trait->weight adjustment), MemoryRetriever (keyword-based), MemorySummarizer (NIM+fallback), llm_utils (JSON parser). TokenBudget: RPM-based gating (40 req/min)
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K13 kompletny (1876 testow).**
+
+## Telegram Bridge - ClawBot (2026-03-26)
+
+Komunikacja Maria <-> operator przez Telegram (w `agent_core/telegram/`):
+
+- **Bot:** ClawBot (Telegram @BotFather), token w `.env`
+- **TelegramBot:** send_message + get_updates via requests (zero nowych deps)
+- **TelegramNotifier:** 7 typow alertow z cooldownami per kategoria
+- **TelegramBridge:** facade + command handler
+- **Komendy:**
+  - `/status` - stan systemu (mode, health, planner, knowledge, goals)
+  - `/goals` - lista celow (active + proposed)
+  - `/approve <id>` - zatwierdz proposed goal
+  - `/reject <id>` - odrzuc proposed goal
+  - `/restart` - restart Marii (systemd wskrzesi po 10s)
+  - `/help` - lista komend
+- **Maria powiadamia o:**
+  - Napieciach creative (K13) - co 2h
+  - Rekomendacjach K12 self-analysis - co 4h
+  - K9 needs_human - co 1h
+  - Health drop - co 30min
+  - Zmiana trybu (degradacja) - co 10min
+  - Blokada K7 consecutive failures - co 1h
+  - Startup
+- **Integracja:** Phase 11 w tick loop (poll co 30s), notify w action_executor (K13/K12)
+- **Config:** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` w `.env`
+- **42 testy**
 
 ## Planner - Warstwa 2 (K5)
 
@@ -431,11 +466,22 @@ Usunieto:
 - [x] K13 LIVE: tension detection (repetition, misalignment, over_restriction)
 - [x] Planner integration: Step 2.5 (before goal selection), K7 GUARDED, K10 AUDIT_ONLY
 
-### NASTEPNE: K13 Phase 2 + improvements
-- K13 Phase 2: LLM-based engines (meta_goal_engine, reframe_engine, exploration_engine) via qwen3:8b
-- K13 Phase 2: identity_profile.py, personality_policy.py (cognitive development style)
-- K13 Phase 2: memory_retriever.py, memory_summarizer.py (selective retrieval)
-- K12 Phase 2: Claude CLI backend (instalacja na mini PC, OpenClaw exec integracja)
+### DONE: K13 Phase 2
+- [x] K13 Phase 2: LLM engines (meta_goal_engine, reframe_engine, exploration_engine) via NIM (40 RPM)
+- [x] K13 Phase 2: identity_profile.py, personality_policy.py (cognitive development style)
+- [x] K13 Phase 2: memory_retriever.py, memory_summarizer.py (selective retrieval)
+- [x] K13 Phase 2: llm_utils.py (shared JSON parser, safe_llm_call)
+- [x] TokenBudget: RPM-based gating (40 req/min sliding window) zamiast token-based
+- [x] CreativeEvaluator: custom weights z PersonalityPolicy
+- [x] Homeostasis wiring: NIM auto-detect + set_llm_fn()
+
+### DONE: K12 Phase 2
+- [x] K12 NIM backend w ExternalAnalyzer (cascade: NIM -> Claude CLI -> local)
+- [x] K12 Web UI /analysis page (3 taby: raport, rekomendacje, historia)
+- [x] K12 GoalStore integration - dziala (3 cele w ostatnim raporcie)
+
+### NASTEPNE: improvements
+- Claude CLI backend (instalacja na mini PC, konto Anthropic $200 plan)
 - K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl) - CZESCIOWO DONE (hints sa zapisywane)
 - K12 Phase 2: Web UI /analysis page (raporty, rekomendacje)
 - K12: GoalStore integration w RecommendationApplier (goals_created puste)
@@ -545,6 +591,9 @@ claude_notes/
   2026-03-21_openclaw_setup_blocker.md
   2026-03-22_openclaw_live_bugfixes.md
   2026-03-22_webui_v2_learning_fix.md
+  2026-03-25_k12_phase2.md
+  2026-03-25_k13_phase2_nim.md
+  2026-03-26_telegram_k7.md
 ```
 
 **Wskazowka:** Na starcie nowej sesji warto przeczytac ostatnia notatke aby miec kontekst.
@@ -825,4 +874,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-25 (K13 Creative Module LIVE - tension detection, meta-goals, strategic journal, 1876 testow)*
+*Ostatnia aktualizacja: 2026-03-26 (Telegram Bridge ClawBot + K7 improvements, 1985 testow)*

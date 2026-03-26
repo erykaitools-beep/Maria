@@ -321,6 +321,21 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"OpenClaw not initialized: {e}")
 
+                # Codex CLI (ChatGPT encyclopedia) - optional, graceful fallback
+                try:
+                    from agent_core.llm.codex_client import CodexClient
+                    codex = CodexClient()
+                    if codex.is_available():
+                        if ctx.brain and hasattr(ctx.brain, 'set_codex_client'):
+                            ctx.brain.set_codex_client(codex)
+                        ctx.codex_client = codex
+                        print("[Homeostasis] [OK] Codex CLI wired (encyclopedia)")
+                    else:
+                        ctx.codex_client = codex  # keep ref for later availability
+                        print("[Homeostasis] [--] Codex CLI not installed (install: npm i -g @openai/codex)")
+                except Exception as e:
+                    logger.debug(f"Codex CLI not initialized: {e}")
+
                 # K12 Self-Analysis (cognitive loop)
                 try:
                     from agent_core.self_analysis import SelfAnalysis
@@ -424,6 +439,9 @@ class HomeostasisModule(MariaModule):
                     # Wire notifier to planner's action executor
                     if ctx.planner_core:
                         ctx.planner_core.executor.set_telegram_notifier(telegram.notifier)
+
+                    # Flush old messages to avoid re-processing (e.g. /restart loop)
+                    telegram.bot.flush_pending()
 
                     # Send startup notification
                     telegram.notifier.notify_startup()

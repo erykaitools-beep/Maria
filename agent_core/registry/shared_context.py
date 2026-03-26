@@ -47,6 +47,7 @@ class SharedContext:
     llm_tape: Any = None             # LLMTape (raw LLM interaction log)
     evidence_collector: Any = None   # EvidenceCollector (Phase 2, grounded responses)
     telegram_bridge: Any = None      # TelegramBridge (operator notifications)
+    codex_client: Any = None         # CodexClient (ChatGPT encyclopedia via Codex CLI)
 
     # REPL state
     last_result: Any = None

@@ -63,11 +63,13 @@ class LLMRouter:
         self.budget = token_budget
         self._model_scheduler = None
         self._llm_tape = None
+        self._codex_client = None
 
         # Stats
         self._nim_calls = 0
         self._nim_fallbacks = 0
         self._ollama_calls = 0
+        self._codex_calls = 0
 
     # -------------------------------------------------
     # MAIN API (compatible with OllamaBrain)
@@ -179,8 +181,11 @@ class LLMRouter:
         return True
 
     def _record_nim_usage(self) -> None:
-        """Record token usage from last NIM call to budget."""
+        """Record token usage and request timestamp from last NIM call."""
         if self.budget is not None and self.nim is not None:
+            # RPM tracking (primary gate)
+            self.budget.record_request()
+            # Token tracking (observability)
             usage = self.nim.get_last_usage()
             if usage["total_tokens"] > 0:
                 self.budget.record_usage(
@@ -310,6 +315,60 @@ class LLMRouter:
             self._model_scheduler.release(result.role)
 
     # -------------------------------------------------
+    # ENCYCLOPEDIA (Codex CLI / ChatGPT)
+    # -------------------------------------------------
+
+    def set_codex_client(self, client) -> None:
+        """Attach Codex CLI client for encyclopedia queries."""
+        self._codex_client = client
+
+    def ask_encyclopedia(
+        self, prompt: str, source: str = "unknown", context=None,
+    ) -> str:
+        """
+        Ask ChatGPT via Codex CLI for knowledge.
+
+        Fallback cascade: Codex -> NIM -> Ollama.
+        Every call logged to codex_interactions.jsonl + LLM Tape.
+
+        Args:
+            prompt: Knowledge question
+            source: Calling module (creative, planner, k12, etc.)
+            context: Optional metadata dict for logging
+
+        Returns:
+            Response text (always returns something via fallback)
+        """
+        start = time.time()
+
+        # Try Codex first
+        if self._codex_client:
+            result = self._codex_client.ask(prompt, source=source, context=context)
+            if result:
+                self._codex_calls += 1
+                self._record_tape(
+                    "encyclopedia", "codex-chatgpt", prompt, result, start,
+                )
+                return result
+
+        # Fallback: NIM
+        if self._should_use_nim():
+            try:
+                result = self.nim._ask_once(prompt, temperature=0.3)
+                self._record_nim_usage()
+                self._nim_calls += 1
+                self._record_tape("encyclopedia", self.nim.model, prompt, result, start)
+                return result
+            except Exception:
+                self._nim_fallbacks += 1
+
+        # Fallback: Ollama
+        self._ollama_calls += 1
+        result = self.ollama._ask_once(prompt, temperature=0.3)
+        self._record_tape("encyclopedia", self.ollama.model, prompt, result, start)
+        return result
+
+    # -------------------------------------------------
     # STATUS & REPORTING
     # -------------------------------------------------
 
@@ -349,7 +408,8 @@ class LLMRouter:
             "nim_calls": self._nim_calls,
             "nim_fallbacks": self._nim_fallbacks,
             "ollama_calls": self._ollama_calls,
-            "total_calls": self._nim_calls + self._ollama_calls,
+            "codex_calls": self._codex_calls,
+            "total_calls": self._nim_calls + self._ollama_calls + self._codex_calls,
         }
 
         if self.budget is not None:
@@ -364,6 +424,9 @@ class LLMRouter:
 
         if self._model_scheduler is not None:
             stats["scheduler"] = self._model_scheduler.get_status()
+
+        if self._codex_client is not None:
+            stats["codex"] = self._codex_client.get_stats()
 
         return stats
 

@@ -21,6 +21,7 @@ class ModelRole(Enum):
     TRIAGE = "triage"         # MODEL-04: Intent classification, cheap routing
     MEMORY = "memory"         # MODEL-05: Summarization, fact extraction
     EXTERNAL = "external"     # MODEL-06: NIM API (z-ai/glm5)
+    ENCYCLOPEDIA = "encyclopedia"  # MODEL-07: Codex CLI (ChatGPT), interactive knowledge
 
 
 class ConcurrencyClass(Enum):
@@ -134,6 +135,19 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         idle_unload_s=0.0,
         min_free_ram_gb=0.0,
         fallback_role=ModelRole.EXECUTOR,
+        block_if_heavy_active=False,
+    ),
+    ModelRole.ENCYCLOPEDIA: ModelSpec(
+        model_id="codex-chatgpt",
+        role=ModelRole.ENCYCLOPEDIA,
+        ollama_tag="",             # not an Ollama model - Codex CLI subprocess
+        ram_estimate_gb=0.0,       # external, no local RAM
+        latency_budget_s=120.0,    # CLI can be slow (30-120s)
+        concurrency_class=ConcurrencyClass.NONE,
+        warm_state=WarmState.EXTERNAL,
+        idle_unload_s=0.0,
+        min_free_ram_gb=0.0,
+        fallback_role=ModelRole.EXTERNAL,  # NIM fallback, then EXECUTOR
         block_if_heavy_active=False,
     ),
 }

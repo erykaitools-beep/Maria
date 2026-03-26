@@ -372,6 +372,17 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         self.state.health_score = self._compute_health(interpreted_state, alerts)
 
+        # Notify operator on health drop (< 0.7)
+        if self._telegram_bridge and self.state.health_score < 0.7:
+            try:
+                self._telegram_bridge.notifier.notify_health_drop(
+                    self.state.health_score,
+                    self.state.mode.value,
+                    self.state.alerts[:5],
+                )
+            except Exception:
+                pass
+
         # ──────────────────────────────────────
         # PHASE 8: PERCEIVE (Tick Aggregator, ADR-009)
         # ──────────────────────────────────────
@@ -617,6 +628,18 @@ class HomeostasisCore:
             self._telegram_bridge.poll_and_respond()
         except Exception as e:
             logger.debug(f"[TELEGRAM] Poll error: {e}")
+
+        # K9: notify operator when meta-cognition signals needs_human
+        if self._planner_core and hasattr(self._planner_core, '_meta_cognition'):
+            mc = self._planner_core._meta_cognition
+            if mc and hasattr(mc, 'needs_human'):
+                try:
+                    if mc.needs_human():
+                        self._telegram_bridge.notifier.notify_needs_human(
+                            "Spadek pewnosci w decyzjach. Sprawdz /status i /goals."
+                        )
+                except Exception:
+                    pass
 
     def _check_planner_trigger(self) -> None:
         """
