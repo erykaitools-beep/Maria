@@ -194,14 +194,23 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
     return counts
 
 
-def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
-                               input_dir: str) -> threading.Thread:
-    """Start initial indexing in a background thread.
+STARTUP_DELAY_SEC = 60  # Wait for homeostasis to stabilize before CPU-heavy embedding
+INCREMENTAL_NAMESPACE = "knowledge"
 
+
+def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
+                               input_dir: str,
+                               delay_sec: float = STARTUP_DELAY_SEC) -> threading.Thread:
+    """Start initial indexing in a background thread after a delay.
+
+    Delays embedding work to avoid CPU spike that triggers REDUCED mode.
     Returns the thread (for join/monitoring).
     """
     def _run():
         try:
+            if delay_sec > 0:
+                logger.info(f"[INDEXER] Waiting {delay_sec:.0f}s before indexing (CPU cooldown)")
+                time.sleep(delay_sec)
             run_initial_indexing(semantic_memory, data_dir, memory_dir, input_dir)
         except Exception as e:
             logger.error(f"[INDEXER] Background indexing failed: {e}")
@@ -210,3 +219,35 @@ def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
     t.start()
     logger.info("[INDEXER] Background indexing started")
     return t
+
+
+def index_new_files(semantic_memory, knowledge_path: str, input_dir: str) -> int:
+    """Index only files not yet in the vector store.
+
+    Call after learning new material or fetching new web content.
+    Returns count of newly indexed entries.
+    """
+    kp = Path(knowledge_path)
+    ip = Path(input_dir)
+
+    if not kp.exists():
+        return 0
+
+    all_entries = build_knowledge_entries(kp, ip)
+    if not all_entries:
+        return 0
+
+    # Filter: only entries not yet in store
+    new_entries = []
+    for entry_id, text in all_entries:
+        if semantic_memory.store.get(entry_id) is None:
+            new_entries.append((entry_id, text))
+
+    if not new_entries:
+        return 0
+
+    count = semantic_memory.index_batch(INCREMENTAL_NAMESPACE, new_entries)
+    if count > 0:
+        semantic_memory.save()
+        logger.info(f"[INDEXER] Incremental: indexed {count} new knowledge entries")
+    return count

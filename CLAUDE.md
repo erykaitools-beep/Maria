@@ -57,15 +57,20 @@
 | **2026-03-26** | **Telegram Bridge (ClawBot)** - Maria pisze do operatora, komendy /status /goals /approve /reject /restart (42 testy) |
 | **2026-03-26** | K7 improvements: consecutive failure auto-reset (30min), fetch 5->10/h, proposed timeout 24->72h |
 | **2026-03-26** | Zmiany zasugerowane przez creative module Marii (NIM-powered tension detection) |
+| **2026-03-27** | **Meta-goal priority escalation** - tension streaks, priority boost, PROPOSED displacement, /priority command (23 testy) |
+| **2026-03-27** | **Semantic Memory** - nomic-embed-text (768-dim), vector store, auto-indexer, 275 vectors (39+18 testow) |
+| **2026-03-27** | SemanticMemory wired: TopicSuggester (novelty rerank) + MemoryRetriever (embedding search) |
+| **2026-03-27** | Incremental indexing - nowe pliki auto-embeddowane po fetch |
+| **2026-03-27** | Startup delay (60s) - unika CPU spike i REDUCED mode po restarcie |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 LIVE + Telegram + ModelScheduler + OpenClaw LIVE + Registry v2 + Web UI v2 |
-| **Testy** | 1985 passing |
-| **Faza** | Telegram Bridge LIVE + K7 tuning (Maria's suggestions) |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
+| **Testy** | 2081 passing |
+| **Faza** | Semantic Memory LIVE (275 vectors) + priority escalation + incremental indexing |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -112,8 +117,9 @@ project/
 │   ├── creative/        # K13 Creative Module Phase 2: tensions, insights, meta-goals, LLM engines (NIM)
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
+│   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 1654 tests
+│   └── tests/           # 2081 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -219,6 +225,39 @@ Formalne specyfikacje zaimplementowane w `docs/CONTRACTS.md`:
 - **K13 Creative Module (Phase 2):** StrategicContext (6 data sources), TensionDetector (7 categories), ReflectionWorkspace (bounded sessions), CreativeJournal (strategic diary), NoveltyFilter (dedup+flood), CreativeEvaluator (5 dimensions, custom weights), GoalAdapter (K3 PROPOSED), CreativeStore (6 JSONL), facade (15-step reflect cycle), ConversationMemory (operator dialogue), K7 GUARDED, K10 AUDIT_ONLY, planner Step 2.5. **Phase 2:** MetaGoalEngine (NIM+fallback), ReframeEngine (NIM+fallback), ExplorationEngine (NIM+fallback), IdentityProfile (CognitiveProfile), PersonalityPolicy (trait->weight adjustment), MemoryRetriever (keyword-based), MemorySummarizer (NIM+fallback), llm_utils (JSON parser). TokenBudget: RPM-based gating (40 req/min)
 
 Wszystko podlaczone w `homeostasis_module.py init()` i `SharedContext`. **Cognitive core K1-K13 kompletny (1876 testow).**
+
+## Semantic Memory (2026-03-27)
+
+Embedding-based similarity search replacing keyword retrieval (w `agent_core/semantic/`):
+
+- **Model:** nomic-embed-text:latest (274MB, 768-dim vectors) via Ollama /api/embed
+- **MODEL-05:** Updated in model_registry (was shared llama3.1:8b placeholder)
+- **EmbeddingModel:** Ollama wrapper, in-memory cache, batch embed, cosine similarity
+- **VectorStore:** In-memory dict + JSONL persist (`meta_data/semantic_vectors.jsonl`), namespace support, cap 10k
+- **SemanticMemory facade:** index_text/batch, search, find_similar, 4 namespaces
+- **Auto-indexer:** Background indexing at startup (60s delay to avoid CPU spike)
+  - 157 knowledge entries (from knowledge_index + input file titles)
+  - 95 beliefs (from K6 world model)
+  - 23 hints (from K12 self-analysis)
+- **Incremental indexing:** New files auto-embedded after fetch actions
+- **Namespaces:** knowledge, beliefs, hints, memories
+- **Clients:**
+  - TopicSuggester: `set_semantic_memory()` + `_semantic_rerank()` (novelty scoring)
+  - MemoryRetriever: `set_semantic_memory()` + `_semantic_retrieve()` (embedding search with keyword fallback)
+- **Wiring:** homeostasis init -> SharedContext.semantic_search -> creative + planner executor
+- **ADR-021:** Embeddings replace keyword retrieval (skip patching old semantic_graph.py)
+- **57 testow** (39 semantic + 18 indexer)
+
+## Meta-goal Priority Escalation (2026-03-27)
+
+Repeated tensions now escalate meta-goal priority:
+
+- **Tension streak tracking:** `CreativeStore.record_tensions()` + `get_tension_streak()` - JSONL: `creative_tension_streaks.jsonl`
+- **Priority boost:** `ReflectionWorkspace.generate_candidates()` - streak * 0.05, max +0.2
+- **PROPOSED displacement:** `GoalStore.propose()` replaces lowest-priority PROPOSED when higher arrives
+- **Telegram /priority:** `/priority <id-prefix> <0.0-1.0>` - operator manual override
+- **Improved /goals:** Shows ID prefix + priority + stats for all goals
+- **23 testow**
 
 ## Telegram Bridge - ClawBot (2026-03-26)
 
@@ -480,13 +519,19 @@ Usunieto:
 - [x] K12 Web UI /analysis page (3 taby: raport, rekomendacje, historia)
 - [x] K12 GoalStore integration - dziala (3 cele w ostatnim raporcie)
 
+### DONE: Semantic Memory + Priority Escalation (2026-03-27)
+- [x] Semantic Memory: nomic-embed-text (768-dim, 275 vectors, auto-indexer, incremental)
+- [x] TopicSuggester semantic reranking (novelty scoring)
+- [x] MemoryRetriever embedding search (with keyword fallback)
+- [x] Meta-goal priority escalation (tension streaks, PROPOSED displacement, /priority)
+- [x] Telegram /goals improved (ID, priority, stats)
+- [x] Startup delay 60s (CPU spike fix)
+- [x] 80 new tests (2081 total)
+
 ### NASTEPNE: improvements
-- Claude CLI backend (instalacja na mini PC, konto Anthropic $200 plan)
-- K12 Phase 2: TopicSuggester hint integration (topic_hints.jsonl) - CZESCIOWO DONE (hints sa zapisywane)
-- K12 Phase 2: Web UI /analysis page (raporty, rekomendacje)
-- K12: GoalStore integration w RecommendationApplier (goals_created puste)
+- Conversation-Driven Learning - user chat influences learning topics (klocki gotowe, trzeba polaczyc)
+- Multi-Source Learning - cross-LLM validation (od zera)
 - Web UI v2 polish (dense mode, sidebar)
-- Semantic memory (nomic-embed-text) - przyszlosc
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - czeka na sprzet
 
@@ -555,6 +600,7 @@ python run_ui.py
 - **ADR-018:** Markdown learning fallback - parsuj odpowiedzi LLM w dowolnym formacie (nie wymuszaj JSON)
 - **ADR-019:** OpenClaw lightweight check - pgrep zamiast health_check (nie laduj modelu przy pollingu)
 - **ADR-020:** K12 Self-Analysis - Maria analizuje wlasne logi silniejszym modelem, tworzy PROPOSED goals (human gate)
+- **ADR-021:** Semantic Memory via embeddings (nomic-embed-text) zamiast keyword retrieval - skip patching old semantic_graph.py
 
 ## Notatki Claude'a (brudnopis)
 
@@ -874,4 +920,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-26 (Telegram Bridge ClawBot + K7 improvements, 1985 testow)*
+*Ostatnia aktualizacja: 2026-03-27 (Semantic Memory + Priority Escalation + Incremental Indexing, 2081 testow)*

@@ -201,7 +201,7 @@ class TestBackgroundIndexing:
         memory_dir.mkdir()
 
         sm = _mock_semantic_memory()
-        t = start_background_indexing(sm, str(data_dir), str(memory_dir), str(tmp_path))
+        t = start_background_indexing(sm, str(data_dir), str(memory_dir), str(tmp_path), delay_sec=0)
         t.join(timeout=5)
         assert not t.is_alive()
 
@@ -210,6 +210,6 @@ class TestBackgroundIndexing:
         sm.index_batch = MagicMock(side_effect=RuntimeError("boom"))
         sm.save = MagicMock()
 
-        t = start_background_indexing(sm, "/nonexistent", "/nonexistent", "/nonexistent")
+        t = start_background_indexing(sm, "/nonexistent", "/nonexistent", "/nonexistent", delay_sec=0)
         t.join(timeout=5)
         assert not t.is_alive()  # Should not crash

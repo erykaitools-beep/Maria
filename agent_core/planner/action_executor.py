@@ -53,6 +53,20 @@ class ActionExecutor:
         """Set SemanticMemory for semantic-aware fetch sessions."""
         self._semantic_search = semantic_memory
 
+    def _incremental_index(self) -> None:
+        """Index new knowledge files into semantic memory."""
+        try:
+            from agent_core.semantic.indexer import index_new_files
+            from maria_core.sys.config import BASE_DIR
+            index_new_files(
+                self._semantic_search,
+                str(BASE_DIR / "memory" / "knowledge_index.jsonl"),
+                str(BASE_DIR / "input"),
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Incremental indexing skipped: {e}")
+
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
         self._teacher_agent = agent
@@ -274,6 +288,11 @@ class ActionExecutor:
                 semantic_memory=self._semantic_search,
             )
             errors = result.get("errors", 0)
+
+            # Incremental indexing: embed newly fetched files
+            if self._semantic_search and result.get("articles_fetched", 0) > 0:
+                self._incremental_index()
+
             return {
                 "success": errors == 0,
                 "articles_fetched": result.get("articles_fetched", 0),
