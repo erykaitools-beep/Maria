@@ -375,6 +375,18 @@ def main():
 
             continue
 
+        # ===== CONVERSATION-DRIVEN LEARNING =====
+        # Detect learning intent before brain processes (zero LLM)
+        try:
+            from agent_core.perception.conversation_learning import process_user_message
+            cdl_result = process_user_message(user_input, ctx, channel="repl")
+            if cdl_result:
+                topic = cdl_result["topic"]
+                action = cdl_result["action"]
+                print(f"[Maria] Rozumiem - {action}: '{topic}'. Dodam do celow nauki.")
+        except Exception:
+            pass  # CDL is optional, never block chat
+
         # ===== PERCEPTION =====
         # Check homeostasis mode before processing
         core = ctx.homeostasis_core

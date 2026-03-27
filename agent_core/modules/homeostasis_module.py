@@ -883,12 +883,28 @@ def _register_telegram_commands(bridge, ctx):
         ctx.goal_store.save()
         return f"Priorytet {goal.description[:60]}: {old_pri:.2f} -> {new_pri:.2f}"
 
+    def _cmd_learn(args):
+        """Create a learning goal from Telegram: /learn <topic>"""
+        if not args or not args.strip():
+            return "Uzycie: /learn <temat>\nPrzyklad: /learn fizyka kwantowa"
+        topic = args.strip()
+        try:
+            from agent_core.perception.conversation_learning import process_user_message
+            result = process_user_message(f"naucz sie o {topic}", ctx, channel="telegram")
+            if result and result.get("goal_id"):
+                return f"Dodam do nauki: '{result['topic']}'"
+            else:
+                return f"Nie udalo sie utworzyc celu dla: '{topic}'"
+        except Exception as e:
+            return f"Blad: {e}"
+
     def _cmd_help(args):
         """List available commands."""
         return (
             "*Komendy ClawBot:*\n"
             "/status - stan systemu\n"
             "/goals - lista celow\n"
+            "/learn <temat> - naucz sie o temacie\n"
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
             "/priority <id> <0-1> - zmien priorytet\n"
@@ -902,6 +918,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("reject", _cmd_reject)
     bridge.register_command("restart", _cmd_restart)
     bridge.register_command("priority", _cmd_priority)
+    bridge.register_command("learn", _cmd_learn)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 
