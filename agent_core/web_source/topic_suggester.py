@@ -29,6 +29,9 @@ class TopicSuggester:
 
     Uses KnowledgeAnalyzer's topic_file_map and tag_frequency_map
     to find topics worth fetching from Wikipedia/RSS.
+
+    When semantic_memory is set, uses embedding similarity to rank
+    suggestions by relevance to Maria's learning gaps.
     """
 
     def __init__(self, knowledge_analyzer, project_root: str = "."):
@@ -40,6 +43,11 @@ class TopicSuggester:
         """
         self._analyzer = knowledge_analyzer
         self._hints_path = Path(project_root) / HINTS_FILENAME
+        self._semantic_memory = None  # Late-wired SemanticMemory
+
+    def set_semantic_memory(self, semantic_memory) -> None:
+        """Wire SemanticMemory for semantic ranking of suggestions."""
+        self._semantic_memory = semantic_memory
 
     def suggest_topics(
         self,
@@ -96,6 +104,10 @@ class TopicSuggester:
             if fetch_registry and fetch_registry.is_topic_fetched(topic):
                 continue
             suggestions.append(item)
+
+        # Semantic re-ranking: boost suggestions similar to known knowledge gaps
+        if self._semantic_memory and len(suggestions) > 1:
+            suggestions = self._semantic_rerank(suggestions)
 
         return suggestions
 
@@ -201,6 +213,47 @@ class TopicSuggester:
             })
 
         return results
+
+    def _semantic_rerank(self, suggestions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Re-rank suggestions using semantic similarity to indexed knowledge.
+
+        Topics similar to what Maria already knows get a diversity penalty,
+        topics dissimilar (novel) get boosted. Hints keep priority.
+        """
+        try:
+            sm = self._semantic_memory
+            reranked = []
+            for s in suggestions:
+                topic = s["topic"]
+                # Search existing knowledge for similar topics
+                results = sm.search(topic, namespace="knowledge", top_k=3, threshold=0.5)
+
+                if results:
+                    # High similarity = Maria already knows this area
+                    # -> lower novelty score (but still useful for EXPAND)
+                    avg_sim = sum(r.score for r in results) / len(results)
+                    novelty = 1.0 - avg_sim  # 0 = exact match, 1 = totally new
+                else:
+                    novelty = 1.0  # Unknown territory
+
+                # Hints keep their priority regardless of novelty
+                if s["strategy"] == "hint":
+                    rank_score = 2.0  # Always first
+                else:
+                    # Blend: 60% novelty + 40% original order
+                    original_order_score = 1.0 - (suggestions.index(s) / len(suggestions))
+                    rank_score = 0.6 * novelty + 0.4 * original_order_score
+
+                s["novelty"] = round(novelty, 3)
+                s["rank_score"] = round(rank_score, 3)
+                reranked.append(s)
+
+            reranked.sort(key=lambda x: x.get("rank_score", 0), reverse=True)
+            return reranked
+
+        except Exception as e:
+            logger.warning(f"[TOPIC_SUGGEST] Semantic rerank failed: {e}")
+            return suggestions  # Fallback: original order
 
     def _explore_topics(
         self, exclude: Optional[List[str]] = None,

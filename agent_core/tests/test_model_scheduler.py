@@ -65,8 +65,8 @@ class TestModelRegistry:
     def test_get_model_memory_shared(self):
         spec = get_model(ModelRole.MEMORY)
         assert spec is not None
-        assert spec.ram_estimate_gb == 0.0  # shared on EXECUTOR
-        assert spec.ollama_tag == "llama3.1:8b"
+        assert spec.ram_estimate_gb == 0.5  # nomic-embed-text
+        assert spec.ollama_tag == "nomic-embed-text:latest"
 
     def test_get_model_external(self):
         spec = get_model(ModelRole.EXTERNAL)
@@ -76,11 +76,12 @@ class TestModelRegistry:
 
     def test_list_models_returns_all(self):
         models = list_models()
-        assert len(models) == 6
+        assert len(models) == 7
         roles = {m.role for m in models}
         assert roles == {
             ModelRole.PLANNER, ModelRole.EXECUTOR, ModelRole.CODER,
             ModelRole.TRIAGE, ModelRole.MEMORY, ModelRole.EXTERNAL,
+            ModelRole.ENCYCLOPEDIA,
         }
 
     def test_get_warm_models(self):
@@ -129,7 +130,7 @@ class TestModelRegistry:
         assert get_model(ModelRole.EXECUTOR).latency_budget_s == 20.0
         assert get_model(ModelRole.CODER).latency_budget_s == 30.0
         assert get_model(ModelRole.PLANNER).latency_budget_s == 60.0
-        assert get_model(ModelRole.MEMORY).latency_budget_s == 15.0
+        assert get_model(ModelRole.MEMORY).latency_budget_s == 5.0  # nomic-embed-text (fast)
 
     def test_idle_unload_times(self):
         """Verify idle unload times."""

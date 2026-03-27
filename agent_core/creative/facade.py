@@ -162,6 +162,10 @@ class CreativeModule:
                 "severity": t.severity,
             })
 
+        # Record tension categories for streak tracking
+        tension_cats = [t.category.value for t in tensions]
+        self._store.record_tensions(tension_cats)
+
         if not tensions:
             logger.info("[CREATIVE] No tensions detected, skipping reflection")
             self._last_reflection_ts = time.time()
@@ -210,6 +214,7 @@ class CreativeModule:
         candidates = self._workspace_mgr.generate_candidates(
             session, context, meta_goal_engine=self._meta_goal_engine,
             memories_summary=memories_summary,
+            tension_streak_fn=self._store.get_tension_streak,
         )
 
         # 5.5 Generate reframes (Phase 2)

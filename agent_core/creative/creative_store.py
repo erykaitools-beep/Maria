@@ -119,6 +119,7 @@ class CreativeStore:
         self._workspace_path = self._dir / "creative_workspace_sessions.jsonl"
         self._events_path = self._dir / "creative_events.jsonl"
         self._signals_path = self._dir / "personality_signals.jsonl"
+        self._tension_streaks_path = self._dir / "creative_tension_streaks.jsonl"
 
         # In-memory caches (loaded on demand)
         self._journal: Optional[Dict[str, Dict]] = None
@@ -234,6 +235,39 @@ class CreativeStore:
     def load_events(self, last_n: int = 50) -> List[Dict]:
         events = _load_jsonl_append_only(self._events_path, 1000)
         return events[-last_n:]
+
+    # --- Tension streaks ---
+
+    def record_tensions(self, categories: list) -> None:
+        """Record which tension categories were detected in this cycle.
+
+        Call once per reflection cycle with the list of detected category values.
+        Builds a streak counter: how many consecutive cycles each category appeared.
+        """
+        record = {
+            "timestamp": time.time(),
+            "categories": categories,
+        }
+        _append_jsonl(self._tension_streaks_path, record)
+
+    def get_tension_streak(self, category: str) -> int:
+        """How many recent consecutive reflection cycles detected this category.
+
+        Reads tension streak log backwards. Returns 0 if never seen or
+        if the last cycle did not include this category.
+        """
+        records = _load_jsonl_append_only(self._tension_streaks_path, 200)
+        if not records:
+            return 0
+
+        streak = 0
+        for rec in reversed(records):
+            cats = rec.get("categories", [])
+            if category in cats:
+                streak += 1
+            else:
+                break
+        return streak
 
     # --- Personality signals ---
 

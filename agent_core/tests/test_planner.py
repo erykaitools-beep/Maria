@@ -152,9 +152,9 @@ class TestPlanStatus:
 
 class TestActionType:
     def test_all_types(self):
-        assert len(ActionType) == 11
+        assert len(ActionType) == 12
         values = {a.value for a in ActionType}
-        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop", "fetch", "experiment", "effector", "self_analyze", "creative"}
+        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop", "fetch", "experiment", "effector", "self_analyze", "creative", "ask_expert"}
 
 
 class TestPlan:
@@ -709,12 +709,18 @@ class TestPlannerCoreLearningAction:
 
     def test_nothing_to_do_noop(self):
         planner = PlannerCore.__new__(PlannerCore)
+        planner._world_model = None
+        planner._expert_fn = None
+        planner._knowledge_analyzer = None
         snapshot = {"files_by_status": {}, "new_files_available": []}
         action = planner._decide_learning_action(snapshot, {"retention_rate": 0.95})
         assert action == ActionType.NOOP
 
     def test_no_snapshot_defaults_to_learn(self):
         planner = PlannerCore.__new__(PlannerCore)
+        planner._world_model = None
+        planner._expert_fn = None
+        planner._knowledge_analyzer = None
         action = planner._decide_learning_action(None, {})
         assert action == ActionType.LEARN
 

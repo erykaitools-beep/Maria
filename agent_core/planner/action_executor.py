@@ -39,6 +39,7 @@ class ActionExecutor:
         self._creative_module = None
         self._telegram_notifier = None
         self._llm_router = None
+        self._semantic_search = None
 
     def set_telegram_notifier(self, notifier) -> None:
         """Set Telegram notifier for operator alerts."""
@@ -47,6 +48,10 @@ class ActionExecutor:
     def set_llm_router(self, router) -> None:
         """Set LLM router for ASK_EXPERT actions (encyclopedia)."""
         self._llm_router = router
+
+    def set_semantic_search(self, semantic_memory) -> None:
+        """Set SemanticMemory for semantic-aware fetch sessions."""
+        self._semantic_search = semantic_memory
 
     def set_teacher_agent(self, agent) -> None:
         """Set teacher agent for learning/exam/review actions."""
@@ -266,6 +271,7 @@ class ActionExecutor:
             result = run_fetch_session(
                 knowledge_analyzer=self._knowledge_analyzer,
                 max_articles=max_articles,
+                semantic_memory=self._semantic_search,
             )
             errors = result.get("errors", 0)
             return {

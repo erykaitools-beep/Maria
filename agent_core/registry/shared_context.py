@@ -48,6 +48,7 @@ class SharedContext:
     evidence_collector: Any = None   # EvidenceCollector (Phase 2, grounded responses)
     telegram_bridge: Any = None      # TelegramBridge (operator notifications)
     codex_client: Any = None         # CodexClient (ChatGPT encyclopedia via Codex CLI)
+    semantic_search: Any = None       # SemanticMemory (nomic-embed-text vector store)
 
     # REPL state
     last_result: Any = None

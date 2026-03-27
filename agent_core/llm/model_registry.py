@@ -112,15 +112,15 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         block_if_heavy_active=False,
     ),
     ModelRole.MEMORY: ModelSpec(
-        model_id="SHARED_BY_DEFAULT",
+        model_id="nomic-embed-text",
         role=ModelRole.MEMORY,
-        ollama_tag="llama3.1:8b",  # reuses MODEL-02 by default (future: nomic-embed-text)
-        ram_estimate_gb=0.0,       # shared, no extra RAM
-        latency_budget_s=15.0,
+        ollama_tag="nomic-embed-text:latest",  # 274MB, 768-dim embeddings
+        ram_estimate_gb=0.5,
+        latency_budget_s=5.0,
         concurrency_class=ConcurrencyClass.BACKGROUND,
-        warm_state=WarmState.COLD,  # future: WARM when semantic memory deployed
-        idle_unload_s=0.0,
-        min_free_ram_gb=8.0,
+        warm_state=WarmState.COLD,  # load on demand, unload after idle
+        idle_unload_s=300.0,        # 5min idle -> unload
+        min_free_ram_gb=2.0,
         fallback_role=ModelRole.EXECUTOR,
         block_if_heavy_active=False,
     ),

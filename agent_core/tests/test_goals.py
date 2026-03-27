@@ -438,9 +438,9 @@ class TestGoalStoreCleanup:
 
     def test_expire_proposed(self, tmp_path):
         store = GoalStore(tmp_path / "goals.jsonl")
-        # Old proposed goal (25h ago)
+        # Old proposed goal (73h ago, past 72h timeout)
         old = create_goal(GoalType.USER, "Old", 0.5, created_by="consciousness")
-        old.created_at = time.time() - 25 * 3600
+        old.created_at = time.time() - 73 * 3600
         store.propose(old)
 
         # Fresh proposed goal

@@ -74,6 +74,7 @@ def run_fetch_session(
     registry_path: Optional[Path] = None,
     max_articles: int = 3,
     enable_rss: bool = True,
+    semantic_memory=None,
 ) -> Dict[str, Any]:
     """
     Run one web content fetch session.
@@ -111,6 +112,8 @@ def run_fetch_session(
     # Derive project root from input_dir for topic hints (K12)
     _project_root = str(input_dir.parent) if input_dir else "."
     suggester = TopicSuggester(knowledge_analyzer, project_root=_project_root)
+    if semantic_memory:
+        suggester.set_semantic_memory(semantic_memory)
 
     # Step 1: Get topic suggestions
     suggestions = suggester.suggest_topics(

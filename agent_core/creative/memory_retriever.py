@@ -2,7 +2,9 @@
 
 Extracts keywords from tensions and context, then delegates to
 CreativeConversationMemory.retrieve_relevant() for keyword matching.
-Zero LLM - keyword-based. Future: semantic similarity.
+
+When semantic_memory is set, uses embedding similarity search
+as primary retrieval, with keyword matching as fallback.
 """
 
 import logging
@@ -32,6 +34,11 @@ class MemoryRetriever:
 
     def __init__(self, store: CreativeStore):
         self._conv_memory = CreativeConversationMemory(store)
+        self._semantic_memory = None  # Late-wired SemanticMemory
+
+    def set_semantic_memory(self, semantic_memory) -> None:
+        """Wire SemanticMemory for embedding-based retrieval."""
+        self._semantic_memory = semantic_memory
 
     def retrieve_for_session(
         self,
@@ -42,6 +49,8 @@ class MemoryRetriever:
         """
         Retrieve memories relevant to current tensions and context.
 
+        Uses semantic search when available, falls back to keyword matching.
+
         Args:
             tensions: Detected tensions in this cycle
             context: Strategic context dict
@@ -50,6 +59,13 @@ class MemoryRetriever:
         Returns:
             List of conversation memory dicts, ranked by relevance
         """
+        # Try semantic search first
+        if self._semantic_memory and tensions:
+            semantic_results = self._semantic_retrieve(tensions, limit)
+            if semantic_results:
+                return semantic_results
+
+        # Fallback: keyword-based
         keywords = self.extract_keywords(tensions, context)
         if not keywords:
             return []
@@ -59,6 +75,46 @@ class MemoryRetriever:
             min_importance=0.3,
             limit=limit,
         )
+
+    def _semantic_retrieve(
+        self,
+        tensions: List[DetectedTension],
+        limit: int,
+    ) -> List[dict]:
+        """Retrieve memories using semantic similarity to tension descriptions."""
+        try:
+            sm = self._semantic_memory
+            all_results = []
+            per_tension = max(limit // len(tensions), 2)
+
+            for tension in tensions:
+                query = tension.description
+                results = sm.search(
+                    query, namespace="memories",
+                    top_k=per_tension, threshold=0.4,
+                )
+                for r in results:
+                    all_results.append({
+                        "content": r.entry.text,
+                        "similarity": r.score,
+                        "metadata": r.entry.metadata,
+                        "source": "semantic",
+                    })
+
+            # Deduplicate by entry ID and sort by similarity
+            seen = set()
+            unique = []
+            for r in sorted(all_results, key=lambda x: x["similarity"], reverse=True):
+                key = r["content"][:100]
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(r)
+
+            return unique[:limit]
+
+        except Exception as e:
+            logger.warning(f"[MEMORY_RETRIEVER] Semantic retrieval failed: {e}")
+            return []
 
     def extract_keywords(
         self,

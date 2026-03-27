@@ -106,14 +106,30 @@ class GoalStore:
     def propose(self, goal: Goal) -> Optional[str]:
         """Create a PROPOSED goal (awaiting user confirmation).
 
-        Enforces MAX_PROPOSED_GOALS: returns None if at limit.
+        Enforces MAX_PROPOSED_GOALS. If at limit, replaces the lowest-priority
+        PROPOSED goal when the new goal has higher priority (displacement).
+        Returns None only if new goal cannot displace any existing one.
         """
-        proposed_count = sum(
-            1 for g in self._goals.values()
+        proposed = [
+            g for g in self._goals.values()
             if g.status == GoalStatus.PROPOSED
-        )
-        if proposed_count >= MAX_PROPOSED_GOALS:
-            return None
+        ]
+        if len(proposed) >= MAX_PROPOSED_GOALS:
+            # Find lowest-priority proposed goal
+            lowest = min(proposed, key=lambda g: g.priority)
+            if goal.priority > lowest.priority:
+                # Displace: abandon lowest to make room
+                self.update_status(
+                    lowest.id, GoalStatus.ABANDONED,
+                    f"displaced by higher-priority proposal ({goal.priority:.2f} > {lowest.priority:.2f})",
+                    "creative",
+                )
+                logger.info(
+                    f"[GOALS] Displaced PROPOSED {lowest.id} "
+                    f"(pri={lowest.priority:.2f}) for {goal.id} (pri={goal.priority:.2f})"
+                )
+            else:
+                return None
 
         goal.status = GoalStatus.PROPOSED
         # Ensure audit trail reflects PROPOSED status

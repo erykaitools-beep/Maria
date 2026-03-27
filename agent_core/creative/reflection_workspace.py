@@ -111,7 +111,8 @@ class ReflectionWorkspaceManager:
     def generate_candidates(self, session: ReflectionSession,
                             context: Dict[str, Any],
                             meta_goal_engine=None,
-                            memories_summary: str = "") -> List[MetaGoal]:
+                            memories_summary: str = "",
+                            tension_streak_fn=None) -> List[MetaGoal]:
         """Generate candidate meta-goals from insights.
 
         Only insights marked as meta_goal_candidate produce goals.
@@ -154,10 +155,19 @@ class ReflectionWorkspaceManager:
                     "decomposition_hint": self._generate_decomposition_hint(tension),
                 }
 
+            # Priority boost from tension streak (repeated detection = higher urgency)
+            base_priority = insight.confidence
+            streak_boost = 0.0
+            if tension and tension_streak_fn:
+                streak = tension_streak_fn(tension.category.value)
+                # +0.05 per consecutive cycle, capped at +0.2
+                streak_boost = min(streak * 0.05, 0.2)
+            priority = min(base_priority + streak_boost, 1.0)
+
             mg = MetaGoal.create(
                 title=generated.get("title", "Nowy kierunek rozwoju"),
                 goal_type=goal_type,
-                priority=insight.confidence,
+                priority=priority,
                 why_now=insight.statement,
                 evidence_refs=evidence_refs,
                 expected_value=generated.get("expected_value", ""),

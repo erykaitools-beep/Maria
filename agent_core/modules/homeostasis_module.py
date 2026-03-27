@@ -68,6 +68,32 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"ModelScheduler not initialized: {e}")
 
+        # Initialize SemanticMemory (nomic-embed-text vector store)
+        if core:
+            try:
+                from agent_core.semantic import SemanticMemory
+                from pathlib import Path as _Path
+                from maria_core.sys.config import BASE_DIR as _BASE
+                _data_dir = str(_BASE / "meta_data")
+                sem = SemanticMemory(data_dir=_data_dir)
+                if sem.initialize():
+                    ctx.semantic_search = sem
+                    logger.info("[Homeostasis] SemanticMemory initialized (nomic-embed-text)")
+
+                    # Start background indexing (knowledge, beliefs, hints)
+                    from agent_core.semantic.indexer import start_background_indexing
+                    start_background_indexing(
+                        sem,
+                        data_dir=_data_dir,
+                        memory_dir=str(_BASE / "memory"),
+                        input_dir=str(_BASE / "input"),
+                    )
+                else:
+                    ctx.semantic_search = sem  # Still usable, will try on-demand
+                    logger.info("[Homeostasis] SemanticMemory loaded (model not warm yet)")
+            except Exception as e:
+                logger.warning(f"[Homeostasis] SemanticMemory failed: {e}")
+
         # Initialize LLM Tape (raw interaction logging)
         if core:
             try:
@@ -405,6 +431,11 @@ class HomeostasisModule(MariaModule):
                     ctx.creative_module = creative
                     print("[Homeostasis] [OK] CreativeModule wired (K13)")
 
+                    # Wire SemanticMemory to creative MemoryRetriever
+                    if ctx.semantic_search:
+                        creative._memory_retriever.set_semantic_memory(ctx.semantic_search)
+                        print("[Homeostasis] [OK] CreativeModule semantic memory wired")
+
                     # Wire Codex/ChatGPT as expert for creative exploration
                     if hasattr(ctx, 'codex_client') and ctx.codex_client and ctx.codex_client.is_available():
                         creative.set_expert_fn(
@@ -417,6 +448,10 @@ class HomeostasisModule(MariaModule):
                 # Wire LLM router to executor for ASK_EXPERT actions
                 if ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia'):
                     planner.executor.set_llm_router(ctx.brain)
+
+                # Wire SemanticMemory to executor for semantic-aware fetch
+                if ctx.semantic_search:
+                    planner.executor.set_semantic_search(ctx.semantic_search)
 
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
@@ -744,14 +779,21 @@ def _register_telegram_commands(bridge, ctx):
         active = ctx.goal_store.get_active()
         if active:
             lines.append(f"*Active ({len(active)}):*")
-            for g in active[:10]:
-                lines.append(f"- {g.description[:80]}")
+            for g in active[:20]:
+                lines.append(f"  [{g.id[:8]}] pri={g.priority:.2f} {g.description[:65]}")
 
         proposed = ctx.goal_store.get_proposed()
         if proposed:
             lines.append(f"\n*Proposed ({len(proposed)}):*")
-            for g in proposed[:5]:
-                lines.append(f"- [{g.id[:8]}] {g.description[:80]}")
+            for g in sorted(proposed, key=lambda x: x.priority, reverse=True)[:10]:
+                lines.append(f"  [{g.id[:8]}] pri={g.priority:.2f} {g.description[:65]}")
+
+        # Stats
+        stats = ctx.goal_store.stats()
+        abandoned = stats["by_status"].get("abandoned", 0)
+        achieved = stats["by_status"].get("achieved", 0)
+        if abandoned or achieved:
+            lines.append(f"\nZakonczone: {achieved} achieved, {abandoned} abandoned")
 
         return "\n".join(lines) if lines else "Brak celow"
 
@@ -803,6 +845,44 @@ def _register_telegram_commands(bridge, ctx):
         t.start()
         return None  # Message already sent via send_raw
 
+    def _cmd_priority(args):
+        """Set priority for a goal: /priority <id-prefix> <0.0-1.0>"""
+        from agent_core.goals.goal_model import AuditEntry
+        if not ctx.goal_store or not args:
+            return "Uzycie: /priority <id-prefix> <0.0-1.0>"
+        parts = args.strip().split(None, 1)
+        if len(parts) < 2:
+            return "Uzycie: /priority <id-prefix> <0.0-1.0>"
+        prefix = parts[0]
+        try:
+            new_pri = float(parts[1])
+        except ValueError:
+            return f"Nieprawidlowy priorytet: {parts[1]}"
+        if not (0.0 <= new_pri <= 1.0):
+            return "Priorytet musi byc 0.0-1.0"
+
+        # Search in proposed + active goals
+        candidates = ctx.goal_store.get_proposed() + ctx.goal_store.get_active()
+        match = [g for g in candidates if g.id.startswith(prefix)]
+        if not match:
+            return f"Nie znaleziono celu: {prefix}"
+        if len(match) > 1:
+            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
+        goal = match[0]
+        old_pri = goal.priority
+        goal.priority = new_pri
+        goal.updated_at = time.time()
+        goal.audit_trail.append(AuditEntry(
+            timestamp=time.time(),
+            old_status=goal.status.value,
+            new_status=goal.status.value,
+            reason=f"priority {old_pri:.2f} -> {new_pri:.2f} (operator)",
+            actor="operator",
+        ))
+        ctx.goal_store._mark_dirty(goal.id)
+        ctx.goal_store.save()
+        return f"Priorytet {goal.description[:60]}: {old_pri:.2f} -> {new_pri:.2f}"
+
     def _cmd_help(args):
         """List available commands."""
         return (
@@ -811,6 +891,7 @@ def _register_telegram_commands(bridge, ctx):
             "/goals - lista celow\n"
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
+            "/priority <id> <0-1> - zmien priorytet\n"
             "/restart - restart Marii\n"
             "/help - ta pomoc"
         )
@@ -820,6 +901,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("approve", _cmd_approve)
     bridge.register_command("reject", _cmd_reject)
     bridge.register_command("restart", _cmd_restart)
+    bridge.register_command("priority", _cmd_priority)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 
