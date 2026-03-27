@@ -623,6 +623,15 @@ class PlannerCore:
         if topics:
             action_params["topics"] = topics
 
+            # Conversation-driven: if no files match topic, fetch first
+            if action == ActionType.NOOP and goal.metadata.get("source") == "conversation":
+                if not self._is_action_rate_limited("fetch"):
+                    action = ActionType.FETCH
+                    logger.info(
+                        f"[Planner] Conversation goal '{topics[0]}': "
+                        f"no matching files, switching to FETCH"
+                    )
+
         # ASK_EXPERT: add topic and source
         if action == ActionType.ASK_EXPERT:
             topic = self._pick_expert_topic()

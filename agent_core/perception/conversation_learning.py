@@ -72,6 +72,7 @@ def process_user_message(text: str, ctx, channel: str = "repl") -> Optional[Dict
                     "channel": channel,
                     "action": action,
                     "topic": topic,
+                    "topics": [topic],  # Planner reads this for topic filtering
                     "original_text": text[:200],
                 },
             )

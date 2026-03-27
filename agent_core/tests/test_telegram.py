@@ -19,6 +19,7 @@ from agent_core.telegram import TelegramBridge
 class TestTelegramBot:
     """Tests for low-level Telegram Bot API client."""
 
+    @patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "0"}, clear=False)
     def test_not_configured_without_token(self):
         bot = TelegramBot(token="", chat_id=0)
         assert not bot.configured
@@ -27,6 +28,7 @@ class TestTelegramBot:
         bot = TelegramBot(token="test-token", chat_id=12345)
         assert bot.configured
 
+    @patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "0"}, clear=False)
     def test_send_message_when_not_configured(self):
         bot = TelegramBot(token="", chat_id=0)
         assert bot.send_message("test") is False

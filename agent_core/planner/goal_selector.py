@@ -116,6 +116,9 @@ class GoalSelector:
 
         # LEARNING goals: need materials to learn
         if goal_type == "learning":
+            # User-requested goals are always feasible (will trigger FETCH if needed)
+            if goal.metadata.get("source") == "conversation":
+                return True, ""
             if knowledge_snapshot:
                 by_status = knowledge_snapshot.get("files_by_status", {})
                 new_files = knowledge_snapshot.get("new_files_available", [])
