@@ -62,15 +62,24 @@
 | **2026-03-27** | SemanticMemory wired: TopicSuggester (novelty rerank) + MemoryRetriever (embedding search) |
 | **2026-03-27** | Incremental indexing - nowe pliki auto-embeddowane po fetch |
 | **2026-03-27** | Startup delay (60s) - unika CPU spike i REDUCED mode po restarcie |
+| **2026-03-28** | **Phase 1 Tracing** - episode-based decision traceability, correlation IDs (25 testow) |
+| **2026-03-28** | Episode ID flows: planner -> LLM tape -> K7 -> K10 (thread-local auto-read) |
+| **2026-03-28** | Web UI /api/traces + Telegram /trace command |
+| **2026-03-28** | Stabilization Roadmap received (ChatGPT, 6 phases, gate model A-E) |
+| **2026-03-28** | **Phase 2 Memory Consistency** - MemoryQuery API, staleness fixes, re-indexing (24 testow) |
+| **2026-03-28** | Grounding: "co wiesz o X" -> GROUNDED_KNOWLEDGE -> evidence z MemoryQuery |
+| **2026-03-28** | Web UI /api/memory/query + Telegram /memory + beliefs rebuild po LEARN |
+| **2026-03-28** | **CDL in Web UI** - Conversation-Driven Learning podpiete w Web UI chat |
+| **2026-03-28** | LLM call counting w traces (total_llm_calls, models_used, latency) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2081 passing |
-| **Faza** | Semantic Memory LIVE (275 vectors) + priority escalation + incremental indexing |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
+| **Testy** | 2200 passing |
+| **Faza** | Phase 1 Tracing + Phase 2 Memory Consistency LIVE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -118,8 +127,9 @@ project/
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
+│   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 2081 tests
+│   └── tests/           # 2200 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -258,6 +268,42 @@ Repeated tensions now escalate meta-goal priority:
 - **Telegram /priority:** `/priority <id-prefix> <0.0-1.0>` - operator manual override
 - **Improved /goals:** Shows ID prefix + priority + stats for all goals
 - **23 testow**
+
+## Phase 1 Tracing - Decision Traceability (2026-03-28)
+
+Episode-based correlation IDs across cognitive episodes (w `agent_core/tracing/`):
+
+- **ADR-022:** Thread-local episode_id, backward compatible
+- **episode.py:** generate_episode_id() -> thread-local via threading.local()
+- **trace_model.py:** DecisionTrace (full episode) + TraceStep (subsystem decision point)
+- **trace_store.py:** JSONL persistence (`meta_data/decision_traces.jsonl`), bounded 200 in-memory
+- **Episode ID auto-read:** LLM tape, K7 escalation, K10 audit - all read from thread-local
+- **Planner:** run_cycle() generates episode_id, Plan.trace_id set, trace steps collected
+- **Wiring:** homeostasis_module.py -> TraceStore -> PlannerCore.set_trace_store()
+- **Web UI:** `/api/traces`, `/api/traces/<id>`, `/api/traces/stats`, `/api/traces/failed`
+- **Telegram:** `/trace [N|stats|failed|ep-ID]`
+- **Stabilization Roadmap:** `docs/plans/MARIA_full_scale_stabilization_roadmap.pdf` (6 phases, gate model A-E)
+- **LLM counting:** total_llm_calls, models_used, total_llm_latency_ms via thread-local trace ref
+- **25 testow**
+
+## Phase 2 Memory Consistency (2026-03-28)
+
+Unified memory query with provenance (w `agent_core/memory/query.py`):
+
+- **ADR-023:** Unified memory query with provenance metadata
+- **MemoryQuery:** query_topic(), get_topic_summary(), get_knowledge_gaps()
+- **Truth hierarchy:** knowledge_index (primary) > beliefs (derived) > semantic vectors
+- **Each result:** source, confidence (0-1), freshness (0-1), relevance (0-1), provenance dict
+- **Grounding:** GROUNDED_KNOWLEDGE mode - "co wiesz o X" -> EvidenceCollector -> MemoryQuery
+- **Staleness fixes:**
+  - Vector cleanup: `cleanup_stale_vectors()` at startup (removes vectors for deleted files)
+  - Beliefs rebuild after LEARN (was: only after EVALUATE every hour)
+  - Incremental re-indexing after LEARN (update embeddings with new status)
+- **Web UI:** `/api/memory/query?topic=X`, `/api/memory/gaps`
+- **Telegram:** `/memory <topic>`, `/memory gaps`
+- **CDL in Web UI:** learning intent detection in Web UI chat (goal creation)
+- **Wiring:** homeostasis_module.py -> MemoryQuery -> SharedContext + EvidenceCollector
+- **24 testow** (test_memory_query.py)
 
 ## Telegram Bridge - ClawBot (2026-03-26)
 
@@ -528,8 +574,24 @@ Usunieto:
 - [x] Startup delay 60s (CPU spike fix)
 - [x] 80 new tests (2081 total)
 
+### DONE: Phase 1 Tracing (2026-03-28)
+- [x] Episode-based tracing: agent_core/tracing/ (episode, trace_model, trace_store)
+- [x] Episode ID auto-propagation: planner -> LLM tape -> K7 -> K10 (thread-local)
+- [x] TraceStore wired in homeostasis_module.py
+- [x] Web UI: /api/traces (4 endpoints) + Telegram: /trace command
+- [x] Stabilization Roadmap received (docs/plans/MARIA_full_scale_stabilization_roadmap.pdf)
+- [x] 25 new tests (2176 total)
+
+### NASTEPNE: Stabilization Roadmap
+- Phase 2: Memory consistency - truth hierarchy, unified query contract
+- Phase 3: Scheduler governance - model routing telemetry, execution budgets
+- Phase 4: Autonomy governance - cross-metric validation, promotion audit
+- Phase 5: Effector safety envelope - staged authority levels
+- Phase 6: Full ClawBot authority readiness review
+
 ### NASTEPNE: improvements
 - Conversation-Driven Learning - user chat influences learning topics (klocki gotowe, trzeba polaczyc)
+- LLM call counting in traces (total_llm_calls currently always 0)
 - Multi-Source Learning - cross-LLM validation (od zera)
 - Web UI v2 polish (dense mode, sidebar)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
@@ -601,6 +663,8 @@ python run_ui.py
 - **ADR-019:** OpenClaw lightweight check - pgrep zamiast health_check (nie laduj modelu przy pollingu)
 - **ADR-020:** K12 Self-Analysis - Maria analizuje wlasne logi silniejszym modelem, tworzy PROPOSED goals (human gate)
 - **ADR-021:** Semantic Memory via embeddings (nomic-embed-text) zamiast keyword retrieval - skip patching old semantic_graph.py
+- **ADR-022:** Episode-based tracing - thread-local episode_id (correlation IDs across cognitive episodes)
+- **ADR-023:** Unified memory query with provenance metadata (MemoryQuery API, truth hierarchy)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -920,4 +984,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-27 (Semantic Memory + Priority Escalation + Incremental Indexing, 2081 testow)*
+*Ostatnia aktualizacja: 2026-03-28 (Phase 1 Tracing + Phase 2 Memory Consistency + CDL + LLM counting, 2200 testow)*

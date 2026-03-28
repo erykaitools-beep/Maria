@@ -1427,3 +1427,79 @@ a:hover { color: #fff; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+
+/* --- 37. Utility: text colors, grid, mono --- */
+.mo-text-green { color: var(--mo-ok); }
+.mo-text-red { color: var(--mo-error); }
+.mo-text-yellow { color: var(--mo-warn); }
+.mo-text-muted { color: var(--mo-text-muted); }
+.mo-text-mono { font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 0.85em; }
+.mo-text-sm { font-size: var(--mo-text-sm); }
+.mo-text-md { font-size: var(--mo-text-md); }
+.mo-mb-1 { margin-bottom: var(--mo-sp-1); }
+.mo-mb-2 { margin-bottom: var(--mo-sp-2); }
+
+.mo-grid { display: grid; gap: var(--mo-sp-3); }
+.mo-grid--2 { grid-template-columns: 1fr 1fr; }
+.mo-grid--3 { grid-template-columns: 1fr 1fr 1fr; }
+
+.mo-card__label { font-size: var(--mo-text-xs); color: var(--mo-text-muted); margin-bottom: 2px; }
+.mo-card__value { font-size: var(--mo-text-lg); font-weight: 600; }
+
+
+/* --- 38. Page: Traces --- */
+.mo-traces-table { border: 1px solid var(--mo-border); border-radius: var(--mo-r-lg); overflow: hidden; }
+
+.mo-traces-row {
+  display: grid;
+  grid-template-columns: 70px 90px 50px 75px 1fr 70px 1fr;
+  gap: var(--mo-sp-2);
+  padding: var(--mo-sp-2) var(--mo-sp-3);
+  border-bottom: 1px solid var(--mo-border);
+  align-items: center;
+  font-size: var(--mo-text-sm);
+  transition: background 0.15s;
+}
+
+.mo-traces-row:hover { background: var(--mo-accent-dim); }
+.mo-traces-row--header {
+  background: rgba(255,255,255,0.03);
+  font-weight: 600;
+  color: var(--mo-text-muted);
+  font-size: var(--mo-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mo-traces-row--header:hover { background: rgba(255,255,255,0.03); }
+
+.mo-traces-step {
+  padding: var(--mo-sp-1) var(--mo-sp-2);
+  border-left: 2px solid var(--mo-accent);
+  margin-bottom: var(--mo-sp-1);
+  font-size: var(--mo-text-sm);
+}
+
+/* Overlay for trace detail */
+.mo-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: mo-fade-in 0.15s;
+}
+
+.mo-overlay__content {
+  background: var(--mo-bg-surface);
+  border: 1px solid var(--mo-border);
+  border-radius: var(--mo-r-lg);
+  padding: var(--mo-sp-5);
+  max-width: 700px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}

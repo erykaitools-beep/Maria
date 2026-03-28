@@ -22,6 +22,7 @@ class ResponseMode(Enum):
     GROUNDED_ERROR = "grounded_error"       # "co za blad", anomalies
     GROUNDED_LEARNING = "grounded_learning" # "czego sie uczysz", learning
     GROUNDED_PLANNER = "grounded_planner"   # "jaki plan", strategy
+    GROUNDED_KNOWLEDGE = "grounded_knowledge"  # "co wiesz o X", memory query
 
 
 # Keyword patterns per mode (Polish + English).
@@ -48,6 +49,13 @@ _MODE_PATTERNS = {
         "goal", "co dalej", "deliberation", "akcja",
         "jaki plan", "jaki cel", "jaka strategia",
         "nad czym pracujesz",
+    ],
+    ResponseMode.GROUNDED_KNOWLEDGE: [
+        "co wiesz o", "co wiesz na temat",
+        "co znasz", "znasz temat",
+        "powiedz mi o", "opowiedz o", "opowiedz mi o",
+        "what do you know about", "tell me about",
+        "ile wiesz o", "jak dobrze znasz",
     ],
     ResponseMode.GROUNDED_STATUS: [
         "co robisz", "co teraz", "status", "jak ci idzie",

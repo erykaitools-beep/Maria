@@ -1776,6 +1776,48 @@ def handle_chat_message(data):
         })
         return
 
+    # Conversation-Driven Learning: detect learning intent before chat
+    try:
+        from agent_core.perception.learning_intent import detect_learning_intent
+        intent = detect_learning_intent(user_message)
+        if intent:
+            _topic = intent["topic"]
+            _action = intent["action"]
+            # Create goal directly via GoalStore (Web UI is separate process)
+            try:
+                from agent_core.goals.goal_model import GoalType, GoalStatus, create_goal
+                from agent_core.goals.store import GoalStore
+                from pathlib import Path as _GPath
+                _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
+                _gs.load()
+                _g = create_goal(
+                    goal_type=GoalType.LEARNING,
+                    description=f"Nauka: {_topic}",
+                    priority=0.8,
+                    status=GoalStatus.PENDING,
+                    created_by="user_conversation",
+                    metadata={
+                        "source": "conversation",
+                        "channel": "webui",
+                        "action": _action,
+                        "topic": _topic,
+                        "topics": [_topic],
+                        "original_text": user_message[:200],
+                    },
+                )
+                _gs.create(_g)
+                _gs.save()
+                emit('chat_status', {
+                    'status': 'learning_detected',
+                    'topic': _topic,
+                    'action': _action,
+                })
+                print(f"[UI] [CDL] Learning intent: {_action} '{_topic}'")
+            except Exception as e:
+                print(f"[UI] [CDL] Goal creation failed: {e}")
+    except Exception:
+        pass
+
     try:
         # Get response from Ollama
         response = brain.think(user_message)
@@ -2266,6 +2308,13 @@ def api_experiment_export(report_id):
 # K12 Self-Analysis page
 # =============================================
 
+@app.route('/traces')
+@require_auth
+def traces_page():
+    """Decision Traces dashboard page (Phase 1)."""
+    return render_template('traces.html', active_page='traces')
+
+
 @app.route('/analysis')
 @require_auth
 def analysis_page():
@@ -2344,6 +2393,134 @@ def api_analysis_status():
         "last_analyzer": last.get("analyzer") if last else None,
         "last_timestamp": last.get("timestamp") if last else None,
     })
+
+
+# =============================================================
+# Decision Traces API (Phase 1 traceability)
+# =============================================================
+
+def _read_traces(limit=50):
+    """Read recent decision traces from JSONL."""
+    import os
+    traces_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "meta_data", "decision_traces.jsonl"
+    )
+    results = []
+    try:
+        with open(traces_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        results.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+    except IOError:
+        pass
+    # Return most recent first
+    return list(reversed(results[-limit:]))
+
+
+# =============================================================
+# Memory Query API (Phase 2 - unified knowledge)
+# =============================================================
+
+@app.route('/api/memory/query')
+@require_auth
+def api_memory_query():
+    """Query Maria's knowledge about a topic."""
+    topic = request.args.get('topic', '').strip()
+    if not topic:
+        return jsonify({"error": "Missing 'topic' parameter"}), 400
+
+    try:
+        from agent_core.memory.query import MemoryQuery
+        mq = MemoryQuery()
+        results = mq.query_topic(topic, top_k=10)
+        summary = mq.get_topic_summary(topic)
+        return jsonify({
+            "topic": topic,
+            "summary": summary,
+            "results": [r.to_dict() for r in results],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/memory/gaps')
+@require_auth
+def api_memory_gaps():
+    """Get knowledge gaps (low confidence topics)."""
+    try:
+        from agent_core.memory.query import MemoryQuery
+        mq = MemoryQuery()
+        gaps = mq.get_knowledge_gaps(top_k=10)
+        return jsonify({"gaps": gaps, "count": len(gaps)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/traces')
+@require_auth
+def api_traces():
+    """Get recent decision traces."""
+    limit = request.args.get('limit', 20, type=int)
+    traces = _read_traces(limit=min(limit, 100))
+    return jsonify({"traces": traces, "count": len(traces)})
+
+
+@app.route('/api/traces/<episode_id>')
+@require_auth
+def api_trace_detail(episode_id):
+    """Get a specific trace by episode_id."""
+    traces = _read_traces(limit=200)
+    for t in traces:
+        if t.get("episode_id") == episode_id:
+            return jsonify(t)
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route('/api/traces/stats')
+@require_auth
+def api_traces_stats():
+    """Get aggregate stats from recent traces."""
+    traces = _read_traces(limit=100)
+    if not traces:
+        return jsonify({"total": 0})
+
+    total = len(traces)
+    success = sum(1 for t in traces if t.get("success") is True)
+    failed = sum(1 for t in traces if t.get("success") is False)
+    durations = [t.get("duration_ms", 0) for t in traces if t.get("duration_ms", 0) > 0]
+    avg_dur = round(sum(durations) / len(durations), 1) if durations else 0.0
+    llm_calls = sum(t.get("total_llm_calls", 0) for t in traces)
+    k7_blocks = sum(1 for t in traces if t.get("k7_decision") in ("block", "rate_limited"))
+
+    action_counts = {}
+    for t in traces:
+        a = t.get("action_type") or "unknown"
+        action_counts[a] = action_counts.get(a, 0) + 1
+
+    return jsonify({
+        "total": total,
+        "success": success,
+        "failed": failed,
+        "avg_duration_ms": avg_dur,
+        "total_llm_calls": llm_calls,
+        "k7_blocks": k7_blocks,
+        "action_types": action_counts,
+    })
+
+
+@app.route('/api/traces/failed')
+@require_auth
+def api_traces_failed():
+    """Get recent failed traces."""
+    limit = request.args.get('limit', 10, type=int)
+    traces = _read_traces(limit=100)
+    failed = [t for t in traces if t.get("success") is False]
+    return jsonify({"traces": failed[:limit], "count": len(failed[:limit])})
 
 
 if __name__ == '__main__':

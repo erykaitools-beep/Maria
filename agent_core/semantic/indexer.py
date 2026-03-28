@@ -181,11 +181,19 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
         counts["hints"] = count
         logger.info(f"[INDEXER] Indexed {count} hint entries")
 
+    # Cleanup stale vectors (files that no longer exist in knowledge_index)
+    stale_removed = cleanup_stale_vectors(
+        semantic_memory,
+        str(memory_path / "knowledge_index.jsonl"),
+    )
+    if stale_removed:
+        counts["stale_removed"] = stale_removed
+
     # Save vectors to JSONL
     saved = semantic_memory.save()
 
     elapsed = time.time() - start
-    total = sum(counts.values())
+    total = sum(v for k, v in counts.items() if k != "stale_removed")
     logger.info(
         f"[INDEXER] Initial indexing complete: {total} vectors "
         f"({counts}) in {elapsed:.1f}s, {saved} saved to disk"
@@ -219,6 +227,41 @@ def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
     t.start()
     logger.info("[INDEXER] Background indexing started")
     return t
+
+
+def cleanup_stale_vectors(semantic_memory, knowledge_path: str) -> int:
+    """Remove vectors for files no longer in knowledge_index.
+
+    Handles staleness: when a file is deleted or removed from learning,
+    its vector should be removed from semantic memory.
+
+    Returns count of removed vectors.
+    """
+    kp = Path(knowledge_path)
+
+    # Get current file IDs from knowledge_index
+    current_ids = set()
+    if kp.exists():
+        for rec in _load_jsonl(kp):
+            file_id = rec.get("id", "")
+            if file_id:
+                current_ids.add(f"knowledge:{file_id}")
+
+    # Find stale vectors in knowledge namespace
+    stored_ids = semantic_memory.store.list_ids_by_namespace("knowledge")
+    stale_ids = [eid for eid in stored_ids if eid not in current_ids]
+
+    if not stale_ids:
+        return 0
+
+    for eid in stale_ids:
+        semantic_memory.remove(eid)
+
+    # Full rewrite needed after removals (append-only save won't delete)
+    semantic_memory.store.save_full()
+    logger.info(f"[INDEXER] Cleaned {len(stale_ids)} stale vectors: {stale_ids[:5]}")
+
+    return len(stale_ids)
 
 
 def index_new_files(semantic_memory, knowledge_path: str, input_dir: str) -> int:

@@ -29,6 +29,11 @@ class StateCollector:
         self._root = Path(project_root)
         self._meta = self._root / _DEFAULT_META
         self._memory = self._root / _DEFAULT_MEMORY
+        self._memory_query = None
+
+    def set_memory_query(self, mq) -> None:
+        """Set MemoryQuery for unified knowledge gap detection (Phase 2)."""
+        self._memory_query = mq
 
     def collect(self, period_days: int = 7) -> Dict[str, Any]:
         """
@@ -145,17 +150,23 @@ class StateCollector:
         return trend
 
     def _collect_knowledge_gaps(self) -> List[Dict[str, Any]]:
-        """Read K6 beliefs and find low-confidence topics."""
+        """Find low-confidence topics. Uses MemoryQuery (Phase 2) or falls back to raw JSONL."""
+        # Phase 2: unified query (includes beliefs + exam_failed files)
+        if self._memory_query:
+            try:
+                return self._memory_query.get_knowledge_gaps(top_k=10)
+            except Exception:
+                pass  # Fall through to legacy
+
+        # Legacy: read beliefs directly
         beliefs = self._read_jsonl_all(self._meta / "beliefs.jsonl")
 
-        # MERGE semantics: last record per belief_id wins
         by_id = {}
         for b in beliefs:
             bid = b.get("belief_id", "")
             if bid:
                 by_id[bid] = b
 
-        # Group by entity, compute avg confidence
         topic_confidence: Dict[str, List[float]] = {}
         for b in by_id.values():
             entity = b.get("entity", "")
@@ -166,16 +177,15 @@ class StateCollector:
         gaps = []
         for topic, confs in topic_confidence.items():
             avg_conf = sum(confs) / len(confs)
-            if avg_conf < 0.6:  # Low confidence threshold
+            if avg_conf < 0.6:
                 gaps.append({
                     "topic": topic,
                     "confidence": round(avg_conf, 2),
                     "belief_count": len(confs),
                 })
 
-        # Sort by confidence ascending (weakest first)
         gaps.sort(key=lambda g: g["confidence"])
-        return gaps[:10]  # Top 10 gaps
+        return gaps[:10]
 
     def _collect_struggling_topics(self, cutoff: float) -> List[str]:
         """Read K9 reflections and find topics with repeated mismatches."""

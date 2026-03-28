@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Decision Traces{% endblock %}
+{% block page_class %}mo-page--traces{% endblock %}
+
+{% block content %}
+<div class="mo-traces">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Decision Traces</h2>
+    <div>
+      <button class="mo-btn mo-btn--sm" onclick="loadTraces()">Odswiez</button>
+      <span id="trace-count" class="mo-badge mo-badge--off">---</span>
+    </div>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-recent">Ostatnie</button>
+    <button class="mo-tab" data-tab="tab-stats">Statystyki</button>
+    <button class="mo-tab" data-tab="tab-failed">Bledy</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-recent">
+    <div id="traces-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-stats">
+    <div id="traces-stats">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-failed">
+    <div id="traces-failed">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <!-- Detail overlay -->
+  <div id="trace-detail-overlay" class="mo-overlay" style="display:none">
+    <div class="mo-overlay__content">
+      <div class="mo-flex mo-flex-between mo-flex-center mo-mb-2">
+        <h3 class="mo-text-lg mo-accent" id="detail-title">Trace</h3>
+        <button class="mo-btn mo-btn--sm" onclick="closeDetail()">X</button>
+      </div>
+      <div id="trace-detail-body"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/traces.js') }}"></script>
+{% endblock %}

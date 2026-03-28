@@ -60,6 +60,7 @@ class ResponseBuilder:
             ResponseMode.GROUNDED_ERROR: self._build_error,
             ResponseMode.GROUNDED_LEARNING: self._build_learning,
             ResponseMode.GROUNDED_PLANNER: self._build_planner,
+            ResponseMode.GROUNDED_KNOWLEDGE: self._build_knowledge,
         }
 
         builder_fn = builders.get(mode, self._build_status)
@@ -220,6 +221,45 @@ class ResponseBuilder:
                 lines.append(f"  - {g.value}")
 
         return "\n".join(lines) if lines else "Brak danych o plannerze."
+
+    def _build_knowledge(self, evidence: List[Evidence]) -> str:
+        """Build knowledge query response (Phase 2 MemoryQuery)."""
+        lines = []
+
+        # Topic summary
+        summary = self._find(evidence, "knowledge.topic_summary")
+        status = self._find(evidence, "knowledge.topic_status")
+        query = self._find(evidence, "knowledge.query")
+
+        if query:
+            return query.value
+        if status:
+            return status.value
+        if summary:
+            lines.append(summary.value + ".")
+
+        # Knowledge index results
+        ki_results = [e for e in evidence if e.key == "knowledge.knowledge_index"]
+        if ki_results:
+            lines.append("Pliki:")
+            for r in ki_results:
+                lines.append(f"  - {r.value}")
+
+        # Belief results
+        belief_results = [e for e in evidence if e.key == "knowledge.beliefs"]
+        if belief_results:
+            lines.append("Przekonania:")
+            for r in belief_results:
+                lines.append(f"  - {r.value}")
+
+        # Semantic results
+        sem_results = [e for e in evidence if e.key == "knowledge.semantic"]
+        if sem_results:
+            lines.append("Powiazane:")
+            for r in sem_results:
+                lines.append(f"  - {r.value}")
+
+        return "\n".join(lines) if lines else "Nie znaleziono informacji."
 
     @staticmethod
     def _find(evidence: List[Evidence], key: str):

@@ -142,6 +142,36 @@ class VectorStore:
 
         return count
 
+    def save_full(self) -> int:
+        """Rewrite entire JSONL file with current in-memory state.
+
+        Use after removals to persist deletions (normal save is append-only).
+        Returns count of entries written.
+        """
+        if not self._path:
+            return 0
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        count = 0
+        try:
+            with open(self._path, "w", encoding="utf-8") as f:
+                for entry in self._entries.values():
+                    line = json.dumps(entry.to_dict(), ensure_ascii=False)
+                    f.write(line + "\n")
+                    count += 1
+            self._dirty_ids.clear()
+        except OSError as e:
+            logger.warning(f"[SEMANTIC] Failed to save_full vectors: {e}")
+
+        return count
+
+    def list_ids_by_namespace(self, namespace: str) -> List[str]:
+        """Get all entry IDs in a given namespace."""
+        return [
+            eid for eid, entry in self._entries.items()
+            if entry.metadata.get("namespace") == namespace
+        ]
+
     def add(self, entry_id: str, text: str, vector: List[float],
             metadata: Optional[Dict[str, Any]] = None) -> bool:
         """Add or update a vector entry."""

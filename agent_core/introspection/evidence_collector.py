@@ -57,6 +57,7 @@ class EvidenceCollector:
         self._llm_tape = None
         self._self_analysis = None
         self._goal_store = None
+        self._memory_query = None
 
         # Compact summary cache
         self._summary_cache: str = ""
@@ -86,9 +87,12 @@ class EvidenceCollector:
     def set_goal_store(self, gs):
         self._goal_store = gs
 
+    def set_memory_query(self, mq):
+        self._memory_query = mq
+
     # -- Public API --
 
-    def collect_for_mode(self, mode: ResponseMode) -> List[Evidence]:
+    def collect_for_mode(self, mode: ResponseMode, query_text: str = "") -> List[Evidence]:
         """Collect evidence relevant to the given response mode."""
         collectors = {
             ResponseMode.GROUNDED_STATUS: self.collect_status,
@@ -96,6 +100,10 @@ class EvidenceCollector:
             ResponseMode.GROUNDED_LEARNING: self.collect_learning,
             ResponseMode.GROUNDED_PLANNER: self.collect_planner,
         }
+
+        # Knowledge mode needs the query text to extract topic
+        if mode == ResponseMode.GROUNDED_KNOWLEDGE:
+            return self.collect_knowledge(query_text)
         fn = collectors.get(mode, self.collect_status)
         try:
             return fn()
@@ -157,6 +165,80 @@ class EvidenceCollector:
         evidence.extend(self._collect_planner_last())
         evidence.extend(self._collect_planner_failures())
         evidence.extend(self._collect_goals())
+
+        return evidence
+
+    def collect_knowledge(self, query_text: str) -> List[Evidence]:
+        """Knowledge: what Maria knows about a topic (Phase 2 MemoryQuery)."""
+        evidence = []
+
+        # Extract topic from query (remove common prefixes)
+        topic = query_text.lower().strip()
+        for prefix in ("co wiesz o ", "co wiesz na temat ", "co znasz ",
+                       "powiedz mi o ", "opowiedz o ", "opowiedz mi o ",
+                       "what do you know about ", "tell me about ",
+                       "ile wiesz o ", "jak dobrze znasz "):
+            if topic.startswith(prefix):
+                topic = topic[len(prefix):].strip().rstrip("?.,!")
+                break
+
+        if not topic or len(topic) < 2:
+            evidence.append(Evidence(
+                key="knowledge.query",
+                value="Nie rozumiem o czym pytasz.",
+                source="memory_query",
+                confidence="low",
+            ))
+            return evidence
+
+        if not self._memory_query:
+            evidence.append(Evidence(
+                key="knowledge.query",
+                value=f"MemoryQuery niedostepny, nie moge sprawdzic wiedzy o: {topic}",
+                source="memory_query",
+                confidence="low",
+            ))
+            return evidence
+
+        try:
+            results = self._memory_query.query_topic(topic, top_k=8)
+            summary = self._memory_query.get_topic_summary(topic)
+
+            if not summary.get("known"):
+                evidence.append(Evidence(
+                    key="knowledge.topic_status",
+                    value=f"Nie mam wiedzy na temat: {topic}",
+                    source="memory_query",
+                    confidence="high",
+                ))
+                return evidence
+
+            avg_conf = summary.get("avg_confidence", 0)
+            conf_str = "high" if avg_conf >= 0.7 else ("medium" if avg_conf >= 0.4 else "low")
+            evidence.append(Evidence(
+                key="knowledge.topic_summary",
+                value=(
+                    f"Temat '{topic}': "
+                    f"{summary.get('files_count', 0)} plikow, "
+                    f"{summary.get('beliefs_count', 0)} przekonan, "
+                    f"pewnosc: {avg_conf:.0%}, "
+                    f"swiezosc: {summary.get('freshness', 0):.0%}"
+                ),
+                source="memory_query",
+                confidence=conf_str,
+            ))
+
+            for r in results[:5]:
+                conf_str = "high" if r.confidence >= 0.7 else ("medium" if r.confidence >= 0.4 else "low")
+                evidence.append(Evidence(
+                    key=f"knowledge.{r.source.value}",
+                    value=r.content,
+                    source=r.provenance.get("source", r.source.value),
+                    confidence=conf_str,
+                ))
+
+        except Exception as e:
+            logger.debug(f"[EvidenceCollector] knowledge query failed: {e}")
 
         return evidence
 

@@ -213,6 +213,11 @@ class ActionExecutor:
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
             result["filtered_out_count"] = stats.get("filtered_out_count", 0)
+
+        # Re-index after learning (update vector embedding with new status)
+        if result["success"] and self._semantic_search:
+            self._incremental_index()
+
         return result
 
     def _exec_exam(self, plan: Plan) -> Dict[str, Any]:
