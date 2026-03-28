@@ -27,11 +27,21 @@ MIN_IMPROVEMENT_PCT = 5.0    # 5% improvement needed for ADOPT
 MIN_CYCLES_FOR_CONFIDENCE = 3
 MAX_CONFIDENCE = 0.95
 MIN_CONFIDENCE = 0.1
+MAX_DEGRADATION_PCT = -3.0   # Phase 4: no ADOPT if any metric degrades > 3%
 
 # Recommendation values
 ADOPT = "ADOPT"
 REJECT = "REJECT"
 INCONCLUSIVE = "INCONCLUSIVE"
+
+# Phase 4: cross-metric validation - metrics that must not degrade
+GUARD_METRICS = [
+    "system_stability",       # From K4 EvaluationObserver
+    "retention_rate",         # Learning quality
+    "knowledge_coverage",    # Knowledge breadth
+    "learning_velocity",     # Learning speed
+    "personality_growth",    # Personality evolution
+]
 
 
 class ReportGenerator:
@@ -118,6 +128,10 @@ class ReportGenerator:
                 "impact_metric": impact_metric,
                 "target_cycles": experiment.target_cycles,
                 "was_aborted": experiment.status == ExperimentStatus.ABORTED,
+                # Phase 4: promotion audit
+                "guard_metrics_checked": GUARD_METRICS,
+                "guard_degraded": self._check_guard_metrics(delta_metrics, impact_metric),
+                "promotion_requires": "operator_approval",  # K3 PROPOSED flow
             },
         )
 
@@ -215,6 +229,18 @@ class ReportGenerator:
         )
 
         if improvement_pct >= MIN_IMPROVEMENT_PCT:
+            # Phase 4: Cross-metric validation - check guard metrics didn't degrade
+            degraded = self._check_guard_metrics(
+                delta_metrics, impact_metric
+            )
+            if degraded:
+                return (
+                    REJECT,
+                    confidence,
+                    f"Metryka {impact_metric} poprawila sie o "
+                    f"{improvement_pct:+.1f}pp, ale inne metryki "
+                    f"pogorszyly sie: {degraded}",
+                )
             return (
                 ADOPT,
                 confidence,
@@ -235,6 +261,26 @@ class ReportGenerator:
                 f"Zmiana metryki {impact_metric} minimalna "
                 f"({improvement_pct:+.1f}pp, prog: +/-{MIN_IMPROVEMENT_PCT}%)",
             )
+
+    @staticmethod
+    def _check_guard_metrics(
+        delta_metrics: Dict[str, float],
+        impact_metric: str,
+    ) -> str:
+        """
+        Phase 4: Cross-metric validation.
+
+        Check if any guard metric degraded beyond threshold.
+        Returns empty string if all OK, or description of degraded metrics.
+        """
+        degraded = []
+        for metric in GUARD_METRICS:
+            if metric == impact_metric:
+                continue  # Skip the metric we're already checking
+            delta = delta_metrics.get(metric, 0.0)
+            if delta * 100 < MAX_DEGRADATION_PCT:
+                degraded.append(f"{metric}:{delta*100:+.1f}pp")
+        return ", ".join(degraded)
 
     def _compute_confidence(
         self,

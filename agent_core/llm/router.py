@@ -310,11 +310,18 @@ class LLMRouter:
 
         # Use the model tag from scheduler (may be fallback)
         try:
+            from agent_core.llm.execution_budget import call_with_timeout, get_timeout_for_role
+            timeout = get_timeout_for_role(role_name)
+
             start = time.time()
-            resp = ollama_lib.chat(
-                model=result.ollama_tag,
-                messages=[{"role": "user", "content": prompt}],
-                options={"temperature": temperature},
+            resp = call_with_timeout(
+                lambda: ollama_lib.chat(
+                    model=result.ollama_tag,
+                    messages=[{"role": "user", "content": prompt}],
+                    options={"temperature": temperature},
+                ),
+                timeout_sec=timeout,
+                label=f"ask_as_role({role_name}:{result.ollama_tag})",
             )
             latency = time.time() - start
             self._model_scheduler.record_request(result.role, latency)

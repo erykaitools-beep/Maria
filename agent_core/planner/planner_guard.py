@@ -12,10 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 # Guard thresholds
-MIN_HEALTH_SCORE = 0.7
+MIN_HEALTH_SCORE = 0.5              # Allow planning even at moderate health
+MIN_HEALTH_SCORE_HEAVY = 0.7       # Require higher health for heavy LLM actions
 MIN_RETENTION_RATE = 0.5
 EVALUATION_COOLDOWN_SEC = 900  # 15 min cooldown on eval recommendations
-ALLOWED_MODES = {"active", "sleep"}  # SLEEP allows autonomous learning/consolidation
+
+# Mode permissions (Phase 3: separate strategic from degradation)
+# ACTIVE: full autonomy
+# SLEEP: learning + consolidation
+# REDUCED: lightweight only (evaluate, maintenance, noop) - no heavy LLM
+# SURVIVAL: nothing
+ALLOWED_MODES = {"active", "sleep", "reduced"}
+HEAVY_LLM_BLOCKED_MODES = {"reduced"}  # Modes that block LLM-heavy actions
 
 
 class PlannerGuard:
@@ -24,6 +32,9 @@ class PlannerGuard:
 
     All checks are pure functions - no side effects.
     Returns (can_plan: bool, reasons: List[str]).
+
+    Phase 3: REDUCED mode allows lightweight actions (evaluate, maintenance)
+    but blocks LLM-heavy actions (learn, exam, creative, fetch, ask_expert).
     """
 
     def can_plan(
@@ -77,3 +88,20 @@ class PlannerGuard:
             logger.debug(f"PlannerGuard blocked: {reasons}")
 
         return can, reasons
+
+    @staticmethod
+    def is_heavy_action_allowed(mode: str, health_score: float) -> Tuple[bool, str]:
+        """
+        Check if LLM-heavy actions are allowed in current mode.
+
+        Phase 3: REDUCED mode blocks learn/exam/creative/fetch/ask_expert
+        but allows evaluate/maintenance/noop/self_analyze.
+
+        Returns:
+            (allowed, reason_if_blocked)
+        """
+        if mode in HEAVY_LLM_BLOCKED_MODES:
+            return False, f"mode={mode}: heavy LLM actions blocked"
+        if health_score < MIN_HEALTH_SCORE_HEAVY:
+            return False, f"health={health_score:.2f}: too low for heavy actions"
+        return True, ""

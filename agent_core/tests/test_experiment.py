@@ -616,7 +616,7 @@ class TestReportGenerator:
             },
             result_metrics={
                 "retention_rate": 0.72,
-                "learning_velocity": 1.8,
+                "learning_velocity": 2.0,  # No degradation (Phase 4 cross-metric)
                 "knowledge_coverage": 0.71,
             },
             test_cycles=5, target_cycles=5,

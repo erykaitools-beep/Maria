@@ -273,7 +273,7 @@ class TestPlannerGuard:
         assert reasons == []
 
     def test_low_health(self):
-        can, reasons = self.guard.can_plan(0.5, "active", False, 0.8)
+        can, reasons = self.guard.can_plan(0.3, "active", False, 0.8)
         assert can is False
         assert any("health_score" in r for r in reasons)
 
@@ -285,10 +285,21 @@ class TestPlannerGuard:
         can, reasons = self.guard.can_plan(MIN_HEALTH_SCORE - 0.01, "active", False, 0.8)
         assert can is False
 
-    def test_not_active_mode(self):
+    def test_reduced_mode_allowed(self):
+        """REDUCED allows lightweight planning (Phase 3: degradation routing)."""
         can, reasons = self.guard.can_plan(0.9, "reduced", False, 0.8)
-        assert can is False
-        assert any("mode" in r for r in reasons)
+        assert can is True
+
+    def test_reduced_blocks_heavy_actions(self):
+        """REDUCED blocks heavy LLM actions."""
+        allowed, reason = PlannerGuard.is_heavy_action_allowed("reduced", 0.9)
+        assert allowed is False
+        assert "heavy" in reason.lower() or "reduced" in reason.lower()
+
+    def test_active_allows_heavy_actions(self):
+        """ACTIVE allows heavy LLM actions."""
+        allowed, reason = PlannerGuard.is_heavy_action_allowed("active", 0.9)
+        assert allowed is True
 
     def test_sleep_mode_allowed(self):
         """SLEEP allows autonomous learning/consolidation."""

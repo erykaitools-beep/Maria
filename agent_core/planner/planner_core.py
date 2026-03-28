@@ -813,6 +813,33 @@ class PlannerCore:
             trace.goal_id = plan.goal_id
             trace.goal_description = plan.goal_description
 
+        # Phase 3: Degradation check - block heavy LLM actions in REDUCED mode
+        _heavy_actions = {
+            ActionType.LEARN, ActionType.EXAM, ActionType.REVIEW,
+            ActionType.FETCH, ActionType.CREATIVE, ActionType.ASK_EXPERT,
+        }
+        if plan.action_type in _heavy_actions and self._homeostasis_core:
+            _state = self._homeostasis_core.get_state()
+            _allowed, _reason = self.guard.is_heavy_action_allowed(
+                _state.mode.value, _state.health_score
+            )
+            if not _allowed:
+                if trace:
+                    trace.add_step("planner", "degradation_check", "blocked", {
+                        "reason": _reason, "action": plan.action_type.value,
+                    })
+                plan.status = PlanStatus.SKIPPED
+                plan.result = {"success": False, "blocked_by": "degradation", "reason": _reason}
+                plan.message = f"Degradation: {_reason}"
+                self._emit_cycle_complete(self._state.last_cycle_tick, plan=plan)
+                self._log_decision(plan)
+                if trace:
+                    trace.finalize(success=False, result_summary=f"degradation: {_reason}")
+                    self._save_trace(trace)
+                self._save_state()
+                clear_episode_id()
+                return plan
+
         # K7: Autonomy Policy check before execution
         if self._autonomy_policy:
             health = 1.0
