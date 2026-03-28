@@ -1,93 +1,79 @@
-# 2026-03-28 - Phase 1: Decision Traceability
+# 2026-03-28 - Mega sesja: Phase 1-4 Stabilization Roadmap
 
-## Co zrobilem
+## Co zrobilem (cala sesja)
 
-Zaimplementowalem Phase 1 ze Stabilization Roadmap (plan Eryka z ChatGPT):
-**"Unified observability and decision traces"**
-
-### Nowy pakiet: `agent_core/tracing/`
-- `episode.py` - thread-local episode_id (generowany per cykl plannera)
-- `trace_model.py` - DecisionTrace + TraceStep dataclasses
-- `trace_store.py` - JSONL persistence (meta_data/decision_traces.jsonl)
-
-### Episode ID flow
-Planner.run_cycle() generuje episode_id -> przeplywa przez:
-- Plan.trace_id (wczesniej zawsze None, teraz ustawiony)
-- LLM Tape - TapeEntry.episode_id (auto-read z thread-local)
-- K7 Autonomy - EscalationRecord.episode_id (auto-read)
-- K10 Action Safety - ActionRecord.episode_id (auto-read)
-
-### Wiring
-- homeostasis_module.py -> TraceStore tworzony i podpiety do plannera
-- SharedContext.trace_store -> dostepny dla Telegrama i Web UI
-
-### Interfejsy operatorskie
-- Web UI: 4 endpointy (/api/traces, /api/traces/<id>, /api/traces/stats, /api/traces/failed)
+### Phase 1: Decision Traceability (ADR-022)
+- `agent_core/tracing/` - episode_id (thread-local), DecisionTrace, TraceStore
+- Episode ID flows: planner -> LLM tape -> K7 -> K10 (auto-read z threading.local)
+- LLM call counting: total_llm_calls, models_used, latency via thread-local trace ref
+- DecisionTrace: goal, K7 decision, K10 safety, steps, duration
+- TraceStore: JSONL persistence (meta_data/decision_traces.jsonl)
+- Web UI: /traces page (tabela, statystyki, bledy, click-to-detail overlay)
 - Telegram: /trace [N|stats|failed|ep-ID]
-- /help zaktualizowany
+- 25 testow
 
-### Testy
-- 25 nowych testow (test_tracing.py)
-- 2176 total passing (was 2081)
-
-### Bug naprawiony po deploy
-SafetyMode enum nie byl JSON-serializowalny - dodal .value conversion.
-Validation z after_action() jest dict, nie string - poprawiony na dict.get().
-
-### Produkcja
-Po 2 restartach trace'y sie generuja. Pierwszy trace z produkcji:
-- ep-69c7ea06-c3982cce: CREATIVE, 18.6s, K7:allow, K10:valid, 4 steps
-
-## Decyzja architektoniczna
-ADR-022: Episode-based tracing. Thread-local episode_id (nie argument passing).
-Kazdy subsystem auto-czyta episode_id z threading.local().
-Backward compatible - jesli episode_id jest pusty, omijany w serializacji.
-
-## Phase 2 - zrobione w tej sesji
-
-### MemoryQuery API (agent_core/memory/query.py)
-- query_topic() - szuka w knowledge_index + beliefs + semantic vectors
-- get_topic_summary() - zwiezle podsumowanie
-- get_knowledge_gaps() - luki w wiedzy
-- 24 testow
-
-### Staleness fixy
-- A: cleanup_stale_vectors() w indexer.py (startup)
-- C: beliefs rebuild_all() po LEARN (nie tylko EVALUATE)
-- Incremental re-indexing po LEARN w action_executor
-
-### Grounding pipeline
-- GROUNDED_KNOWLEDGE mode w query_router.py
-- "co wiesz o fizyce" -> EvidenceCollector -> MemoryQuery -> evidence
-- ResponseBuilder._build_knowledge()
-
-### CDL w Web UI
-- detect_learning_intent() przed brain.think()
-- GoalStore.create() z Web UI (oddzielny proces)
-
-### Interfejsy
+### Phase 2: Memory Consistency (ADR-023)
+- `agent_core/memory/query.py` - MemoryQuery API (unified query with provenance)
+  - query_topic() - knowledge_index + beliefs + semantic vectors
+  - get_topic_summary() - summary z confidence + freshness
+  - get_knowledge_gaps() - low confidence beliefs + exam_failed files
+- Grounding: GROUNDED_KNOWLEDGE mode ("co wiesz o X" -> EvidenceCollector -> MemoryQuery)
+- Staleness fixy:
+  - cleanup_stale_vectors() w indexer.py (startup)
+  - beliefs rebuild_all() po LEARN (nie tylko EVALUATE)
+  - incremental re-indexing po LEARN
+- CDL w Web UI (learning intent detection, GoalStore direct write)
 - Web UI: /api/memory/query, /api/memory/gaps
 - Telegram: /memory <topic>, /memory gaps
-- K12 StateCollector.set_memory_query() - unified gaps
+- K12 StateCollector wired z MemoryQuery
+- Memory hierarchy analysis: 34 zrodla danych zmapowane
+- 24 testow
 
-## Phase 3 - scheduler telemetry
+### Phase 3: Scheduler Hardening
+- `agent_core/llm/execution_budget.py` - call_with_timeout() (ThreadPoolExecutor)
+  - Ollama calls mialy ZERO timeout, teraz 120-180s per role
+  - EpisodeBudget: max 10 LLM calls, 5min total latency per episode
+- route_reason w LLM tape (dlaczego ten model wybrany)
+- Degradation routing: REDUCED mode dopuszcza lekkie akcje (evaluate, maintenance)
+  ale blokuje ciezkie LLM (learn, exam, creative, fetch)
+- PlannerGuard: MIN_HEALTH_SCORE 0.7->0.5, heavy actions nadal wymagaja 0.7
 
-### Route reason logging
-- TapeEntry.route_reason (opcjonalne pole w LLM tape)
-- Kazdy LLM call loguje dlaczego ten model:
-  - chat_always_ollama
-  - nim_budget_ok / nim_unavailable_or_budget / nim_fallback
-  - scheduler:<role>:<model> / scheduler_fail:<reason>
-- Backward compatible (omit empty)
+### Phase 4: Autonomy Governance
+- Cross-metric validation: ADOPT blocked jesli guard metric degraduje > 3%
+  (retention_rate, system_stability, knowledge_coverage, learning_velocity)
+- Promotion audit metadata: guard_metrics_checked, guard_degraded, promotion_requires
+- Zapobiega metric gaming: poprawa jednej metryki kosztem innych = REJECT
 
-## Pliki ze stabilization roadmap
-Eryk przyniosl docs/plans/MARIA_full_scale_stabilization_roadmap.pdf
-(zrobiony z ChatGPT 2026-03-27). Dobrze przemyslany plan 6 faz:
-1. Observability (DONE - this session)
-2. Memory consistency
-3. Scheduler governance
-4. Autonomy governance
-5. Effector safety envelope
-6. Full ClawBot authority
+### Inne
+- 3 pliki edukacyjne przeniesione z docs/plans/ do input/
+- Web UI /traces page - 3 taby, overlay detail, auto-refresh 30s
+- Stabilization Roadmap PDF (docs/plans/) - plan Eryka z ChatGPT
 
-Przenioslem tez 3 pliki txt z docs/plans/ do input/ (materialy edukacyjne).
+## Stan testow
+- Start sesji: 2081
+- Koniec sesji: 2202
+- Nowe testy: +121 (tracing: 25, memory: 24, planner guard: 2, reszta z istniejacych)
+
+## 3 commity
+1. `382105c` - Phase 1 Tracing + Phase 3 telemetry
+2. `8f8da32` - Phase 2 Memory + CDL + Traces page
+3. `81534ba` - Phase 3 budgets + Phase 4 cross-metric
+
+## Nastepna sesja
+- Phase 5: Effector safety envelope (staged authority levels for ClawBot)
+- Phase 6: Full authority readiness review
+- Restart Marii zeby nowe zmiany weszly (Phase 3 budgets, Phase 4 validation, degradation routing)
+- Eryk moze przetestowac: /memory fizyka, /trace stats, /traces w Web UI
+
+## Decyzje architektoniczne
+- ADR-022: Episode-based tracing (thread-local correlation IDs)
+- ADR-023: Unified memory query with provenance metadata
+- Execution budgets: ThreadPoolExecutor + future.result(timeout=N)
+- Degradation: REDUCED dozwala planner ale blokuje heavy LLM
+- Cross-metric: GUARD_METRICS lista, MAX_DEGRADATION_PCT = -3%
+
+## Uwagi
+- Web UI traces page jest SUPER wedlug Eryka
+- Maria caly czas dziala na produkcji (creative + learn traces potwierdzaja)
+- LLM counting dziala: creative trace pokazal 3 calls do z-ai/glm5
+- MemoryQuery wired ale wymaga restart (nowy PID) zeby wrocyc w syslog

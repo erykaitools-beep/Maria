@@ -78,8 +78,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2200 passing |
-| **Faza** | Phase 1 Tracing + Phase 2 Memory Consistency LIVE |
+| **Testy** | 2202 passing |
+| **Faza** | Phase 1-4 Stabilization Roadmap DONE, Phase 5-6 TODO |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -129,7 +129,7 @@ project/
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 2200 tests
+│   └── tests/           # 2202 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -582,10 +582,19 @@ Usunieto:
 - [x] Stabilization Roadmap received (docs/plans/MARIA_full_scale_stabilization_roadmap.pdf)
 - [x] 25 new tests (2176 total)
 
+### DONE: Phase 3 Scheduler Hardening (2026-03-28)
+- [x] Execution budgets: call_with_timeout() wraps Ollama (120-180s per role, was: no timeout)
+- [x] EpisodeBudget: max 10 LLM calls, 5min total latency per episode
+- [x] route_reason in LLM tape (why model was chosen)
+- [x] Degradation routing: REDUCED mode allows light actions, blocks heavy LLM
+- [x] PlannerGuard: MIN_HEALTH_SCORE 0.7->0.5, heavy actions still need 0.7
+
+### DONE: Phase 4 Autonomy Governance (2026-03-28)
+- [x] Cross-metric validation: ADOPT blocked if guard metric degrades >3%
+- [x] Guard metrics: retention_rate, system_stability, knowledge_coverage, learning_velocity
+- [x] Promotion audit metadata in experiment reports (guard_checked, degraded, requires)
+
 ### NASTEPNE: Stabilization Roadmap
-- Phase 2: Memory consistency - truth hierarchy, unified query contract
-- Phase 3: Scheduler governance - model routing telemetry, execution budgets
-- Phase 4: Autonomy governance - cross-metric validation, promotion audit
 - Phase 5: Effector safety envelope - staged authority levels
 - Phase 6: Full ClawBot authority readiness review
 
@@ -665,6 +674,8 @@ python run_ui.py
 - **ADR-021:** Semantic Memory via embeddings (nomic-embed-text) zamiast keyword retrieval - skip patching old semantic_graph.py
 - **ADR-022:** Episode-based tracing - thread-local episode_id (correlation IDs across cognitive episodes)
 - **ADR-023:** Unified memory query with provenance metadata (MemoryQuery API, truth hierarchy)
+- **ADR-024:** Execution budgets - call_with_timeout() for Ollama, degradation routing in REDUCED mode
+- **ADR-025:** Cross-metric validation - no experiment ADOPT if guard metrics degrade
 
 ## Notatki Claude'a (brudnopis)
 
@@ -984,4 +995,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-28 (Phase 1 Tracing + Phase 2 Memory Consistency + CDL + LLM counting, 2200 testow)*
+*Ostatnia aktualizacja: 2026-03-28 (Phase 1-4 Stabilization Roadmap + CDL + Traces UI, 2202 testow)*
