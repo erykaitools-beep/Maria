@@ -30,9 +30,10 @@ class EscalationRecord:
     rule_name: Optional[str] = None
     goal_id: Optional[str] = None
     context_snapshot: Dict[str, Any] = field(default_factory=dict)
+    episode_id: str = ""  # Correlation ID from tracing.episode (Phase 1)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "ts": self.timestamp,
             "action_type": self.action_type,
             "decision": self.decision,
@@ -41,6 +42,9 @@ class EscalationRecord:
             "goal_id": self.goal_id,
             "context": self.context_snapshot,
         }
+        if self.episode_id:
+            d["episode_id"] = self.episode_id
+        return d
 
 
 class EscalationHandler:
@@ -82,6 +86,14 @@ class EscalationHandler:
         Returns:
             Dict suitable as action result: {"success": False, "blocked_by": ...}
         """
+        # Auto-read episode_id from thread-local tracing context
+        episode_id = ""
+        try:
+            from agent_core.tracing.episode import current_episode_id
+            episode_id = current_episode_id()
+        except ImportError:
+            pass
+
         record = EscalationRecord(
             timestamp=time.time(),
             action_type=action_type,
@@ -90,6 +102,7 @@ class EscalationHandler:
             rule_name=rule_name,
             goal_id=goal_id,
             context_snapshot=context_snapshot or {},
+            episode_id=episode_id,
         )
 
         self._log(record)

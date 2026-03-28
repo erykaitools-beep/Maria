@@ -40,9 +40,17 @@ class TapeEntry:
     tokens_est: int         # rough estimate
     latency_ms: float
     success: bool
+    episode_id: str = ""    # Correlation ID from tracing.episode (Phase 1)
+    route_reason: str = ""  # Why this model was chosen (Phase 3 telemetry)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # Omit empty optional fields (backward compat)
+        if not d.get("episode_id"):
+            d.pop("episode_id", None)
+        if not d.get("route_reason"):
+            d.pop("route_reason", None)
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TapeEntry":
@@ -55,6 +63,8 @@ class TapeEntry:
             tokens_est=d.get("tokens_est", 0),
             latency_ms=d.get("latency_ms", 0.0),
             success=d.get("success", True),
+            episode_id=d.get("episode_id", ""),
+            route_reason=d.get("route_reason", ""),
         )
 
 
@@ -65,8 +75,17 @@ def make_tape_entry(
     response: str,
     latency_ms: float,
     success: bool = True,
+    episode_id: str = "",
+    route_reason: str = "",
 ) -> TapeEntry:
     """Helper to create a TapeEntry with truncation."""
+    # Auto-read episode_id from thread-local if not provided
+    if not episode_id:
+        try:
+            from agent_core.tracing.episode import current_episode_id
+            episode_id = current_episode_id()
+        except ImportError:
+            pass
     return TapeEntry(
         ts=time.time(),
         model=model,
@@ -76,6 +95,8 @@ def make_tape_entry(
         tokens_est=len(response or "") // 4,
         latency_ms=round(latency_ms, 1),
         success=success,
+        episode_id=episode_id,
+        route_reason=route_reason,
     )
 
 

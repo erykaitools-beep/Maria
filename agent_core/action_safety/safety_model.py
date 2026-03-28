@@ -128,9 +128,10 @@ class ActionRecord:
     timestamp: float = 0.0
     duration_ms: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    episode_id: str = ""  # Correlation ID from tracing.episode (Phase 1)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "record_id": self.record_id,
             "plan_id": self.plan_id,
             "action_type": self.action_type,
@@ -149,6 +150,9 @@ class ActionRecord:
             "duration_ms": self.duration_ms,
             "metadata": self.metadata,
         }
+        if self.episode_id:
+            d["episode_id"] = self.episode_id
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "ActionRecord":
@@ -170,6 +174,7 @@ class ActionRecord:
             timestamp=d.get("timestamp", 0.0),
             duration_ms=d.get("duration_ms", 0.0),
             metadata=d.get("metadata", {}),
+            episode_id=d.get("episode_id", ""),
         )
 
 
@@ -183,6 +188,14 @@ def create_action_record(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> ActionRecord:
     """Factory function for creating an ActionRecord."""
+    # Auto-read episode_id from thread-local tracing context
+    episode_id = ""
+    try:
+        from agent_core.tracing.episode import current_episode_id
+        episode_id = current_episode_id()
+    except ImportError:
+        pass
+
     return ActionRecord(
         record_id=f"arec-{uuid.uuid4().hex[:12]}",
         plan_id=plan_id,
@@ -195,4 +208,5 @@ def create_action_record(
         before_state=before_state.to_dict() if before_state else None,
         timestamp=time.time(),
         metadata=metadata or {},
+        episode_id=episode_id,
     )

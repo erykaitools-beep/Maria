@@ -360,7 +360,7 @@ class OllamaBrain:
         import time as _time
 
         # 1. Collect evidence
-        evidence = self._evidence_collector.collect_for_mode(mode)
+        evidence = self._evidence_collector.collect_for_mode(mode, query_text=prompt)
         grounded = self._response_builder.build(mode, evidence, prompt)
 
         # 2. Try LLM formatting (optional improvement)

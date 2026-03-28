@@ -20,6 +20,11 @@ from agent_core.planner.planner_model import (
 from agent_core.planner.planner_guard import PlannerGuard
 from agent_core.planner.goal_selector import GoalSelector
 from agent_core.planner.action_executor import ActionExecutor
+from agent_core.tracing.episode import (
+    generate_episode_id, current_episode_id, clear_episode_id,
+    set_current_trace,
+)
+from agent_core.tracing.trace_model import DecisionTrace
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +97,8 @@ class PlannerCore:
         self._experiment_system = None
         self._self_analysis = None
         self._creative_module = None
+        self._trace_store = None
+        self._current_trace: Optional[DecisionTrace] = None
 
         # Load persisted state
         self._load_state()
@@ -157,6 +164,10 @@ class PlannerCore:
         self._creative_module = creative
         self.executor.set_creative_module(creative)
 
+    def set_trace_store(self, store) -> None:
+        """Set TraceStore for decision traceability (Phase 1)."""
+        self._trace_store = store
+
     # -- Internal: pre-check autonomy policy ----------------
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:
@@ -216,14 +227,33 @@ class PlannerCore:
         self._state.total_cycles += 1
         self._state.last_cycle_tick = tick_count
 
+        # -- EPISODE TRACE: start --
+        episode_id = generate_episode_id()
+        trace = DecisionTrace(
+            episode_id=episode_id,
+            started_at=time.time(),
+            tick_count=tick_count,
+        )
+        if self._homeostasis_core:
+            state = self._homeostasis_core.get_state()
+            trace.mode = state.mode.value
+            trace.health_score = state.health_score
+        self._current_trace = trace
+        set_current_trace(trace)
+
         # -- STEP 1: GUARD --
         can_plan, block_reasons = self._check_guard()
         if not can_plan:
             logger.debug(f"Planner cycle skipped: {block_reasons}")
+            trace.add_step("planner", "guard_check", "blocked",
+                           {"reasons": block_reasons})
+            trace.finalize(success=False, result_summary="guard_blocked")
+            self._save_trace(trace)
             self._emit_cycle_complete(tick_count, guard_blocked=True,
                                       block_reasons=block_reasons)
             self._log_skip(tick_count, "guard_blocked", block_reasons)
             self._save_state()
+            clear_episode_id()
             return None
 
         # -- STEP 2: PERCEIVE --
@@ -244,6 +274,15 @@ class PlannerCore:
                 goal = self._select_goal(context)
 
         if goal is not None:
+            if trace:
+                trace.goal_id = goal.id
+                trace.goal_description = goal.description
+                trace.goal_priority = getattr(goal, "priority", 0.0)
+                trace.add_step("planner", "goal_selected", "ok", {
+                    "goal_id": goal.id,
+                    "goal_type": goal.type.value if hasattr(goal.type, "value") else str(goal.type),
+                    "priority": getattr(goal, "priority", 0.0),
+                })
             # -- STEP 4: CREATE PLAN for goal --
             plan = self._create_plan_for_goal(goal, context)
             if plan.action_type == ActionType.NOOP:
@@ -289,9 +328,14 @@ class PlannerCore:
 
         # Nothing to do
         logger.debug("Planner: no feasible goal and no evaluation needed")
+        if trace:
+            trace.add_step("planner", "no_goals", "idle")
+            trace.finalize(success=True, result_summary="no_goals")
+            self._save_trace(trace)
         self._emit_cycle_complete(tick_count, no_goals=True)
         self._log_skip(tick_count, "no_goals", [])
         self._save_state()
+        clear_episode_id()
         return None
 
     # -- Internal: guard ------------------------------------
@@ -755,6 +799,20 @@ class PlannerCore:
 
     def _finalize_plan(self, plan: Plan) -> Plan:
         """Execute plan, emit event, log, save state."""
+        trace = self._current_trace
+        episode_id = current_episode_id()
+
+        # Stamp plan with episode_id
+        plan.trace_id = episode_id
+
+        # Fill trace with plan info
+        if trace:
+            trace.plan_id = plan.plan_id
+            trace.action_type = plan.action_type.value
+            trace.action_params = plan.action_params
+            trace.goal_id = plan.goal_id
+            trace.goal_description = plan.goal_description
+
         # K7: Autonomy Policy check before execution
         if self._autonomy_policy:
             health = 1.0
@@ -772,6 +830,15 @@ class PlannerCore:
                 mode=mode,
             )
             if not check.allowed:
+                k7_decision = check.blocked_result.get("decision", "block") if check.blocked_result else "block"
+                k7_reasons = check.blocked_result.get("reasons", []) if check.blocked_result else []
+                if trace:
+                    trace.k7_decision = k7_decision
+                    trace.k7_reasons = k7_reasons
+                    trace.add_step("k7_policy", "check", "blocked", {
+                        "decision": k7_decision,
+                        "reasons": k7_reasons,
+                    })
                 plan.status = PlanStatus.FAILED
                 plan.result = check.blocked_result or {
                     "success": False, "blocked_by": "autonomy_policy"
@@ -787,12 +854,20 @@ class PlannerCore:
                         reason=f"K7 blocked {plan.action_type.value}",
                     )
 
+                if trace:
+                    trace.finalize(success=False, result_summary=f"K7 blocked: {k7_decision}")
+                    self._save_trace(trace)
+
                 self._emit_cycle_complete(
                     self._state.last_cycle_tick, plan=plan,
                 )
                 self._log_decision(plan)
                 self._save_state()
                 return plan
+            else:
+                if trace:
+                    trace.k7_decision = "allow"
+                    trace.add_step("k7_policy", "check", "allowed")
 
         # K9: Record assumptions BEFORE execution
         if self._meta_cognition:
@@ -849,9 +924,19 @@ class PlannerCore:
                     goal_id=plan.goal_id,
                     metadata=plan.metadata,
                 )
-                # v1: STAGED actions logged but not blocked (placeholder)
+                if trace:
+                    sm_str = safety_mode.value if hasattr(safety_mode, 'value') else str(safety_mode or "")
+                    trace.k10_safety_mode = sm_str
+                    trace.add_step("k10_safety", "before_action", "captured", {
+                        "safety_mode": sm_str,
+                    })
             except Exception:
                 pass
+
+        if trace:
+            trace.add_step("planner", "execute_start", "ok", {
+                "action_type": plan.action_type.value,
+            })
 
         plan.status = PlanStatus.EXECUTING
         start = time.time()
@@ -867,12 +952,16 @@ class PlannerCore:
         # K10: Capture after-state and validate effects
         if self._action_safety:
             try:
-                self._action_safety.after_action(
+                validation = self._action_safety.after_action(
                     plan_id=plan.plan_id,
                     success=result.get("success", False),
                     result=result,
                     duration_ms=plan.duration_ms,
                 )
+                if trace:
+                    val_str = validation.get("validation", "skipped") if isinstance(validation, dict) else str(validation or "skipped")
+                    trace.k10_validation = val_str
+                    trace.add_step("k10_safety", "after_action", val_str)
             except Exception:
                 pass
 
@@ -923,9 +1012,10 @@ class PlannerCore:
             except Exception:
                 pass
 
-        # K6: Rebuild beliefs periodically (after EVALUATE, ~1/hour)
-        # Picks up new files, topics, concepts from learning
-        if (plan.action_type == ActionType.EVALUATE
+        # K6: Rebuild beliefs after LEARN (new knowledge -> new beliefs)
+        # and after EVALUATE (~1/hour periodic rebuild)
+        if (plan.action_type in (ActionType.EVALUATE, ActionType.LEARN)
+                and result.get("success")
                 and self._world_model):
             try:
                 self._world_model.build_all()
@@ -945,6 +1035,16 @@ class PlannerCore:
             self._state.last_cycle_tick, plan=plan,
         )
 
+        # Finalize and persist trace
+        if trace:
+            trace.success = result.get("success", False)
+            trace.result_summary = plan.message or plan.action_type.value
+            trace.finalize(
+                success=result.get("success", False),
+                result_summary=plan.message or plan.action_type.value,
+            )
+            self._save_trace(trace)
+
         # Persist (with message)
         self._log_decision(plan)
         self._save_state()
@@ -954,6 +1054,7 @@ class PlannerCore:
         if len(self._last_plans) > MAX_HISTORY_SIZE:
             self._last_plans = self._last_plans[-50:]
 
+        clear_episode_id()
         return plan
 
     # -- Internal: auto-create learning goals -----------------
@@ -1225,6 +1326,17 @@ class PlannerCore:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except IOError:
             pass
+
+    def _save_trace(self, trace: DecisionTrace) -> None:
+        """Save decision trace to TraceStore (if available)."""
+        if self._trace_store is None:
+            return
+        try:
+            self._trace_store.record(trace)
+        except Exception as e:
+            logger.debug(f"Could not save trace: {e}")
+        finally:
+            self._current_trace = None
 
     def _log_decision(self, plan: Plan) -> None:
         """Append plan to planner_decisions.jsonl."""

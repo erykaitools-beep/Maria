@@ -49,6 +49,8 @@ class SharedContext:
     telegram_bridge: Any = None      # TelegramBridge (operator notifications)
     codex_client: Any = None         # CodexClient (ChatGPT encyclopedia via Codex CLI)
     semantic_search: Any = None       # SemanticMemory (nomic-embed-text vector store)
+    trace_store: Any = None            # TraceStore (Phase 1 decision traceability)
+    memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
 
     # REPL state
     last_result: Any = None

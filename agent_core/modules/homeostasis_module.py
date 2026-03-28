@@ -392,6 +392,8 @@ class HomeostasisModule(MariaModule):
                         sa.set_goal_store(ctx.goal_store)
                     if ctx.world_model:
                         sa.set_world_model(ctx.world_model)
+                    if hasattr(ctx, 'memory_query') and ctx.memory_query:
+                        sa._collector.set_memory_query(ctx.memory_query)
 
                     # Wire Claude CLI client (K12 Phase 2)
                     try:
@@ -452,6 +454,27 @@ class HomeostasisModule(MariaModule):
                 # Wire SemanticMemory to executor for semantic-aware fetch
                 if ctx.semantic_search:
                     planner.executor.set_semantic_search(ctx.semantic_search)
+
+                # Phase 1 Tracing: DecisionTrace store
+                try:
+                    from agent_core.tracing.trace_store import TraceStore
+                    trace_store = TraceStore()
+                    planner.set_trace_store(trace_store)
+                    ctx.trace_store = trace_store
+                    print("[Homeostasis] [OK] TraceStore wired (Phase 1 tracing)")
+                except Exception as e:
+                    logger.warning(f"TraceStore not initialized: {e}")
+
+                # Phase 2: Unified MemoryQuery API
+                try:
+                    from agent_core.memory.query import MemoryQuery
+                    memory_query = MemoryQuery()
+                    if ctx.semantic_search:
+                        memory_query.set_semantic_memory(ctx.semantic_search)
+                    ctx.memory_query = memory_query
+                    print("[Homeostasis] [OK] MemoryQuery wired (Phase 2)")
+                except Exception as e:
+                    logger.warning(f"MemoryQuery not initialized: {e}")
 
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
@@ -522,6 +545,8 @@ class HomeostasisModule(MariaModule):
                 ec.set_self_analysis(ctx.self_analysis)
             if ctx.goal_store:
                 ec.set_goal_store(ctx.goal_store)
+            if hasattr(ctx, 'memory_query') and ctx.memory_query:
+                ec.set_memory_query(ctx.memory_query)
 
             ctx.evidence_collector = ec
 
@@ -898,12 +923,127 @@ def _register_telegram_commands(bridge, ctx):
         except Exception as e:
             return f"Blad: {e}"
 
+    def _cmd_trace(args):
+        """Show recent decision traces."""
+        trace_store = getattr(ctx, 'trace_store', None)
+        if not trace_store:
+            return "TraceStore niedostepny."
+
+        args = args.strip()
+        # /trace <episode_id> - show specific trace
+        if args and args.startswith("ep-"):
+            t = trace_store.get_by_episode_id(args)
+            if not t:
+                return f"Trace {args} nie znaleziony."
+            steps_text = ""
+            for s in t.get("steps", [])[:8]:
+                steps_text += f"  {s['subsystem']}: {s['action']} -> {s['result']}\n"
+            return (
+                f"*Trace {t['episode_id'][-8:]}*\n"
+                f"Action: {t.get('action_type', '?')}\n"
+                f"Goal: {t.get('goal_description', '-')[:40]}\n"
+                f"K7: {t.get('k7_decision', '-')}\n"
+                f"Success: {t.get('success')}\n"
+                f"Duration: {t.get('duration_ms', 0):.0f}ms\n"
+                f"LLM calls: {t.get('total_llm_calls', 0)}\n"
+                f"Steps:\n{steps_text}"
+            )
+
+        # /trace stats - aggregate stats
+        if args == "stats":
+            stats = trace_store.get_stats()
+            at = stats.get("action_types", {})
+            at_text = ", ".join(f"{k}:{v}" for k, v in sorted(at.items(), key=lambda x: -x[1])[:5])
+            return (
+                f"*Trace stats* (last {stats['total']})\n"
+                f"OK: {stats.get('success', 0)} | FAIL: {stats.get('failed', 0)}\n"
+                f"K7 blocks: {stats.get('k7_blocks', 0)}\n"
+                f"Avg: {stats.get('avg_duration_ms', 0):.0f}ms\n"
+                f"LLM: {stats.get('total_llm_calls', 0)} calls\n"
+                f"Actions: {at_text}"
+            )
+
+        # /trace failed - recent failures
+        if args == "failed":
+            failed = trace_store.get_failed(limit=5)
+            if not failed:
+                return "Brak ostatnich bledow."
+            lines = []
+            for t in failed:
+                eid = t.get("episode_id", "?")[-8:]
+                action = t.get("action_type", "?")
+                k7 = t.get("k7_decision", "")
+                summary = t.get("result_summary", "")[:40]
+                lines.append(f"[{eid}] {action} K7:{k7} - {summary}")
+            return "*Ostatnie bledy:*\n" + "\n".join(lines)
+
+        # /trace - show last N traces (default 5)
+        limit = 5
+        if args.isdigit():
+            limit = min(int(args), 10)
+        recent = trace_store.get_recent(limit=limit)
+        if not recent:
+            return "Brak traces."
+        lines = []
+        for t in recent:
+            eid = t.get("episode_id", "?")[-8:]
+            action = t.get("action_type", "?")
+            ok = "OK" if t.get("success") else "FAIL"
+            dur = t.get("duration_ms", 0)
+            goal = (t.get("goal_description") or "-")[:25]
+            lines.append(f"[{eid}] {action} {ok} {dur:.0f}ms - {goal}")
+        return "*Ostatnie trace:*\n" + "\n".join(lines)
+
+    def _cmd_memory(args):
+        """Query Maria's knowledge about a topic."""
+        topic = args.strip()
+        if not topic:
+            return "Uzycie: /memory <temat>\nNp. /memory fizyka\n/memory gaps"
+
+        memory_query = getattr(ctx, 'memory_query', None)
+        if not memory_query:
+            return "MemoryQuery niedostepny."
+
+        try:
+            # /memory gaps - knowledge gap analysis
+            if topic.lower() == "gaps":
+                gaps = memory_query.get_knowledge_gaps(top_k=5)
+                if not gaps:
+                    return "Brak luk w wiedzy."
+                lines = ["*Luki w wiedzy:*"]
+                for g in gaps:
+                    lines.append(f"- {g['topic']}: {g['confidence']:.0%} ({g['reason']})")
+                return "\n".join(lines)
+
+            # /memory <topic> - query knowledge
+            summary = memory_query.get_topic_summary(topic)
+            if not summary.get("known"):
+                return f"Nie mam wiedzy o: {topic}"
+
+            results = memory_query.query_topic(topic, top_k=5)
+            lines = [
+                f"*Wiedza o '{topic}':*",
+                f"Pliki: {summary.get('files_count', 0)}, przekonania: {summary.get('beliefs_count', 0)}",
+                f"Pewnosc: {summary.get('avg_confidence', 0):.0%}, swiezosc: {summary.get('freshness', 0):.0%}",
+                "",
+            ]
+            for r in results[:5]:
+                src = r.source.value[:4]
+                lines.append(f"[{src}] {r.content[:60]}")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Blad: {e}"
+
     def _cmd_help(args):
         """List available commands."""
         return (
             "*Komendy ClawBot:*\n"
             "/status - stan systemu\n"
             "/goals - lista celow\n"
+            "/trace [N|stats|failed|ep-ID] - traces\n"
+            "/memory <temat> - co Maria wie\n"
+            "/memory gaps - luki w wiedzy\n"
             "/learn <temat> - naucz sie o temacie\n"
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
@@ -919,6 +1059,8 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("restart", _cmd_restart)
     bridge.register_command("priority", _cmd_priority)
     bridge.register_command("learn", _cmd_learn)
+    bridge.register_command("trace", _cmd_trace)
+    bridge.register_command("memory", _cmd_memory)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 
