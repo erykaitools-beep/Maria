@@ -67,6 +67,10 @@ DEFAULT_SAFETY_PROFILES: Dict[str, SafetyProfile] = {
         SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
         EffectType.GOAL_STATE, True, True,  # K13: creates PROPOSED goals + journal
     ),
+    "validate": SafetyProfile(
+        SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
+        EffectType.NONE, True, False,  # Faza F: read-only cross-validation, uses LLM
+    ),
 }
 
 # Safe-by-default profile for unknown action types

@@ -25,6 +25,7 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "self_analyze": 2,  # K12: max 2 per hour (practically 1/day via planner cooldown)
     "creative": 2,      # K13: max 2 creative reflections per hour
     "ask_expert": 10,   # ChatGPT encyclopedia: max 10 per hour
+    "validate": 5,      # Cross-validation: max 5 per hour
 }
 
 # Sliding window size

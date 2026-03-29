@@ -35,6 +35,7 @@ class ActionType(Enum):
     SELF_ANALYZE = "self_analyze"  # K12: Self-analysis cognitive loop
     CREATIVE = "creative"        # K13: Creative reflection cycle
     ASK_EXPERT = "ask_expert"    # Ask ChatGPT/Codex for knowledge (encyclopedia)
+    VALIDATE = "validate"        # Cross-validate learned knowledge (Faza F)
 
 
 @dataclass

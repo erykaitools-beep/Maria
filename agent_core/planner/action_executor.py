@@ -38,6 +38,7 @@ class ActionExecutor:
         self._self_analysis = None
         self._creative_module = None
         self._telegram_notifier = None
+        self._cross_validator = None
         self._llm_router = None
         self._semantic_search = None
 
@@ -103,6 +104,10 @@ class ActionExecutor:
         """Set Creative module for K13 reflection cycle."""
         self._creative_module = creative
 
+    def set_cross_validator(self, validator) -> None:
+        """Set CrossValidator for multi-source learning (Faza F)."""
+        self._cross_validator = validator
+
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
         Execute a plan. Returns result dict.
@@ -139,6 +144,8 @@ class ActionExecutor:
                 result = self._exec_creative(plan)
             elif action == ActionType.ASK_EXPERT:
                 result = self._exec_ask_expert(plan)
+            elif action == ActionType.VALIDATE:
+                result = self._exec_validate(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -531,3 +538,84 @@ class ActionExecutor:
 
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(content)
+
+    def _exec_validate(self, plan: Plan) -> Dict[str, Any]:
+        """Cross-validate learned knowledge using a secondary LLM (Faza F)."""
+        if self._cross_validator is None:
+            return {"success": False, "error": "No CrossValidator configured"}
+
+        file_id = plan.action_params.get("file_id", "")
+        if not file_id:
+            # Pick a recently completed file for validation
+            file_id = self._pick_validation_candidate()
+            if not file_id:
+                return {"success": False, "error": "No files ready for validation"}
+
+        try:
+            # Load memory records for this file
+            from maria_core.sys.config import LONGTERM_MEMORY, INPUT_DIR
+            from maria_core.memory_engine.memory_store import load_index
+            import json
+
+            memories = []
+            if LONGTERM_MEMORY.exists():
+                with open(LONGTERM_MEMORY, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            if rec.get("source_file") == file_id:
+                                memories.append(rec)
+                        except json.JSONDecodeError:
+                            continue
+
+            if not memories:
+                return {"success": False, "error": f"No memories for {file_id}"}
+
+            # Load original chunk texts from input file
+            chunk_texts = {}
+            input_path = INPUT_DIR / file_id
+            if input_path.exists():
+                from maria_core.learning.chunking import intelligent_chunk_text
+                full_text = input_path.read_text(encoding="utf-8", errors="replace")
+                chunks = intelligent_chunk_text(full_text)
+                for i, chunk in enumerate(chunks):
+                    chunk_id = f"{file_id}#chunk_{i}"
+                    chunk_texts[chunk_id] = chunk
+            else:
+                return {"success": False, "error": f"Input file not found: {file_id}"}
+
+            # Run cross-validation
+            result = self._cross_validator.validate_file(
+                file_id=file_id,
+                chunk_texts=chunk_texts,
+                memory_records=memories,
+                max_chunks=5,  # limit per session
+            )
+
+            return {
+                "success": result["chunks_validated"] > 0,
+                "file_id": file_id,
+                "chunks_validated": result["chunks_validated"],
+                "chunks_agreed": result["chunks_agreed"],
+                "chunks_disputed": result["chunks_disputed"],
+                "avg_confidence": result["avg_confidence"],
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _pick_validation_candidate(self) -> str:
+        """Pick a completed file that hasn't been validated recently."""
+        if not self._knowledge_analyzer:
+            return ""
+        try:
+            snapshot = self._knowledge_analyzer.get_knowledge_snapshot()
+            completed = snapshot.get("files_by_status", {}).get("completed", [])
+            if completed:
+                # Pick first completed file (simplest strategy)
+                return completed[0]
+        except Exception:
+            pass
+        return ""

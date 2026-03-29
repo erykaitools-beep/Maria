@@ -170,6 +170,10 @@ class PlannerCore:
         """Set ApprovalQueue for effector HITL (Phase 5)."""
         self._approval_queue = queue
 
+    def set_cross_validator(self, validator) -> None:
+        """Set CrossValidator for multi-source learning (Faza F)."""
+        self.executor.set_cross_validator(validator)
+
     def set_telegram_notifier(self, notifier) -> None:
         """Set TelegramNotifier for effector request notifications (Phase 5)."""
         self._telegram_notifier = notifier
