@@ -143,17 +143,31 @@ class OllamaBrain:
     def _record_tape(self, role: str, prompt: str, response: str,
                      start_time: float, success: bool = True) -> None:
         """Record interaction to tape if attached."""
+        import time as _time
+        latency_ms = (_time.time() - start_time) * 1000
+
+        # Update current episode trace with LLM call stats
+        try:
+            from agent_core.tracing.episode import get_current_trace
+            trace = get_current_trace()
+            if trace is not None:
+                trace.total_llm_calls += 1
+                trace.total_llm_latency_ms += latency_ms
+                if self.model and self.model not in trace.models_used:
+                    trace.models_used.append(self.model)
+        except (ImportError, AttributeError):
+            pass
+
         if self._llm_tape is None:
             return
         try:
             from agent_core.llm.llm_tape import make_tape_entry
-            import time as _time
             entry = make_tape_entry(
                 model=self.model,
                 role=role,
                 prompt=prompt or "",
                 response=response or "",
-                latency_ms=(_time.time() - start_time) * 1000,
+                latency_ms=latency_ms,
                 success=success and bool(response and response.strip()),
             )
             self._llm_tape.record(entry)

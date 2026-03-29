@@ -71,15 +71,22 @@
 | **2026-03-28** | Web UI /api/memory/query + Telegram /memory + beliefs rebuild po LEARN |
 | **2026-03-28** | **CDL in Web UI** - Conversation-Driven Learning podpiete w Web UI chat |
 | **2026-03-28** | LLM call counting w traces (total_llm_calls, models_used, latency) |
+| **2026-03-29** | **Phase 5 Effector Safety Envelope** - 5-level authority (OBSERVE/SUGGEST/CONFIRM/BOUNDED), approval queue, anti-cascade (190 testow) |
+| **2026-03-29** | ApprovalQueue HITL: /efapprove, /efreject, /efstatus, /authority (Telegram) |
+| **2026-03-29** | ToolBudgetManager: per-tool rate limits, exponential backoff, duplicate detection |
+| **2026-03-29** | **Phase 6 Readiness Review** - stability tests, authority drills, 15-point checklist |
+| **2026-03-29** | **Stabilization Roadmap COMPLETE** (all 6 phases, all 5 gates A-E passed) |
+| **2026-03-29** | Cleanup: 3153 linii martwego kodu usuniete z maria_core/ |
+| **2026-03-29** | Fix: flaky test_time_awareness + LLM call counting w OllamaBrain |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2202 passing |
-| **Faza** | Phase 1-4 Stabilization Roadmap DONE, Phase 5-6 TODO |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
+| **Testy** | 2392 passing |
+| **Faza** | Stabilization Roadmap COMPLETE (Phase 1-6), cleanup done |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -594,15 +601,18 @@ Usunieto:
 - [x] Guard metrics: retention_rate, system_stability, knowledge_coverage, learning_velocity
 - [x] Promotion audit metadata in experiment reports (guard_checked, degraded, requires)
 
-### NASTEPNE: Stabilization Roadmap
-- Phase 5: Effector safety envelope - staged authority levels
-- Phase 6: Full ClawBot authority readiness review
+### DONE: Stabilization Roadmap (Phase 1-6 COMPLETE, 2026-03-29)
+- Phase 1-4: Tracing, Memory, Budgets, Cross-metric (2026-03-28)
+- Phase 5: Effector Safety Envelope - 5-level authority, approval queue, anti-cascade (2026-03-29)
+- Phase 6: Readiness Review - stability tests, drills, 15-point checklist (2026-03-29)
 
-### NASTEPNE: improvements
-- Conversation-Driven Learning - user chat influences learning topics (klocki gotowe, trzeba polaczyc)
-- LLM call counting in traces (total_llm_calls currently always 0)
-- Multi-Source Learning - cross-LLM validation (od zera)
+### NASTEPNE: Autorozwoj i stabilnosc
+- Multi-Source Learning - cross-LLM validation (CrossValidator, ConfidenceScorer, DisputeLog)
+- Belief Store ulepszenia - compaction oparta na waznosci, dedup, unifikacja z vector store
+- CDL dopracowanie - lepsze rozpoznawanie intencji, feedback loop
 - Web UI v2 polish (dense mode, sidebar)
+
+### ODROCZONE: Zmysly (czeka na sprzet)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
 - Smart Home (Warstwa 11) - czeka na sprzet
 

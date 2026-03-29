@@ -126,8 +126,10 @@ class TestTimeAwareness:
         assert suggestion is not None
         assert "spac" in suggestion.lower()
 
-    def test_get_sleep_suggestion_long_idle(self):
-        """Test sleep suggestion for very long idle."""
+    @patch("agent_core.homeostasis.time_awareness.datetime")
+    def test_get_sleep_suggestion_long_idle(self, mock_datetime):
+        """Test sleep suggestion for very long idle (daytime)."""
+        mock_datetime.now.return_value = datetime(2026, 2, 2, 14, 0)  # 14:00
         suggestion = TimeAwareness.get_sleep_suggestion(idle_seconds=8000)  # > 2h
         assert suggestion is not None
         assert "ok" in suggestion.lower()
