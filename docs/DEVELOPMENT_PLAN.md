@@ -1,9 +1,10 @@
-# M.A.R.I.A. - Plan Rozwoju (2026-03-08)
+# M.A.R.I.A. - Plan Rozwoju (2026-03-29)
 
 > Ten plan powstal z burzy mozgow opartej na analizach Groka, ChatGPT i Claude (ktory zna kod od srodka).
 > Trzymamy sie tej kolejnosci. Kazdy nowy modul wchodzi naturalnie w system, a nie jest doklejony z boku.
 > **2026-03-01:** Dodano Warstwe 0.5 (Kontrakty architektoniczne) - formalne specyfikacje przed implementacja.
 > **2026-03-08:** Zmiana kierunku: najpierw domkniecie rdzenia kognitywnego (K6-K10), potem zmysly i efektory.
+> **2026-03-29:** Cognitive Core K1-K13 COMPLETE. Stabilization 6 phases COMPLETE. Faza F COMPLETE. 2448 testow.
 
 ## Zasada naczelna
 
@@ -156,8 +157,8 @@ K1-K5.1 dzialaja. Teraz trzeba je przetestowac w praktyce i zobaczyc co faktyczn
 - [x] Web Content Fetcher (agent_core/web_source/) - gotowy i podlaczony do plannera
 - [x] Aktywacja Web Content Fetcher: `ActionType.FETCH` + `_exec_fetch()` wired
 - [x] Identyfikacja brakujacych elementow kognitywnych -> K6, K7, K8 zaimplementowane
-- [ ] Multi-day test automatyki (K1-K8 + planner + topic-aware learning)
-- [ ] Analiza logow planner_decisions.jsonl + deliberation_intents.jsonl
+- [x] Multi-day test (Stabilization Roadmap Phase 6: 100-cycle marathon, 2026-03-29)
+- [x] Analiza logow: Phase 1 Tracing (episode_id, DecisionTrace, TraceStore)
 
 ### Web Content Fetcher (zbudowany 2026-03-08, aktywowany 2026-03-19)
 
@@ -183,13 +184,14 @@ agent_core/web_source/
 
 ---
 
-## Warstwa 5-9: Cognitive Core (K6-K10 DONE)
+## Warstwa 5-9: Cognitive Core (K6-K13 DONE)
 
-**K6-K10: DONE (2026-03-11 - 2026-03-20)**
+**K6-K13: DONE (2026-03-11 - 2026-03-25)**
 
-> Rdzen kognitywny kompletny. Wszystkie 10 kontraktow (K1-K10) zaimplementowane.
-> K6 (World Model), K7 (Autonomy Policy), K8 (Deliberation), K9 (Meta-Cognition), K10 (Action Safety).
-> Nastepny krok: Vision (Warstwa 10) i Smart Home (Warstwa 11).
+> Pelny rdzen kognitywny kompletny. Wszystkie 13 kontraktow (K1-K13) zaimplementowane.
+> K6-K10 core + K11 Experiments + K12 Self-Analysis (NIM) + K13 Creative Module (NIM).
+> Stabilization Roadmap (6 phases) COMPLETE (2026-03-29).
+> Faza F Multi-Source Learning COMPLETE (2026-03-29).
 
 ### K6: World Model / Belief System
 
@@ -454,4 +456,5 @@ Najlepsze dane wejsciowe dla zewnetrznych LLM:
 ---
 
 *Utworzono: 2026-02-28*
+*Ostatnia aktualizacja: 2026-03-29 (K1-K13 + Stabilization + Faza F COMPLETE, 2448 testow)*
 *Zatwierdzone przez: Eryk + Claude*

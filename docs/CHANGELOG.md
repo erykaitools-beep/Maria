@@ -3,6 +3,182 @@
 
 ---
 
+## [2026-03-29] - Sesja 21: Faza F Multi-Source Learning + Roadmap v1.0
+
+### Added - Faza F: Multi-Source Learning COMPLETE
+- **`agent_core/cross_validation/`** - 3 nowe moduly:
+  - `cross_validator.py` - porownanie wynikow z primary (Ollama) i secondary (NIM) LLM
+  - `confidence_scorer.py` - rule-based scoring (Jaccard similarity, 3 wymiary, wagi)
+  - `dispute_log.py` - JSONL persistence sporow (thread-safe, bounded 200)
+- **Planner trigger:** `_maybe_validate()` w decision cycle (6h cooldown)
+- **`PlannerState.last_validation_ts`** - backward-compatible state tracking
+- **Belief confidence update** - po walidacji: OBSERVATION->FACT (>0.7), demotion HYPOTHESIS (<0.3)
+- **VALIDATE w degradation check** - blokowane w REDUCED mode (heavy action)
+- **World model wiring** - planner_core -> executor -> BeliefStore.revise()
+- **Web UI `/validation`** - 3 taby (stats, disputes, history) + 4 API endpoints
+- **Telegram `/validate`** - [disputes|unresolved] command
+- K7: GUARDED, rate 5/h | K10: SafetyProfile skonfigurowany
+
+### Added - Roadmap v1.0
+- `docs/ROADMAP.md` zaktualizowany z v0.6 (2026-03-01) do v1.0
+- Dodane fazy C.6 (Cognitive Core K5-K13), C.7 (Infrastructure), C.8 (Stabilization)
+- Milestones M5-M10, ryzyka zaktualizowane, ADR-001 do ADR-026
+
+### Statistics
+- **2448 tests passing** (2391 + 57 nowych: 38 cross-validation + 14 planner trigger + 4 telegram + 1 belief)
+- Faza F: COMPLETE
+
+---
+
+## [2026-03-29] - Sesja 20: Phase 5-6 Stabilization (Effector Safety + Readiness)
+
+### Added - Phase 5: Effector Safety Envelope (ADR-026)
+- **`agent_core/autonomy/authority_level.py`** - 5-level staged authority:
+  - OBSERVE (default, read-only) / SUGGEST / CONFIRM / BOUNDED / UNRESTRICTED (blocked)
+  - AuthorityConfig (persistent JSON), AuthorityManager (singleton)
+- **`agent_core/autonomy/approval_queue.py`** - Non-blocking HITL:
+  - ApprovalRequest dataclass, JSONL persistence, stale expiry (1h)
+  - get_approved_ready(), expire_stale(), reject_all_pending()
+- **`agent_core/autonomy/tool_budget.py`** - Per-tool rate limits:
+  - ToolBudgetManager, exponential backoff (2^n * 60s), duplicate detection
+- **PlanStatus.AWAITING_APPROVAL** - planner doesn't block, picks up next cycle
+- **Telegram:** /efapprove, /efreject, /efstatus, /authority (4 nowe komendy)
+- **Anti-cascade:** breaker w action_executor (max 3 effector failures -> disable)
+
+### Added - Phase 6: Readiness Review
+- 100-cycle marathon test z BOUNDED mode
+- Authority transitions: observe->bounded->observe + cleanup
+- Concurrent access: 4 threads, budget checking, approval handling
+- 15-point readiness checklist - all passed
+- All gates A-E passed (tracing, memory, budgets, governance, readiness)
+
+### Statistics
+- **2391 tests passing** (2201 + 190 nowych)
+- **Stabilization Roadmap COMPLETE** (all 6 phases, all 5 gates)
+
+---
+
+## [2026-03-28] - Sesja 19: Phase 1-4 Stabilization + CDL + Traces UI
+
+### Added - Phase 1: Decision Traceability (ADR-022)
+- **`agent_core/tracing/`** - episode_id (thread-local), DecisionTrace, TraceStore (JSONL)
+- Episode ID auto-propagation: planner -> LLM tape -> K7 -> K10
+- Web UI: `/api/traces` (4 endpoints) + Telegram: `/trace` command
+
+### Added - Phase 2: Memory Consistency (ADR-023)
+- **`agent_core/memory/query.py`** - MemoryQuery API z provenance metadata
+- Truth hierarchy: knowledge_index > beliefs > semantic vectors
+- Grounding: "co wiesz o X" -> GROUNDED_KNOWLEDGE -> evidence
+- Staleness fixes: vector cleanup, beliefs rebuild po LEARN, re-indexing
+- Web UI: `/api/memory/query` + Telegram: `/memory`
+
+### Added - Phase 3: Scheduler Hardening (ADR-024)
+- `call_with_timeout()` wraps Ollama (120-180s per role)
+- EpisodeBudget: max 10 LLM calls, 5min total latency per episode
+- route_reason w LLM tape (why model was chosen)
+- Degradation routing: REDUCED mode blocks heavy LLM actions
+
+### Added - Phase 4: Autonomy Governance (ADR-025)
+- Cross-metric validation: ADOPT blocked if guard metric degrades >3%
+- Guard metrics: retention_rate, system_stability, knowledge_coverage, learning_velocity
+- Promotion audit metadata in experiment reports
+
+### Added - CDL in Web UI
+- Conversation-Driven Learning: learning intent detection w Web UI chat
+- LLM call counting w traces (total_llm_calls, models_used, latency)
+
+### Statistics
+- **2202 tests passing** (2081 + 121 nowych)
+
+---
+
+## [2026-03-27] - Sesja 18: Semantic Memory + Priority Escalation
+
+### Added - Semantic Memory (ADR-021)
+- **`agent_core/semantic/`** - nomic-embed-text (768-dim, 274MB) via Ollama /api/embed
+- EmbeddingModel: in-memory cache, batch embed, cosine similarity
+- VectorStore: in-memory + JSONL persist (`meta_data/semantic_vectors.jsonl`), cap 10k
+- SemanticMemory facade: index_text/batch, search, find_similar, 4 namespaces
+- Auto-indexer: 275 vectors (157 knowledge + 95 beliefs + 23 hints), startup delay 60s
+- Incremental indexing: nowe pliki auto-embeddowane po fetch
+- TopicSuggester: semantic reranking (novelty scoring)
+- MemoryRetriever: embedding search (with keyword fallback)
+
+### Added - Meta-goal Priority Escalation
+- Tension streak tracking: `creative_tension_streaks.jsonl`
+- Priority boost: streak * 0.05, max +0.2
+- PROPOSED displacement: replaces lowest-priority when higher arrives
+- Telegram `/priority <id-prefix> <0.0-1.0>` - operator manual override
+- Improved `/goals`: shows ID prefix + priority + stats
+
+### Statistics
+- **2081 tests passing** (2009 + 57 nowych + 15 indexer)
+
+---
+
+## [2026-03-26] - Sesja 17: Telegram Bridge + Codex CLI + K7 Improvements
+
+### Added - Telegram Bridge (ClawBot)
+- **`agent_core/telegram/`** - bot.py, notifier.py, __init__.py (TelegramBridge facade)
+- 7 typow alertow z cooldownami (creative, k12, k9, health, mode, k7, startup)
+- Komendy: /status, /goals, /approve, /reject, /restart, /priority, /learn, /help
+- Homeostasis Phase 11 TELEGRAM polling (co 30s)
+- Notyfikacje z action_executor (K13 creative, K12 self-analysis)
+
+### Added - Codex CLI / ChatGPT Encyclopedia
+- **`agent_core/llm/codex_client.py`** - subprocess wrapper for Codex CLI
+- ModelRole.ENCYCLOPEDIA (MODEL-07), router.ask_encyclopedia()
+- Fallback chain: Codex -> NIM -> Ollama, rate limit 10/h
+
+### Changed - K7 Autonomy Improvements
+- Consecutive failure auto-reset (counter resets po 30min idle)
+- Fetch rate limit: 5 -> 10/h
+- Proposed goals timeout: 24h -> 72h
+
+### Statistics
+- **~2009 tests passing** (1943 + 42 telegram + 24 codex)
+
+---
+
+## [2026-03-25] - Sesja 16b: K13 Phase 2 + K12 Phase 2 (NIM Engines)
+
+### Added - K13 Creative Module Phase 2
+- 8 nowych modulow w `agent_core/creative/`:
+  - `meta_goal_engine.py` - NIM-powered meta-goal generation
+  - `reframe_engine.py` - NIM-powered perspective reframing
+  - `exploration_engine.py` - NIM-powered knowledge exploration
+  - `identity_profile.py` - CognitiveProfile (developmental stage)
+  - `personality_policy.py` - trait->weight adjustment for creativity
+  - `memory_retriever.py` - selective memory retrieval (semantic + keyword)
+  - `memory_summarizer.py` - NIM-powered memory condensation
+  - `llm_utils.py` - shared JSON parser, safe_llm_call
+- TokenBudget: RPM-based gating (40 req/min sliding window)
+- CreativeEvaluator: custom weights z PersonalityPolicy
+- Homeostasis wiring: NIM auto-detect + set_llm_fn()
+
+### Added - K12 Self-Analysis Phase 2
+- NIM backend w ExternalAnalyzer (cascade: NIM -> Claude CLI -> local qwen3:8b)
+- Web UI `/analysis` page (3 taby: raport, rekomendacje, historia)
+- 4 API endpoints: /api/analysis/{latest,recommendations,history,status}
+- GoalStore integration: last report contained 3 goals
+
+### Statistics
+- **1943 tests passing** (1876 + 62 K13 Phase 2 + 5 misc)
+
+---
+
+## [2026-03-24] - Sesja 16a: K12 LIVE + Planner Bugfixes
+
+### Fixed
+- K12 LIVE: 5 bugow naprawionych (file_id passthrough, chunk failure backoff)
+- Teacher: skip po 5 consecutive chunk failures (was: infinite retry)
+- Planner fallthrough: NOOP/K7-blocked -> evaluate -> K12 (zamiast slepego NOOP)
+
+### Statistics
+- **~1876 tests passing**
+
+---
+
 ## [2026-03-22] - Sesja 16: Web UI v2 Metaoperator Panel + Learning Fixes
 
 ### Added - Web UI v2 Metaoperator Panel

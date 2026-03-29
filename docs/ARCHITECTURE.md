@@ -1,14 +1,16 @@
 # M.A.R.I.A. - Architecture Document
-> Version: 0.7 | Last updated: 2026-03-19
+> Version: 1.0 | Last updated: 2026-03-29
 
 ## 1. Overview
 
 **M.A.R.I.A.** (Meta Analysis Recalibration Intelligence Architecture) to lokalny, autonomiczny agent AI zaprojektowany do samodzielnego uczenia sie z plikow tekstowych.
 
-- **Backend LLM:** Ollama (llama3.1:8b)
-- **Tryb pracy:** Offline-first
+- **Backend LLM:** Multi-model stack (7 modeli: Ollama local + NIM cloud + embeddings)
+- **Tryb pracy:** Offline-first, NIM cloud optional
 - **Jezyk:** Python 3.8+
-- **Platforma:** Windows/Linux/Mac (cross-platform)
+- **Platforma:** Ubuntu 22.04 (Mini PC: AMD Ryzen 5, 32GB RAM)
+- **Testy:** 2448 passing
+- **Cognitive Core:** K1-K13 complete, Stabilization (6 phases) complete, Faza F complete
 
 ---
 
@@ -244,7 +246,7 @@ System spelnia "Full Homeostasis" gdy:
 - [x] episodic_memory ma cap i FIFO
 - [x] System raportuje swoj stan (motivation, uptime, stats)
 
-**STATUS: COMPLETE** (2026-01-28, teraz 1067 tests passing)
+**STATUS: COMPLETE** (2026-01-28)
 
 ---
 
@@ -254,21 +256,28 @@ Zobacz: [DECISIONS.md](./DECISIONS.md)
 
 ---
 
-## 5. Znane ograniczenia (Ver.4.2)
+## 5. Znane ograniczenia (Ver.5.0)
 
-1. **Brak embeddings** - semantic_graph wspiera embeddings, ale nie sa generowane
-2. ~~**Dwa systemy pamieci**~~ -> Rozwiazane przez MemoryManager
-3. ~~**Brak cap na episodic_memory**~~ -> Rozwiazane przez consolidate_episodic()
-4. ~~**Brak consolidation scheduler**~~ -> Rozwiazane przez epoch tasks w core.py
-5. **Legacy maria_core/** - stary kod nadal istnieje, owiniety adapterami (Stage 5 archiwizacja done)
-6. ~~**Brak Unified Perception**~~ -> Rozwiazane: PerceptionEvent + PerceptionBuffer + 6 adapterow (K1)
-7. ~~**Brak Plannera**~~ -> Rozwiazane: PlannerCore + GoalSelector + ActionExecutor + PlannerGuard (K5, K5.1)
-8. ~~**Brak Goal System**~~ -> Rozwiazane: GoalStore z 4 typami celow + audit trail (K3)
-9. ~~**Brak World Model**~~ -> Rozwiazane: BeliefStore + BeliefBuilder + WorldModelQuery (K6)
-10. ~~**Brak Autonomy Policy**~~ -> Rozwiazane: ActionClassification + RateLimiter + PolicyEngine (K7)
-11. ~~**Brak Deliberation**~~ -> Rozwiazane: Strategy templates + Deliberator + IntentTracker (K8)
+1. **Legacy maria_core/** - stary kod owiniety adapterami, archiwizacja done
+2. **Vision/Smart Home** - odroczone (ADR-014), czekaja na sprzet (Tapo C200, Shelly)
+3. **NIM API expiry** - z-ai/glm5 wygasa Aug 2026, wymaga odnowienia lub alternatywy
 
-Patrz: `docs/DEVELOPMENT_PLAN.md` (plan rozwoju: warstwy 1-3 DONE, K6-K8 DONE, K9-K10 cognitive core docelowe, potem Vision/Smart Home)
+### Rozwiazane ograniczenia:
+- ~~Brak embeddings~~ -> Semantic Memory (nomic-embed-text, 768-dim, ADR-021)
+- ~~Brak Unified Perception~~ -> K1 PerceptionEvent + Buffer + 6 adapterow
+- ~~Brak Plannera~~ -> K5 PlannerCore + 13 action types
+- ~~Brak Goal System~~ -> K3 GoalStore + audit trail
+- ~~Brak World Model~~ -> K6 BeliefStore + BeliefBuilder
+- ~~Brak Autonomy Policy~~ -> K7 + Phase 5 authority levels
+- ~~Brak Deliberation~~ -> K8 strategy templates
+- ~~Brak Meta-Cognition~~ -> K9 reflection + confidence
+- ~~Brak Action Safety~~ -> K10 audit + effect validation
+- ~~Brak Cross-Validation~~ -> Faza F CrossValidator + belief update
+- ~~Brak Effector Safety~~ -> Phase 5 approval queue + tool budgets
+
+**Cognitive Core K1-K13: COMPLETE (2448 tests)**
+**Stabilization Roadmap (6 phases): COMPLETE**
+**Faza F Multi-Source Learning: COMPLETE**
 
 ---
 
@@ -330,16 +339,67 @@ agent_core/
 │   ├── belief_store.py    # BeliefStore (JSONL, MERGE, cap 2000)
 │   ├── belief_builder.py  # Buduje beliefs z JSONL (zero LLM, idempotent)
 │   └── query.py           # WorldModelQuery (topic confidence, gaps, summaries)
-├── autonomy/              # Autonomy Policy / Governance (Kontrakt K7)
+├── autonomy/              # Autonomy Policy / Governance (Kontrakt K7 + Phase 5)
 │   ├── action_class.py    # ActionClassification (FREE/GUARDED/RESTRICTED/FORBIDDEN)
 │   ├── rate_limiter.py    # Sliding-window rate limiter per ActionType
-│   ├── policy_rules.py    # PolicyEngine + 3 built-in rules
-│   └── escalation.py      # EscalationHandler (JSONL log, HITL placeholder)
+│   ├── policy_rules.py    # PolicyEngine + rules (incl. effector_authority)
+│   ├── escalation.py      # EscalationHandler (JSONL log)
+│   ├── authority_level.py # Phase 5: 5-level authority (OBSERVE->BOUNDED)
+│   ├── approval_queue.py  # Phase 5: Non-blocking HITL approval queue
+│   └── tool_budget.py     # Phase 5: Per-tool rate limits, backoff
 ├── deliberation/          # Deliberation / Strategic Planning (Kontrakt K8)
 │   ├── strategy.py        # Strategy + Step dataclasses
 │   ├── strategy_templates.py # 3 szablony + TEMPLATE_REGISTRY
 │   ├── deliberator.py     # Rule-based selection + advancement
 │   └── intent_tracker.py  # IntentTracker (JSONL, bounded 500)
+├── meta_cognition/        # Meta-Cognition (Kontrakt K9)
+│   ├── reflection_model.py # ReflectionRecord, assumption tracking
+│   ├── reflection_store.py # ReflectionStore (JSONL, 300 cap)
+│   ├── confidence_tracker.py # ConfidenceTracker (exponential decay)
+│   └── reflector.py       # Reflector (before/after, pattern detection, needs_human)
+├── action_safety/         # Action Safety (Kontrakt K10)
+│   ├── safety_classifier.py # SafetyMode(3), SafetyProfile per action type
+│   ├── audit_log.py       # AuditLog (JSONL, 200 cap)
+│   └── effect_validator.py # Before/after state capture, effect validation
+├── experiment/            # Experiment System (Kontrakt K11)
+│   ├── proposal_engine.py # 4 rules (LOW_RETENTION, FAILURES, COVERAGE, SLOW)
+│   ├── parameter_registry.py # 12 tunable parameters + bounds
+│   ├── experiment_runner.py # setattr patch, health guard, timeout 1h
+│   └── report_generator.py # ADOPT/REJECT/INCONCLUSIVE + confidence
+├── self_analysis/         # K12 Self-Analysis (Phase 2: NIM cascade)
+│   ├── state_collector.py # 8 JSONL sources, zero LLM
+│   ├── external_analyzer.py # Cascade: NIM -> Claude CLI -> local qwen3:8b
+│   └── recommendation_applier.py # PROPOSED goals + topic hints + beliefs
+├── creative/              # K13 Creative Module (Phase 2: NIM engines)
+│   ├── tension_detector.py # 7 tension categories
+│   ├── reflection_workspace.py # Bounded sessions, candidate generation
+│   ├── creative_journal.py # Strategic diary
+│   ├── meta_goal_engine.py # NIM-powered meta-goal generation
+│   ├── reframe_engine.py  # NIM-powered perspective reframing
+│   ├── exploration_engine.py # NIM-powered knowledge exploration
+│   ├── identity_profile.py # CognitiveProfile, developmental stage
+│   └── personality_policy.py # Trait->weight adjustment
+├── telegram/              # Telegram Bridge (ClawBot)
+│   ├── bot.py             # TelegramBot (HTTP API, send/receive)
+│   └── notifier.py        # 7 alert types with cooldowns
+├── effector/              # OpenClaw Effector (ADR-016)
+│   ├── openclaw_client.py # Subprocess client (sudo deployadmin)
+│   └── tool_specs.py      # 7 whitelisted tools + validation
+├── semantic/              # Semantic Memory (ADR-021, nomic-embed-text)
+│   ├── embedding_model.py # Ollama /api/embed wrapper, cache
+│   ├── vector_store.py    # In-memory + JSONL, 4 namespaces, cap 10k
+│   └── indexer.py         # Auto-indexer (knowledge, beliefs, hints)
+├── tracing/               # Decision Tracing (Phase 1, ADR-022)
+│   ├── episode.py         # Thread-local episode_id
+│   ├── trace_model.py     # DecisionTrace + TraceStep
+│   └── trace_store.py     # JSONL persistence, bounded 200
+├── cross_validation/      # Multi-Source Learning (Faza F, ADR-027)
+│   ├── cross_validator.py # Compare primary (Ollama) vs secondary (NIM)
+│   ├── confidence_scorer.py # Rule-based scoring (Jaccard, 3 dimensions)
+│   └── dispute_log.py     # JSONL dispute persistence
+├── storage/               # Storage Manager (6TB disk)
+│   ├── log_archiver.py    # JSONL -> /mnt/storage/data/logs/
+│   └── daily_summary.py   # Compaction -> /mnt/storage/data/summaries/
 ├── web_source/            # Web Content Fetcher (podlaczony do plannera)
 │   ├── __init__.py        # run_fetch_session() - jedyny punkt integracji
 │   ├── wiki_client.py     # Wikipedia PL API (search + fetch)
@@ -354,10 +414,15 @@ agent_core/
 │   └── scheduler.py       # Periodic analysis
 ├── awareness/             # Kontekst samowiedzy
 │   └── context_builder.py # ContextBuilder for /awareness
-├── llm/                   # LLM management + NIM routing
-│   ├── router.py          # LLMRouter: chat->Ollama, nauka->NIM
+├── llm/                   # LLM management + multi-model stack
+│   ├── router.py          # LLMRouter: chat->Ollama, nauka->NIM, ask_as_role()
 │   ├── nim_client.py      # NVIDIA NIM API client (OpenAI-compatible)
-│   ├── token_budget.py    # Daily/monthly token limits
+│   ├── token_budget.py    # RPM-based gating (40 req/min)
+│   ├── model_registry.py  # 7 models: ModelRole, ModelSpec, REGISTRY
+│   ├── model_scheduler.py # Load/unload via Ollama, RAM guard, heavy mutex
+│   ├── routing_rules.py   # TaskType -> ModelRole, heuristic_classify
+│   ├── execution_budget.py # Phase 3: call_with_timeout, EpisodeBudget
+│   ├── codex_client.py    # ChatGPT/Codex CLI wrapper (MODEL-07)
 │   ├── latency_probe.py   # Non-blocking latency measurement
 │   └── manager.py         # LLMManager interface
 ├── memory/
@@ -394,8 +459,8 @@ agent_core/
 ├── ui/
 │   ├── telemetry_api.py   # Read-only dashboard
 │   └── operator_controls.py
-└── tests/                 # 1121 tests
-    └── test_*.py          # 28 test files
+└── tests/                 # 2448 tests
+    └── test_*.py          # 40+ test files
 ```
 
 ### 6.2 Integracja z main.py
@@ -430,7 +495,7 @@ main.py (Ver.2.0 - Registry-based)
         └── ConsciousnessCore.checkpoint()
 ```
 
-### 6.3 Przepływ danych - Homeostasis Loop (10 faz)
+### 6.3 Przepływ danych - Homeostasis Loop (12 faz)
 
 ```
 [1Hz Tick] ──────────────────────────────────────────────────────────
@@ -457,34 +522,56 @@ main.py (Ver.2.0 - Registry-based)
     │
     ├── Phase 7: UPDATE HEALTH SCORE
     │
-    ├── Phase 8: PERCEIVE (Kontrakt K1, ADR-009)
+    ├── Phase 8: PERCEIVE (K1, ADR-009)
     │   ├── Aggregate sensor events -> PerceptionBuffer
     │   └── Drain external queue (REPL, teacher, etc.)
     │
-    ├── Phase 9: AUDIT & LOG (co 60 tickow)
+    ├── Phase 9: TEACHER TRIGGER (idle >= 10min -> auto-learn)
     │
-    └── Phase 10: PLANNER (K5 + K6 + K7 + K8)
-        ├── PlannerCore.run_cycle() (co 60 tickow + event-driven)
-        ├── GoalSelector → PlannerGuard → AutonomyPolicy (K7) → ActionExecutor
-        ├── Deliberation (K8): multi-step strategies → next action from template
-        ├── WorldModel (K6): belief context + exam feedback
-        ├── Topic-Aware Learning (K5.1): topics → resolved_file_ids → Teacher
-        └── Fallback: _decide_learning_action() (backward compatible)
+    ├── Phase 9.5: MODEL SCHEDULER (load/unload models, RAM guard)
+    │
+    ├── Phase 10: PLANNER (K5-K13 cognitive core)
+    │   ├── PlannerCore.run_cycle() (co 60 tickow + event-driven)
+    │   ├── Guard -> Approval Queue (Phase 5) -> Creative (K13)
+    │   ├── GoalSelector -> Plan -> K7 AutonomyPolicy -> K9 Meta-Cognition
+    │   ├── K10 ActionSafety -> ActionExecutor (13 action types)
+    │   ├── Actions: LEARN/EXAM/REVIEW/FETCH/VALIDATE/CREATIVE/
+    │   │   SELF_ANALYZE/EXPERIMENT/EFFECTOR/ASK_EXPERT/EVALUATE/NOOP
+    │   ├── Deliberation (K8): multi-step strategies
+    │   ├── WorldModel (K6): belief context + cross-validation feedback
+    │   └── Trace: episode_id -> DecisionTrace -> TraceStore
+    │
+    ├── Phase 11: TELEGRAM (poll co 30s, operator commands)
+    │
+    └── Phase 12: AUDIT & LOG (co 60 tickow)
 ```
 
-### 6.4 LLM Routing
+### 6.4 LLM Multi-Model Stack
 
 ```
+ModelScheduler (heavy mutex, RAM guard)
+    │
+    ├── MODEL-01: qwen3:8b (Strategic Planner, 5.5GB, cold)
+    ├── MODEL-02: llama3.1:8b (Executor/Brain, 5GB, warm=always loaded)
+    ├── MODEL-03: qwen2.5-coder:7b (Coder, 5GB, cold)
+    ├── MODEL-04: Rule-based triage (0GB, 0.1ms, keyword classifier)
+    ├── MODEL-05: nomic-embed-text (Embeddings, 274MB, cold)
+    ├── MODEL-06: NIM z-ai/glm5 (Cloud API, 40 RPM, expiry Aug 2026)
+    ├── MODEL-07: Codex CLI (ChatGPT, 10 calls/h, subprocess)
+    └── OpenClaw: qwen2.5:3b (Effector, 2GB, separate instance)
+
 LLMRouter
+    ├── think(prompt)          -> MODEL-02 Ollama (chat, fast)
+    ├── analyze_task(task)     -> MODEL-06 NIM, fallback MODEL-02
+    ├── ask_as_role(role, p)   -> ModelScheduler load/inference/release
+    ├── ask_encyclopedia(q)    -> MODEL-07 Codex, fallback NIM, fallback Ollama
     │
-    ├── think(prompt)       -> Ollama (chat, offline, fast)
-    ├── _ask_once(prompt)   -> NIM if budget OK, else Ollama
-    ├── analyze_task(task)  -> NIM if budget OK, else Ollama
-    │
-    └── TokenBudget
-        ├── Daily:   100,000 tokens
-        ├── Monthly: 2,000,000 tokens
-        └── States: OK -> LOW (<=20%) -> DEPLETED -> fallback Ollama
+    └── TokenBudget (RPM-based: 40 req/min sliding window)
+
+ExecutionBudget (Phase 3, ADR-024)
+    ├── call_with_timeout() wraps Ollama (120-180s per role)
+    ├── EpisodeBudget: max 10 LLM calls, 5min latency per episode
+    └── Degradation: REDUCED mode blocks heavy LLM actions
 ```
 
 ### 6.5 Consciousness Flow
@@ -512,4 +599,4 @@ SleepProcessor (when ACTIVE -> SLEEP)
 ---
 
 *Ten dokument jest zywym dokumentem - aktualizuj go przy zmianach architektonicznych.*
-*Ostatnia aktualizacja: 2026-03-08 (Web Content Fetcher, stabilizacja K1-K5.1, 1121 tests)*
+*Ostatnia aktualizacja: 2026-03-29 (K1-K13 complete, Stabilization 6 phases, Faza F, 2448 tests)*
