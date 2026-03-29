@@ -151,6 +151,24 @@ class EffectValidator:
                 unexpected = True
                 details["goal_count_explosion"] = True
 
+        # Phase 5: Effector-specific validation
+        if action_type == "effector":
+            tool_name = result.get("tool_name", "")
+            details["tool_name"] = tool_name
+            success = result.get("success", False)
+            tool_result = result.get("tool_result")
+
+            # Empty result on reported success = suspicious
+            if success and not tool_result and tool_result != 0:
+                unexpected = True
+                details["empty_result_on_success"] = True
+
+            # Check for error indicators in result
+            error = result.get("error", "")
+            if error and success:
+                unexpected = True
+                details["error_on_success"] = str(error)[:200]
+
         if unexpected:
             return ValidationResult.UNEXPECTED, details
 

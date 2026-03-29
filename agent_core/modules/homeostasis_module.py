@@ -268,11 +268,35 @@ class HomeostasisModule(MariaModule):
 
                 # Autonomy Policy (K7) for action governance
                 try:
-                    from agent_core.autonomy import AutonomyPolicy
-                    autonomy_policy = AutonomyPolicy()
+                    from agent_core.autonomy import AutonomyPolicy, AuthorityManager
+                    from agent_core.autonomy.approval_queue import ApprovalQueue
+                    from agent_core.autonomy.tool_budget import ToolBudgetManager
+
+                    # Phase 5: Authority Manager (persisted level)
+                    authority_manager = AuthorityManager()
+                    ctx.authority_manager = authority_manager
+
+                    autonomy_policy = AutonomyPolicy(
+                        authority_manager=authority_manager,
+                    )
                     planner.set_autonomy_policy(autonomy_policy)
                     ctx.autonomy_policy = autonomy_policy
-                    print("[Homeostasis] [OK] AutonomyPolicy wired (K7)")
+
+                    # Phase 5: Approval Queue for effector HITL
+                    approval_queue = ApprovalQueue()
+                    planner.set_approval_queue(approval_queue)
+                    ctx.approval_queue = approval_queue
+
+                    # Phase 5: Per-tool budget manager
+                    tool_budget = ToolBudgetManager(
+                        tool_rate_limits=authority_manager.get_config().tool_rate_limits,
+                        failure_cooldown_sec=authority_manager.get_config().failure_cooldown_sec,
+                        max_consecutive_failures=authority_manager.get_config().max_consecutive_failures,
+                    )
+                    ctx.tool_budget = tool_budget
+
+                    auth_level = authority_manager.get_level().value
+                    print(f"[Homeostasis] [OK] AutonomyPolicy wired (K7, authority={auth_level})")
                 except Exception as e:
                     logger.debug(f"AutonomyPolicy not initialized: {e}")
 
@@ -505,9 +529,10 @@ class HomeostasisModule(MariaModule):
                     # Register basic commands
                     _register_telegram_commands(telegram, ctx)
 
-                    # Wire notifier to planner's action executor
+                    # Wire notifier to planner's action executor + Phase 5 approval flow
                     if ctx.planner_core:
                         ctx.planner_core.executor.set_telegram_notifier(telegram.notifier)
+                        ctx.planner_core.set_telegram_notifier(telegram.notifier)
 
                     # Flush old messages to avoid re-processing (e.g. /restart loop)
                     telegram.bot.flush_pending()
@@ -1035,6 +1060,92 @@ def _register_telegram_commands(bridge, ctx):
         except Exception as e:
             return f"Blad: {e}"
 
+    # -- Phase 5: Effector commands --
+
+    def _cmd_efapprove(args):
+        """Approve a pending effector request."""
+        queue = getattr(ctx, 'approval_queue', None)
+        if not queue or not args:
+            return "Uzycie: /efapprove <request-id-prefix>"
+        prefix = args.strip()
+        approved = queue.approve(prefix)
+        if not approved:
+            return f"Nie znaleziono oczekujacego requestu: {prefix}"
+        return f"Zatwierdzono efektor: {approved.tool_name} ({approved.request_id[:12]})"
+
+    def _cmd_efreject(args):
+        """Reject a pending effector request."""
+        queue = getattr(ctx, 'approval_queue', None)
+        if not queue or not args:
+            return "Uzycie: /efreject <request-id-prefix>"
+        prefix = args.strip()
+        rejected = queue.reject(prefix)
+        if not rejected:
+            return f"Nie znaleziono oczekujacego requestu: {prefix}"
+        return f"Odrzucono efektor: {rejected.tool_name} ({rejected.request_id[:12]})"
+
+    def _cmd_efstatus(args):
+        """Show effector authority status and pending requests."""
+        parts = []
+
+        auth_mgr = getattr(ctx, 'authority_manager', None)
+        if auth_mgr:
+            status = auth_mgr.get_status()
+            parts.append(f"*Authority level:* {status['authority_level']}")
+
+        queue = getattr(ctx, 'approval_queue', None)
+        if queue:
+            stats = queue.get_stats()
+            parts.append(f"Pending: {stats['pending']}, Approved: {stats['approved']}")
+            pending = queue.get_pending()
+            for p in pending[:5]:
+                parts.append(f"  [{p.request_id[:8]}] {p.tool_name} - {p.goal_description[:40]}")
+
+        budget = getattr(ctx, 'tool_budget', None)
+        if budget:
+            bstats = budget.get_stats()
+            for tool, ts in bstats.items():
+                if ts['consecutive_failures'] > 0 or ts['locked']:
+                    parts.append(f"  {tool}: {ts['invocations_this_window']}/{ts['rate_limit']} "
+                                 f"fails={ts['consecutive_failures']} locked={ts['locked']}")
+
+        return "\n".join(parts) if parts else "Brak danych efektora"
+
+    def _cmd_authority(args):
+        """Change effector authority level."""
+        from agent_core.autonomy.authority_level import AuthorityLevel
+
+        auth_mgr = getattr(ctx, 'authority_manager', None)
+        if not auth_mgr:
+            return "AuthorityManager niedostepny"
+
+        arg = args.strip().lower()
+        if not arg:
+            level = auth_mgr.get_level()
+            return (
+                f"*Aktualny level:* {level.value}\n"
+                "Dostepne: observe, suggest, confirm, bounded\n"
+                "Uzycie: /authority <level>"
+            )
+
+        try:
+            new_level = AuthorityLevel(arg)
+        except ValueError:
+            return f"Nieznany level: {arg}. Dostepne: observe, suggest, confirm, bounded"
+
+        ok = auth_mgr.set_level(new_level)
+        if not ok:
+            return f"Nie mozna ustawic: {arg} (max: bounded)"
+
+        # On downgrade, reject pending approvals
+        queue = getattr(ctx, 'approval_queue', None)
+        if queue and new_level.value in ("observe", "suggest"):
+            rejected = queue.reject_all_pending("authority_downgrade")
+            if rejected > 0:
+                return f"Authority: {new_level.value} (odrzucono {rejected} oczekujacych)"
+
+        return f"Authority: {new_level.value}"
+
     def _cmd_help(args):
         """List available commands."""
         return (
@@ -1048,6 +1159,10 @@ def _register_telegram_commands(bridge, ctx):
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
             "/priority <id> <0-1> - zmien priorytet\n"
+            "/efapprove <id> - zatwierdz efektor\n"
+            "/efreject <id> - odrzuc efektor\n"
+            "/efstatus - status efektora\n"
+            "/authority [level] - zmien poziom autoryzacji\n"
             "/restart - restart Marii\n"
             "/help - ta pomoc"
         )
@@ -1061,6 +1176,10 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("learn", _cmd_learn)
     bridge.register_command("trace", _cmd_trace)
     bridge.register_command("memory", _cmd_memory)
+    bridge.register_command("efapprove", _cmd_efapprove)
+    bridge.register_command("efreject", _cmd_efreject)
+    bridge.register_command("efstatus", _cmd_efstatus)
+    bridge.register_command("authority", _cmd_authority)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 

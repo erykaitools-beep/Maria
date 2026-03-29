@@ -39,6 +39,10 @@ class PolicyContext:
     mode: str = "active"
     retention_rate: Optional[float] = None
     consecutive_failures: int = 0  # Same action type failures in a row
+    # Phase 5: Effector authority context
+    authority_level: str = "observe"   # AuthorityLevel.value for effector actions
+    tool_name: str = ""                # Specific tool being invoked (effector only)
+    tool_dangerous: bool = False       # ToolSpec.dangerous flag (effector only)
 
 
 @dataclass
@@ -99,19 +103,28 @@ def rule_degraded_mode_restrict(ctx: PolicyContext) -> Optional[PolicyResult]:
 
 def rule_restricted_actions_block(ctx: PolicyContext) -> Optional[PolicyResult]:
     """
-    RESTRICTED and FORBIDDEN actions always blocked (until HITL is ready).
+    RESTRICTED and FORBIDDEN actions: authority-aware gating.
+
+    For effector actions: delegates to rule_effector_authority().
+    For other RESTRICTED/FORBIDDEN actions: blocks as before.
 
     Safe-by-default: unknown action types are RESTRICTED.
     """
     from agent_core.autonomy.action_class import classify_action, ActionClassification
     classification = classify_action(ctx.action_type)
+
     if classification == ActionClassification.FORBIDDEN:
         return PolicyResult(
             decision=PolicyDecision.BLOCK,
             reasons=[f"forbidden: {ctx.action_type} is never allowed autonomously"],
             rule_name="restricted_actions_block",
         )
+
     if classification == ActionClassification.RESTRICTED:
+        # Phase 5: effector actions use authority-level gating
+        if ctx.action_type == "effector":
+            return rule_effector_authority(ctx)
+        # Other RESTRICTED actions: still blocked (HITL placeholder)
         return PolicyResult(
             decision=PolicyDecision.ESCALATE,
             reasons=[
@@ -121,6 +134,79 @@ def rule_restricted_actions_block(ctx: PolicyContext) -> Optional[PolicyResult]:
             rule_name="restricted_actions_block",
         )
     return None
+
+
+def rule_effector_authority(ctx: PolicyContext) -> Optional[PolicyResult]:
+    """
+    Authority-level gating for effector actions (Phase 5).
+
+    Checks ctx.authority_level to decide:
+    - OBSERVE: BLOCK (read-only, no invocation)
+    - SUGGEST: ESCALATE (notify operator, no execution)
+    - CONFIRM: ESCALATE (queue for approval, execute after confirm)
+    - BOUNDED: ALLOW for non-dangerous tools, ESCALATE for dangerous
+    - UNRESTRICTED: ALLOW (not activated in Phase 5)
+    """
+    from agent_core.autonomy.authority_level import AuthorityLevel
+
+    try:
+        level = AuthorityLevel(ctx.authority_level)
+    except ValueError:
+        level = AuthorityLevel.OBSERVE
+
+    if level == AuthorityLevel.OBSERVE:
+        return PolicyResult(
+            decision=PolicyDecision.BLOCK,
+            reasons=[
+                f"authority_level=observe: effector is read-only, "
+                f"tool={ctx.tool_name or 'unknown'}"
+            ],
+            rule_name="effector_authority",
+        )
+
+    if level == AuthorityLevel.SUGGEST:
+        return PolicyResult(
+            decision=PolicyDecision.ESCALATE,
+            reasons=[
+                f"authority_level=suggest: suggestion sent to operator, "
+                f"tool={ctx.tool_name or 'unknown'}"
+            ],
+            rule_name="effector_authority",
+        )
+
+    if level == AuthorityLevel.CONFIRM:
+        return PolicyResult(
+            decision=PolicyDecision.ESCALATE,
+            reasons=[
+                f"authority_level=confirm: awaiting operator approval, "
+                f"tool={ctx.tool_name or 'unknown'}"
+            ],
+            rule_name="effector_authority",
+        )
+
+    if level == AuthorityLevel.BOUNDED:
+        if ctx.tool_dangerous:
+            return PolicyResult(
+                decision=PolicyDecision.ESCALATE,
+                reasons=[
+                    f"authority_level=bounded: dangerous tool "
+                    f"'{ctx.tool_name}' requires approval"
+                ],
+                rule_name="effector_authority",
+            )
+        # Non-dangerous tool at BOUNDED level: allow
+        return None
+
+    if level == AuthorityLevel.UNRESTRICTED:
+        # Allow everything (not activated in Phase 5)
+        return None
+
+    # Fallback: block unknown levels
+    return PolicyResult(
+        decision=PolicyDecision.BLOCK,
+        reasons=[f"unknown authority_level={ctx.authority_level}"],
+        rule_name="effector_authority",
+    )
 
 
 # Rule type: callable(PolicyContext) -> Optional[PolicyResult]

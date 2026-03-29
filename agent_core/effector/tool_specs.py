@@ -119,3 +119,11 @@ def validate_args(tool_name: str, args: Dict) -> Tuple[bool, str]:
 def get_tool_spec(tool_name: str) -> Optional[ToolSpec]:
     """Get spec for a tool. Returns None if unknown."""
     return TOOL_SPECS.get(tool_name)
+
+
+def is_tool_dangerous(tool_name: str) -> bool:
+    """Check if a tool is marked as dangerous. Unknown tools are dangerous."""
+    spec = TOOL_SPECS.get(tool_name)
+    if spec is None:
+        return True  # unknown = dangerous by default
+    return spec.dangerous

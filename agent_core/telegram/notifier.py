@@ -229,6 +229,53 @@ class TelegramNotifier:
             self._mark_sent("consecutive_failure")
         return ok
 
+    def notify_effector_request(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        goal_description: str = "",
+        authority_level: str = "",
+        request_id: str = "",
+    ) -> bool:
+        """
+        Send effector approval request to operator (Phase 5).
+
+        Always sent (no cooldown) - operator needs to see every request.
+        """
+        args_str = ", ".join(
+            f"{k}={str(v)[:60]}" for k, v in list(tool_args.items())[:5]
+        )
+        lines = [
+            f"*Efektor: {tool_name}*",
+            f"Cel: {goal_description[:120]}" if goal_description else "",
+            f"Args: {args_str}" if args_str else "",
+            f"Level: {authority_level}" if authority_level else "",
+        ]
+        if request_id:
+            prefix = request_id[:12] if len(request_id) > 12 else request_id
+            lines.append(f"\n/efapprove {prefix}")
+            lines.append(f"/efreject {prefix}")
+
+        text = "\n".join(line for line in lines if line)
+        return self._bot.send_message(text)
+
+    def notify_effector_result(
+        self,
+        tool_name: str,
+        success: bool,
+        summary: str = "",
+    ) -> bool:
+        """Send effector execution result to operator (Phase 5)."""
+        status = "OK" if success else "BLAD"
+        lines = [
+            f"*Efektor wynik: {tool_name} [{status}]*",
+        ]
+        if summary:
+            lines.append(summary[:300])
+
+        text = "\n".join(lines)
+        return self._bot.send_message(text)
+
     def send_raw(self, text: str) -> bool:
         """Send arbitrary message (no cooldown)."""
         return self._bot.send_message(text)

@@ -18,6 +18,7 @@ class PlanStatus(Enum):
     COMPLETED = "completed"      # Executed successfully
     FAILED = "failed"            # Execution failed
     SKIPPED = "skipped"          # Skipped by guard
+    AWAITING_APPROVAL = "awaiting_approval"  # Phase 5: waiting for operator
 
 
 class ActionType(Enum):

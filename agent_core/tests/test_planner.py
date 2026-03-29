@@ -145,9 +145,9 @@ def _make_mock_goal_store(goals=None):
 
 class TestPlanStatus:
     def test_all_statuses(self):
-        assert len(PlanStatus) == 5
+        assert len(PlanStatus) == 6
         values = {s.value for s in PlanStatus}
-        assert values == {"pending", "executing", "completed", "failed", "skipped"}
+        assert values == {"pending", "executing", "completed", "failed", "skipped", "awaiting_approval"}
 
 
 class TestActionType:

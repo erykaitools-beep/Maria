@@ -32,6 +32,10 @@ from agent_core.autonomy.action_class import (
     ActionClassification,
     classify_action,
 )
+from agent_core.autonomy.authority_level import (
+    AuthorityLevel,
+    AuthorityManager,
+)
 from agent_core.autonomy.policy_rules import (
     PolicyContext,
     PolicyDecision,
@@ -76,12 +80,14 @@ class AutonomyPolicy:
         rate_limiter: Optional[ActionRateLimiter] = None,
         escalation_handler: Optional[EscalationHandler] = None,
         log_path: Optional[Path] = None,
+        authority_manager: Optional[AuthorityManager] = None,
     ):
         self._engine = engine or PolicyEngine()
         self._rate_limiter = rate_limiter or ActionRateLimiter()
         self._escalation = escalation_handler or EscalationHandler(
             log_path=log_path
         )
+        self._authority = authority_manager
         # Track consecutive failures per action type
         self._consecutive_failures: Dict[str, int] = {}
         # Track when the last failure was recorded per action type
@@ -149,6 +155,23 @@ class AutonomyPolicy:
                 )
 
         # Step 2: Policy rules check
+        # Phase 5: populate authority context for effector actions
+        authority_level = "observe"
+        tool_name = ""
+        tool_dangerous = False
+        if action_type == "effector":
+            if self._authority:
+                authority_level = self._authority.get_level().value
+            params = action_params or {}
+            tool_name = params.get("tool_name", "")
+            if tool_name:
+                try:
+                    from agent_core.effector.tool_specs import get_tool_spec
+                    spec = get_tool_spec(tool_name)
+                    tool_dangerous = spec.dangerous if spec else True  # unknown = dangerous
+                except Exception:
+                    tool_dangerous = True  # unknown tool = treat as dangerous
+
         ctx = PolicyContext(
             action_type=action_type,
             action_params=action_params or {},
@@ -160,6 +183,9 @@ class AutonomyPolicy:
             consecutive_failures=self._consecutive_failures.get(
                 action_type, 0
             ),
+            authority_level=authority_level,
+            tool_name=tool_name,
+            tool_dangerous=tool_dangerous,
         )
 
         result = self._engine.evaluate(ctx)
@@ -226,3 +252,28 @@ class AutonomyPolicy:
     def get_recent_escalations(self, limit: int = 10) -> List[Dict]:
         """Get recent escalation records."""
         return self._escalation.get_recent(limit=limit)
+
+    # -- Phase 5: Authority management -----------------------------------
+
+    def set_authority_manager(self, manager: AuthorityManager) -> None:
+        """Set authority manager (for late wiring)."""
+        self._authority = manager
+
+    def get_authority_level(self) -> AuthorityLevel:
+        """Get current effector authority level."""
+        if self._authority:
+            return self._authority.get_level()
+        return AuthorityLevel.OBSERVE
+
+    def set_authority_level(self, level: AuthorityLevel) -> bool:
+        """Change effector authority level. Returns False if blocked."""
+        if not self._authority:
+            logger.warning("No authority manager configured")
+            return False
+        return self._authority.set_level(level)
+
+    def get_authority_status(self) -> Dict:
+        """Get authority status for REPL/Telegram."""
+        if self._authority:
+            return self._authority.get_status()
+        return {"authority_level": "observe", "note": "no manager configured"}

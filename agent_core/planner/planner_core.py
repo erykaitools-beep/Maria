@@ -98,6 +98,8 @@ class PlannerCore:
         self._self_analysis = None
         self._creative_module = None
         self._trace_store = None
+        self._approval_queue = None
+        self._telegram_notifier = None
         self._current_trace: Optional[DecisionTrace] = None
 
         # Load persisted state
@@ -163,6 +165,14 @@ class PlannerCore:
         """Set K13 Creative module for strategic reflection."""
         self._creative_module = creative
         self.executor.set_creative_module(creative)
+
+    def set_approval_queue(self, queue) -> None:
+        """Set ApprovalQueue for effector HITL (Phase 5)."""
+        self._approval_queue = queue
+
+    def set_telegram_notifier(self, notifier) -> None:
+        """Set TelegramNotifier for effector request notifications (Phase 5)."""
+        self._telegram_notifier = notifier
 
     def set_trace_store(self, store) -> None:
         """Set TraceStore for decision traceability (Phase 1)."""
@@ -255,6 +265,15 @@ class PlannerCore:
             self._save_state()
             clear_episode_id()
             return None
+
+        # -- STEP 1.5: CHECK APPROVED EFFECTOR REQUESTS (Phase 5) --
+        if self._approval_queue:
+            self._approval_queue.expire_stale()
+            approved = self._approval_queue.get_approved_ready()
+            if approved:
+                plan = self._execute_approved_effector(approved, trace)
+                if plan is not None:
+                    return plan
 
         # -- STEP 2: PERCEIVE --
         context = self._gather_context()
@@ -859,13 +878,25 @@ class PlannerCore:
             if not check.allowed:
                 k7_decision = check.blocked_result.get("decision", "block") if check.blocked_result else "block"
                 k7_reasons = check.blocked_result.get("reasons", []) if check.blocked_result else []
+                k7_rule = check.rule_name or ""
+
                 if trace:
                     trace.k7_decision = k7_decision
                     trace.k7_reasons = k7_reasons
                     trace.add_step("k7_policy", "check", "blocked", {
                         "decision": k7_decision,
                         "reasons": k7_reasons,
+                        "rule": k7_rule,
                     })
+
+                # Phase 5: Handle effector ESCALATE with authority-aware flow
+                if (plan.action_type == ActionType.EFFECTOR
+                        and k7_decision == "escalate"
+                        and k7_rule == "effector_authority"):
+                    return self._handle_effector_escalation(
+                        plan, check, trace,
+                    )
+
                 plan.status = PlanStatus.FAILED
                 plan.result = check.blocked_result or {
                     "success": False, "blocked_by": "autonomy_policy"
@@ -1218,6 +1249,216 @@ class PlannerCore:
         return True
 
     # -- Internal: human-readable messages -------------------
+
+    # -- Phase 5: Effector approval flow --
+
+    def _handle_effector_escalation(self, plan, check, trace):
+        """
+        Handle K7 ESCALATE for effector actions based on authority level.
+
+        - SUGGEST: notify operator, mark FAILED (no queue)
+        - CONFIRM/BOUNDED+dangerous: submit to approval queue, mark AWAITING_APPROVAL
+        """
+        from agent_core.tracing.episode import current_episode_id, clear_episode_id
+
+        authority_level = ""
+        reasons = check.blocked_result.get("reasons", []) if check.blocked_result else []
+        for r in reasons:
+            if "authority_level=" in r:
+                # Extract level from reason string
+                for part in r.split(","):
+                    if "authority_level=" in part:
+                        authority_level = part.split("=")[1].strip().split(":")[0]
+                        break
+                break
+
+        tool_name = plan.action_params.get("tool_name", "")
+        tool_args = plan.action_params.get("tool_args", {})
+        episode_id = current_episode_id() or ""
+
+        if authority_level == "suggest":
+            # Notify operator but don't queue
+            if self._telegram_notifier:
+                try:
+                    self._telegram_notifier.notify_effector_request(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        goal_description=plan.goal_description,
+                        authority_level=authority_level,
+                    )
+                except Exception:
+                    pass
+
+            plan.status = PlanStatus.FAILED
+            plan.result = {
+                "success": False,
+                "blocked_by": "authority_suggest",
+                "tool_name": tool_name,
+                "notification_sent": True,
+            }
+            plan.message = f"Sugestia: {tool_name} (operator powiadomiony)"
+
+        elif authority_level in ("confirm", "bounded"):
+            # Submit to approval queue
+            if self._approval_queue:
+                request = self._approval_queue.submit(
+                    plan_id=plan.plan_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    goal_id=plan.goal_id,
+                    goal_description=plan.goal_description,
+                    authority_level=authority_level,
+                    episode_id=episode_id,
+                    action_params=plan.action_params,
+                )
+
+                # Notify operator
+                if self._telegram_notifier:
+                    try:
+                        self._telegram_notifier.notify_effector_request(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            goal_description=plan.goal_description,
+                            authority_level=authority_level,
+                            request_id=request.request_id,
+                        )
+                    except Exception:
+                        pass
+
+                plan.status = PlanStatus.AWAITING_APPROVAL
+                plan.result = {
+                    "success": False,
+                    "awaiting_approval": True,
+                    "request_id": request.request_id,
+                    "tool_name": tool_name,
+                }
+                plan.message = f"Czekam na zatwierdzenie: {tool_name} ({request.request_id[:12]})"
+            else:
+                # No queue configured - fall back to FAILED
+                plan.status = PlanStatus.FAILED
+                plan.result = {"success": False, "blocked_by": "no_approval_queue"}
+                plan.message = f"Brak kolejki zatwierdzen dla {tool_name}"
+        else:
+            # Other levels (observe) - standard block
+            plan.status = PlanStatus.FAILED
+            plan.result = check.blocked_result or {
+                "success": False, "blocked_by": "authority_observe"
+            }
+            plan.message = f"Efektor zablokowany (level={authority_level})"
+
+        self._state.total_plans_executed += 1
+
+        if trace:
+            trace.finalize(
+                success=False,
+                result_summary=f"effector_{authority_level}: {plan.status.value}",
+            )
+            self._save_trace(trace)
+
+        self._emit_cycle_complete(self._state.last_cycle_tick, plan=plan)
+        self._log_decision(plan)
+        self._save_state()
+        clear_episode_id()
+        return plan
+
+    def _execute_approved_effector(self, approved_request, trace):
+        """
+        Execute a previously approved effector request.
+
+        Creates a Plan from the ApprovalRequest and runs through
+        the normal K10 safety + ActionExecutor flow.
+        """
+        from agent_core.tracing.episode import clear_episode_id
+
+        plan = create_plan(
+            goal_id=approved_request.goal_id,
+            goal_description=approved_request.goal_description,
+            action_type=ActionType.EFFECTOR,
+            action_params=approved_request.action_params or {
+                "tool_name": approved_request.tool_name,
+                "tool_args": approved_request.tool_args,
+            },
+        )
+        plan.trace_id = approved_request.episode_id
+        plan.message = f"Wykonuje zatwierdzony efektor: {approved_request.tool_name}"
+        plan.metadata["approval_request_id"] = approved_request.request_id
+
+        if trace:
+            trace.plan_id = plan.plan_id
+            trace.action_type = plan.action_type.value
+            trace.action_params = plan.action_params
+            trace.goal_id = plan.goal_id
+            trace.goal_description = plan.goal_description
+            trace.add_step("planner", "approved_effector", "executing", {
+                "request_id": approved_request.request_id,
+                "tool_name": approved_request.tool_name,
+            })
+
+        # K10: before_action
+        if self._action_safety:
+            try:
+                self._action_safety.before_action(
+                    plan_id=plan.plan_id,
+                    action_type=plan.action_type.value,
+                    action_params=plan.action_params,
+                    goal_id=plan.goal_id,
+                    metadata=plan.metadata,
+                )
+            except Exception:
+                pass
+
+        plan.status = PlanStatus.EXECUTING
+        start = time.time()
+        result = self.executor.execute(plan)
+        plan.result = result
+        plan.duration_ms = (time.time() - start) * 1000
+        plan.status = (
+            PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
+        )
+
+        # K10: after_action
+        if self._action_safety:
+            try:
+                self._action_safety.after_action(
+                    plan_id=plan.plan_id,
+                    success=result.get("success", False),
+                    result=result,
+                    duration_ms=plan.duration_ms,
+                )
+            except Exception:
+                pass
+
+        # K7: record outcome
+        if self._autonomy_policy:
+            self._autonomy_policy.record_execution(
+                plan.action_type.value, result.get("success", False),
+            )
+
+        # Notify operator of result
+        if self._telegram_notifier:
+            try:
+                self._telegram_notifier.notify_effector_result(
+                    tool_name=approved_request.tool_name,
+                    success=result.get("success", False),
+                    summary=str(result.get("tool_result", result.get("error", "")))[:200],
+                )
+            except Exception:
+                pass
+
+        self._state.total_plans_executed += 1
+
+        if trace:
+            trace.finalize(
+                success=result.get("success", False),
+                result_summary=f"effector_executed: {approved_request.tool_name}",
+            )
+            self._save_trace(trace)
+
+        self._emit_cycle_complete(self._state.last_cycle_tick, plan=plan)
+        self._log_decision(plan)
+        self._save_state()
+        clear_episode_id()
+        return plan
 
     def _format_message(self, plan: Plan) -> str:
         """Generate human-readable message for a plan decision."""
