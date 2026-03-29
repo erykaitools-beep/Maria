@@ -4,6 +4,8 @@ Belief Model - dataclasses for World Model (K6).
 Typed entities, belief classification, confidence tracking.
 Frozen dataclasses (like PerceptionEvent).
 
+v2: Evidence tracking - beliefs carry provenance evidence tuples.
+
 Kontrakt: docs/CONTRACTS.md - Kontrakt 6: World Model
 ADR-013: Rule-based, zero LLM, deterministic
 """
@@ -63,10 +65,11 @@ class Belief:
     revision: int                  # Revision counter (MERGE semantics)
     superseded_by: Optional[str]   # belief_id of newer version
     related_entities: Tuple[str, ...]
+    evidence: Tuple[Tuple[str, str, float], ...] = ()  # v2: (source_type, source_ref, weight)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dict for JSONL storage."""
-        return {
+        d = {
             "belief_id": self.belief_id,
             "entity": self.entity,
             "entity_type": self.entity_type.value,
@@ -82,10 +85,19 @@ class Belief:
             "superseded_by": self.superseded_by,
             "related_entities": list(self.related_entities),
         }
+        if self.evidence:
+            d["evidence"] = [list(e) for e in self.evidence]
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Belief":
-        """Deserialize from dict."""
+        """Deserialize from dict. Backward-compatible (evidence defaults to empty)."""
+        # v2: parse evidence tuples, fallback to empty for old records
+        raw_evidence = d.get("evidence", [])
+        evidence = tuple(
+            tuple(e) for e in raw_evidence
+            if isinstance(e, (list, tuple)) and len(e) >= 3
+        )
         return Belief(
             belief_id=d["belief_id"],
             entity=d["entity"],
@@ -101,6 +113,7 @@ class Belief:
             revision=d.get("revision", 1),
             superseded_by=d.get("superseded_by"),
             related_entities=tuple(d.get("related_entities", [])),
+            evidence=evidence,
         )
 
 
@@ -116,6 +129,7 @@ def create_belief(
     related_entities: Optional[List[str]] = None,
     belief_id: Optional[str] = None,
     revision: int = 1,
+    evidence: Optional[List[Tuple[str, str, float]]] = None,
 ) -> Belief:
     """Factory function for creating a Belief."""
     now = time.time()
@@ -134,4 +148,5 @@ def create_belief(
         revision=revision,
         superseded_by=None,
         related_entities=tuple(related_entities or []),
+        evidence=tuple(evidence or []),
     )

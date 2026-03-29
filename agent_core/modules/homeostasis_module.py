@@ -1235,12 +1235,70 @@ def _register_telegram_commands(bridge, ctx):
 
         return "\n".join(parts)
 
+    def _cmd_beliefs(args):
+        """Show belief store stats and run maintenance."""
+        wm = getattr(ctx, 'world_model', None)
+        if not wm:
+            return "WorldModel niedostepny."
+
+        args = args.strip()
+
+        # /beliefs maintain - run full maintenance
+        if args == "maintain":
+            try:
+                results = wm.maintain()
+                parts = ["*Belief maintenance complete:*"]
+                for k, v in results.items():
+                    parts.append(f"  {k}: {v}")
+                return "\n".join(parts)
+            except Exception as e:
+                return f"Blad maintenance: {e}"
+
+        # /beliefs gaps - weakest topics
+        if args == "gaps":
+            try:
+                gaps = wm.query.get_knowledge_gaps()[:10]
+                if not gaps:
+                    return "Brak luk w wiedzy."
+                lines = ["*Najslabsze tematy:*"]
+                for g in gaps:
+                    lines.append(
+                        f"  {g['topic']}: {g['confidence']:.0%} "
+                        f"({g.get('belief_count', '?')} beliefs)"
+                    )
+                return "\n".join(lines)
+            except Exception as e:
+                return f"Blad: {e}"
+
+        # /beliefs - stats overview (default)
+        try:
+            stats = wm.stats()
+            by_type = stats.get("by_belief_type", {})
+            by_etype = stats.get("by_entity_type", {})
+            return (
+                f"*Belief Store v2:*\n"
+                f"Active: {stats.get('total', 0)} beliefs\n"
+                f"All records: {stats.get('total_all', 0)}\n"
+                f"Avg confidence: {stats.get('avg_confidence', 0):.0%}\n"
+                f"\n*By type:*\n"
+                f"  FACT: {by_type.get('fact', 0)}\n"
+                f"  OBSERVATION: {by_type.get('observation', 0)}\n"
+                f"  HYPOTHESIS: {by_type.get('hypothesis', 0)}\n"
+                f"\n*By entity:*\n"
+                f"  Topics: {by_etype.get('topic', 0)}\n"
+                f"  Files: {by_etype.get('file', 0)}\n"
+                f"  Concepts: {by_etype.get('concept', 0)}"
+            )
+        except Exception as e:
+            return f"Blad: {e}"
+
     def _cmd_help(args):
         """List available commands."""
         return (
             "*Komendy ClawBot:*\n"
             "/status - stan systemu\n"
             "/goals - lista celow\n"
+            "/beliefs [gaps|maintain] - belief store\n"
             "/trace [N|stats|failed|ep-ID] - traces\n"
             "/memory <temat> - co Maria wie\n"
             "/memory gaps - luki w wiedzy\n"
@@ -1267,6 +1325,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("trace", _cmd_trace)
     bridge.register_command("memory", _cmd_memory)
     bridge.register_command("validate", _cmd_validate)
+    bridge.register_command("beliefs", _cmd_beliefs)
     bridge.register_command("efapprove", _cmd_efapprove)
     bridge.register_command("efreject", _cmd_efreject)
     bridge.register_command("efstatus", _cmd_efstatus)

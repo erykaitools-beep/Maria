@@ -136,6 +136,7 @@ class BeliefBuilder:
                 source_id=f"topic:{tag}",
                 tags=[tag],
                 related_entities=list(files)[:10],
+                evidence=[(BeliefSource.LEARNING.value, f"topic:{tag}", confidence)],
             )
             store.add(belief)
             created += 1
@@ -191,6 +192,9 @@ class BeliefBuilder:
                 content = f"Plik '{file_id}' nowy, nie rozpoczety"
 
             tags = [t.lower() for t in rec.get("tags", [])][:10]
+            ev = [(BeliefSource.LEARNING.value, f"file:{file_id}", confidence)]
+            if avg_score > 0:
+                ev.append((BeliefSource.EXAM.value, f"exam:{file_id}", avg_score))
             belief = create_belief(
                 entity=file_id,
                 entity_type=EntityType.FILE,
@@ -200,6 +204,7 @@ class BeliefBuilder:
                 source=BeliefSource.LEARNING,
                 source_id=f"file:{file_id}",
                 tags=tags,
+                evidence=ev,
             )
             store.add(belief)
             created += 1
@@ -254,6 +259,9 @@ class BeliefBuilder:
                     confidence = min(1.0, confidence + 0.2)
                     belief_type = BeliefType.FACT
 
+                ev = [(BeliefSource.MEMORY_FACT.value, concept_id, confidence)]
+                if best_score >= 0.7:
+                    ev.append((BeliefSource.EXAM.value, f"exam:{source_file}", best_score))
                 belief = create_belief(
                     entity=kp_short,
                     entity_type=EntityType.CONCEPT,
@@ -264,6 +272,7 @@ class BeliefBuilder:
                     source_id=concept_id,
                     tags=normalized_tags,
                     related_entities=[source_file],
+                    evidence=ev,
                 )
                 store.add(belief)
                 created += 1
@@ -298,6 +307,8 @@ class BeliefBuilder:
             elif file_id in belief.related_entities:
                 candidates.append(belief)
 
+        exam_evidence = [(BeliefSource.EXAM.value, f"exam:{file_id}", score)]
+
         for belief in candidates:
             if passed:
                 new_conf = min(1.0, belief.confidence + 0.1)
@@ -306,7 +317,10 @@ class BeliefBuilder:
                 new_conf = max(0.1, belief.confidence - 0.15)
                 new_type = None  # Keep current type
 
-            result = store.revise(belief.belief_id, new_conf, new_type)
+            result = store.revise(
+                belief.belief_id, new_conf, new_type,
+                new_evidence=exam_evidence,
+            )
             if result:
                 revised += 1
 

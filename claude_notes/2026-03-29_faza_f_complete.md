@@ -42,8 +42,28 @@ COMPLETE. Wszystkie moduly:
 - Web UI -> /validation page
 - Telegram -> /validate command
 
+## Belief Store v2 (ta sama sesja, po Faza F)
+
+Zaimplementowane:
+- **belief_model.py** - evidence field: `Tuple[Tuple[str, str, float], ...]` (backward-compatible)
+- **belief_maintenance.py** (NOWY, ~310 lines):
+  - `compact_jsonl()` - rewrite JSONL without superseded
+  - `compute_belief_score()` - 4-factor: confidence + freshness + revision + references
+  - `smart_prune()` - replaces naive confidence-only pruning
+  - `compute_decayed_confidence()` - exponential decay (FACT 90d, OBS 30d, HYP 14d)
+  - `apply_decay()` - batch, idempotent, min_delta=0.05
+  - `find_exact_duplicates()` + `merge_duplicate_pair()` + `deduplicate()`
+  - `run_maintenance()` - decay -> dedup -> prune -> compact
+- **belief_store.py** - revise() merges evidence, _enforce_cap() uses smart_prune, compact()
+- **belief_builder.py** - evidence populated in all build methods + update_from_exam
+- **__init__.py** - compact(), apply_decay(), deduplicate(), maintain() facade methods
+- **Planner** - maintain() po EVALUATE (~1/h)
+- **Telegram** - /beliefs [gaps|maintain]
+- **Web UI** - /api/beliefs/{stats,gaps,recent}
+
+97 testow world_model (69 + 28 nowych), 2476 total.
+
 ## Co dalej
-- Restart Maria (systemd) zeby nowe zmiany weszly
-- Belief Store compaction
-- CDL dopracowanie
+- CDL dopracowanie (Etap 1 roadmapy)
+- Capability/Task Router (Etap 2)
 - Vision/Smart Home czeka na sprzet

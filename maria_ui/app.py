@@ -2524,6 +2524,95 @@ def api_traces_failed():
 
 
 # =============================================================
+# Belief Store v2 API
+# =============================================================
+
+
+def _read_beliefs():
+    """Read current beliefs from JSONL."""
+    import os
+    beliefs_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "meta_data", "beliefs.jsonl"
+    )
+    beliefs = {}
+    try:
+        with open(beliefs_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        rec = json.loads(line)
+                        beliefs[rec["belief_id"]] = rec
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+    except IOError:
+        pass
+    # Return only current (non-superseded)
+    return [b for b in beliefs.values() if not b.get("superseded_by")]
+
+
+@app.route('/api/beliefs/stats')
+@require_auth
+def api_beliefs_stats():
+    """Get belief store stats."""
+    beliefs = _read_beliefs()
+    if not beliefs:
+        return jsonify({"total": 0})
+
+    by_type = {}
+    by_entity_type = {}
+    total_conf = 0.0
+    total_evidence = 0
+
+    for b in beliefs:
+        bt = b.get("belief_type", "?")
+        by_type[bt] = by_type.get(bt, 0) + 1
+        et = b.get("entity_type", "?")
+        by_entity_type[et] = by_entity_type.get(et, 0) + 1
+        total_conf += b.get("confidence", 0)
+        total_evidence += len(b.get("evidence", []))
+
+    return jsonify({
+        "total": len(beliefs),
+        "avg_confidence": round(total_conf / len(beliefs), 3) if beliefs else 0,
+        "total_evidence": total_evidence,
+        "by_belief_type": by_type,
+        "by_entity_type": by_entity_type,
+    })
+
+
+@app.route('/api/beliefs/gaps')
+@require_auth
+def api_beliefs_gaps():
+    """Get knowledge gaps (lowest confidence topics)."""
+    beliefs = _read_beliefs()
+    topics = {}
+    for b in beliefs:
+        if b.get("entity_type") == "topic":
+            entity = b.get("entity", "?")
+            conf = b.get("confidence", 0)
+            if entity not in topics or conf < topics[entity]:
+                topics[entity] = conf
+
+    gaps = sorted(topics.items(), key=lambda x: x[1])[:15]
+    return jsonify({
+        "gaps": [{"topic": t, "confidence": c} for t, c in gaps],
+        "count": len(gaps),
+    })
+
+
+@app.route('/api/beliefs/recent')
+@require_auth
+def api_beliefs_recent():
+    """Get most recently updated beliefs."""
+    beliefs = _read_beliefs()
+    beliefs.sort(key=lambda b: b.get("updated_at", 0), reverse=True)
+    limit = request.args.get('limit', 20, type=int)
+    return jsonify({"beliefs": beliefs[:limit], "count": min(limit, len(beliefs))})
+
+
+# =============================================================
 # Cross-Validation API (Faza F - Multi-Source Learning)
 # =============================================================
 

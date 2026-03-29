@@ -4,8 +4,9 @@ World Model (K6) for M.A.R.I.A.
 Structured knowledge representation:
 - Typed entities (topic, file, concept, person, place, module)
 - Belief classification (fact, observation, hypothesis)
-- Confidence tracking per belief
+- Confidence tracking per belief with evidence provenance (v2)
 - Belief revision on new evidence (exam results)
+- v2: Compaction, smart pruning, confidence decay, dedup
 - Queryable interface for Planner
 
 Kontrakt: docs/CONTRACTS.md - Kontrakt 6: World Model
@@ -103,3 +104,28 @@ class WorldModel:
     def stats(self) -> Dict[str, Any]:
         """Summary stats."""
         return self.store.stats()
+
+    # -- v2: Maintenance operations --
+
+    def compact(self) -> int:
+        """Compact beliefs.jsonl by removing superseded records."""
+        from agent_core.world_model.belief_maintenance import compact_jsonl
+        return compact_jsonl(self.store)
+
+    def apply_decay(self) -> int:
+        """Apply confidence decay to stale beliefs."""
+        from agent_core.world_model.belief_maintenance import apply_decay
+        return apply_decay(self.store)
+
+    def deduplicate(self, semantic_memory=None) -> int:
+        """Remove duplicate beliefs via exact + semantic similarity."""
+        from agent_core.world_model.belief_maintenance import deduplicate
+        return deduplicate(self.store, semantic_memory)
+
+    def maintain(self, semantic_memory=None) -> Dict[str, int]:
+        """
+        Run full maintenance cycle: decay -> dedup -> prune -> compact.
+        Intended for SLEEP phase or periodic trigger.
+        """
+        from agent_core.world_model.belief_maintenance import run_maintenance
+        return run_maintenance(self.store, semantic_memory)

@@ -82,6 +82,8 @@
 | **2026-03-29** | Faza F: planner trigger (_maybe_validate, 6h cooldown), belief confidence update, K7 GUARDED |
 | **2026-03-29** | Web UI /validation page + Telegram /validate command |
 | **2026-03-29** | Roadmap v1.0 - aktualizacja do aktualnego stanu (K1-K13, Stabilization, Faza F) |
+| **2026-03-29** | **Belief Store v2** - evidence tracking, compaction, smart pruning, confidence decay, dedup (28 testow) |
+| **2026-03-29** | Belief maintenance wired: planner EVALUATE -> maintain(), Telegram /beliefs, Web UI /api/beliefs |
 
 ## Aktualny stan projektu
 
@@ -89,7 +91,7 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2448 passing |
+| **Testy** | 2476 passing |
 | **Faza** | Stabilization COMPLETE + Faza F Multi-Source Learning COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
@@ -619,10 +621,23 @@ Usunieto:
 - [x] Telegram /validate [disputes|unresolved] command
 - [x] 18 nowych testow (planner trigger + telegram + belief update)
 
-### NASTEPNE: Autorozwoj i stabilnosc
-- Belief Store ulepszenia - compaction oparta na waznosci, dedup, unifikacja z vector store
+### DONE: Belief Store v2 (2026-03-29)
+- [x] Evidence tracking: beliefs carry provenance tuples (source_type, source_ref, weight)
+- [x] JSONL Compaction: compact() removes superseded records
+- [x] Smart Pruning: 4-factor scoring (confidence + freshness + revisions + references)
+- [x] Confidence Decay: FACT 90d, OBSERVATION 30d, HYPOTHESIS 14d, floor 0.05
+- [x] Automatic Dedup: exact matching + optional semantic (threshold 0.85)
+- [x] maintain() convenience: decay -> dedup -> prune -> compact
+- [x] Planner integration: maintain() po EVALUATE (~1/h)
+- [x] Telegram /beliefs [gaps|maintain] command
+- [x] Web UI /api/beliefs/{stats,gaps,recent} endpoints
+- [x] 28 nowych testow (2476 total)
+
+### NASTEPNE: Autorozwoj i stabilnosc (Etap 1-2 z roadmapy)
 - CDL dopracowanie - lepsze rozpoznawanie intencji, feedback loop
-- Web UI v2 polish (dense mode, sidebar)
+- Capability/Task Router (Etap 2) - unified routing miedzy organami
+- Operator UX / dense mode (Web UI v2 polish)
+- Web UI /beliefs page (visual dashboard)
 
 ### ODROCZONE: Zmysly (czeka na sprzet)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
@@ -1017,4 +1032,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-29 (Faza F Multi-Source Learning COMPLETE + Roadmap v1.0, 2448 testow)*
+*Ostatnia aktualizacja: 2026-03-29 (Belief Store v2 + Faza F + Roadmap v1.0, 2476 testow)*

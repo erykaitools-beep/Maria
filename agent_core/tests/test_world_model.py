@@ -1038,3 +1038,544 @@ class TestPlannerWorldModelIntegration:
         planner._finalize_plan(plan)
 
         wm.process_exam_result.assert_not_called()
+
+
+# ============================================================
+# Belief Store v2: Evidence Tracking
+# ============================================================
+
+
+class TestBeliefEvidence:
+    """Tests for v2 evidence field."""
+
+    def test_create_belief_with_evidence(self):
+        b = create_belief(
+            entity="python",
+            entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT,
+            content="Python jest jezykiem programowania",
+            confidence=0.9,
+            source=BeliefSource.LEARNING,
+            evidence=[("learning", "topic:python", 0.9)],
+        )
+        assert len(b.evidence) == 1
+        assert b.evidence[0] == ("learning", "topic:python", 0.9)
+
+    def test_create_belief_without_evidence_default_empty(self):
+        b = create_belief(
+            entity="test",
+            entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION,
+            content="test",
+            confidence=0.5,
+            source=BeliefSource.SYSTEM,
+        )
+        assert b.evidence == ()
+
+    def test_evidence_serialization_roundtrip(self):
+        b = create_belief(
+            entity="fizyka",
+            entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT,
+            content="Fizyka",
+            confidence=0.8,
+            source=BeliefSource.EXAM,
+            evidence=[
+                ("learning", "topic:fizyka", 0.6),
+                ("exam", "exam:file_001", 0.85),
+            ],
+        )
+        d = b.to_dict()
+        assert "evidence" in d
+        assert len(d["evidence"]) == 2
+
+        restored = Belief.from_dict(d)
+        assert len(restored.evidence) == 2
+        assert restored.evidence[0] == ("learning", "topic:fizyka", 0.6)
+        assert restored.evidence[1] == ("exam", "exam:file_001", 0.85)
+
+    def test_from_dict_backward_compat_no_evidence(self):
+        """Old belief records without evidence field should load fine."""
+        d = {
+            "belief_id": "belief-old",
+            "entity": "test",
+            "entity_type": "topic",
+            "belief_type": "observation",
+            "content": "old belief",
+            "confidence": 0.5,
+            "source": "system",
+        }
+        b = Belief.from_dict(d)
+        assert b.evidence == ()
+
+    def test_evidence_not_serialized_when_empty(self):
+        b = create_belief(
+            entity="test", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="test",
+            confidence=0.5, source=BeliefSource.SYSTEM,
+        )
+        d = b.to_dict()
+        assert "evidence" not in d
+
+    def test_revise_merges_evidence(self, tmp_path):
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b = create_belief(
+            entity="fizyka", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Fizyka",
+            confidence=0.5, source=BeliefSource.LEARNING,
+            evidence=[("learning", "topic:fizyka", 0.5)],
+        )
+        store.add(b)
+
+        revised = store.revise(
+            b.belief_id, 0.8, BeliefType.FACT,
+            new_evidence=[("exam", "exam:file_001", 0.85)],
+        )
+        assert revised is not None
+        assert len(revised.evidence) == 2
+        assert revised.evidence[0] == ("learning", "topic:fizyka", 0.5)
+        assert revised.evidence[1] == ("exam", "exam:file_001", 0.85)
+
+    def test_revise_dedup_evidence_by_ref(self, tmp_path):
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b = create_belief(
+            entity="fizyka", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Fizyka",
+            confidence=0.5, source=BeliefSource.LEARNING,
+            evidence=[("learning", "topic:fizyka", 0.5)],
+        )
+        store.add(b)
+
+        # Same source_ref should not duplicate
+        revised = store.revise(
+            b.belief_id, 0.6,
+            new_evidence=[("learning", "topic:fizyka", 0.6)],
+        )
+        assert len(revised.evidence) == 1  # Deduped
+
+
+# ============================================================
+# Belief Store v2: Compaction
+# ============================================================
+
+
+class TestCompaction:
+    def test_compact_removes_superseded(self, tmp_path):
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b1 = create_belief(
+            entity="a", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="a",
+            confidence=0.5, source=BeliefSource.SYSTEM,
+        )
+        store.add(b1)
+        store.save()
+
+        # Revise creates superseded record
+        store.revise(b1.belief_id, 0.8)
+        store.save()
+
+        # JSONL should have 3 lines (original + superseded + revised)
+        lines_before = len(open(tmp_path / "beliefs.jsonl").readlines())
+        assert lines_before == 3
+
+        removed = store.compact()
+        assert removed > 0
+
+        # After compaction: only 2 records (superseded + revised in-memory)
+        lines_after = len(open(tmp_path / "beliefs.jsonl").readlines())
+        assert lines_after < lines_before
+
+    def test_compact_preserves_current_beliefs(self, tmp_path):
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        for i in range(5):
+            b = create_belief(
+                entity=f"topic_{i}", entity_type=EntityType.TOPIC,
+                belief_type=BeliefType.OBSERVATION, content=f"topic {i}",
+                confidence=0.5, source=BeliefSource.SYSTEM,
+            )
+            store.add(b)
+        store.save()
+
+        before_count = len(store.get_current())
+        store.compact()
+        after_count = len(store.get_current())
+        assert after_count == before_count
+
+    def test_compact_on_empty_store(self, tmp_path):
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        removed = store.compact()
+        assert removed == 0
+
+
+# ============================================================
+# Belief Store v2: Smart Pruning
+# ============================================================
+
+
+class TestSmartPruning:
+    def test_compute_belief_score_factors(self):
+        from agent_core.world_model.belief_maintenance import compute_belief_score
+        now = time.time()
+
+        # High confidence, fresh, high revision
+        b_good = create_belief(
+            entity="good", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT, content="good",
+            confidence=0.9, source=BeliefSource.EXAM,
+            belief_id="b-good", revision=5,
+        )
+        # Low confidence, stale, low revision
+        b_bad = create_belief(
+            entity="bad", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.HYPOTHESIS, content="bad",
+            confidence=0.1, source=BeliefSource.SYSTEM,
+            belief_id="b-bad", revision=1,
+        )
+        # Make b_bad appear old
+        import dataclasses
+        b_bad_old = dataclasses.replace(b_bad, updated_at=now - 86400 * 60)
+
+        score_good = compute_belief_score(b_good, now, {"good": 5})
+        score_bad = compute_belief_score(b_bad_old, now, {})
+
+        assert score_good > score_bad
+        assert score_good > 0.3
+        assert score_bad < 0.3
+
+    def test_smart_prune_keeps_high_scored(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import smart_prune
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        # Add 5 beliefs, cap at 3
+        for i in range(5):
+            b = create_belief(
+                entity=f"t_{i}", entity_type=EntityType.TOPIC,
+                belief_type=BeliefType.OBSERVATION, content=f"topic {i}",
+                confidence=0.1 * (i + 1),  # 0.1, 0.2, 0.3, 0.4, 0.5
+                source=BeliefSource.SYSTEM,
+            )
+            store.add(b)
+
+        pruned = smart_prune(store, cap=3)
+        assert pruned == 2
+        current = store.get_current()
+        assert len(current) == 3
+        # Highest confidence beliefs should survive
+        confs = sorted(b.confidence for b in current)
+        assert confs[0] >= 0.3
+
+    def test_smart_prune_no_action_under_cap(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import smart_prune
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b = create_belief(
+            entity="solo", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="solo",
+            confidence=0.5, source=BeliefSource.SYSTEM,
+        )
+        store.add(b)
+        assert smart_prune(store, cap=100) == 0
+
+
+# ============================================================
+# Belief Store v2: Confidence Decay
+# ============================================================
+
+
+class TestConfidenceDecay:
+    def test_compute_decayed_confidence_30day_observation(self):
+        from agent_core.world_model.belief_maintenance import compute_decayed_confidence
+        now = time.time()
+        b = create_belief(
+            entity="test", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="test",
+            confidence=0.8, source=BeliefSource.LEARNING,
+        )
+        # 30 days old with half_life=30 -> ~50% of original
+        import dataclasses
+        b_old = dataclasses.replace(b, updated_at=now - 86400 * 30)
+        decayed = compute_decayed_confidence(b_old, now)
+        assert 0.35 < decayed < 0.45  # ~0.4 (0.8 * 0.5)
+
+    def test_fact_decays_slower_than_hypothesis(self):
+        from agent_core.world_model.belief_maintenance import compute_decayed_confidence
+        now = time.time()
+        import dataclasses
+
+        base = create_belief(
+            entity="test", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT, content="test",
+            confidence=0.8, source=BeliefSource.EXAM,
+        )
+        b_fact = dataclasses.replace(base, updated_at=now - 86400 * 30)
+        b_hypo = dataclasses.replace(
+            base, belief_type=BeliefType.HYPOTHESIS,
+            updated_at=now - 86400 * 30,
+        )
+
+        decay_fact = compute_decayed_confidence(b_fact, now)
+        decay_hypo = compute_decayed_confidence(b_hypo, now)
+        assert decay_fact > decay_hypo
+
+    def test_decay_floor(self):
+        from agent_core.world_model.belief_maintenance import compute_decayed_confidence, DECAY_FLOOR
+        now = time.time()
+        import dataclasses
+        b = create_belief(
+            entity="ancient", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.HYPOTHESIS, content="ancient",
+            confidence=0.1, source=BeliefSource.SYSTEM,
+        )
+        b_ancient = dataclasses.replace(b, updated_at=now - 86400 * 365)
+        decayed = compute_decayed_confidence(b_ancient, now)
+        assert decayed >= DECAY_FLOOR
+
+    def test_apply_decay_batch(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import apply_decay
+        import dataclasses
+
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        now = time.time()
+
+        # Add a stale belief (60 days old)
+        b = create_belief(
+            entity="stale", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="stale topic",
+            confidence=0.8, source=BeliefSource.LEARNING,
+        )
+        b_stale = dataclasses.replace(b, updated_at=now - 86400 * 60)
+        store._beliefs[b_stale.belief_id] = b_stale
+
+        revised = apply_decay(store, now=now)
+        assert revised == 1
+
+        # The revised belief should have lower confidence
+        current = store.get_current()
+        assert len(current) == 1
+        assert current[0].confidence < 0.8
+
+    def test_apply_decay_idempotent(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import apply_decay
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        # Fresh belief - should not be decayed
+        b = create_belief(
+            entity="fresh", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="fresh",
+            confidence=0.8, source=BeliefSource.LEARNING,
+        )
+        store.add(b)
+
+        # First pass: fresh belief should not decay much
+        revised = apply_decay(store)
+        # Second pass immediately: should revise 0
+        revised2 = apply_decay(store)
+        assert revised2 == 0
+
+    def test_fresh_belief_not_decayed(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import apply_decay
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b = create_belief(
+            entity="fresh", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="fresh",
+            confidence=0.8, source=BeliefSource.LEARNING,
+        )
+        store.add(b)
+        revised = apply_decay(store)
+        assert revised == 0  # Just created, delta < 0.05
+
+
+# ============================================================
+# Belief Store v2: Deduplication
+# ============================================================
+
+
+class TestDeduplication:
+    def test_find_exact_duplicates(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import find_exact_duplicates
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        b1 = create_belief(
+            entity="python", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Python jest jezykiem",
+            confidence=0.5, source=BeliefSource.LEARNING,
+        )
+        b2 = create_belief(
+            entity="python", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Python jest jezykiem",
+            confidence=0.8, source=BeliefSource.EXAM,
+        )
+        store.add(b1)
+        store.add(b2)
+
+        pairs = find_exact_duplicates(store)
+        assert len(pairs) == 1
+        # Higher confidence should be kept
+        assert pairs[0][0] == b2.belief_id
+
+    def test_find_exact_no_duplicates(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import find_exact_duplicates
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        b1 = create_belief(
+            entity="python", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Python",
+            confidence=0.5, source=BeliefSource.LEARNING,
+        )
+        b2 = create_belief(
+            entity="java", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Java",
+            confidence=0.5, source=BeliefSource.LEARNING,
+        )
+        store.add(b1)
+        store.add(b2)
+
+        assert find_exact_duplicates(store) == []
+
+    def test_merge_duplicate_pair(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import merge_duplicate_pair
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        b1 = create_belief(
+            entity="python", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Python",
+            confidence=0.8, source=BeliefSource.LEARNING,
+            tags=["programowanie"],
+            evidence=[("learning", "topic:python", 0.8)],
+        )
+        b2 = create_belief(
+            entity="python", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Python",
+            confidence=0.5, source=BeliefSource.EXAM,
+            tags=["jezyk"],
+            evidence=[("exam", "exam:file1", 0.7)],
+        )
+        store.add(b1)
+        store.add(b2)
+
+        result = merge_duplicate_pair(store, b1.belief_id, b2.belief_id)
+        assert result is True
+
+        current = store.get_current()
+        assert len(current) == 1
+        merged = current[0]
+        assert merged.confidence == 0.8  # max
+        assert "programowanie" in merged.tags
+        assert "jezyk" in merged.tags
+        assert len(merged.evidence) == 2
+        assert merged.revision == 2
+
+    def test_deduplicate_full_pass(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import deduplicate
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        # 3 beliefs, 2 are duplicates
+        for i in range(2):
+            b = create_belief(
+                entity="fizyka", entity_type=EntityType.TOPIC,
+                belief_type=BeliefType.OBSERVATION, content="Fizyka kwantowa",
+                confidence=0.3 + i * 0.2,
+                source=BeliefSource.LEARNING,
+            )
+            store.add(b)
+        b_unique = create_belief(
+            entity="chemia", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="Chemia organiczna",
+            confidence=0.5, source=BeliefSource.LEARNING,
+        )
+        store.add(b_unique)
+
+        merged = deduplicate(store)
+        assert merged == 1
+        current = store.get_current()
+        assert len(current) == 2  # 1 merged fizyka + 1 chemia
+
+    def test_deduplicate_without_semantic_memory(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import deduplicate
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        b = create_belief(
+            entity="solo", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="solo",
+            confidence=0.5, source=BeliefSource.SYSTEM,
+        )
+        store.add(b)
+        merged = deduplicate(store, semantic_memory=None)
+        assert merged == 0
+
+
+# ============================================================
+# Belief Store v2: Full Maintenance Cycle
+# ============================================================
+
+
+class TestMaintenance:
+    def test_maintain_runs_all_steps(self, tmp_path):
+        from agent_core.world_model.belief_maintenance import run_maintenance
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+
+        # Add some beliefs
+        for i in range(3):
+            b = create_belief(
+                entity=f"topic_{i}", entity_type=EntityType.TOPIC,
+                belief_type=BeliefType.OBSERVATION, content=f"topic {i}",
+                confidence=0.5, source=BeliefSource.SYSTEM,
+            )
+            store.add(b)
+        store.save()
+
+        results = run_maintenance(store)
+        assert "decayed" in results
+        assert "deduped" in results
+        assert "pruned" in results
+        assert "compacted" in results
+
+    def test_world_model_maintain_facade(self, tmp_path):
+        wm = WorldModel(
+            beliefs_path=tmp_path / "beliefs.jsonl",
+            knowledge_index_path=tmp_path / "ki.jsonl",
+            longterm_memory_path=tmp_path / "ltm.jsonl",
+            exam_results_path=tmp_path / "exams.jsonl",
+        )
+        # Create source files
+        (tmp_path / "ki.jsonl").touch()
+        (tmp_path / "ltm.jsonl").touch()
+        (tmp_path / "exams.jsonl").touch()
+
+        b = create_belief(
+            entity="test", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.OBSERVATION, content="test",
+            confidence=0.5, source=BeliefSource.SYSTEM,
+        )
+        wm.store.add(b)
+        wm.save()
+
+        results = wm.maintain()
+        assert isinstance(results, dict)
+        assert "decayed" in results
+
+    def test_world_model_compact_facade(self, tmp_path):
+        wm = WorldModel(
+            beliefs_path=tmp_path / "beliefs.jsonl",
+            knowledge_index_path=tmp_path / "ki.jsonl",
+            longterm_memory_path=tmp_path / "ltm.jsonl",
+            exam_results_path=tmp_path / "exams.jsonl",
+        )
+        (tmp_path / "ki.jsonl").touch()
+        (tmp_path / "ltm.jsonl").touch()
+        (tmp_path / "exams.jsonl").touch()
+
+        removed = wm.compact()
+        assert removed == 0  # Empty store
+
+    def test_world_model_apply_decay_facade(self, tmp_path):
+        wm = WorldModel(
+            beliefs_path=tmp_path / "beliefs.jsonl",
+            knowledge_index_path=tmp_path / "ki.jsonl",
+            longterm_memory_path=tmp_path / "ltm.jsonl",
+            exam_results_path=tmp_path / "exams.jsonl",
+        )
+        (tmp_path / "ki.jsonl").touch()
+        (tmp_path / "ltm.jsonl").touch()
+        (tmp_path / "exams.jsonl").touch()
+
+        revised = wm.apply_decay()
+        assert revised == 0  # Empty store

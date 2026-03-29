@@ -104,11 +104,13 @@ class BeliefStore:
         belief_id: str,
         new_confidence: float,
         new_belief_type: Optional[BeliefType] = None,
+        new_evidence: Optional[list] = None,
     ) -> Optional[Belief]:
         """
         Create a revised version of an existing belief.
 
         The old belief gets superseded_by pointing to the new one.
+        v2: optionally merge new evidence with existing.
 
         Returns:
             New revised Belief, or None if original not found.
@@ -119,6 +121,16 @@ class BeliefStore:
 
         now = time.time()
         new_id = f"belief-{__import__('uuid').uuid4().hex[:12]}"
+
+        # v2: merge evidence (old + new, deduped by source_ref)
+        merged_evidence = old.evidence
+        if new_evidence:
+            seen_refs = {e[1] for e in old.evidence if len(e) >= 2}
+            extra = tuple(
+                tuple(e) for e in new_evidence
+                if len(e) >= 3 and e[1] not in seen_refs
+            )
+            merged_evidence = old.evidence + extra
 
         # Create revised belief
         revised = Belief(
@@ -136,6 +148,7 @@ class BeliefStore:
             revision=old.revision + 1,
             superseded_by=None,
             related_entities=old.related_entities,
+            evidence=merged_evidence,
         )
 
         # Mark old as superseded
@@ -154,6 +167,7 @@ class BeliefStore:
             revision=old.revision,
             superseded_by=new_id,
             related_entities=old.related_entities,
+            evidence=old.evidence,
         )
 
         self._beliefs[old.belief_id] = superseded
@@ -239,32 +253,40 @@ class BeliefStore:
             if bid not in self._by_tag.get(tag, []):
                 self._by_tag[tag].append(bid)
 
+    def compact(self) -> int:
+        """Compact beliefs.jsonl by removing superseded records. v2."""
+        from agent_core.world_model.belief_maintenance import compact_jsonl
+        return compact_jsonl(self)
+
     def _enforce_cap(self) -> None:
-        """Prune lowest-confidence beliefs if over cap."""
+        """Prune lowest-scored beliefs if over cap. v2: uses smart_prune."""
         current = self.get_current()
         if len(current) <= MAX_CURRENT_BELIEFS:
             return
-
-        # Sort by confidence ascending, prune excess
-        current.sort(key=lambda b: b.confidence)
-        excess = len(current) - MAX_CURRENT_BELIEFS
-        for b in current[:excess]:
-            # Mark as superseded with no replacement
-            superseded = Belief(
-                belief_id=b.belief_id,
-                entity=b.entity,
-                entity_type=b.entity_type,
-                belief_type=b.belief_type,
-                content=b.content,
-                confidence=b.confidence,
-                source=b.source,
-                source_id=b.source_id,
-                tags=b.tags,
-                created_at=b.created_at,
-                updated_at=time.time(),
-                revision=b.revision,
-                superseded_by="pruned",
-                related_entities=b.related_entities,
-            )
-            self._beliefs[b.belief_id] = superseded
-            self._dirty.add(b.belief_id)
+        try:
+            from agent_core.world_model.belief_maintenance import smart_prune
+            smart_prune(self, cap=MAX_CURRENT_BELIEFS)
+        except Exception:
+            # Fallback to naive pruning if maintenance module unavailable
+            current.sort(key=lambda b: b.confidence)
+            excess = len(current) - MAX_CURRENT_BELIEFS
+            for b in current[:excess]:
+                superseded = Belief(
+                    belief_id=b.belief_id,
+                    entity=b.entity,
+                    entity_type=b.entity_type,
+                    belief_type=b.belief_type,
+                    content=b.content,
+                    confidence=b.confidence,
+                    source=b.source,
+                    source_id=b.source_id,
+                    tags=b.tags,
+                    created_at=b.created_at,
+                    updated_at=time.time(),
+                    revision=b.revision,
+                    superseded_by="pruned",
+                    related_entities=b.related_entities,
+                    evidence=b.evidence,
+                )
+                self._beliefs[b.belief_id] = superseded
+                self._dirty.add(b.belief_id)

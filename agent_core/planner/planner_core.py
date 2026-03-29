@@ -1132,6 +1132,16 @@ class PlannerCore:
             except Exception:
                 pass
 
+        # Belief Store v2: maintenance after EVALUATE (~1/hour)
+        # Runs: decay -> dedup -> prune -> compact
+        if (plan.action_type == ActionType.EVALUATE
+                and result.get("success")
+                and self._world_model):
+            try:
+                self._world_model.maintain()
+            except Exception:
+                pass
+
         # Generate human-readable message and attach to plan
         plan.message = self._format_message(plan)
 
