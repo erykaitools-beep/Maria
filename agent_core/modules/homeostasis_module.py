@@ -1174,6 +1174,67 @@ def _register_telegram_commands(bridge, ctx):
 
         return f"Authority: {new_level.value}"
 
+    def _cmd_validate(args):
+        """Show cross-validation stats and disputes."""
+        cv = getattr(ctx, 'cross_validator', None)
+        dl = getattr(ctx, 'dispute_log', None)
+
+        args = args.strip()
+
+        # /validate disputes - recent disputes
+        if args == "disputes":
+            if not dl:
+                return "DisputeLog niedostepny."
+            recent = dl.get_recent(limit=10)
+            if not recent:
+                return "Brak sporow."
+            lines = []
+            for d in recent:
+                rec = d if isinstance(d, dict) else d.to_dict()
+                fid = rec.get("file_id", "?")[:20]
+                dim = rec.get("dimension", "?")
+                sev = rec.get("severity", "?")
+                lines.append(f"  [{fid}] {dim} (sev={sev})")
+            return "*Ostatnie spory:*\n" + "\n".join(lines)
+
+        # /validate unresolved - unresolved disputes
+        if args == "unresolved":
+            if not dl:
+                return "DisputeLog niedostepny."
+            unresolved = dl.get_unresolved()
+            if not unresolved:
+                return "Brak nierozwiazanych sporow."
+            lines = []
+            for d in unresolved[:10]:
+                rec = d if isinstance(d, dict) else d.to_dict()
+                fid = rec.get("file_id", "?")[:20]
+                dim = rec.get("dimension", "?")
+                lines.append(f"  [{fid}] {dim}")
+            return f"*Nierozwiazane ({len(unresolved)}):*\n" + "\n".join(lines)
+
+        # /validate - stats overview (default)
+        parts = ["*Cross-Validation (Faza F):*"]
+        if cv:
+            stats = cv.get_stats()
+            parts.append(
+                f"Validated: {stats.get('chunks_validated', 0)} chunks\n"
+                f"Agreed: {stats.get('chunks_agreed', 0)}\n"
+                f"Disputed: {stats.get('chunks_disputed', 0)}\n"
+                f"Avg confidence: {stats.get('avg_confidence', 0):.2f}"
+            )
+        else:
+            parts.append("CrossValidator niedostepny (brak NIM?).")
+
+        if dl:
+            dl_stats = dl.get_stats()
+            parts.append(
+                f"\n*Disputes:*\n"
+                f"Total: {dl_stats.get('total', 0)}\n"
+                f"Unresolved: {dl_stats.get('unresolved', 0)}"
+            )
+
+        return "\n".join(parts)
+
     def _cmd_help(args):
         """List available commands."""
         return (
@@ -1184,6 +1245,7 @@ def _register_telegram_commands(bridge, ctx):
             "/memory <temat> - co Maria wie\n"
             "/memory gaps - luki w wiedzy\n"
             "/learn <temat> - naucz sie o temacie\n"
+            "/validate [disputes|unresolved] - cross-validation\n"
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
             "/priority <id> <0-1> - zmien priorytet\n"
@@ -1204,6 +1266,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("learn", _cmd_learn)
     bridge.register_command("trace", _cmd_trace)
     bridge.register_command("memory", _cmd_memory)
+    bridge.register_command("validate", _cmd_validate)
     bridge.register_command("efapprove", _cmd_efapprove)
     bridge.register_command("efreject", _cmd_efreject)
     bridge.register_command("efstatus", _cmd_efstatus)

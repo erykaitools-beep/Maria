@@ -2523,6 +2523,109 @@ def api_traces_failed():
     return jsonify({"traces": failed[:limit], "count": len(failed[:limit])})
 
 
+# =============================================================
+# Cross-Validation API (Faza F - Multi-Source Learning)
+# =============================================================
+
+
+def _read_disputes(limit=50):
+    """Read recent disputes from JSONL."""
+    import os
+    disputes_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "meta_data", "dispute_log.jsonl"
+    )
+    results = []
+    try:
+        with open(disputes_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        results.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+    except IOError:
+        pass
+    return list(reversed(results[-limit:]))
+
+
+@app.route('/validation')
+@require_auth
+def validation_page():
+    """Cross-Validation dashboard page (Faza F)."""
+    return render_template('validation.html', active_page='validation')
+
+
+@app.route('/api/validation/stats')
+@require_auth
+def api_validation_stats():
+    """Get cross-validation stats."""
+    try:
+        from agent_core.cross_validation import CrossValidator
+        # Try to get stats from running instance via SharedContext
+        # Fallback: read from dispute log
+        disputes = _read_disputes(limit=500)
+        total_disputes = len(disputes)
+        unresolved = sum(1 for d in disputes if not d.get("resolution"))
+
+        # Count validations from traces
+        traces = _read_traces(limit=200)
+        validations = [t for t in traces if t.get("action_type") == "validate"]
+        total_validated = len(validations)
+        successful = sum(1 for v in validations if v.get("success") is True)
+
+        # Calculate avg confidence from validation results
+        confidences = []
+        for v in validations:
+            params = v.get("action_params", {})
+            # Also check result for avg_confidence
+            result = v.get("result_summary", "")
+            if isinstance(v.get("steps"), list):
+                for step in v["steps"]:
+                    detail = step.get("detail", {})
+                    if "avg_confidence" in detail:
+                        confidences.append(detail["avg_confidence"])
+
+        return jsonify({
+            "total_validations": total_validated,
+            "successful": successful,
+            "total_disputes": total_disputes,
+            "unresolved_disputes": unresolved,
+            "avg_confidence": round(sum(confidences) / len(confidences), 3) if confidences else 0,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/validation/disputes')
+@require_auth
+def api_validation_disputes():
+    """Get recent cross-validation disputes."""
+    limit = request.args.get('limit', 30, type=int)
+    disputes = _read_disputes(limit=min(limit, 100))
+    return jsonify({"disputes": disputes, "count": len(disputes)})
+
+
+@app.route('/api/validation/disputes/unresolved')
+@require_auth
+def api_validation_disputes_unresolved():
+    """Get unresolved disputes."""
+    disputes = _read_disputes(limit=500)
+    unresolved = [d for d in disputes if not d.get("resolution")]
+    return jsonify({"disputes": unresolved, "count": len(unresolved)})
+
+
+@app.route('/api/validation/history')
+@require_auth
+def api_validation_history():
+    """Get validation action history from traces."""
+    limit = request.args.get('limit', 20, type=int)
+    traces = _read_traces(limit=200)
+    validations = [t for t in traces if t.get("action_type") == "validate"]
+    return jsonify({"validations": validations[:limit], "count": len(validations[:limit])})
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("[START] M.A.R.I.A. Web UI (Sprint 5)")

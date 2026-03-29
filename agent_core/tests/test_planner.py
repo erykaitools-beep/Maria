@@ -1618,3 +1618,221 @@ class TestK7FallthroughToK12:
         result = planner.run_cycle(60)
         assert result is not None
         assert result.action_type == ActionType.SELF_ANALYZE
+
+
+# ═══════════════════════════════════════════════════════
+# Faza F: Cross-Validation Trigger Tests
+# ═══════════════════════════════════════════════════════
+
+
+class TestPlannerStatValidation:
+    def test_last_validation_ts_default(self):
+        s = PlannerState()
+        assert s.last_validation_ts == 0.0
+
+    def test_last_validation_ts_roundtrip(self):
+        s = PlannerState(last_validation_ts=12345.0)
+        d = s.to_dict()
+        assert d["last_validation_ts"] == 12345.0
+        restored = PlannerState.from_dict(d)
+        assert restored.last_validation_ts == 12345.0
+
+    def test_from_dict_missing_validation_ts(self):
+        """Backward compatibility: old state files without last_validation_ts."""
+        d = {"total_cycles": 5}
+        s = PlannerState.from_dict(d)
+        assert s.last_validation_ts == 0.0
+
+
+class TestMaybeValidate:
+    def test_triggers_when_cooldown_expired(self, planner_env):
+        planner, _ = planner_env
+        mock_validator = MagicMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_knowledge_snapshot.return_value = {
+            "files_by_status": {"completed": ["test_file.txt"]},
+        }
+        planner.executor._cross_validator = mock_validator
+        planner.executor._knowledge_analyzer = mock_analyzer
+        planner._state.last_validation_ts = 0.0  # Long ago
+
+        result = planner._maybe_validate({})
+        assert result is not None
+        assert result.action_type == ActionType.VALIDATE
+        assert result.action_params["file_id"] == "test_file.txt"
+
+    def test_no_trigger_within_cooldown(self, planner_env):
+        planner, _ = planner_env
+        mock_validator = MagicMock()
+        planner.executor._cross_validator = mock_validator
+        planner._state.last_validation_ts = time.time()  # Just now
+
+        result = planner._maybe_validate({})
+        assert result is None
+
+    def test_no_trigger_without_validator(self, planner_env):
+        planner, _ = planner_env
+        result = planner._maybe_validate({})
+        assert result is None
+
+    def test_no_trigger_no_completed_files(self, planner_env):
+        planner, _ = planner_env
+        mock_validator = MagicMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_knowledge_snapshot.return_value = {
+            "files_by_status": {"completed": []},
+        }
+        planner.executor._cross_validator = mock_validator
+        planner.executor._knowledge_analyzer = mock_analyzer
+        planner._state.last_validation_ts = 0.0
+
+        result = planner._maybe_validate({})
+        assert result is None
+
+    def test_no_trigger_when_k7_rate_limited(self, planner_env):
+        planner, _ = planner_env
+        mock_validator = MagicMock()
+        planner.executor._cross_validator = mock_validator
+        planner._state.last_validation_ts = 0.0
+
+        mock_k7 = MagicMock()
+        check_result = MagicMock()
+        check_result.allowed = False
+        mock_k7.check.return_value = check_result
+        planner.set_autonomy_policy(mock_k7)
+
+        result = planner._maybe_validate({})
+        assert result is None
+
+    def test_updates_last_validation_ts(self, planner_env):
+        planner, _ = planner_env
+        mock_validator = MagicMock()
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_knowledge_snapshot.return_value = {
+            "files_by_status": {"completed": ["file_a.txt"]},
+        }
+        planner.executor._cross_validator = mock_validator
+        planner.executor._knowledge_analyzer = mock_analyzer
+        planner._state.last_validation_ts = 0.0
+
+        before = time.time()
+        planner._maybe_validate({})
+        assert planner._state.last_validation_ts >= before
+
+
+class TestValidateInDecisionCycle:
+    def test_validate_triggers_as_fallback(self, planner_env):
+        """VALIDATE fires when no goals and evaluate/creative already done."""
+        planner, _ = planner_env
+        core = _make_mock_core(mode="active", health=0.9)
+        planner.set_homeostasis_core(core)
+        planner.set_goal_store(_make_mock_goal_store([]))
+
+        # No evaluation needed (recent)
+        planner._state.last_evaluation_ts = time.time()
+
+        # Wire validator with completed file
+        mock_validator = MagicMock()
+        mock_validator.validate_file.return_value = {
+            "chunks_validated": 3,
+            "chunks_agreed": 2,
+            "chunks_disputed": 1,
+            "avg_confidence": 0.75,
+        }
+        planner.set_cross_validator(mock_validator)
+
+        mock_analyzer = MagicMock()
+        mock_analyzer.get_knowledge_snapshot.return_value = {
+            "files_by_status": {"completed": ["validated_file.txt"]},
+            "total_files": 1, "total_chunks": 5,
+        }
+        planner.executor.set_knowledge_analyzer(mock_analyzer)
+        planner._state.last_validation_ts = 0.0
+
+        result = planner.run_cycle(60)
+        assert result is not None
+        assert result.action_type == ActionType.VALIDATE
+
+
+class TestBeliefConfidenceUpdate:
+    def test_update_beliefs_from_validation(self):
+        """Beliefs linked to validated file get confidence updated."""
+        executor = ActionExecutor()
+
+        # Create mock world model with belief store
+        mock_store = MagicMock()
+        mock_belief = MagicMock()
+        mock_belief.source_id = "test_file.txt"
+        mock_belief.belief_id = "belief-001"
+        mock_belief.confidence = 0.5
+        mock_belief.belief_type = MagicMock(value="observation")
+        mock_belief.belief_type.name = "OBSERVATION"
+        # Import for type comparison
+        from agent_core.world_model.belief_model import BeliefType
+        mock_belief.belief_type = BeliefType.OBSERVATION
+        mock_store.get_current.return_value = [mock_belief]
+        mock_store.revise.return_value = MagicMock()
+
+        mock_wm = MagicMock()
+        mock_wm.store = mock_store
+        executor.set_world_model(mock_wm)
+
+        count = executor._update_beliefs_from_validation("test_file.txt", 0.8)
+        assert count == 1
+        mock_store.revise.assert_called_once()
+        # Verify confidence blend: 0.5*0.6 + 0.8*0.4 = 0.62
+        call_args = mock_store.revise.call_args
+        assert call_args[0][0] == "belief-001"
+        new_conf = call_args[0][1]
+        assert abs(new_conf - 0.62) < 0.01
+        # High validation -> promoted to FACT
+        assert call_args[0][2] == BeliefType.FACT
+        mock_store.flush.assert_called_once()
+
+    def test_no_update_without_world_model(self):
+        executor = ActionExecutor()
+        count = executor._update_beliefs_from_validation("file.txt", 0.8)
+        assert count == 0
+
+    def test_low_confidence_demotes_to_hypothesis(self):
+        """Low validation score demotes belief to HYPOTHESIS."""
+        executor = ActionExecutor()
+        from agent_core.world_model.belief_model import BeliefType
+
+        mock_store = MagicMock()
+        mock_belief = MagicMock()
+        mock_belief.source_id = "bad_file.txt"
+        mock_belief.belief_id = "belief-002"
+        mock_belief.confidence = 0.6
+        mock_belief.belief_type = BeliefType.FACT
+        mock_store.get_current.return_value = [mock_belief]
+        mock_store.revise.return_value = MagicMock()
+
+        mock_wm = MagicMock()
+        mock_wm.store = mock_store
+        executor.set_world_model(mock_wm)
+
+        count = executor._update_beliefs_from_validation("bad_file.txt", 0.2)
+        assert count == 1
+        call_args = mock_store.revise.call_args
+        # confidence: 0.6*0.6 + 0.2*0.4 = 0.44
+        assert abs(call_args[0][1] - 0.44) < 0.01
+        assert call_args[0][2] == BeliefType.HYPOTHESIS
+
+    def test_skips_unrelated_beliefs(self):
+        """Only beliefs matching file_id are updated."""
+        executor = ActionExecutor()
+        from agent_core.world_model.belief_model import BeliefType
+
+        mock_store = MagicMock()
+        other_belief = MagicMock()
+        other_belief.source_id = "other_file.txt"
+        mock_store.get_current.return_value = [other_belief]
+
+        mock_wm = MagicMock()
+        mock_wm.store = mock_store
+        executor.set_world_model(mock_wm)
+
+        count = executor._update_beliefs_from_validation("target.txt", 0.9)
+        assert count == 0
+        mock_store.revise.assert_not_called()

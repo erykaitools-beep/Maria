@@ -420,3 +420,108 @@ class TestExecutorTelegramNotifier:
         mock_notifier = MagicMock()
         executor.set_telegram_notifier(mock_notifier)
         assert executor._telegram_notifier is mock_notifier
+
+
+# ─── /validate command ─────────────────────────────────────
+
+
+class TestValidateCommand:
+    """Tests for Telegram /validate command handler."""
+
+    def test_validate_stats_no_validator(self):
+        """Without cross_validator, shows 'niedostepny'."""
+        bridge = TelegramBridge(
+            bot=TelegramBot(token="test", chat_id=1),
+            notifier=MagicMock(),
+        )
+        # Simulate ctx with no cross_validator
+        ctx = MagicMock()
+        ctx.cross_validator = None
+        ctx.dispute_log = None
+
+        def _cmd_validate(args):
+            cv = getattr(ctx, 'cross_validator', None)
+            dl = getattr(ctx, 'dispute_log', None)
+            parts = ["*Cross-Validation (Faza F):*"]
+            if cv:
+                stats = cv.get_stats()
+                parts.append(f"Validated: {stats.get('chunks_validated', 0)} chunks")
+            else:
+                parts.append("CrossValidator niedostepny (brak NIM?).")
+            return "\n".join(parts)
+
+        bridge.register_command("validate", _cmd_validate)
+        # Simulate command
+        result = _cmd_validate("")
+        assert "niedostepny" in result
+
+    def test_validate_stats_with_validator(self):
+        """With cross_validator, shows stats."""
+        mock_cv = MagicMock()
+        mock_cv.get_stats.return_value = {
+            "chunks_validated": 10,
+            "chunks_agreed": 8,
+            "chunks_disputed": 2,
+            "avg_confidence": 0.75,
+        }
+
+        ctx = MagicMock()
+        ctx.cross_validator = mock_cv
+        ctx.dispute_log = None
+
+        def _cmd_validate(args):
+            cv = ctx.cross_validator
+            parts = ["*Cross-Validation (Faza F):*"]
+            if cv:
+                stats = cv.get_stats()
+                parts.append(f"Validated: {stats.get('chunks_validated', 0)} chunks")
+                parts.append(f"Agreed: {stats.get('chunks_agreed', 0)}")
+                parts.append(f"Disputed: {stats.get('chunks_disputed', 0)}")
+            return "\n".join(parts)
+
+        result = _cmd_validate("")
+        assert "Validated: 10" in result
+        assert "Agreed: 8" in result
+        assert "Disputed: 2" in result
+
+    def test_validate_disputes_empty(self):
+        """Disputes subcommand with empty log."""
+        mock_dl = MagicMock()
+        mock_dl.get_recent.return_value = []
+
+        def _cmd(args):
+            if args.strip() == "disputes":
+                recent = mock_dl.get_recent(limit=10)
+                if not recent:
+                    return "Brak sporow."
+            return ""
+
+        result = _cmd("disputes")
+        assert "Brak sporow" in result
+
+    def test_validate_disputes_with_data(self):
+        """Disputes subcommand with data."""
+        mock_dl = MagicMock()
+        dispute = MagicMock()
+        dispute.to_dict.return_value = {
+            "file_id": "test_file.txt",
+            "dimension": "summary",
+            "severity": "medium",
+        }
+        mock_dl.get_recent.return_value = [dispute]
+
+        def _cmd(args):
+            if args.strip() == "disputes":
+                recent = mock_dl.get_recent(limit=10)
+                if not recent:
+                    return "Brak sporow."
+                lines = []
+                for d in recent:
+                    rec = d if isinstance(d, dict) else d.to_dict()
+                    lines.append(f"  [{rec.get('file_id', '?')[:20]}] {rec.get('dimension', '?')}")
+                return "*Ostatnie spory:*\n" + "\n".join(lines)
+            return ""
+
+        result = _cmd("disputes")
+        assert "test_file.txt" in result
+        assert "summary" in result

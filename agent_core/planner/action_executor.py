@@ -39,6 +39,7 @@ class ActionExecutor:
         self._creative_module = None
         self._telegram_notifier = None
         self._cross_validator = None
+        self._world_model = None
         self._llm_router = None
         self._semantic_search = None
 
@@ -107,6 +108,10 @@ class ActionExecutor:
     def set_cross_validator(self, validator) -> None:
         """Set CrossValidator for multi-source learning (Faza F)."""
         self._cross_validator = validator
+
+    def set_world_model(self, world_model) -> None:
+        """Set WorldModel for belief confidence updates (Faza F)."""
+        self._world_model = world_model
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
@@ -595,6 +600,11 @@ class ActionExecutor:
                 max_chunks=5,  # limit per session
             )
 
+            # Update belief confidence based on validation results
+            beliefs_updated = self._update_beliefs_from_validation(
+                file_id, result.get("avg_confidence", 0.5),
+            )
+
             return {
                 "success": result["chunks_validated"] > 0,
                 "file_id": file_id,
@@ -602,6 +612,7 @@ class ActionExecutor:
                 "chunks_agreed": result["chunks_agreed"],
                 "chunks_disputed": result["chunks_disputed"],
                 "avg_confidence": result["avg_confidence"],
+                "beliefs_updated": beliefs_updated,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -619,3 +630,55 @@ class ActionExecutor:
         except Exception:
             pass
         return ""
+
+    def _update_beliefs_from_validation(
+        self, file_id: str, avg_confidence: float,
+    ) -> int:
+        """
+        Update belief confidence for beliefs related to a validated file.
+
+        High cross-validation confidence (>0.7) promotes OBSERVATION -> FACT.
+        Low confidence (<0.3) demotes to HYPOTHESIS.
+
+        Returns number of beliefs updated.
+        """
+        if not self._world_model:
+            return 0
+
+        try:
+            from agent_core.world_model.belief_model import BeliefType
+
+            store = self._world_model.store
+            # Find beliefs linked to this file
+            beliefs = [
+                b for b in store.get_current()
+                if b.source_id == file_id
+            ]
+
+            updated = 0
+            for belief in beliefs:
+                # Blend existing confidence with validation score
+                new_conf = belief.confidence * 0.6 + avg_confidence * 0.4
+
+                # Determine if belief type should change
+                new_type = None
+                if avg_confidence >= 0.7 and belief.belief_type == BeliefType.OBSERVATION:
+                    new_type = BeliefType.FACT
+                elif avg_confidence < 0.3 and belief.belief_type != BeliefType.HYPOTHESIS:
+                    new_type = BeliefType.HYPOTHESIS
+
+                # Only revise if confidence changed meaningfully
+                if abs(new_conf - belief.confidence) > 0.05 or new_type:
+                    store.revise(belief.belief_id, new_conf, new_type)
+                    updated += 1
+
+            if updated:
+                store.flush()
+                logger.info(
+                    f"[Faza F] Updated {updated} beliefs for {file_id} "
+                    f"(avg_confidence={avg_confidence:.2f})"
+                )
+            return updated
+        except Exception as e:
+            logger.debug(f"Belief update skipped: {e}")
+            return 0

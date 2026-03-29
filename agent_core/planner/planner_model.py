@@ -126,6 +126,7 @@ class PlannerState:
     last_evaluation_ts: float = 0.0        # Last EvaluationObserver report
     last_recommendation_ts: float = 0.0    # Last acted-on recommendation
     last_self_analysis_ts: float = 0.0     # K12: Last self-analysis cycle
+    last_validation_ts: float = 0.0       # Faza F: Last cross-validation cycle
     total_cycles: int = 0
     total_plans_executed: int = 0
     current_plan_id: Optional[str] = None
@@ -136,6 +137,7 @@ class PlannerState:
             "last_evaluation_ts": self.last_evaluation_ts,
             "last_recommendation_ts": self.last_recommendation_ts,
             "last_self_analysis_ts": self.last_self_analysis_ts,
+            "last_validation_ts": self.last_validation_ts,
             "total_cycles": self.total_cycles,
             "total_plans_executed": self.total_plans_executed,
             "current_plan_id": self.current_plan_id,
@@ -148,6 +150,7 @@ class PlannerState:
             last_evaluation_ts=d.get("last_evaluation_ts", 0.0),
             last_recommendation_ts=d.get("last_recommendation_ts", 0.0),
             last_self_analysis_ts=d.get("last_self_analysis_ts", 0.0),
+            last_validation_ts=d.get("last_validation_ts", 0.0),
             total_cycles=d.get("total_cycles", 0),
             total_plans_executed=d.get("total_plans_executed", 0),
             current_plan_id=d.get("current_plan_id"),

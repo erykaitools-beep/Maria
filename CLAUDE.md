@@ -78,6 +78,10 @@
 | **2026-03-29** | **Stabilization Roadmap COMPLETE** (all 6 phases, all 5 gates A-E passed) |
 | **2026-03-29** | Cleanup: 3153 linii martwego kodu usuniete z maria_core/ |
 | **2026-03-29** | Fix: flaky test_time_awareness + LLM call counting w OllamaBrain |
+| **2026-03-29** | **Faza F: Multi-Source Learning** - CrossValidator, ConfidenceScorer, DisputeLog (38 testow) |
+| **2026-03-29** | Faza F: planner trigger (_maybe_validate, 6h cooldown), belief confidence update, K7 GUARDED |
+| **2026-03-29** | Web UI /validation page + Telegram /validate command |
+| **2026-03-29** | Roadmap v1.0 - aktualizacja do aktualnego stanu (K1-K13, Stabilization, Faza F) |
 
 ## Aktualny stan projektu
 
@@ -85,8 +89,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2392 passing |
-| **Faza** | Stabilization Roadmap COMPLETE (Phase 1-6), cleanup done |
+| **Testy** | 2448 passing |
+| **Faza** | Stabilization COMPLETE + Faza F Multi-Source Learning COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -606,8 +610,16 @@ Usunieto:
 - Phase 5: Effector Safety Envelope - 5-level authority, approval queue, anti-cascade (2026-03-29)
 - Phase 6: Readiness Review - stability tests, drills, 15-point checklist (2026-03-29)
 
+### DONE: Faza F Multi-Source Learning (2026-03-29)
+- [x] CrossValidator + ConfidenceScorer + DisputeLog (38 testow)
+- [x] Planner trigger (_maybe_validate, 6h cooldown, K7 GUARDED, degradation check)
+- [x] Belief confidence update (OBSERVATION->FACT / HYPOTHESIS po walidacji)
+- [x] Homeostasis wiring (NIM jako secondary LLM)
+- [x] Web UI /validation page (stats, disputes, history) + 4 API endpoints
+- [x] Telegram /validate [disputes|unresolved] command
+- [x] 18 nowych testow (planner trigger + telegram + belief update)
+
 ### NASTEPNE: Autorozwoj i stabilnosc
-- Multi-Source Learning - cross-LLM validation (CrossValidator, ConfidenceScorer, DisputeLog)
 - Belief Store ulepszenia - compaction oparta na waznosci, dedup, unifikacja z vector store
 - CDL dopracowanie - lepsze rozpoznawanie intencji, feedback loop
 - Web UI v2 polish (dense mode, sidebar)
@@ -1005,4 +1017,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-28 (Phase 1-4 Stabilization Roadmap + CDL + Traces UI, 2202 testow)*
+*Ostatnia aktualizacja: 2026-03-29 (Faza F Multi-Source Learning COMPLETE + Roadmap v1.0, 2448 testow)*

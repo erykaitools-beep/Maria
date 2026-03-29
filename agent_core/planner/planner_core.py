@@ -37,6 +37,7 @@ _DEFAULT_DECISIONS_PATH = _META_DIR / "planner_decisions.jsonl"
 ROUTINE_INTERVAL_TICKS = 60         # Normal cycle every 60 ticks (60s)
 EVALUATION_INTERVAL_SEC = 3600      # Trigger K4 report every 1h
 RECOMMENDATION_COOLDOWN_SEC = 900   # 15 min cooldown on eval recommendations
+VALIDATION_INTERVAL_SEC = 21600     # 6h between cross-validations (Faza F)
 
 # High-priority event types that trigger immediate cycle
 HIGH_PRIORITY_EVENTS = {
@@ -135,6 +136,7 @@ class PlannerCore:
 
     def set_world_model(self, world_model) -> None:
         self._world_model = world_model
+        self.executor.set_world_model(world_model)
 
     def set_autonomy_policy(self, policy) -> None:
         self._autonomy_policy = policy
@@ -326,6 +328,11 @@ class PlannerCore:
 
         # -- STEP 5: EVALUATE as fallback (no actionable goals or goal plan blocked) --
         plan = self._maybe_evaluate(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # Faza F: Cross-validate learned knowledge (after evaluate, before self-analysis)
+        plan = self._maybe_validate(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -578,6 +585,45 @@ class PlannerCore:
             goal_description="K13 Creative reflection",
             action_type=ActionType.CREATIVE,
             action_params={"trigger": "planner_idle"},
+        )
+
+    # Faza F: Cross-validation trigger
+
+    def _maybe_validate(self, context: Dict) -> Optional[Plan]:
+        """
+        Check if cross-validation should trigger (Faza F).
+
+        Triggers when:
+        - CrossValidator is configured (NIM available)
+        - Cooldown expired (6h)
+        - Completed files exist for validation
+        - Not rate-limited by K7
+        """
+        if not self.executor._cross_validator:
+            return None
+
+        # Check K7 rate limit
+        if self._is_action_rate_limited("validate"):
+            return None
+
+        now = time.time()
+        since_validation = now - self._state.last_validation_ts
+
+        if since_validation < VALIDATION_INTERVAL_SEC:
+            return None
+
+        # Check if there are completed files to validate
+        file_id = self.executor._pick_validation_candidate()
+        if not file_id:
+            return None
+
+        self._state.last_validation_ts = now
+        logger.info(f"[Faza F] Cross-validation triggered for {file_id}")
+        return create_plan(
+            goal_id=None,
+            goal_description=f"Cross-validate: {file_id}",
+            action_type=ActionType.VALIDATE,
+            action_params={"file_id": file_id},
         )
 
     # -- Internal: goal selection ---------------------------
@@ -840,6 +886,7 @@ class PlannerCore:
         _heavy_actions = {
             ActionType.LEARN, ActionType.EXAM, ActionType.REVIEW,
             ActionType.FETCH, ActionType.CREATIVE, ActionType.ASK_EXPERT,
+            ActionType.VALIDATE,
         }
         if plan.action_type in _heavy_actions and self._homeostasis_core:
             _state = self._homeostasis_core.get_state()

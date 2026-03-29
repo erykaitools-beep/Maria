@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Cross-Validation{% endblock %}
+{% block page_class %}mo-page--validation{% endblock %}
+
+{% block content %}
+<div class="mo-validation">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Cross-Validation (Faza F)</h2>
+    <div>
+      <button class="mo-btn mo-btn--sm" onclick="loadValidation()">Odswiez</button>
+    </div>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-stats">Statystyki</button>
+    <button class="mo-tab" data-tab="tab-disputes">Spory</button>
+    <button class="mo-tab" data-tab="tab-history">Historia</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-stats">
+    <div id="validation-stats">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-disputes">
+    <div id="validation-disputes">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-history">
+    <div id="validation-history">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/validation.js') }}"></script>
+{% endblock %}
