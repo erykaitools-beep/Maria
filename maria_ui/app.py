@@ -3,7 +3,7 @@ M.A.R.I.A. Web UI - Flask Application
 Sprint 5: Proactive notifications
 """
 
-from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory
 from flask_socketio import SocketIO, emit
 import sys
 import time
@@ -2624,6 +2624,41 @@ def api_validation_history():
     traces = _read_traces(limit=200)
     validations = [t for t in traces if t.get("action_type") == "validate"]
     return jsonify({"validations": validations[:limit], "count": len(validations[:limit])})
+
+
+# =============================================================
+# Document Downloads (PDF status reports, etc.)
+# =============================================================
+
+DOCS_DIR = PROJECT_ROOT / "docs"
+
+
+@app.route('/api/docs')
+@require_auth
+def api_docs_list():
+    """List available documents (PDF/MD) in docs/."""
+    files = []
+    for f in sorted(DOCS_DIR.iterdir()):
+        if f.suffix in ('.pdf', '.md') and f.is_file():
+            files.append({
+                "name": f.name,
+                "size": f.stat().st_size,
+                "type": f.suffix[1:],
+            })
+    return jsonify({"files": files, "count": len(files)})
+
+
+@app.route('/api/docs/download/<filename>')
+@require_auth
+def api_docs_download(filename):
+    """Download a document from docs/."""
+    # Security: only allow files from docs/ directory, no path traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    filepath = DOCS_DIR / filename
+    if not filepath.exists() or not filepath.is_file():
+        return jsonify({"error": "File not found"}), 404
+    return send_from_directory(str(DOCS_DIR), filename, as_attachment=True)
 
 
 if __name__ == '__main__':
