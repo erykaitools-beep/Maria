@@ -371,6 +371,34 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.debug(f"OpenClaw not initialized: {e}")
 
+                # Cross-Validator (Faza F) - multi-source learning validation
+                # Uses NIM as secondary LLM to validate knowledge learned by Ollama
+                try:
+                    from agent_core.cross_validation import CrossValidator, DisputeLog
+
+                    dispute_log = DisputeLog()
+                    cross_validator = CrossValidator(
+                        source_name="nim",
+                        dispute_log=dispute_log,
+                    )
+
+                    # Wire secondary LLM: NIM if available via brain (LLMRouter)
+                    _brain = ctx.brain if hasattr(ctx, 'brain') else None
+                    if _brain and hasattr(_brain, 'nim') and _brain.nim and getattr(_brain.nim, 'api_key', None):
+                        _nim_ref = _brain.nim
+                        cross_validator.set_llm_fn(
+                            lambda p, _n=_nim_ref: _n._ask_once(p, temperature=0.3)
+                        )
+                        print("[Homeostasis] [OK] CrossValidator wired (NIM secondary)")
+                    else:
+                        print("[Homeostasis] [--] CrossValidator: no NIM, validation inactive")
+
+                    planner.set_cross_validator(cross_validator)
+                    ctx.cross_validator = cross_validator
+                    ctx.dispute_log = dispute_log
+                except Exception as e:
+                    logger.debug(f"CrossValidator not initialized: {e}")
+
                 # Codex CLI (ChatGPT encyclopedia) - optional, graceful fallback
                 try:
                     from agent_core.llm.codex_client import CodexClient
