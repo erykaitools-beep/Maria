@@ -528,6 +528,103 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning(f"MemoryQuery not initialized: {e}")
 
+                # CapabilityRouter: registry-based dispatch
+                try:
+                    from agent_core.routing import CapabilityRouter, DEFAULT_CAPABILITY_SPECS
+                    from agent_core.routing.handlers import (
+                        make_learn_handler, make_exam_handler,
+                        make_review_handler, make_evaluate_handler,
+                        make_maintenance_handler, make_fetch_handler,
+                        make_experiment_handler, make_effector_handler,
+                        make_self_analyze_handler, make_creative_handler,
+                        make_ask_expert_handler, make_validate_handler,
+                        make_noop_handler,
+                    )
+
+                    cap_router = CapabilityRouter()
+
+                    # Teacher-based capabilities (learn/exam/review)
+                    _teacher = getattr(core, '_teacher_agent', None)
+                    _analyzer = ctx.knowledge_analyzer if hasattr(ctx, 'knowledge_analyzer') else None
+                    _sem = ctx.semantic_search if hasattr(ctx, 'semantic_search') else None
+                    _goals = ctx.goal_store if hasattr(ctx, 'goal_store') else None
+                    # Telegram notifier wires later - use planner.executor
+                    # as bridge (handlers read from it at call time)
+                    _tg = lambda: getattr(planner.executor, '_telegram_notifier', None)
+
+                    cap_router.register("learn", make_learn_handler(
+                        _teacher, _analyzer, _sem, _goals, _tg,
+                    ), DEFAULT_CAPABILITY_SPECS["learn"])
+                    cap_router.register("exam", make_exam_handler(
+                        _teacher, _analyzer, _goals, _tg,
+                    ), DEFAULT_CAPABILITY_SPECS["exam"])
+                    cap_router.register("review", make_review_handler(
+                        _teacher, _analyzer,
+                    ), DEFAULT_CAPABILITY_SPECS["review"])
+
+                    # Evaluation
+                    _eval_obs = ctx.evaluation_observer if hasattr(ctx, 'evaluation_observer') else None
+                    cap_router.register("evaluate", make_evaluate_handler(
+                        _eval_obs,
+                    ), DEFAULT_CAPABILITY_SPECS["evaluate"])
+
+                    # Maintenance
+                    cap_router.register("maintenance", make_maintenance_handler(
+                        core, _goals,
+                    ), DEFAULT_CAPABILITY_SPECS["maintenance"])
+
+                    # Fetch
+                    cap_router.register("fetch", make_fetch_handler(
+                        _analyzer, _sem,
+                    ), DEFAULT_CAPABILITY_SPECS["fetch"])
+
+                    # Experiment (K11)
+                    _exp = ctx.experiment_system if hasattr(ctx, 'experiment_system') else None
+                    cap_router.register("experiment", make_experiment_handler(
+                        _exp,
+                    ), DEFAULT_CAPABILITY_SPECS["experiment"])
+
+                    # Effector (OpenClaw)
+                    _claw = ctx.openclaw_client if hasattr(ctx, 'openclaw_client') else None
+                    cap_router.register("effector", make_effector_handler(
+                        _claw,
+                    ), DEFAULT_CAPABILITY_SPECS["effector"])
+
+                    # Self-Analysis (K12)
+                    _sa = ctx.self_analysis if hasattr(ctx, 'self_analysis') else None
+                    cap_router.register("self_analyze", make_self_analyze_handler(
+                        _sa, _tg,
+                    ), DEFAULT_CAPABILITY_SPECS["self_analyze"])
+
+                    # Creative (K13)
+                    _creative = ctx.creative_module if hasattr(ctx, 'creative_module') else None
+                    cap_router.register("creative", make_creative_handler(
+                        _creative, _tg,
+                    ), DEFAULT_CAPABILITY_SPECS["creative"])
+
+                    # Ask Expert (Codex/ChatGPT)
+                    _llm_rtr = ctx.brain if (hasattr(ctx, 'brain') and ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia')) else None
+                    cap_router.register("ask_expert", make_ask_expert_handler(
+                        _llm_rtr,
+                    ), DEFAULT_CAPABILITY_SPECS["ask_expert"])
+
+                    # Validate (Faza F)
+                    _cross_val = ctx.cross_validator if hasattr(ctx, 'cross_validator') else None
+                    _wm = ctx.world_model if hasattr(ctx, 'world_model') else None
+                    cap_router.register("validate", make_validate_handler(
+                        _cross_val, _wm, _analyzer,
+                    ), DEFAULT_CAPABILITY_SPECS["validate"])
+
+                    # Noop
+                    cap_router.register("noop", make_noop_handler(),
+                                        DEFAULT_CAPABILITY_SPECS["noop"])
+
+                    planner.set_capability_router(cap_router)
+                    ctx.capability_router = cap_router
+                    print(f"[Homeostasis] [OK] CapabilityRouter wired ({cap_router.registered_count} capabilities)")
+                except Exception as e:
+                    logger.warning(f"CapabilityRouter not initialized: {e}")
+
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
                 print("[Homeostasis] [OK] PlannerCore wired (Warstwa 2)")

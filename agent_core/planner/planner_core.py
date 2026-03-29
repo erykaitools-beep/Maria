@@ -184,6 +184,10 @@ class PlannerCore:
         """Set TraceStore for decision traceability (Phase 1)."""
         self._trace_store = store
 
+    def set_capability_router(self, router) -> None:
+        """Set CapabilityRouter for registry-based dispatch."""
+        self.executor.set_capability_router(router)
+
     # -- Internal: pre-check autonomy policy ----------------
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:

@@ -41,17 +41,26 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
 }
 
 
-def classify_action(action_type_value: str) -> ActionClassification:
+def classify_action(action_type_value: str, router=None) -> ActionClassification:
     """
     Get classification for an action type.
 
     Args:
         action_type_value: ActionType.value string (e.g. "learn", "fetch")
+        router: Optional CapabilityRouter for registry-based lookup
 
     Returns:
         ActionClassification. Defaults to RESTRICTED for unknown actions
         (safe-by-default: unknown actions require explicit approval).
     """
+    # Prefer router if available (single source of truth)
+    if router is not None:
+        k7_str = router.get_k7_classification(action_type_value)
+        try:
+            return ActionClassification(k7_str)
+        except ValueError:
+            return ActionClassification.RESTRICTED
+
     return DEFAULT_ACTION_CLASSIFICATIONS.get(
         action_type_value, ActionClassification.RESTRICTED
     )

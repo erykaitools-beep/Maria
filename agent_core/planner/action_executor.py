@@ -42,6 +42,11 @@ class ActionExecutor:
         self._world_model = None
         self._llm_router = None
         self._semantic_search = None
+        self._capability_router = None
+
+    def set_capability_router(self, router) -> None:
+        """Set CapabilityRouter for registry-based dispatch."""
+        self._capability_router = router
 
     def set_telegram_notifier(self, notifier) -> None:
         """Set Telegram notifier for operator alerts."""
@@ -123,6 +128,11 @@ class ActionExecutor:
         Returns:
             Dict with at least {"success": bool, ...}
         """
+        # Registry-based dispatch (Phase B: dual-path)
+        if self._capability_router is not None:
+            return self._capability_router.dispatch(plan)
+
+        # Legacy dispatch (backward compat, removed in Phase C)
         action = plan.action_type
         start = time.time()
 

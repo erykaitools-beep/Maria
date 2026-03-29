@@ -84,14 +84,15 @@
 | **2026-03-29** | Roadmap v1.0 - aktualizacja do aktualnego stanu (K1-K13, Stabilization, Faza F) |
 | **2026-03-29** | **Belief Store v2** - evidence tracking, compaction, smart pruning, confidence decay, dedup (28 testow) |
 | **2026-03-29** | Belief maintenance wired: planner EVALUATE -> maintain(), Telegram /beliefs, Web UI /api/beliefs |
+| **2026-03-29** | **Capability/Task Router** - unified registry-based dispatch replacing 13-way if/elif (63 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 |
-| **Testy** | 2476 passing |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter |
+| **Testy** | 2554 passing |
 | **Faza** | Stabilization COMPLETE + Faza F Multi-Source Learning COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
@@ -140,6 +141,7 @@ project/
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
+│   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── adapters/        # Wrappers for legacy maria_core
 │   └── tests/           # 2202 tests
@@ -631,11 +633,20 @@ Usunieto:
 - [x] Planner integration: maintain() po EVALUATE (~1/h)
 - [x] Telegram /beliefs [gaps|maintain] command
 - [x] Web UI /api/beliefs/{stats,gaps,recent} endpoints
-- [x] 28 nowych testow (2476 total)
+- [x] 28 nowych testow (2491 total)
 
-### NASTEPNE: Autorozwoj i stabilnosc (Etap 1-2 z roadmapy)
+### DONE: Capability/Task Router (2026-03-29)
+- [x] CapabilityRouter: registry-based dispatch replacing 13-way if/elif in ActionExecutor
+- [x] CapabilitySpec: frozen dataclass with name, description, required_subsystems, k7_classification, tags
+- [x] 13 handler factories (closure-based, 1:1 z ActionExecutor._exec_*)
+- [x] Dual-path: router dispatch gdy dostepny, legacy fallback
+- [x] Late-binding Telegram notifier (lambda on executor attr)
+- [x] K7 classify_action() opcjonalnie z routera
+- [x] Wired in homeostasis_module.py (13 capabilities registered)
+- [x] 63 nowe testy (2554 total)
+
+### NASTEPNE: Autorozwoj i stabilnosc
 - CDL dopracowanie - lepsze rozpoznawanie intencji, feedback loop
-- Capability/Task Router (Etap 2) - unified routing miedzy organami
 - Operator UX / dense mode (Web UI v2 polish)
 - Web UI /beliefs page (visual dashboard)
 
@@ -1032,4 +1043,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-29 (Belief Store v2 + Faza F + Roadmap v1.0, 2476 testow)*
+*Ostatnia aktualizacja: 2026-03-29 (Capability/Task Router + Belief Store v2 + Faza F, 2554 testow)*
