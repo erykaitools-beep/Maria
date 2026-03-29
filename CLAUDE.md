@@ -92,7 +92,7 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter |
-| **Testy** | 2554 passing |
+| **Testy** | 2566 passing |
 | **Faza** | Stabilization COMPLETE + Faza F Multi-Source Learning COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
@@ -645,10 +645,18 @@ Usunieto:
 - [x] Wired in homeostasis_module.py (13 capabilities registered)
 - [x] 63 nowe testy (2554 total)
 
+### DONE: CDL dopracowanie + Web UI polish (2026-03-29)
+- [x] Chat feedback: user widzi "Zaczynam nauke: X" po wykryciu intencji
+- [x] Dedup: nie tworzy duplikatu jesli aktywny cel na ten sam temat
+- [x] Goal cancellation: "zapomnij o nauce X", "anuluj nauke X", "stop learning X"
+- [x] detect_cancel_intent(): 8 polskich + 3 angielskie wzorce
+- [x] Web UI CSS: --mo-text-md, --mo-r-xl, .mo-btn--sm (missing definitions)
+- [x] /api/capabilities endpoint (CapabilityRouter discovery)
+- [x] 12 nowych testow cancel (2566 total)
+
 ### NASTEPNE: Autorozwoj i stabilnosc
-- CDL dopracowanie - lepsze rozpoznawanie intencji, feedback loop
 - Operator UX / dense mode (Web UI v2 polish)
-- Web UI /beliefs page (visual dashboard)
+- Web UI /beliefs page - juz istnieje, ewentualnie rozszerzenie
 
 ### ODROCZONE: Zmysly (czeka na sprzet)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
@@ -1043,4 +1051,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-29 (Capability/Task Router + Belief Store v2 + Faza F, 2554 testow)*
+*Ostatnia aktualizacja: 2026-03-29 (CDL v2 + CapabilityRouter + Belief Store v2 + Faza F, 2566 testow)*

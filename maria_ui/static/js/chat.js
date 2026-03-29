@@ -34,6 +34,20 @@
 
   socket.on('chat_status', (data) => {
     if (data.status === 'thinking') showTypingIndicator();
+    if (data.status === 'learning_detected') {
+      if (data.action === 'already_active') {
+        addMessage('system', 'Juz sie ucze o: ' + data.topic);
+      } else {
+        const action = data.action === 'fetch' ? 'Szukam materialow' : 'Zaczynam nauke';
+        addMessage('system', action + ': ' + data.topic);
+      }
+    }
+    if (data.status === 'learning_cancelled') {
+      addMessage('system', 'Anulowano nauke: ' + (data.topic || ''));
+    }
+    if (data.status === 'learning_cancel_notfound') {
+      addMessage('system', 'Nie znalazlam aktywnego celu nauki: ' + (data.topic || ''));
+    }
   });
 
   socket.on('chat_response', (data) => {

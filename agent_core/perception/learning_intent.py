@@ -46,6 +46,14 @@ _EN_PATTERNS = [
     (re.compile(r"fetch\s+(?:articles?\s+)?(?:about\s+|on\s+)?(.+)", re.IGNORECASE), "fetch"),
 ]
 
+# Cancellation patterns (Polish + English)
+_CANCEL_PATTERNS = [
+    (re.compile(r"(?:zapomnij|olej|anuluj|przerwij|zrezygnuj)\s+(?:z\s+)?(?:nauk[ieę]\s+(?:o\s+)?|temat(?:u)?\s+)?(.+)", re.IGNORECASE), "cancel"),
+    (re.compile(r"nie\s+ucz\s+si[eę]\s+(?:o\s+)?(.+)", re.IGNORECASE), "cancel"),
+    (re.compile(r"przesta[nń]\s+(?:si[eę]\s+)?uczy[cć]\s+(?:o\s+)?(.+)", re.IGNORECASE), "cancel"),
+    (re.compile(r"(?:cancel|stop|forget)\s+(?:learning\s+)?(?:about\s+)?(.+)", re.IGNORECASE), "cancel"),
+]
+
 # Topic cleanup: remove trailing punctuation, articles, etc.
 _TOPIC_CLEANUP = re.compile(r'[.!?;,]+$')
 _TOPIC_MIN_LEN = 2
@@ -91,6 +99,35 @@ def detect_learning_intent(text: str) -> Optional[Dict[str, Any]]:
                     "action": action,
                     "confidence": 0.8,
                     "language": "en",
+                }
+
+    return None
+
+
+def detect_cancel_intent(text: str) -> Optional[Dict[str, Any]]:
+    """Detect intent to cancel learning about a topic.
+
+    Args:
+        text: User message text.
+
+    Returns:
+        Dict with keys: topic, action ("cancel"), confidence
+        Or None if no cancel intent detected.
+    """
+    if not text or len(text) < 5:
+        return None
+
+    text = text.strip()
+
+    for pattern, action in _CANCEL_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            topic = _clean_topic(match.group(1))
+            if topic:
+                return {
+                    "topic": topic,
+                    "action": action,
+                    "confidence": 0.85,
                 }
 
     return None

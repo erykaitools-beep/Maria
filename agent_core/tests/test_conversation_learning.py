@@ -9,7 +9,9 @@ Covers:
 import pytest
 from unittest.mock import MagicMock, patch
 
-from agent_core.perception.learning_intent import detect_learning_intent
+from agent_core.perception.learning_intent import (
+    detect_learning_intent, detect_cancel_intent,
+)
 from agent_core.perception.conversation_learning import process_user_message
 
 
@@ -196,3 +198,68 @@ class TestProcessUserMessage:
         ctx.semantic_search = MagicMock()
         process_user_message("naucz sie o genetyce", ctx)
         ctx.semantic_search.index_text.assert_called_once()
+
+
+# =========================================================================
+# 4. Cancel intent detection
+# =========================================================================
+
+class TestCancelIntent:
+    def test_zapomnij(self):
+        r = detect_cancel_intent("zapomnij o nauce fizyki")
+        assert r is not None
+        assert "fizyki" in r["topic"]
+        assert r["action"] == "cancel"
+
+    def test_anuluj(self):
+        r = detect_cancel_intent("anuluj nauke o chemii")
+        assert r is not None
+        assert "chemii" in r["topic"]
+
+    def test_przerwij(self):
+        r = detect_cancel_intent("przerwij nauke o biologii")
+        assert r is not None
+        assert "biologii" in r["topic"]
+
+    def test_nie_ucz_sie(self):
+        r = detect_cancel_intent("nie ucz sie o matematyce")
+        assert r is not None
+        assert "matematyce" in r["topic"]
+
+    def test_przestan_uczyc(self):
+        r = detect_cancel_intent("przestan sie uczyc o logice")
+        assert r is not None
+        assert "logice" in r["topic"]
+
+    def test_cancel_english(self):
+        r = detect_cancel_intent("cancel learning about physics")
+        assert r is not None
+        assert "physics" in r["topic"]
+
+    def test_stop_english(self):
+        r = detect_cancel_intent("stop learning about math")
+        assert r is not None
+        assert "math" in r["topic"]
+
+    def test_forget_english(self):
+        r = detect_cancel_intent("forget about biology")
+        assert r is not None
+        assert "biology" in r["topic"]
+
+    def test_no_cancel_normal_message(self):
+        assert detect_cancel_intent("jak sie masz?") is None
+        assert detect_cancel_intent("naucz sie o fizyce") is None
+
+    def test_no_cancel_short(self):
+        assert detect_cancel_intent("") is None
+        assert detect_cancel_intent("hi") is None
+
+    def test_zrezygnuj(self):
+        r = detect_cancel_intent("zrezygnuj z nauki o astronomii")
+        assert r is not None
+        assert "astronomii" in r["topic"]
+
+    def test_olej(self):
+        r = detect_cancel_intent("olej temat historii")
+        assert r is not None
+        assert "historii" in r["topic"]

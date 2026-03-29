@@ -1776,11 +1776,52 @@ def handle_chat_message(data):
         })
         return
 
-    # Conversation-Driven Learning: detect learning intent before chat
+    # Conversation-Driven Learning: detect cancel or learning intent
     try:
-        from agent_core.perception.learning_intent import detect_learning_intent
+        from agent_core.perception.learning_intent import (
+            detect_learning_intent, detect_cancel_intent,
+        )
+
+        # Check cancel intent first (before learning detection)
+        cancel = detect_cancel_intent(user_message)
+        if cancel:
+            _cancel_topic = cancel["topic"]
+            try:
+                from agent_core.goals.store import GoalStore
+                from pathlib import Path as _GPath
+                _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
+                _gs.load()
+                # Find matching active/pending learning goal
+                _cancelled = False
+                for _g in _gs.get_active():
+                    if _g.type.value != "learning":
+                        continue
+                    _g_topic = _g.metadata.get("topic", "")
+                    if _cancel_topic.lower() in _g_topic.lower() or _g_topic.lower() in _cancel_topic.lower():
+                        from agent_core.goals.goal_model import GoalStatus
+                        _gs.update_status(
+                            _g.goal_id, GoalStatus.ABANDONED,
+                            f"user_cancel: {user_message[:100]}", "user",
+                        )
+                        _gs.save()
+                        emit('chat_status', {
+                            'status': 'learning_cancelled',
+                            'topic': _g_topic,
+                        })
+                        print(f"[UI] [CDL] Cancelled goal: {_g_topic}")
+                        _cancelled = True
+                        break
+                if not _cancelled:
+                    emit('chat_status', {
+                        'status': 'learning_cancel_notfound',
+                        'topic': _cancel_topic,
+                    })
+            except Exception as e:
+                print(f"[UI] [CDL] Cancel failed: {e}")
+
+        # Check learning intent
         intent = detect_learning_intent(user_message)
-        if intent:
+        if intent and not cancel:
             _topic = intent["topic"]
             _action = intent["action"]
             # Create goal directly via GoalStore (Web UI is separate process)
@@ -1790,29 +1831,44 @@ def handle_chat_message(data):
                 from pathlib import Path as _GPath
                 _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
                 _gs.load()
-                _g = create_goal(
-                    goal_type=GoalType.LEARNING,
-                    description=f"Nauka: {_topic}",
-                    priority=0.8,
-                    status=GoalStatus.PENDING,
-                    created_by="user_conversation",
-                    metadata={
-                        "source": "conversation",
-                        "channel": "webui",
-                        "action": _action,
-                        "topic": _topic,
-                        "topics": [_topic],
-                        "original_text": user_message[:200],
-                    },
-                )
-                _gs.create(_g)
-                _gs.save()
-                emit('chat_status', {
-                    'status': 'learning_detected',
-                    'topic': _topic,
-                    'action': _action,
-                })
-                print(f"[UI] [CDL] Learning intent: {_action} '{_topic}'")
+
+                # Dedup: don't create if active goal with same topic exists
+                _dup = False
+                for _g in _gs.get_active():
+                    if _g.metadata.get("topic", "").lower() == _topic.lower():
+                        _dup = True
+                        break
+
+                if not _dup:
+                    _g = create_goal(
+                        goal_type=GoalType.LEARNING,
+                        description=f"Nauka: {_topic}",
+                        priority=0.8,
+                        status=GoalStatus.PENDING,
+                        created_by="user_conversation",
+                        metadata={
+                            "source": "conversation",
+                            "channel": "webui",
+                            "action": _action,
+                            "topic": _topic,
+                            "topics": [_topic],
+                            "original_text": user_message[:200],
+                        },
+                    )
+                    _gs.create(_g)
+                    _gs.save()
+                    emit('chat_status', {
+                        'status': 'learning_detected',
+                        'topic': _topic,
+                        'action': _action,
+                    })
+                    print(f"[UI] [CDL] Learning intent: {_action} '{_topic}'")
+                else:
+                    emit('chat_status', {
+                        'status': 'learning_detected',
+                        'topic': _topic,
+                        'action': 'already_active',
+                    })
             except Exception as e:
                 print(f"[UI] [CDL] Goal creation failed: {e}")
     except Exception:
@@ -2727,6 +2783,31 @@ def api_validation_history():
     traces = _read_traces(limit=200)
     validations = [t for t in traces if t.get("action_type") == "validate"]
     return jsonify({"validations": validations[:limit], "count": len(validations[:limit])})
+
+
+# =============================================================
+# Capabilities API (CapabilityRouter discovery)
+# =============================================================
+
+
+@app.route('/api/capabilities')
+@require_auth
+def api_capabilities():
+    """List all registered capabilities from CapabilityRouter."""
+    try:
+        from agent_core.routing import DEFAULT_CAPABILITY_SPECS
+        caps = []
+        for name, spec in sorted(DEFAULT_CAPABILITY_SPECS.items()):
+            caps.append({
+                "name": spec.name,
+                "description": spec.description,
+                "classification": spec.k7_classification,
+                "tags": list(spec.tags),
+                "subsystems": list(spec.required_subsystems),
+            })
+        return jsonify({"registered": len(caps), "capabilities": caps})
+    except Exception:
+        return jsonify({"registered": 0, "capabilities": []})
 
 
 # =============================================================
