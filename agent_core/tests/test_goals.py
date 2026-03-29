@@ -659,3 +659,109 @@ class TestGoalStoreE2E:
         assert store.get(gid).status == GoalStatus.ABANDONED
         assert len(store.get_active()) == 0
         assert len(store.get_proposed()) == 0
+
+
+# ============================================================
+# CDL Feedback Loop: outcome + find_by_topic
+# ============================================================
+
+
+class TestGoalOutcome:
+    def test_outcome_default_none(self):
+        g = create_goal(GoalType.LEARNING, "test", 0.5)
+        assert g.outcome is None
+
+    def test_outcome_serialization(self):
+        g = create_goal(GoalType.LEARNING, "Nauka: fizyka", 0.8)
+        g.outcome = {"chunks_learned": 5, "final_score": 0.85}
+        d = g.to_dict()
+        assert d["outcome"] == {"chunks_learned": 5, "final_score": 0.85}
+        restored = Goal.from_dict(d)
+        assert restored.outcome["final_score"] == 0.85
+
+    def test_outcome_backward_compat(self):
+        """Old goal records without outcome load fine."""
+        d = {
+            "id": "goal-old", "type": "learning",
+            "description": "old goal", "priority": 0.5,
+            "status": "pending", "progress": 0.0,
+            "created_by": "system", "created_at": 0.0, "updated_at": 0.0,
+        }
+        g = Goal.from_dict(d)
+        assert g.outcome is None
+
+    def test_set_outcome(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.LEARNING, "test", 0.5)
+        store.create(g)
+        ok = store.set_outcome(g.id, {"score": 0.9})
+        assert ok is True
+        assert store.get(g.id).outcome == {"score": 0.9}
+
+    def test_set_outcome_nonexistent(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        assert store.set_outcome("fake-id", {}) is False
+
+
+class TestFindByTopic:
+    def test_find_by_topic_exact(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Nauka: genetyka", 0.8,
+            metadata={"topic": "genetyka", "topics": ["genetyka"]},
+        )
+        store.create(g)
+        results = store.find_by_topic("genetyka")
+        assert len(results) == 1
+        assert results[0].id == g.id
+
+    def test_find_by_topic_substring(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Nauka: fizyka kwantowa", 0.8,
+            metadata={"topic": "fizyka kwantowa"},
+        )
+        store.create(g)
+        results = store.find_by_topic("fizyka")
+        assert len(results) == 1
+
+    def test_find_by_topic_case_insensitive(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Nauka: Python", 0.8,
+            metadata={"topic": "Python"},
+        )
+        store.create(g)
+        results = store.find_by_topic("python")
+        assert len(results) == 1
+
+    def test_find_by_topic_no_match(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Nauka: fizyka", 0.8,
+            metadata={"topic": "fizyka"},
+        )
+        store.create(g)
+        results = store.find_by_topic("chemia")
+        assert len(results) == 0
+
+    def test_find_by_topic_only_learning_goals(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g1 = create_goal(GoalType.MAINTENANCE, "Maintenance fizyka", 0.5)
+        g2 = create_goal(
+            GoalType.LEARNING, "Nauka: fizyka", 0.8,
+            metadata={"topic": "fizyka"},
+        )
+        store.create(g1)
+        store.create(g2)
+        results = store.find_by_topic("fizyka")
+        assert len(results) == 1
+        assert results[0].type == GoalType.LEARNING
+
+    def test_find_by_topic_description_fallback(self, tmp_path):
+        """Finds by description if no topic in metadata."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.LEARNING, "Nauka: biologia", 0.8)
+        store.create(g)
+        results = store.find_by_topic("biologia")
+        assert len(results) == 1

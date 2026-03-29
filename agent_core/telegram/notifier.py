@@ -30,6 +30,8 @@ ALERT_COOLDOWNS: Dict[str, float] = {
     "health_drop": 1800,          # 30min - urgent
     "mode_change": 600,           # 10min - mode transitions
     "consecutive_failure": 3600,  # 1h - K7 blocks
+    "learning_progress": 1800,    # 30min - CDL progress updates
+    "learning_complete": 0,       # always send - operator requested this
     "startup": 0,                 # always send
 }
 

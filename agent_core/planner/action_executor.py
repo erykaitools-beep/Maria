@@ -230,6 +230,10 @@ class ActionExecutor:
         if result["success"] and self._semantic_search:
             self._incremental_index()
 
+        # CDL feedback: update learning goal progress
+        if result["success"]:
+            self._update_learning_goal(plan, result)
+
         return result
 
     def _exec_exam(self, plan: Plan) -> Dict[str, Any]:
@@ -251,6 +255,11 @@ class ActionExecutor:
         }
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
+
+        # CDL feedback: update learning goal progress
+        if result["success"]:
+            self._update_learning_goal(plan, result)
+
         return result
 
     def _exec_review(self, plan: Plan) -> Dict[str, Any]:
@@ -682,3 +691,87 @@ class ActionExecutor:
         except Exception as e:
             logger.debug(f"Belief update skipped: {e}")
             return 0
+
+    def _update_learning_goal(self, plan, result: dict) -> None:
+        """
+        CDL feedback loop: update LEARNING goal progress and outcome.
+
+        Called after successful LEARN or EXAM execution.
+        Computes progress from knowledge snapshot if available,
+        sends Telegram notification, sets outcome on completion.
+        """
+        if not self._goal_store or not plan.goal_id:
+            return
+
+        try:
+            goal = self._goal_store.get(plan.goal_id)
+            if not goal or goal.type.value != "learning":
+                return
+
+            # Compute progress from knowledge state
+            progress = goal.progress
+            topics = goal.metadata.get("topics", [])
+
+            if self._knowledge_analyzer and topics:
+                try:
+                    scored_files = self._knowledge_analyzer.get_files_for_topics(topics)
+                    file_ids = [fid for fid, _ in scored_files]
+                    if file_ids:
+                        snapshot = self._knowledge_analyzer.get_knowledge_snapshot()
+                        completed = snapshot.get("files_by_status", {}).get("completed", [])
+                        done = sum(1 for f in file_ids if f in completed)
+                        progress = done / len(file_ids) if file_ids else 0.0
+                except Exception:
+                    pass
+
+            # Fallback: increment progress
+            if progress <= goal.progress:
+                chunks = result.get("chunks_learned", 0)
+                exams_passed = result.get("exams_passed", 0)
+                if chunks > 0:
+                    progress = min(0.9, goal.progress + 0.1)
+                if exams_passed > 0:
+                    progress = min(1.0, goal.progress + 0.2)
+
+            # Update goal progress
+            if progress > goal.progress:
+                self._goal_store.update_progress(plan.goal_id, progress)
+
+            # Check if goal just completed (progress >= 1.0)
+            goal_refreshed = self._goal_store.get(plan.goal_id)
+            if goal_refreshed and goal_refreshed.status.value == "achieved":
+                outcome = {
+                    "chunks_learned": result.get("chunks_learned", 0),
+                    "exams_passed": result.get("exams_passed", 0),
+                    "final_score": result.get("score", 0.0),
+                    "completed_at": time.time(),
+                }
+                self._goal_store.set_outcome(plan.goal_id, outcome)
+                self._goal_store.save()
+
+                # Notify operator
+                topic = goal.metadata.get("topic", goal.description)
+                if self._telegram_notifier:
+                    try:
+                        self._telegram_notifier.notify(
+                            "learning_complete",
+                            f"*Nauka zakonczona: {topic}*\n"
+                            f"Wynik: {outcome.get('final_score', 0):.0%}"
+                        )
+                    except Exception:
+                        pass
+                logger.info(f"[CDL] Learning goal achieved: {topic}")
+
+            elif self._telegram_notifier and progress > goal.progress:
+                # Progress update (with cooldown in notifier)
+                topic = goal.metadata.get("topic", goal.description)
+                try:
+                    self._telegram_notifier.notify(
+                        "learning_progress",
+                        f"*Nauka: {topic}*\nPostep: {progress:.0%}"
+                    )
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.debug(f"Learning goal update skipped: {e}")

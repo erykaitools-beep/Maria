@@ -1836,3 +1836,80 @@ class TestBeliefConfidenceUpdate:
         count = executor._update_beliefs_from_validation("target.txt", 0.9)
         assert count == 0
         mock_store.revise.assert_not_called()
+
+
+# ═══════════════════════════════════════════════════════
+# CDL Feedback Loop: _update_learning_goal
+# ═══════════════════════════════════════════════════════
+
+
+class TestUpdateLearningGoal:
+    def test_updates_progress_on_learn(self):
+        """Learning goal progress updated after successful LEARN."""
+        executor = ActionExecutor()
+
+        mock_goal = MagicMock()
+        mock_goal.type = MagicMock(value="learning")
+        mock_goal.progress = 0.0
+        mock_goal.metadata = {"topic": "genetyka", "topics": ["genetyka"]}
+        mock_goal.description = "Nauka: genetyka"
+        mock_goal.status = MagicMock(value="active")
+
+        mock_store = MagicMock()
+        mock_store.get.return_value = mock_goal
+        executor.set_goal_store(mock_store)
+
+        plan = create_plan("goal-123", "learn", ActionType.LEARN)
+        result = {"success": True, "chunks_learned": 2}
+
+        executor._update_learning_goal(plan, result)
+        mock_store.update_progress.assert_called_once()
+
+    def test_no_update_without_goal_store(self):
+        """No crash when goal_store is None."""
+        executor = ActionExecutor()
+        plan = create_plan("goal-123", "learn", ActionType.LEARN)
+        executor._update_learning_goal(plan, {"success": True})
+        # Should not raise
+
+    def test_no_update_for_non_learning_goal(self):
+        """Non-learning goals are skipped."""
+        executor = ActionExecutor()
+
+        mock_goal = MagicMock()
+        mock_goal.type = MagicMock(value="maintenance")
+
+        mock_store = MagicMock()
+        mock_store.get.return_value = mock_goal
+        executor.set_goal_store(mock_store)
+
+        plan = create_plan("goal-123", "maint", ActionType.MAINTENANCE)
+        executor._update_learning_goal(plan, {"success": True})
+        mock_store.update_progress.assert_not_called()
+
+    def test_sets_outcome_on_achieved(self):
+        """When goal transitions to achieved, outcome is set."""
+        executor = ActionExecutor()
+
+        mock_goal = MagicMock()
+        mock_goal.type = MagicMock(value="learning")
+        mock_goal.progress = 0.8
+        mock_goal.metadata = {"topic": "fizyka"}
+        mock_goal.description = "Nauka: fizyka"
+
+        # After update_progress, goal status becomes achieved
+        mock_goal_achieved = MagicMock()
+        mock_goal_achieved.status = MagicMock(value="achieved")
+
+        mock_store = MagicMock()
+        mock_store.get.side_effect = [mock_goal, mock_goal_achieved]
+        executor.set_goal_store(mock_store)
+
+        plan = create_plan("goal-123", "exam", ActionType.EXAM)
+        result = {"success": True, "exams_passed": 1, "score": 0.85}
+
+        executor._update_learning_goal(plan, result)
+        mock_store.set_outcome.assert_called_once()
+        outcome = mock_store.set_outcome.call_args[0][1]
+        assert outcome["final_score"] == 0.85
+        assert outcome["exams_passed"] == 1

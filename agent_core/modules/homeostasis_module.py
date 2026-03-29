@@ -1235,6 +1235,57 @@ def _register_telegram_commands(bridge, ctx):
 
         return "\n".join(parts)
 
+    def _cmd_nauka(args):
+        """Show learning goals and their progress."""
+        gs = getattr(ctx, 'goal_store', None)
+        if not gs:
+            return "GoalStore niedostepny."
+
+        args = args.strip()
+
+        # /nauka <topic> - search by topic
+        if args:
+            goals = gs.find_by_topic(args)
+            if not goals:
+                return f"Brak celow nauki o '{args}'."
+            lines = [f"*Nauka: {args}*"]
+            for g in goals[:5]:
+                status = g.status.value
+                progress = f"{g.progress:.0%}"
+                age = time.time() - g.created_at
+                age_str = f"{age/3600:.0f}h" if age < 86400 else f"{age/86400:.0f}d"
+                line = f"  [{g.id[:8]}] {status} | {progress} | {age_str} temu"
+                if g.outcome:
+                    score = g.outcome.get("final_score", 0)
+                    line += f" | wynik: {score:.0%}"
+                lines.append(line)
+            return "\n".join(lines)
+
+        # /nauka - list all LEARNING goals
+        from agent_core.goals.goal_model import GoalType
+        all_goals = [g for g in gs._goals.values() if g.type == GoalType.LEARNING]
+        if not all_goals:
+            return "Brak celow nauki."
+
+        active = [g for g in all_goals if g.is_active]
+        done = [g for g in all_goals if g.status.value == "achieved"]
+
+        lines = [f"*Cele nauki: {len(active)} aktywnych, {len(done)} ukonczonych*"]
+        for g in sorted(active, key=lambda x: x.priority, reverse=True)[:8]:
+            topic = g.metadata.get("topic", g.description[:25])
+            lines.append(f"  [{g.id[:8]}] {topic} | {g.progress:.0%} | pri={g.priority:.1f}")
+
+        if done:
+            lines.append(f"\n*Ukonczone ({len(done)}):*")
+            for g in sorted(done, key=lambda x: x.updated_at, reverse=True)[:5]:
+                topic = g.metadata.get("topic", g.description[:25])
+                score = ""
+                if g.outcome:
+                    score = f" | wynik: {g.outcome.get('final_score', 0):.0%}"
+                lines.append(f"  [{g.id[:8]}] {topic}{score}")
+
+        return "\n".join(lines)
+
     def _cmd_beliefs(args):
         """Show belief store stats and run maintenance."""
         wm = getattr(ctx, 'world_model', None)
@@ -1298,6 +1349,7 @@ def _register_telegram_commands(bridge, ctx):
             "*Komendy ClawBot:*\n"
             "/status - stan systemu\n"
             "/goals - lista celow\n"
+            "/nauka [temat] - cele nauki + postep\n"
             "/beliefs [gaps|maintain] - belief store\n"
             "/trace [N|stats|failed|ep-ID] - traces\n"
             "/memory <temat> - co Maria wie\n"
@@ -1326,6 +1378,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("memory", _cmd_memory)
     bridge.register_command("validate", _cmd_validate)
     bridge.register_command("beliefs", _cmd_beliefs)
+    bridge.register_command("nauka", _cmd_nauka)
     bridge.register_command("efapprove", _cmd_efapprove)
     bridge.register_command("efreject", _cmd_efreject)
     bridge.register_command("efstatus", _cmd_efstatus)

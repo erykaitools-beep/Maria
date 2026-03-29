@@ -178,6 +178,32 @@ class GoalStore:
             if g.parent_goal_id == parent_goal_id
         ]
 
+    def find_by_topic(self, topic: str) -> List[Goal]:
+        """Find LEARNING goals matching a topic (case-insensitive substring)."""
+        topic_lower = topic.lower()
+        results = []
+        for g in self._goals.values():
+            if g.type != GoalType.LEARNING:
+                continue
+            meta_topic = (g.metadata.get("topic") or "").lower()
+            meta_topics = [t.lower() for t in g.metadata.get("topics", [])]
+            desc_lower = g.description.lower()
+            if (topic_lower in meta_topic
+                    or any(topic_lower in t for t in meta_topics)
+                    or topic_lower in desc_lower):
+                results.append(g)
+        return sorted(results, key=lambda g: g.created_at, reverse=True)
+
+    def set_outcome(self, goal_id: str, outcome: dict) -> bool:
+        """Set outcome dict on a goal (typically on completion)."""
+        goal = self._goals.get(goal_id)
+        if not goal:
+            return False
+        goal.outcome = outcome
+        goal.updated_at = __import__('time').time()
+        self._mark_dirty(goal_id)
+        return True
+
     # ---- Update ----
 
     def confirm(self, goal_id: str) -> bool:

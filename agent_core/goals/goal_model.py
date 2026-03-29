@@ -87,6 +87,7 @@ class Goal:
     deadline: Optional[float] = None
     audit_trail: List[AuditEntry] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    outcome: Optional[Dict[str, Any]] = None  # v2: learning results when goal completed
 
     @property
     def is_active(self) -> bool:
@@ -114,6 +115,7 @@ class Goal:
             "deadline": self.deadline,
             "audit_trail": [a.to_dict() for a in self.audit_trail],
             "metadata": self.metadata,
+            "outcome": self.outcome,
         }
 
     @staticmethod
@@ -136,6 +138,7 @@ class Goal:
                 for a in d.get("audit_trail", [])
             ],
             metadata=d.get("metadata", {}),
+            outcome=d.get("outcome"),
         )
 
 
