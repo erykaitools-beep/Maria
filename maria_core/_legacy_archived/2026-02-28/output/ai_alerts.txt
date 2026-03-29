@@ -1,2 +1,0 @@
-[2025-11-29 14:43:23] [INFO] Agent iniciuje cykl analizy
-[2025-12-05 21:10:24] [INFO] Agent iniciuje cykl analizy

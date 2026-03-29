@@ -1,2 +1,0 @@
-[2025-11-29 14:43:23] [0.75] AI z pamięcią może być bardziej efektywna w podejmowaniu decyzji (#ai,memory,hypothesis)
-[2025-12-05 21:10:24] [0.75] AI z pamięcią może być bardziej efektywna w podejmowaniu decyzji (#ai,memory,hypothesis)

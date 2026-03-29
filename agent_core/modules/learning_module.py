@@ -7,7 +7,6 @@ from pathlib import Path
 
 from agent_core.registry import MariaModule, CommandInfo
 from maria_core.utils.conversation_logger import log_message
-from maria_core.sys.orchestrator import maria_learning_cycle
 from maria_core.perception.perception import scan_input_directory
 from maria_core.sys.config import INPUT_DIR, KNOWLEDGE_INDEX, EXAM_RESULTS, LONGTERM_MEMORY
 
