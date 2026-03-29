@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Belief Store{% endblock %}
+{% block page_class %}mo-page--beliefs{% endblock %}
+
+{% block content %}
+<div class="mo-beliefs">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Belief Store v2</h2>
+    <div>
+      <button class="mo-btn mo-btn--sm" onclick="loadBeliefs()">Odswiez</button>
+    </div>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-stats">Statystyki</button>
+    <button class="mo-tab" data-tab="tab-gaps">Luki w wiedzy</button>
+    <button class="mo-tab" data-tab="tab-recent">Ostatnie</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-stats">
+    <div id="beliefs-stats">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-gaps">
+    <div id="beliefs-gaps">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-recent">
+    <div id="beliefs-recent">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/beliefs.js') }}"></script>
+{% endblock %}

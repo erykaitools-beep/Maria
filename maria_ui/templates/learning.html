@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Learning Goals{% endblock %}
+{% block page_class %}mo-page--learning{% endblock %}
+
+{% block content %}
+<div class="mo-learning">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Learning Goals (CDL)</h2>
+    <div>
+      <button class="mo-btn mo-btn--sm" onclick="loadLearning()">Odswiez</button>
+    </div>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-overview">Przeglad</button>
+    <button class="mo-tab" data-tab="tab-active">Aktywne</button>
+    <button class="mo-tab" data-tab="tab-done">Ukonczone</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-overview">
+    <div id="learning-overview">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-active">
+    <div id="learning-active">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-done">
+    <div id="learning-done">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/learning.js') }}"></script>
+{% endblock %}

@@ -2646,6 +2646,20 @@ def validation_page():
     return render_template('validation.html', active_page='validation')
 
 
+@app.route('/beliefs')
+@require_auth
+def beliefs_page():
+    """Belief Store v2 dashboard page."""
+    return render_template('beliefs.html', active_page='beliefs')
+
+
+@app.route('/learning')
+@require_auth
+def learning_page():
+    """Learning Goals dashboard page (CDL feedback)."""
+    return render_template('learning.html', active_page='learning')
+
+
 @app.route('/api/validation/stats')
 @require_auth
 def api_validation_stats():
@@ -2713,6 +2727,87 @@ def api_validation_history():
     traces = _read_traces(limit=200)
     validations = [t for t in traces if t.get("action_type") == "validate"]
     return jsonify({"validations": validations[:limit], "count": len(validations[:limit])})
+
+
+# =============================================================
+# Learning Goals API (CDL feedback)
+# =============================================================
+
+
+def _read_goals():
+    """Read goals from JSONL."""
+    import os
+    goals_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "meta_data", "goals.jsonl"
+    )
+    goals = {}
+    try:
+        with open(goals_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        rec = json.loads(line)
+                        goals[rec["id"]] = rec
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+    except IOError:
+        pass
+    return goals
+
+
+@app.route('/api/learning/goals')
+@require_auth
+def api_learning_goals():
+    """Get all learning goals with progress and outcome."""
+    goals = _read_goals()
+    learning = [g for g in goals.values() if g.get("type") == "learning"]
+    learning.sort(key=lambda g: g.get("created_at", 0), reverse=True)
+
+    active = [g for g in learning if g.get("status") in ("pending", "active")]
+    achieved = [g for g in learning if g.get("status") == "achieved"]
+    failed = [g for g in learning if g.get("status") in ("failed", "abandoned")]
+
+    return jsonify({
+        "active": active,
+        "achieved": achieved,
+        "failed": failed,
+        "total": len(learning),
+        "active_count": len(active),
+        "achieved_count": len(achieved),
+    })
+
+
+@app.route('/api/learning/stats')
+@require_auth
+def api_learning_stats():
+    """Get aggregate learning stats."""
+    goals = _read_goals()
+    learning = [g for g in goals.values() if g.get("type") == "learning"]
+
+    total = len(learning)
+    achieved = sum(1 for g in learning if g.get("status") == "achieved")
+    active = sum(1 for g in learning if g.get("status") in ("pending", "active"))
+    avg_progress = 0.0
+    if learning:
+        avg_progress = sum(g.get("progress", 0) for g in learning) / total
+
+    # Extract topics
+    topics = set()
+    for g in learning:
+        t = g.get("metadata", {}).get("topic", "")
+        if t:
+            topics.add(t)
+
+    return jsonify({
+        "total": total,
+        "active": active,
+        "achieved": achieved,
+        "avg_progress": round(avg_progress, 3),
+        "topics_count": len(topics),
+        "completion_rate": round(achieved / total, 3) if total > 0 else 0,
+    })
 
 
 # =============================================================
