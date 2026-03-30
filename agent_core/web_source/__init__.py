@@ -75,12 +75,14 @@ def run_fetch_session(
     max_articles: int = 3,
     enable_rss: bool = True,
     semantic_memory=None,
+    override_topics: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Run one web content fetch session.
 
     Flow:
     1. TopicSuggester picks topics from Maria's knowledge
+       (or use override_topics if provided - e.g. from user conversation goals)
     2. WikiClient searches and fetches articles
     3. RSSClient fetches from configured feeds (optional)
     4. ContentWriter saves .txt files to input/
@@ -91,6 +93,8 @@ def run_fetch_session(
         registry_path: JSONL registry path (default: meta_data/)
         max_articles: Max articles to fetch per session
         enable_rss: Whether to also check RSS feeds
+        override_topics: Explicit topics to search first (from user goals).
+            These are prepended before TopicSuggester results.
 
     Returns:
         Stats dict with articles_fetched, topics_searched, errors.
@@ -116,10 +120,28 @@ def run_fetch_session(
         suggester.set_semantic_memory(semantic_memory)
 
     # Step 1: Get topic suggestions
+    # Override topics from user goals go first (highest priority)
+    override_suggestions = []
+    if override_topics:
+        for t in override_topics:
+            override_suggestions.append({
+                "topic": t,
+                "strategy": "user_request",
+                "score": 1.0,
+            })
+        logger.info(
+            "[WEB_SOURCE] User-requested topics: %s",
+            [s["topic"] for s in override_suggestions],
+        )
+
     suggestions = suggester.suggest_topics(
         fetch_registry=registry,
         max_suggestions=max_articles + 2,  # extra buffer for skips
     )
+
+    # Prepend user topics before auto-suggested ones
+    if override_suggestions:
+        suggestions = override_suggestions + suggestions
 
     if not suggestions:
         logger.info("[WEB_SOURCE] No topics to fetch (empty knowledge map)")

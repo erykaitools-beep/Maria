@@ -325,10 +325,13 @@ class ActionExecutor:
             from agent_core.web_source import run_fetch_session
 
             max_articles = plan.action_params.get("max_articles", 3)
+            # Pass user-requested topics from conversation goals
+            override_topics = plan.action_params.get("topics")
             result = run_fetch_session(
                 knowledge_analyzer=self._knowledge_analyzer,
                 max_articles=max_articles,
                 semantic_memory=self._semantic_search,
+                override_topics=override_topics,
             )
             errors = result.get("errors", 0)
 
