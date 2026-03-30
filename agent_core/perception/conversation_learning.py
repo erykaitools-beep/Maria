@@ -64,7 +64,7 @@ def process_user_message(text: str, ctx, channel: str = "repl") -> Optional[Dict
             goal = create_goal(
                 goal_type=GoalType.LEARNING,
                 description=f"Nauka: {topic}",
-                priority=0.8,  # User-requested = high priority
+                priority=1.1,  # User-requested: above seed goals (1.0)
                 status=GoalStatus.PENDING,  # Skip PROPOSED, user explicitly asked
                 created_by="user_conversation",
                 metadata={
