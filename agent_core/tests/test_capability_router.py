@@ -95,11 +95,12 @@ class TestCapabilitySpec:
         assert s1 == s2
 
     def test_default_specs_complete(self):
-        """All 13 known action types have specs."""
+        """All 14 known action types have specs."""
         expected = {
             "learn", "exam", "review", "evaluate", "noop",
             "maintenance", "fetch", "experiment", "effector",
             "self_analyze", "creative", "ask_expert", "validate",
+            "critique",
         }
         assert set(DEFAULT_CAPABILITY_SPECS.keys()) == expected
 
@@ -600,7 +601,7 @@ class TestFullFlow:
         for name, spec in DEFAULT_CAPABILITY_SPECS.items():
             router.register(name, _ok_handler, spec)
 
-        assert router.registered_count == 13
+        assert router.registered_count == 14
         plan = MockPlan(MockActionType.NOOP, {})
         result = router.dispatch(plan)
         assert result["success"] is True
@@ -622,7 +623,7 @@ class TestFullFlow:
             router.register(name, _ok_handler, spec)
 
         status = router.get_status()
-        assert status["registered"] == 13
+        assert status["registered"] == 14
         free_count = sum(
             1 for c in status["capabilities"]
             if c["classification"] == "free"

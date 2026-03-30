@@ -717,6 +717,56 @@ def make_validate_handler(
     return handler
 
 
+def make_critique_handler(
+    critic_agent,
+    telegram_notifier=None,
+) -> Callable:
+    """Create handler for ActionType.CRITIQUE (Faza G)."""
+
+    def handler(plan) -> Dict[str, Any]:
+        if critic_agent is None:
+            return {"success": False, "error": "No critic_agent configured"}
+
+        try:
+            trigger = plan.action_params.get("trigger", "planner")
+            report = critic_agent.run_critique(trigger=trigger)
+
+            if report.error:
+                return {
+                    "success": False,
+                    "error": report.error,
+                    "report_id": report.report_id,
+                }
+
+            # Telegram: notify only CRITICAL findings
+            notifier = _resolve_notifier(telegram_notifier)
+            if notifier and report.findings:
+                try:
+                    critical = [
+                        f for f in report.findings
+                        if f.severity == "critical"
+                    ]
+                    if critical and hasattr(notifier, "notify_critique"):
+                        notifier.notify_critique(
+                            [f.to_dict() for f in critical]
+                        )
+                except Exception:
+                    pass
+
+            return {
+                "success": True,
+                "report_id": report.report_id,
+                "findings": len(report.findings),
+                "findings_total": report.findings_total,
+                "goals_created": report.goals_created,
+                "duration_ms": report.duration_ms,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    return handler
+
+
 def make_noop_handler() -> Callable:
     """Create handler for ActionType.NOOP."""
 

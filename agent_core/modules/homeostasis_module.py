@@ -499,6 +499,36 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning(f"CreativeModule not initialized: {e}")
 
+                # Faza G: CriticAgent (knowledge quality gate)
+                try:
+                    from agent_core.critic import CriticAgent
+                    from maria_core.sys.config import BASE_DIR as _BASE_DIR
+
+                    critic = CriticAgent(project_root=str(_BASE_DIR))
+
+                    # Wire belief store
+                    if ctx.world_model and hasattr(ctx.world_model, 'store'):
+                        critic.set_belief_store(ctx.world_model.store)
+
+                    # Wire dispute log
+                    if hasattr(ctx, 'dispute_log') and ctx.dispute_log:
+                        critic.set_dispute_log(ctx.dispute_log)
+
+                    # Wire goal store
+                    if ctx.goal_store:
+                        critic.set_goal_store(ctx.goal_store)
+
+                    # Wire LLM (NIM for summary decoration)
+                    _cr_router = ctx.brain
+                    if hasattr(_cr_router, '_ask_once') and getattr(_cr_router, 'nim', None) is not None:
+                        critic.set_llm_fn(lambda p, _r=_cr_router: _r._ask_once(p))
+
+                    planner.set_critic_agent(critic)
+                    ctx.critic_agent = critic
+                    print("[Homeostasis] [OK] CriticAgent wired (Faza G)")
+                except Exception as e:
+                    logger.warning(f"CriticAgent not initialized: {e}")
+
                 # Wire LLM router to executor for ASK_EXPERT actions
                 if ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia'):
                     planner.executor.set_llm_router(ctx.brain)
@@ -538,7 +568,7 @@ class HomeostasisModule(MariaModule):
                         make_experiment_handler, make_effector_handler,
                         make_self_analyze_handler, make_creative_handler,
                         make_ask_expert_handler, make_validate_handler,
-                        make_noop_handler,
+                        make_critique_handler, make_noop_handler,
                     )
 
                     cap_router = CapabilityRouter()
@@ -614,6 +644,12 @@ class HomeostasisModule(MariaModule):
                     cap_router.register("validate", make_validate_handler(
                         _cross_val, _wm, _analyzer,
                     ), DEFAULT_CAPABILITY_SPECS["validate"])
+
+                    # Critique (Faza G)
+                    _critic = ctx.critic_agent if hasattr(ctx, 'critic_agent') else None
+                    cap_router.register("critique", make_critique_handler(
+                        _critic, _tg,
+                    ), DEFAULT_CAPABILITY_SPECS["critique"])
 
                     # Noop
                     cap_router.register("noop", make_noop_handler(),

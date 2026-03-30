@@ -156,6 +156,28 @@ class TelegramNotifier:
             self._mark_sent("self_analysis")
         return ok
 
+    def notify_critique(self, findings: List[Dict]) -> bool:
+        """Send Faza G critique findings (CRITICAL only)."""
+        if not self._can_send("critique"):
+            return False
+
+        lines = ["*Faza G - Krytyk wiedzy:*\n"]
+        for f in findings[:3]:
+            cat = f.get("category", "?")
+            topic = f.get("topic", "?")
+            desc = f.get("description", "")[:120]
+            action = f.get("suggested_action", "?")
+            lines.append(f"[!] {cat}: {topic}")
+            lines.append(f"    {desc}")
+            lines.append(f"    -> {action}")
+            lines.append("")
+
+        text = "\n".join(lines)
+        ok = self._bot.send_message(text)
+        if ok:
+            self._mark_sent("critique")
+        return ok
+
     def notify_needs_human(self, reason: str = "") -> bool:
         """Send K9 needs_human signal."""
         if not self._can_send("needs_human"):

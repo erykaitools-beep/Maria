@@ -39,6 +39,7 @@ class ActionExecutor:
         self._creative_module = None
         self._telegram_notifier = None
         self._cross_validator = None
+        self._critic_agent = None
         self._world_model = None
         self._llm_router = None
         self._semantic_search = None
@@ -114,6 +115,10 @@ class ActionExecutor:
         """Set CrossValidator for multi-source learning (Faza F)."""
         self._cross_validator = validator
 
+    def set_critic_agent(self, critic) -> None:
+        """Set CriticAgent for knowledge quality gate (Faza G)."""
+        self._critic_agent = critic
+
     def set_world_model(self, world_model) -> None:
         """Set WorldModel for belief confidence updates (Faza F)."""
         self._world_model = world_model
@@ -161,6 +166,8 @@ class ActionExecutor:
                 result = self._exec_ask_expert(plan)
             elif action == ActionType.VALIDATE:
                 result = self._exec_validate(plan)
+            elif action == ActionType.CRITIQUE:
+                result = self._exec_critique(plan)
             elif action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
@@ -785,3 +792,31 @@ class ActionExecutor:
 
         except Exception as e:
             logger.debug(f"Learning goal update skipped: {e}")
+
+    # -- Faza G: Knowledge critique (deprecated legacy path) ---------
+
+    def _exec_critique(self, plan: Plan) -> Dict[str, Any]:
+        """Knowledge quality critique (Faza G). Legacy fallback."""
+        if self._critic_agent is None:
+            return {"success": False, "error": "No CriticAgent configured"}
+
+        try:
+            trigger = plan.action_params.get("trigger", "planner")
+            report = self._critic_agent.run_critique(trigger=trigger)
+
+            if report.error:
+                return {
+                    "success": False,
+                    "error": report.error,
+                    "report_id": report.report_id,
+                }
+
+            return {
+                "success": True,
+                "report_id": report.report_id,
+                "findings": len(report.findings),
+                "goals_created": report.goals_created,
+                "duration_ms": report.duration_ms,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}

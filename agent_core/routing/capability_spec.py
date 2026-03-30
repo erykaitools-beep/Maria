@@ -122,4 +122,11 @@ DEFAULT_CAPABILITY_SPECS = {
         k7_classification="guarded",
         tags=("validation", "learning"),
     ),
+    "critique": CapabilitySpec(
+        name="critique",
+        description="Faza G: Knowledge quality gate - contradictions, calibration, gaps",
+        required_subsystems=("critic_agent",),
+        k7_classification="guarded",
+        tags=("meta", "analysis"),
+    ),
 }

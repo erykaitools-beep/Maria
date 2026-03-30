@@ -38,6 +38,7 @@ ROUTINE_INTERVAL_TICKS = 60         # Normal cycle every 60 ticks (60s)
 EVALUATION_INTERVAL_SEC = 3600      # Trigger K4 report every 1h
 RECOMMENDATION_COOLDOWN_SEC = 900   # 15 min cooldown on eval recommendations
 VALIDATION_INTERVAL_SEC = 21600     # 6h between cross-validations (Faza F)
+CRITIQUE_INTERVAL_SEC = 28800       # 8h between knowledge critiques (Faza G)
 
 # High-priority event types that trigger immediate cycle
 HIGH_PRIORITY_EVENTS = {
@@ -98,6 +99,7 @@ class PlannerCore:
         self._experiment_system = None
         self._self_analysis = None
         self._creative_module = None
+        self._critic_agent = None
         self._trace_store = None
         self._approval_queue = None
         self._telegram_notifier = None
@@ -175,6 +177,10 @@ class PlannerCore:
     def set_cross_validator(self, validator) -> None:
         """Set CrossValidator for multi-source learning (Faza F)."""
         self.executor.set_cross_validator(validator)
+
+    def set_critic_agent(self, critic) -> None:
+        """Set CriticAgent for knowledge quality gate (Faza G)."""
+        self._critic_agent = critic
 
     def set_telegram_notifier(self, notifier) -> None:
         """Set TelegramNotifier for effector request notifications (Phase 5)."""
@@ -335,12 +341,17 @@ class PlannerCore:
         if plan is not None:
             return self._finalize_plan(plan)
 
-        # Faza F: Cross-validate learned knowledge (after evaluate, before self-analysis)
+        # Faza F: Cross-validate learned knowledge (after evaluate, before critique)
         plan = self._maybe_validate(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
-        # K12: Self-analysis (after evaluation, before giving up)
+        # Faza G: Knowledge quality critique (after validate, before self-analysis)
+        plan = self._maybe_critique(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # K12: Self-analysis (after critique, before giving up)
         plan = self._maybe_self_analyze(context)
         if plan is not None:
             return self._finalize_plan(plan)
@@ -628,6 +639,54 @@ class PlannerCore:
             goal_description=f"Cross-validate: {file_id}",
             action_type=ActionType.VALIDATE,
             action_params={"file_id": file_id},
+        )
+
+    # Faza G: Knowledge critique trigger
+
+    def _maybe_critique(self, context: Dict) -> Optional[Plan]:
+        """
+        Check if knowledge critique should trigger (Faza G).
+
+        Triggers when:
+        - CriticAgent is configured
+        - Cooldown expired (8h)
+        - Or post_validation / post_maintenance event
+        - Not rate-limited by K7
+        """
+        if not hasattr(self, '_critic_agent') or self._critic_agent is None:
+            return None
+
+        # Check K7 rate limit
+        if self._is_action_rate_limited("critique"):
+            return None
+
+        now = time.time()
+        since_critique = now - self._state.last_critique_ts
+
+        # Minimum 1h between critiques
+        if since_critique < 3600:
+            return None
+
+        trigger = None
+        if since_critique >= CRITIQUE_INTERVAL_SEC:
+            trigger = "periodic"
+        # Post-validation trigger (use fresh dispute data)
+        elif context.get("last_action_type") == "validate":
+            trigger = "post_validation"
+        # Post-maintenance trigger (beliefs just maintained)
+        elif context.get("last_action_type") == "evaluate":
+            trigger = "post_maintenance"
+
+        if trigger is None:
+            return None
+
+        self._state.last_critique_ts = now
+        logger.info("[Faza G] Knowledge critique triggered: %s", trigger)
+        return create_plan(
+            goal_id=None,
+            goal_description=f"Knowledge critique ({trigger})",
+            action_type=ActionType.CRITIQUE,
+            action_params={"trigger": trigger},
         )
 
     # -- Internal: goal selection ---------------------------

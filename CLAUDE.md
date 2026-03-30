@@ -85,15 +85,16 @@
 | **2026-03-29** | **Belief Store v2** - evidence tracking, compaction, smart pruning, confidence decay, dedup (28 testow) |
 | **2026-03-29** | Belief maintenance wired: planner EVALUATE -> maintain(), Telegram /beliefs, Web UI /api/beliefs |
 | **2026-03-29** | **Capability/Task Router** - unified registry-based dispatch replacing 13-way if/elif (63 testow) |
+| **2026-03-30** | **Faza G: Agent Krytyk** - knowledge quality gate, 7 wymiarow analizy, READ-ONLY critic (69 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter |
-| **Testy** | 2566 passing |
-| **Faza** | Stabilization COMPLETE + Faza F Multi-Source Learning COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent |
+| **Testy** | 2635 passing |
+| **Faza** | Stabilization COMPLETE + Faza F COMPLETE + Faza G Agent Krytyk COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -141,6 +142,7 @@ project/
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
+│   ├── critic/          # Faza G: Agent Krytyk - knowledge quality gate (7 dimensions)
 │   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── adapters/        # Wrappers for legacy maria_core
@@ -654,9 +656,19 @@ Usunieto:
 - [x] /api/capabilities endpoint (CapabilityRouter discovery)
 - [x] 12 nowych testow cancel (2566 total)
 
+### DONE: Faza G Agent Krytyk (2026-03-30)
+- [x] agent_core/critic/ - 4 pliki (model, critic, applier, facade)
+- [x] 7 wymiarow analizy: contradiction, overconfident, underconfident, shallow, disputes, coverage, stale
+- [x] READ-ONLY critic (zero LLM, zero side effects) + applier (PROPOSED goals)
+- [x] Integracja: ActionType.CRITIQUE, CapabilityRouter (14), planner trigger (8h/post_validate/post_maintenance)
+- [x] Telegram: notify_critique (tylko CRITICAL) + cooldown
+- [x] ADR-028: coherence/calibration critic, nie truth engine
+- [x] 69 nowych testow (2635 total)
+
 ### NASTEPNE: Autorozwoj i stabilnosc
+- REPL /critique command
+- Web UI /critique page (opcjonalnie)
 - Operator UX / dense mode (Web UI v2 polish)
-- Web UI /beliefs page - juz istnieje, ewentualnie rozszerzenie
 
 ### ODROCZONE: Zmysly (czeka na sprzet)
 - Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
@@ -732,6 +744,7 @@ python run_ui.py
 - **ADR-023:** Unified memory query with provenance metadata (MemoryQuery API, truth hierarchy)
 - **ADR-024:** Execution budgets - call_with_timeout() for Ollama, degradation routing in REDUCED mode
 - **ADR-025:** Cross-metric validation - no experiment ADOPT if guard metrics degrade
+- **ADR-028:** Critic = coherence/calibration auditor, nie truth engine (Faza G)
 
 ## Notatki Claude'a (brudnopis)
 
@@ -1051,4 +1064,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-29 (CDL v2 + CapabilityRouter + Belief Store v2 + Faza F, 2566 testow)*
+*Ostatnia aktualizacja: 2026-03-30 (Faza G Agent Krytyk + CDL v2 + CapabilityRouter, 2635 testow)*
