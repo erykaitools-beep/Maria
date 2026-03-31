@@ -300,15 +300,17 @@ class PlannerCore:
         if plan is not None:
             return self._finalize_plan(plan)
 
-        # -- STEP 3: SELECT GOAL (learning/exam/review first) --
-        goal = self._select_goal(context)
-        if goal is None:
+        # -- STEP 3: SELECT GOAL with pivot (try next if NOOP/blocked) --
+        ranked_goals = self._select_ranked_goals(context)
+        if not ranked_goals:
             # Try to auto-create a learning goal with topic selection
             created = self._auto_create_learning_goal(context)
             if created:
-                goal = self._select_goal(context)
+                ranked_goals = self._select_ranked_goals(context)
 
-        if goal is not None:
+        goal = None  # track last attempted goal for NOOP fallback
+        for candidate in ranked_goals:
+            goal = candidate
             if trace:
                 trace.goal_id = goal.id
                 trace.goal_description = goal.description
@@ -322,19 +324,35 @@ class PlannerCore:
             plan = self._create_plan_for_goal(goal, context)
             if plan.action_type == ActionType.NOOP:
                 # Goal mapped to NOOP (e.g. all files completed, FETCH rate-limited)
-                # -> fall through to evaluate/self_analyze before idling
-                pass
-            else:
-                result = self._finalize_plan(plan)
-                # If K7 blocked (autonomy_policy), fall through to evaluate/self_analyze
-                blocked_by_k7 = (
-                    result.status == PlanStatus.FAILED
-                    and isinstance(result.result, dict)
-                    and result.result.get("blocked_by") == "autonomy_policy"
+                # -> pivot: try next goal in ranking before falling through
+                logger.info(
+                    f"Planner: goal {goal.id} mapped to NOOP, "
+                    f"trying next goal (pivot)"
                 )
-                if not blocked_by_k7:
-                    return result
-                # K7 blocked -> try evaluate or self_analyze instead
+                if trace:
+                    trace.add_step("planner", "goal_pivot", "noop", {
+                        "skipped_goal": goal.id,
+                        "reason": plan.action_params.get("reason", "noop"),
+                    })
+                continue
+            result = self._finalize_plan(plan)
+            # If K7 blocked (autonomy_policy), try next goal
+            blocked_by_k7 = (
+                result.status == PlanStatus.FAILED
+                and isinstance(result.result, dict)
+                and result.result.get("blocked_by") == "autonomy_policy"
+            )
+            if blocked_by_k7:
+                logger.info(
+                    f"Planner: goal {goal.id} blocked by K7, "
+                    f"trying next goal (pivot)"
+                )
+                if trace:
+                    trace.add_step("planner", "goal_pivot", "k7_blocked", {
+                        "skipped_goal": goal.id,
+                    })
+                continue
+            return result
 
         # -- STEP 5: EVALUATE as fallback (no actionable goals or goal plan blocked) --
         plan = self._maybe_evaluate(context)
@@ -703,6 +721,28 @@ class PlannerCore:
             knowledge_snapshot=context.get("knowledge_snapshot"),
             world_summary=context.get("world_summary"),
         )
+
+    def _select_ranked_goals(self, context: Dict) -> list:
+        """Return all feasible goals ranked by effective priority (descending)."""
+        if self._goal_store is None:
+            return []
+
+        active_goals = self._goal_store.get_active()
+        if not active_goals:
+            return []
+
+        metrics = context.get("evaluation_metrics", {})
+        snapshot = context.get("knowledge_snapshot")
+
+        # Use GoalSelector to filter feasible + rank
+        scored = []
+        for goal in active_goals:
+            score = self.selector._compute_effective_priority(goal, time.time())
+            feasible, _ = self.selector._check_feasibility(goal, metrics, snapshot)
+            if feasible:
+                scored.append((score, goal))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [g for _, g in scored]
 
     # -- Internal: plan creation ----------------------------
 
