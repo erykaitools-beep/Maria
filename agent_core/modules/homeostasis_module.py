@@ -535,7 +535,22 @@ class HomeostasisModule(MariaModule):
                     bulletin_store = BulletinStore()
                     planner.set_bulletin_store(bulletin_store)
                     ctx.bulletin_store = bulletin_store
-                    print("[Homeostasis] [OK] BulletinStore wired (Learning Upgrade)")
+
+                    # Phase 2: KnowledgeAuditor
+                    from agent_core.bulletin import KnowledgeAuditor
+                    auditor = KnowledgeAuditor()
+                    if hasattr(ctx, 'memory_query') and ctx.memory_query:
+                        auditor.set_memory_query(ctx.memory_query)
+                    if ctx.world_model and hasattr(ctx.world_model, 'store'):
+                        auditor.set_belief_store(ctx.world_model.store)
+                    if hasattr(ctx, 'critic_agent') and ctx.critic_agent:
+                        auditor.set_critic_agent(ctx.critic_agent)
+                    if ctx.knowledge_analyzer:
+                        auditor.set_knowledge_analyzer(ctx.knowledge_analyzer)
+                    planner.set_knowledge_auditor(auditor)
+                    ctx.knowledge_auditor = auditor
+
+                    print("[Homeostasis] [OK] BulletinStore + KnowledgeAuditor wired (Learning Upgrade)")
                 except Exception as e:
                     logger.warning(f"BulletinStore not initialized: {e}")
 

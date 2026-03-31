@@ -14,10 +14,20 @@ from agent_core.bulletin.bulletin_model import (
     EntryStatus,
 )
 from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.bulletin.knowledge_auditor import (
+    KnowledgeAuditor,
+    AuditReport,
+    KnowledgeGap,
+    GapType,
+)
 
 __all__ = [
     "BulletinEntry",
     "EntryType",
     "EntryStatus",
     "BulletinStore",
+    "KnowledgeAuditor",
+    "AuditReport",
+    "KnowledgeGap",
+    "GapType",
 ]

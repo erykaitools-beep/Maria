@@ -101,6 +101,7 @@ class PlannerCore:
         self._creative_module = None
         self._critic_agent = None
         self._bulletin_store = None
+        self._knowledge_auditor = None
         self._trace_store = None
         self._approval_queue = None
         self._telegram_notifier = None
@@ -199,6 +200,10 @@ class PlannerCore:
         """Set BulletinStore for cognitive needs tracking (Learning Upgrade)."""
         self._bulletin_store = store
         self.executor.set_bulletin_store(store)
+
+    def set_knowledge_auditor(self, auditor) -> None:
+        """Set KnowledgeAuditor for pre-learn audit (Phase 2)."""
+        self._knowledge_auditor = auditor
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -977,27 +982,60 @@ class PlannerCore:
         return None
 
     def _post_need_material_if_missing(self) -> None:
-        """Post NEED_MATERIAL to bulletin board for current goal's topic."""
+        """Audit topic knowledge and post appropriate need to bulletin board."""
         if not getattr(self, "_bulletin_store", None):
             return
-        # Get topic from current goal context
         topic = self._get_current_goal_topic()
         if not topic:
             return
         goal_id = self._get_current_goal_id()
+
         try:
             from agent_core.bulletin.bulletin_model import EntryType
-            self._bulletin_store.create_and_post(
-                entry_type=EntryType.NEED_MATERIAL,
-                topic=topic,
-                reason_code="all_sources_exhausted",
-                summary=f"Wszystkie zrodla wyczerpane dla tematu: {topic}",
-                requested_by="planner",
-                goal_id=goal_id,
-                priority=0.7,
-            )
+
+            # Phase 2: use auditor if available, otherwise simple NEED_MATERIAL
+            auditor = getattr(self, "_knowledge_auditor", None)
+            if auditor:
+                report = auditor.audit_topic(topic)
+                if not report.has_gaps:
+                    return  # Topic well-covered, no need to post
+
+                # Map audit gaps to bulletin entry types
+                for action in report.suggested_actions:
+                    entry_type_map = {
+                        "need_material": EntryType.NEED_MATERIAL,
+                        "need_test": EntryType.NEED_TEST,
+                        "need_review": EntryType.NEED_REVIEW,
+                    }
+                    etype = entry_type_map.get(action, EntryType.NEED_MATERIAL)
+
+                    # Use worst gap severity as priority
+                    gap_desc = "; ".join(
+                        g.description for g in report.gaps[:3]
+                    )
+                    self._bulletin_store.create_and_post(
+                        entry_type=etype,
+                        topic=topic,
+                        reason_code=action,
+                        summary=gap_desc or f"Audit: {action} for {topic}",
+                        requested_by="auditor",
+                        goal_id=goal_id,
+                        priority=min(report.worst_gap_severity, 0.9),
+                        metadata={"audit": report.to_dict()},
+                    )
+            else:
+                # Fallback: simple NEED_MATERIAL without audit
+                self._bulletin_store.create_and_post(
+                    entry_type=EntryType.NEED_MATERIAL,
+                    topic=topic,
+                    reason_code="all_sources_exhausted",
+                    summary=f"Wszystkie zrodla wyczerpane dla tematu: {topic}",
+                    requested_by="planner",
+                    goal_id=goal_id,
+                    priority=0.7,
+                )
         except Exception as e:
-            logger.debug(f"[BULLETIN] Failed to post NEED_MATERIAL: {e}")
+            logger.debug(f"[BULLETIN] Failed to post need: {e}")
 
     def _get_current_goal_topic(self) -> Optional[str]:
         """Extract topic from the goal currently being planned."""

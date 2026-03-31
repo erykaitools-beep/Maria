@@ -16,6 +16,12 @@ from agent_core.bulletin.bulletin_model import (
     STALE_TIMEOUT_SEC,
 )
 from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.bulletin.knowledge_auditor import (
+    KnowledgeAuditor,
+    AuditReport,
+    KnowledgeGap,
+    GapType,
+)
 
 
 # ═══════════════════════════════════════════════════════
@@ -592,3 +598,201 @@ class TestBulletinExecutorIntegration:
         assert len(ready) == 1
         assert ready[0].topic == "biologia"
         assert ready[0].goal_id == "goal-bio"
+
+
+# ═══════════════════════════════════════════════════════
+# KnowledgeAuditor Tests (Phase 2)
+# ═══════════════════════════════════════════════════════
+
+
+class TestKnowledgeAuditorModel:
+    def test_gap_types(self):
+        assert len(GapType) == 7
+
+    def test_audit_report_no_gaps(self):
+        report = AuditReport(topic="test", known=True)
+        assert not report.has_gaps
+        assert report.worst_gap_severity == 0.0
+
+    def test_audit_report_with_gaps(self):
+        report = AuditReport(topic="test", known=True, gaps=[
+            KnowledgeGap(GapType.LOW_CONFIDENCE, "test", 0.7, "low"),
+            KnowledgeGap(GapType.STALE, "test", 0.4, "stale"),
+        ])
+        assert report.has_gaps
+        assert report.worst_gap_severity == 0.7
+
+    def test_audit_report_serialization(self):
+        report = AuditReport(topic="fizyka", known=True, files_count=3)
+        d = report.to_dict()
+        assert d["topic"] == "fizyka"
+        assert d["known"] is True
+        assert d["files_count"] == 3
+
+
+class TestKnowledgeAuditorBasic:
+    def test_no_subsystems_returns_unknown(self):
+        """Without MemoryQuery, topic is unknown -> NEED_MATERIAL."""
+        auditor = KnowledgeAuditor()
+        report = auditor.audit_topic("quantum physics")
+        assert not report.known
+        assert report.has_gaps
+        assert report.gaps[0].gap_type == GapType.NO_MATERIAL
+        assert "need_material" in report.suggested_actions
+
+    def test_known_topic_high_confidence(self):
+        """Well-known topic with good confidence -> no gaps."""
+        from unittest.mock import MagicMock
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 5,
+            "beliefs_count": 10,
+            "avg_confidence": 0.8,
+            "freshness": 0.9,
+        }
+        auditor.set_memory_query(mock_mq)
+
+        report = auditor.audit_topic("biologia")
+        assert report.known
+        assert report.files_count == 5
+        assert not report.has_gaps  # All good
+
+    def test_low_confidence_gap(self):
+        """Topic with low confidence -> LOW_CONFIDENCE gap."""
+        from unittest.mock import MagicMock
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 2,
+            "beliefs_count": 3,
+            "avg_confidence": 0.25,
+            "freshness": 0.7,
+        }
+        auditor.set_memory_query(mock_mq)
+
+        report = auditor.audit_topic("fizyka kwantowa")
+        assert report.has_gaps
+        gap_types = {g.gap_type for g in report.gaps}
+        assert GapType.LOW_CONFIDENCE in gap_types
+        assert "need_material" in report.suggested_actions
+
+    def test_shallow_knowledge_gap(self):
+        """Files exist but few beliefs -> SHALLOW gap."""
+        from unittest.mock import MagicMock
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 3,
+            "beliefs_count": 1,
+            "avg_confidence": 0.6,
+            "freshness": 0.8,
+        }
+        auditor.set_memory_query(mock_mq)
+
+        report = auditor.audit_topic("genetyka")
+        assert report.has_gaps
+        gap_types = {g.gap_type for g in report.gaps}
+        assert GapType.SHALLOW in gap_types
+
+    def test_stale_knowledge_gap(self):
+        """Old knowledge -> STALE gap."""
+        from unittest.mock import MagicMock
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 2,
+            "beliefs_count": 5,
+            "avg_confidence": 0.7,
+            "freshness": 0.1,
+        }
+        auditor.set_memory_query(mock_mq)
+
+        report = auditor.audit_topic("chemia")
+        assert report.has_gaps
+        gap_types = {g.gap_type for g in report.gaps}
+        assert GapType.STALE in gap_types
+        assert "need_review" in report.suggested_actions
+
+    def test_exam_coverage_check(self):
+        """Learned files without exam -> NO_EXAM gap."""
+        from unittest.mock import MagicMock
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 2,
+            "beliefs_count": 4,
+            "avg_confidence": 0.7,
+            "freshness": 0.8,
+        }
+        auditor.set_memory_query(mock_mq)
+
+        mock_ka = MagicMock()
+        mock_ka.get_snapshot.return_value = {
+            "files_by_status": {
+                "learned": ["fizyka_basics.txt", "fizyka_advanced.txt"],
+                "completed": [],
+            }
+        }
+        auditor.set_knowledge_analyzer(mock_ka)
+
+        report = auditor.audit_topic("fizyka")
+        gap_types = {g.gap_type for g in report.gaps}
+        assert GapType.NO_EXAM in gap_types
+        assert "need_test" in report.suggested_actions
+
+
+class TestAuditorPlannerIntegration:
+    """Test auditor-driven bulletin posting in planner."""
+
+    def test_auditor_posts_typed_needs(self, tmp_path):
+        """Auditor finds gaps -> planner posts correct entry types."""
+        from agent_core.planner.planner_core import PlannerCore
+        from agent_core.planner.planner_model import ActionType
+        from agent_core.tracing.trace_model import DecisionTrace
+        from unittest.mock import MagicMock
+
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        store = BulletinStore(path=tmp_path / "bulletin.jsonl")
+        planner.set_bulletin_store(store)
+
+        # Set up auditor that finds low confidence + stale
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 1,
+            "beliefs_count": 1,
+            "avg_confidence": 0.2,
+            "freshness": 0.1,
+        }
+        auditor.set_memory_query(mock_mq)
+        planner.set_knowledge_auditor(auditor)
+
+        # Set trace context
+        trace = DecisionTrace(episode_id="ep-test")
+        trace.goal_id = "goal-aud"
+        trace.goal_description = "Nauka: system kognitywny"
+        planner._current_trace = trace
+
+        # Force NOOP path
+        planner._is_action_rate_limited = lambda x: True
+        planner._world_model = None
+        snapshot = {"files_by_status": {"completed": ["f1"]}, "new_files_available": []}
+
+        planner._decide_learning_action(snapshot, {"retention_rate": 0.95})
+
+        entries = store.get_open()
+        # Should have need_material (low confidence) + need_review (stale)
+        types = {e.entry_type for e in entries}
+        assert EntryType.NEED_MATERIAL in types
+        assert EntryType.NEED_REVIEW in types
+        assert all(e.goal_id == "goal-aud" for e in entries)
