@@ -22,6 +22,11 @@ from agent_core.bulletin.knowledge_auditor import (
     KnowledgeGap,
     GapType,
 )
+from agent_core.bulletin.gap_planner import (
+    GapPlanner,
+    GapPlan,
+    GapAction,
+)
 
 
 # ═══════════════════════════════════════════════════════
@@ -796,3 +801,206 @@ class TestAuditorPlannerIntegration:
         assert EntryType.NEED_MATERIAL in types
         assert EntryType.NEED_REVIEW in types
         assert all(e.goal_id == "goal-aud" for e in entries)
+
+
+# ═══════════════════════════════════════════════════════
+# GapPlanner Tests (Phase 3)
+# ═══════════════════════════════════════════════════════
+
+
+class TestGapPlannerModel:
+    def test_gap_actions(self):
+        assert len(GapAction) == 7
+
+    def test_gap_plan_serialization(self):
+        plan = GapPlan(
+            action=GapAction.ASK_EXPERT,
+            topic="AGI",
+            reason="no_knowledge",
+            priority=0.9,
+            context_prompt="Maria nie wie nic o AGI.",
+        )
+        d = plan.to_dict()
+        assert d["action"] == "ask_expert"
+        assert d["topic"] == "AGI"
+        assert d["context_prompt"] == "Maria nie wie nic o AGI."
+
+
+class TestGapPlannerDecisions:
+    def test_no_gaps_no_action(self):
+        gp = GapPlanner()
+        report = AuditReport(topic="biologia", known=True)
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.NO_ACTION
+
+    def test_no_material_asks_expert(self):
+        gp = GapPlanner()
+        report = AuditReport(topic="kwanty", known=False, gaps=[
+            KnowledgeGap(GapType.NO_MATERIAL, "kwanty", 0.9, "brak"),
+        ])
+        plan = gp.plan_for_topic(report, "Nauka: fizyka kwantowa")
+        assert plan.action == GapAction.ASK_EXPERT
+        assert plan.priority == 0.9
+        assert "kwanty" in plan.context_prompt
+        assert "fizyka kwantowa" in plan.context_prompt
+
+    def test_low_confidence_asks_expert(self):
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="logika", known=True, files_count=2,
+            beliefs_count=3, avg_confidence=0.25, gaps=[
+                KnowledgeGap(GapType.LOW_CONFIDENCE, "logika", 0.7, "low"),
+            ],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+        assert "confidence" in plan.context_prompt.lower() or "pewnosci" in plan.context_prompt.lower()
+
+    def test_shallow_asks_expert(self):
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="chemia", known=True, files_count=3,
+            beliefs_count=1, avg_confidence=0.6, gaps=[
+                KnowledgeGap(GapType.SHALLOW, "chemia", 0.5, "shallow"),
+            ],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+
+    def test_contradictions_review(self):
+        gp = GapPlanner()
+        report = AuditReport(topic="fizyka", known=True, gaps=[
+            KnowledgeGap(GapType.CONTRADICTIONS, "fizyka", 0.8, "sprzecznosci"),
+        ])
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.REVIEW
+        assert plan.reason == "contradictions_detected"
+
+    def test_no_exam_runs_test(self):
+        gp = GapPlanner()
+        report = AuditReport(topic="historia", known=True, gaps=[
+            KnowledgeGap(GapType.NO_EXAM, "historia", 0.3, "untested"),
+        ])
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.RUN_EXAM
+
+    def test_stale_reviews(self):
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="matematyka", known=True, freshness=0.1, gaps=[
+                KnowledgeGap(GapType.STALE, "matematyka", 0.4, "stale"),
+            ],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.REVIEW
+        assert plan.reason == "knowledge_stale"
+
+    def test_broad_topic_decomposes(self):
+        """4+ gap types -> DECOMPOSE."""
+        gp = GapPlanner()
+        report = AuditReport(topic="nauka", known=True, gaps=[
+            KnowledgeGap(GapType.LOW_CONFIDENCE, "nauka", 0.7, "low"),
+            KnowledgeGap(GapType.SHALLOW, "nauka", 0.5, "shallow"),
+            KnowledgeGap(GapType.STALE, "nauka", 0.4, "stale"),
+            KnowledgeGap(GapType.NO_EXAM, "nauka", 0.3, "no exam"),
+        ])
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.DECOMPOSE
+        assert len(plan.subtopics) > 0
+
+    def test_critic_review_takes_priority(self, tmp_path):
+        """If bulletin has NEED_REVIEW from critic, review first."""
+        store = BulletinStore(path=tmp_path / "b.jsonl")
+        store.create_and_post(
+            entry_type=EntryType.NEED_REVIEW,
+            topic="fizyka",
+            reason_code="contradictions",
+            summary="Critic found issues",
+            requested_by="critic",
+        )
+
+        gp = GapPlanner()
+        gp.set_bulletin_store(store)
+
+        report = AuditReport(topic="fizyka", known=True, gaps=[
+            KnowledgeGap(GapType.LOW_CONFIDENCE, "fizyka", 0.7, "low"),
+        ])
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.REVIEW
+        assert plan.reason == "critic_flagged_quality_issue"
+
+
+class TestGapPlannerExpertPrompt:
+    def test_unknown_topic_prompt(self):
+        gp = GapPlanner()
+        report = AuditReport(topic="AGI", known=False, gaps=[
+            KnowledgeGap(GapType.NO_MATERIAL, "AGI", 0.9, "brak"),
+        ])
+        plan = gp.plan_for_topic(report, "Nauka: AGI fundamentals")
+        assert "nie ma zadnej wiedzy" in plan.context_prompt
+        assert "AGI" in plan.context_prompt
+        assert "AGI fundamentals" in plan.context_prompt
+
+    def test_known_topic_with_gaps_prompt(self):
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="fizyka", known=True, files_count=2,
+            beliefs_count=3, avg_confidence=0.3, gaps=[
+                KnowledgeGap(GapType.LOW_CONFIDENCE, "fizyka", 0.7, "low"),
+                KnowledgeGap(GapType.SHALLOW, "fizyka", 0.5, "shallow"),
+            ],
+        )
+        plan = gp.plan_for_topic(report)
+        assert "podstawowa wiedze" in plan.context_prompt
+        assert "2 plikow" in plan.context_prompt
+        assert "30%" in plan.context_prompt or "pewnosci" in plan.context_prompt
+
+
+class TestGapPlannerPlannerIntegration:
+    """Full pipeline: planner -> auditor -> gap_planner -> bulletin."""
+
+    def test_full_pipeline_posts_with_context(self, tmp_path):
+        from agent_core.planner.planner_core import PlannerCore
+        from agent_core.planner.planner_model import ActionType
+        from agent_core.tracing.trace_model import DecisionTrace
+        from unittest.mock import MagicMock
+
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        store = BulletinStore(path=tmp_path / "bulletin.jsonl")
+        planner.set_bulletin_store(store)
+
+        # Auditor: topic unknown
+        auditor = KnowledgeAuditor()
+        mock_mq = MagicMock()
+        mock_mq.get_topic_summary.return_value = {"known": False, "topic": "AGI"}
+        auditor.set_memory_query(mock_mq)
+        planner.set_knowledge_auditor(auditor)
+
+        # Gap planner
+        gp = GapPlanner()
+        gp.set_bulletin_store(store)
+        planner.set_gap_planner(gp)
+
+        # Trace context
+        trace = DecisionTrace(episode_id="ep-test")
+        trace.goal_id = "goal-agi"
+        trace.goal_description = "Nauka: AGI fundamentals"
+        planner._current_trace = trace
+
+        # Force NOOP path
+        planner._is_action_rate_limited = lambda x: True
+        planner._world_model = None
+        snapshot = {"files_by_status": {"completed": ["f1"]}, "new_files_available": []}
+
+        planner._decide_learning_action(snapshot, {"retention_rate": 0.95})
+
+        entries = store.get_open()
+        assert len(entries) >= 1
+        entry = entries[0]
+        assert entry.entry_type == EntryType.NEED_MATERIAL
+        assert entry.requested_by == "gap_planner"
+        assert "context_prompt" in entry.metadata
+        assert "AGI" in entry.metadata["context_prompt"]

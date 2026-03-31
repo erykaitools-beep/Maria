@@ -102,6 +102,7 @@ class PlannerCore:
         self._critic_agent = None
         self._bulletin_store = None
         self._knowledge_auditor = None
+        self._gap_planner = None
         self._trace_store = None
         self._approval_queue = None
         self._telegram_notifier = None
@@ -204,6 +205,10 @@ class PlannerCore:
     def set_knowledge_auditor(self, auditor) -> None:
         """Set KnowledgeAuditor for pre-learn audit (Phase 2)."""
         self._knowledge_auditor = auditor
+
+    def set_gap_planner(self, planner) -> None:
+        """Set GapPlanner for gap-driven learning decisions (Phase 3)."""
+        self._gap_planner = planner
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -982,46 +987,95 @@ class PlannerCore:
         return None
 
     def _post_need_material_if_missing(self) -> None:
-        """Audit topic knowledge and post appropriate need to bulletin board."""
+        """Audit topic, plan gaps, post targeted needs to bulletin board."""
         if not getattr(self, "_bulletin_store", None):
             return
         topic = self._get_current_goal_topic()
         if not topic:
             return
         goal_id = self._get_current_goal_id()
+        goal_desc = ""
+        if self._current_trace:
+            goal_desc = self._current_trace.goal_description or ""
 
         try:
             from agent_core.bulletin.bulletin_model import EntryType
+            from agent_core.bulletin.gap_planner import GapAction
 
-            # Phase 2: use auditor if available, otherwise simple NEED_MATERIAL
+            # Phase 3: audit + gap plan -> targeted bulletin entries
             auditor = getattr(self, "_knowledge_auditor", None)
-            if auditor:
+            gap_planner = getattr(self, "_gap_planner", None)
+
+            if auditor and gap_planner:
                 report = auditor.audit_topic(topic)
                 if not report.has_gaps:
-                    return  # Topic well-covered, no need to post
+                    return  # Topic well-covered
 
-                # Map audit gaps to bulletin entry types
+                plan = gap_planner.plan_for_topic(report, goal_desc)
+
+                # Map GapAction to EntryType
+                action_to_entry = {
+                    GapAction.FETCH_MATERIAL: EntryType.NEED_MATERIAL,
+                    GapAction.ASK_EXPERT: EntryType.NEED_MATERIAL,
+                    GapAction.RUN_EXAM: EntryType.NEED_TEST,
+                    GapAction.REVIEW: EntryType.NEED_REVIEW,
+                    GapAction.DECOMPOSE: EntryType.WAITING_HUMAN,
+                    GapAction.WAIT_HUMAN: EntryType.WAITING_HUMAN,
+                }
+                etype = action_to_entry.get(plan.action, EntryType.NEED_MATERIAL)
+
+                metadata = plan.metadata or {}
+                metadata["gap_plan"] = plan.to_dict()
+                if plan.context_prompt:
+                    metadata["context_prompt"] = plan.context_prompt
+
+                self._bulletin_store.create_and_post(
+                    entry_type=etype,
+                    topic=topic,
+                    reason_code=plan.reason,
+                    summary=plan.context_prompt or plan.reason,
+                    requested_by="gap_planner",
+                    goal_id=goal_id,
+                    priority=plan.priority,
+                    metadata=metadata,
+                )
+
+                # For DECOMPOSE: also post sub-topic entries
+                if plan.action == GapAction.DECOMPOSE:
+                    for sub in plan.subtopics[:3]:
+                        self._bulletin_store.create_and_post(
+                            entry_type=EntryType.NEED_MATERIAL,
+                            topic=sub,
+                            reason_code="decomposed_subtopic",
+                            summary=f"Podtemat z: {topic}",
+                            requested_by="gap_planner",
+                            goal_id=goal_id,
+                            priority=plan.priority * 0.9,
+                        )
+
+                logger.info(
+                    f"[GAP_PLANNER] {plan.action.value} for '{topic}' "
+                    f"(reason={plan.reason}, priority={plan.priority:.2f})"
+                )
+
+            elif auditor:
+                # Phase 2 fallback: audit without gap planner
+                report = auditor.audit_topic(topic)
+                if not report.has_gaps:
+                    return
                 for action in report.suggested_actions:
-                    entry_type_map = {
+                    etype = {
                         "need_material": EntryType.NEED_MATERIAL,
                         "need_test": EntryType.NEED_TEST,
                         "need_review": EntryType.NEED_REVIEW,
-                    }
-                    etype = entry_type_map.get(action, EntryType.NEED_MATERIAL)
-
-                    # Use worst gap severity as priority
-                    gap_desc = "; ".join(
-                        g.description for g in report.gaps[:3]
-                    )
+                    }.get(action, EntryType.NEED_MATERIAL)
+                    gap_desc = "; ".join(g.description for g in report.gaps[:3])
                     self._bulletin_store.create_and_post(
-                        entry_type=etype,
-                        topic=topic,
+                        entry_type=etype, topic=topic,
                         reason_code=action,
                         summary=gap_desc or f"Audit: {action} for {topic}",
-                        requested_by="auditor",
-                        goal_id=goal_id,
+                        requested_by="auditor", goal_id=goal_id,
                         priority=min(report.worst_gap_severity, 0.9),
-                        metadata={"audit": report.to_dict()},
                     )
             else:
                 # Fallback: simple NEED_MATERIAL without audit

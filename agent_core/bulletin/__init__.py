@@ -20,6 +20,11 @@ from agent_core.bulletin.knowledge_auditor import (
     KnowledgeGap,
     GapType,
 )
+from agent_core.bulletin.gap_planner import (
+    GapPlanner,
+    GapPlan,
+    GapAction,
+)
 
 __all__ = [
     "BulletinEntry",
@@ -30,4 +35,7 @@ __all__ = [
     "AuditReport",
     "KnowledgeGap",
     "GapType",
+    "GapPlanner",
+    "GapPlan",
+    "GapAction",
 ]

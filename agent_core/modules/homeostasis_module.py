@@ -550,7 +550,14 @@ class HomeostasisModule(MariaModule):
                     planner.set_knowledge_auditor(auditor)
                     ctx.knowledge_auditor = auditor
 
-                    print("[Homeostasis] [OK] BulletinStore + KnowledgeAuditor wired (Learning Upgrade)")
+                    # Phase 3: GapPlanner
+                    from agent_core.bulletin import GapPlanner
+                    gap_planner = GapPlanner()
+                    gap_planner.set_bulletin_store(bulletin_store)
+                    planner.set_gap_planner(gap_planner)
+                    ctx.gap_planner = gap_planner
+
+                    print("[Homeostasis] [OK] BulletinStore + Auditor + GapPlanner wired (Learning Upgrade)")
                 except Exception as e:
                     logger.warning(f"BulletinStore not initialized: {e}")
 
