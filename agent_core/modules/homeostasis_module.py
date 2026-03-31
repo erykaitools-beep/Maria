@@ -529,6 +529,16 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning(f"CriticAgent not initialized: {e}")
 
+                # Cognitive Bulletin Board (Learning Upgrade Phase 1)
+                try:
+                    from agent_core.bulletin import BulletinStore
+                    bulletin_store = BulletinStore()
+                    planner.set_bulletin_store(bulletin_store)
+                    ctx.bulletin_store = bulletin_store
+                    print("[Homeostasis] [OK] BulletinStore wired (Learning Upgrade)")
+                except Exception as e:
+                    logger.warning(f"BulletinStore not initialized: {e}")
+
                 # Wire LLM router to executor for ASK_EXPERT actions
                 if ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia'):
                     planner.executor.set_llm_router(ctx.brain)
@@ -1495,11 +1505,62 @@ def _register_telegram_commands(bridge, ctx):
             "/efapprove <id> - zatwierdz efektor\n"
             "/efreject <id> - odrzuc efektor\n"
             "/efstatus - status efektora\n"
+            "/board - tablica potrzeb poznawczych\n"
             "/authority [level] - zmien poziom autoryzacji\n"
             "/restart - restart Marii\n"
             "/help - ta pomoc"
         )
 
+    def _cmd_board(args):
+        """Show cognitive bulletin board status."""
+        bs = getattr(ctx, 'bulletin_store', None)
+        if not bs:
+            return "BulletinStore niedostepny."
+
+        args = args.strip()
+
+        # /board stats
+        if not args or args == "stats":
+            s = bs.stats()
+            lines = [
+                "*Tablica potrzeb poznawczych:*",
+                f"Otwarte: {s['open']}",
+                f"Actionable: {s['actionable']}",
+                f"Total: {s['total']}",
+            ]
+            if s["by_type"]:
+                lines.append("\n*By type:*")
+                for t, c in sorted(s["by_type"].items()):
+                    lines.append(f"  {t}: {c}")
+            return "\n".join(lines)
+
+        # /board open - list open entries
+        if args == "open":
+            entries = bs.get_open()
+            if not entries:
+                return "Tablica pusta - brak otwartych potrzeb."
+            lines = ["*Otwarte potrzeby:*"]
+            for e in entries[:15]:
+                status_icon = {
+                    "open": "NEW", "in_progress": "WIP",
+                    "blocked": "BLK",
+                }.get(e.status.value, e.status.value)
+                lines.append(
+                    f"  [{status_icon}] {e.entry_type.value}: "
+                    f"{e.topic} (pri={e.priority:.1f})"
+                )
+                if e.goal_id:
+                    lines.append(f"    goal: {e.goal_id[:16]}")
+            return "\n".join(lines)
+
+        # /board prune - cleanup stale entries
+        if args == "prune":
+            pruned = bs.prune_stale()
+            return f"Pruned {pruned} stale entries."
+
+        return "Uzycie: /board [open|prune]"
+
+    bridge.register_command("board", _cmd_board)
     bridge.register_command("status", _cmd_status)
     bridge.register_command("goals", _cmd_goals)
     bridge.register_command("approve", _cmd_approve)

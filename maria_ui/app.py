@@ -2815,6 +2815,39 @@ def api_capabilities():
 # =============================================================
 
 
+@app.route('/api/bulletin')
+@require_auth
+def api_bulletin():
+    """Cognitive Bulletin Board - list open needs."""
+    try:
+        from agent_core.bulletin import BulletinStore
+        store = BulletinStore()
+        stats = store.stats()
+        entries = []
+        for e in store.get_open():
+            entries.append(e.to_dict())
+        return jsonify({"stats": stats, "entries": entries})
+    except Exception as e:
+        return jsonify({"error": str(e), "stats": {}, "entries": []})
+
+
+@app.route('/api/bulletin/stats')
+@require_auth
+def api_bulletin_stats():
+    """Cognitive Bulletin Board stats."""
+    try:
+        from agent_core.bulletin import BulletinStore
+        store = BulletinStore()
+        return jsonify(store.stats())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+# =============================================================
+# Learning Goals API (CDL feedback)
+# =============================================================
+
+
 def _read_goals():
     """Read goals from JSONL."""
     import os

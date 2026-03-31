@@ -100,6 +100,7 @@ class PlannerCore:
         self._self_analysis = None
         self._creative_module = None
         self._critic_agent = None
+        self._bulletin_store = None
         self._trace_store = None
         self._approval_queue = None
         self._telegram_notifier = None
@@ -193,6 +194,11 @@ class PlannerCore:
     def set_capability_router(self, router) -> None:
         """Set CapabilityRouter for registry-based dispatch."""
         self.executor.set_capability_router(router)
+
+    def set_bulletin_store(self, store) -> None:
+        """Set BulletinStore for cognitive needs tracking (Learning Upgrade)."""
+        self._bulletin_store = store
+        self.executor.set_bulletin_store(store)
 
     # -- Internal: pre-check autonomy policy ----------------
 
@@ -942,6 +948,9 @@ class PlannerCore:
             if topic:
                 return ActionType.ASK_EXPERT
 
+        # P7: Post NEED_MATERIAL to bulletin board (instead of silent NOOP)
+        self._post_need_material_if_missing()
+
         return ActionType.NOOP
 
     def _pick_expert_topic(self) -> Optional[str]:
@@ -965,6 +974,47 @@ class PlannerCore:
             except Exception:
                 pass
 
+        return None
+
+    def _post_need_material_if_missing(self) -> None:
+        """Post NEED_MATERIAL to bulletin board for current goal's topic."""
+        if not getattr(self, "_bulletin_store", None):
+            return
+        # Get topic from current goal context
+        topic = self._get_current_goal_topic()
+        if not topic:
+            return
+        goal_id = self._get_current_goal_id()
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType
+            self._bulletin_store.create_and_post(
+                entry_type=EntryType.NEED_MATERIAL,
+                topic=topic,
+                reason_code="all_sources_exhausted",
+                summary=f"Wszystkie zrodla wyczerpane dla tematu: {topic}",
+                requested_by="planner",
+                goal_id=goal_id,
+                priority=0.7,
+            )
+        except Exception as e:
+            logger.debug(f"[BULLETIN] Failed to post NEED_MATERIAL: {e}")
+
+    def _get_current_goal_topic(self) -> Optional[str]:
+        """Extract topic from the goal currently being planned."""
+        trace = self._current_trace
+        if trace and trace.goal_description:
+            # Strip "Nauka: " prefix if present
+            desc = trace.goal_description
+            if desc.lower().startswith("nauka:"):
+                return desc[6:].strip()
+            return desc
+        return None
+
+    def _get_current_goal_id(self) -> Optional[str]:
+        """Get ID of the goal currently being planned."""
+        trace = self._current_trace
+        if trace and trace.goal_id:
+            return trace.goal_id
         return None
 
     # -- Internal: finalize and persist ---------------------

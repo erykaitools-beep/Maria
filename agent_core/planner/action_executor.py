@@ -7,7 +7,7 @@ Kontrakt: docs/CONTRACTS.md - Kontrakt 5: Planner
 
 import logging
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from agent_core.planner.planner_model import ActionType, Plan
 
@@ -44,6 +44,11 @@ class ActionExecutor:
         self._llm_router = None
         self._semantic_search = None
         self._capability_router = None
+        self._bulletin_store = None
+
+    def set_bulletin_store(self, store) -> None:
+        """Set BulletinStore for resolving cognitive needs after actions."""
+        self._bulletin_store = store
 
     def set_capability_router(self, router) -> None:
         """Set CapabilityRouter for registry-based dispatch."""
@@ -250,6 +255,7 @@ class ActionExecutor:
         # CDL feedback: update learning goal progress
         if result["success"]:
             self._update_learning_goal(plan, result)
+            self._resolve_bulletin_entries(plan.goal_id, "learned_material")
 
         return result
 
@@ -339,9 +345,14 @@ class ActionExecutor:
             if self._semantic_search and result.get("articles_fetched", 0) > 0:
                 self._incremental_index()
 
+            fetched = result.get("articles_fetched", 0)
+            if fetched > 0:
+                # Material arrived -> update bulletin: NEED_MATERIAL -> READY_TO_LEARN
+                self._transition_bulletin_to_ready(plan.goal_id)
+
             return {
                 "success": errors == 0,
-                "articles_fetched": result.get("articles_fetched", 0),
+                "articles_fetched": fetched,
                 "topics_searched": result.get("topics_searched", 0),
                 "errors": errors,
             }
@@ -823,3 +834,43 @@ class ActionExecutor:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # -- Bulletin Board helpers ---
+
+    def _resolve_bulletin_entries(self, goal_id: Optional[str], reason: str) -> None:
+        """Resolve NEED_MATERIAL/READY_TO_LEARN entries for a goal."""
+        if self._bulletin_store is None or goal_id is None:
+            return
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType
+            entries = self._bulletin_store.get_for_goal(goal_id)
+            for entry in entries:
+                if entry.entry_type in (EntryType.NEED_MATERIAL, EntryType.READY_TO_LEARN):
+                    self._bulletin_store.resolve(entry.entry_id, reason)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[BULLETIN] Resolve failed: {e}")
+
+    def _transition_bulletin_to_ready(self, goal_id: Optional[str]) -> None:
+        """After fetch: mark NEED_MATERIAL -> READY_TO_LEARN for this goal."""
+        if self._bulletin_store is None or goal_id is None:
+            return
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType, EntryStatus
+            entries = self._bulletin_store.get_for_goal(goal_id)
+            for entry in entries:
+                if (entry.entry_type == EntryType.NEED_MATERIAL
+                        and entry.status != EntryStatus.RESOLVED):
+                    self._bulletin_store.create_and_post(
+                        entry_type=EntryType.READY_TO_LEARN,
+                        topic=entry.topic,
+                        reason_code="material_fetched",
+                        summary=f"Material pobrany, gotowy do nauki: {entry.topic}",
+                        requested_by="action_executor",
+                        goal_id=goal_id,
+                        priority=entry.priority,
+                    )
+                    self._bulletin_store.resolve(entry.entry_id, "material_fetched")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"[BULLETIN] Transition failed: {e}")
