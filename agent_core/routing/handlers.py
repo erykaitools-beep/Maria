@@ -538,16 +538,75 @@ def make_creative_handler(
     return handler
 
 
-def make_ask_expert_handler(llm_router) -> Callable:
-    """Create handler for ActionType.ASK_EXPERT."""
+def make_ask_expert_handler(
+    llm_router,
+    expert_bridge=None,
+    bulletin_store=None,
+) -> Callable:
+    """Create handler for ActionType.ASK_EXPERT.
+
+    When expert_bridge is available: uses audit-aware targeted prompts.
+    Otherwise: falls back to generic "explain in 3-5 sentences" prompt.
+    """
 
     def handler(plan) -> Dict[str, Any]:
+        topic = plan.action_params.get("topic", "")
+        goal_desc = plan.goal_description or ""
+        context_prompt = plan.action_params.get("context_prompt", "")
+
+        # Phase 4: ExpertBridge path (audit-aware, targeted prompts)
+        if expert_bridge is not None and topic:
+            try:
+                if context_prompt:
+                    resp = expert_bridge.ask_with_context(topic, context_prompt)
+                else:
+                    resp = expert_bridge.ask_about_topic(topic, goal_desc)
+
+                if not resp.success:
+                    # Bridge decided no action needed or LLM failed
+                    return {
+                        "success": False,
+                        "error": resp.reason,
+                        "topic": topic,
+                        "gap_action": resp.gap_action,
+                    }
+
+                # Save to input/ as learning material
+                saved = False
+                try:
+                    save_expert_response(
+                        topic, resp.context_prompt, resp.response,
+                    )
+                    saved = True
+                except Exception:
+                    pass
+
+                # Phase 5: resolve bulletin NEED_MATERIAL entries
+                if bulletin_store is not None and saved:
+                    _resolve_bulletin_need(bulletin_store, topic)
+
+                return {
+                    "success": True,
+                    "topic": topic,
+                    "response": resp.response[:500],
+                    "response_length": len(resp.response),
+                    "context_prompt": resp.context_prompt[:200],
+                    "gap_action": resp.gap_action,
+                    "reason": resp.reason,
+                    "duration_ms": resp.duration_ms,
+                    "saved_to_input": saved,
+                    "audit_info": resp.metadata,
+                }
+            except Exception as e:
+                logger.debug(f"[ASK_EXPERT] ExpertBridge error: {e}")
+                # Fall through to legacy path
+
+        # Legacy path: generic prompt via ask_encyclopedia
         if llm_router is None or not hasattr(llm_router, 'ask_encyclopedia'):
             return {"success": False, "error": "No LLM router with encyclopedia"}
 
         try:
             question = plan.action_params.get("question", "")
-            topic = plan.action_params.get("topic", "")
             source = plan.action_params.get("source", "planner")
 
             if not question and topic:
@@ -590,6 +649,21 @@ def make_ask_expert_handler(llm_router) -> Callable:
             return {"success": False, "error": str(e)}
 
     return handler
+
+
+def _resolve_bulletin_need(bulletin_store, topic: str) -> None:
+    """Mark NEED_MATERIAL bulletin entries as resolved after expert response."""
+    try:
+        from agent_core.bulletin.bulletin_model import EntryType, EntryStatus
+        entries = bulletin_store.find_open(
+            topic=topic, entry_type=EntryType.NEED_MATERIAL,
+        )
+        for entry in entries:
+            bulletin_store.update_status(
+                entry.entry_id, EntryStatus.RESOLVED,
+            )
+    except Exception as e:
+        logger.debug(f"[ASK_EXPERT] Bulletin update failed: {e}")
 
 
 def make_validate_handler(

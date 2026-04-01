@@ -86,15 +86,17 @@
 | **2026-03-29** | Belief maintenance wired: planner EVALUATE -> maintain(), Telegram /beliefs, Web UI /api/beliefs |
 | **2026-03-29** | **Capability/Task Router** - unified registry-based dispatch replacing 13-way if/elif (63 testow) |
 | **2026-03-30** | **Faza G: Agent Krytyk** - knowledge quality gate, 7 wymiarow analizy, READ-ONLY critic (69 testow) |
+| **2026-03-31** | **Learning Upgrade Phase 1-3** - BulletinStore, KnowledgeAuditor, GapPlanner (57 testow) |
+| **2026-04-01** | **Learning Upgrade Phase 4-5** - ExpertBridge (audit-aware expert queries), full wiring to input/ (42 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent |
-| **Testy** | 2635 passing |
-| **Faza** | Stabilization COMPLETE + Faza F COMPLETE + Faza G Agent Krytyk COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade |
+| **Testy** | 2730 passing |
+| **Faza** | Stabilization COMPLETE + Faza F COMPLETE + Faza G COMPLETE + Learning Upgrade COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -142,6 +144,7 @@ project/
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
 │   ├── effector/        # OpenClaw client (ADR-016): HTTP tools/invoke, whitelist, validation
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
+│   ├── bulletin/        # Learning Upgrade: BulletinStore, KnowledgeAuditor, GapPlanner, ExpertBridge
 │   ├── critic/          # Faza G: Agent Krytyk - knowledge quality gate (7 dimensions)
 │   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
@@ -665,6 +668,18 @@ Usunieto:
 - [x] ADR-028: coherence/calibration critic, nie truth engine
 - [x] 69 nowych testow (2635 total)
 
+### DONE: Learning Upgrade Phase 1-5 (2026-03-31 / 2026-04-01)
+- [x] **Phase 1:** Cognitive Bulletin Board - BulletinStore (JSONL), 5 EntryTypes, dedup, Telegram /board, Web UI /api/bulletin (32 testy)
+- [x] **Phase 2:** KnowledgeAuditor - checks MemoryQuery, beliefs, critic, exams -> AuditReport with 7 gap types (11 testow)
+- [x] **Phase 3:** GapPlanner - reads audit, decides: ASK_EXPERT (with context_prompt), REVIEW, RUN_EXAM, DECOMPOSE, WAIT_HUMAN (14 testow)
+- [x] **Phase 4:** ExpertBridge - audit-aware expert queries, targeted prompts ("Maria wie X, potrzebuje Y"), cascade LLM (27 testow)
+- [x] **Phase 5:** Full wiring - ExpertBridge in planner + CapabilityRouter, bulletin NEED_MATERIAL -> resolved, save to input/ (11 testow)
+- [x] Planner: _exec_ask_expert uses ExpertBridge (with legacy fallback)
+- [x] CapabilityRouter: make_ask_expert_handler accepts expert_bridge + bulletin_store
+- [x] Homeostasis init: ExpertBridge wired with auditor + gap_planner + ask_encyclopedia LLM fn
+- [x] Plan od ChatGPT: docs/plans/plan_upgrade_nauki_maria.pdf (5 faz, wszystkie zaimplementowane)
+- [x] 95 nowych testow (2730 total)
+
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
 - Web UI /critique page (opcjonalnie)
@@ -1064,4 +1079,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-03-30 (Faza G Agent Krytyk + CDL v2 + CapabilityRouter, 2635 testow)*
+*Ostatnia aktualizacja: 2026-04-01 (Learning Upgrade Phase 4-5 + ExpertBridge, 2730 testow)*

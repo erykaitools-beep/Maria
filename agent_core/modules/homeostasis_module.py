@@ -557,13 +557,30 @@ class HomeostasisModule(MariaModule):
                     planner.set_gap_planner(gap_planner)
                     ctx.gap_planner = gap_planner
 
-                    print("[Homeostasis] [OK] BulletinStore + Auditor + GapPlanner wired (Learning Upgrade)")
+                    # Phase 4: ExpertBridge (audit-aware expert queries)
+                    from agent_core.bulletin.expert_bridge import ExpertBridge
+                    expert_bridge = ExpertBridge()
+                    expert_bridge.set_auditor(auditor)
+                    expert_bridge.set_gap_planner(gap_planner)
+                    # LLM function wired below (after brain check)
+                    ctx.expert_bridge = expert_bridge
+                    planner.executor.set_expert_bridge(expert_bridge)
+
+                    print("[Homeostasis] [OK] BulletinStore + Auditor + GapPlanner + ExpertBridge wired (Learning Upgrade)")
                 except Exception as e:
                     logger.warning(f"BulletinStore not initialized: {e}")
 
                 # Wire LLM router to executor for ASK_EXPERT actions
                 if ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia'):
                     planner.executor.set_llm_router(ctx.brain)
+                    # Wire ExpertBridge LLM function
+                    if hasattr(ctx, 'expert_bridge') and ctx.expert_bridge:
+                        ctx.expert_bridge.set_llm_fn(
+                            lambda p, _b=ctx.brain: _b.ask_encyclopedia(
+                                prompt=p, source="expert_bridge",
+                            )
+                        )
+                        print("[Homeostasis] [OK] ExpertBridge LLM wired")
 
                 # Wire SemanticMemory to executor for semantic-aware fetch
                 if ctx.semantic_search:
@@ -664,10 +681,14 @@ class HomeostasisModule(MariaModule):
                         _creative, _tg,
                     ), DEFAULT_CAPABILITY_SPECS["creative"])
 
-                    # Ask Expert (Codex/ChatGPT)
+                    # Ask Expert (Codex/ChatGPT) - with ExpertBridge (Phase 4)
                     _llm_rtr = ctx.brain if (hasattr(ctx, 'brain') and ctx.brain and hasattr(ctx.brain, 'ask_encyclopedia')) else None
+                    _expert_br = ctx.expert_bridge if hasattr(ctx, 'expert_bridge') else None
+                    _bull_store = ctx.bulletin_store if hasattr(ctx, 'bulletin_store') else None
                     cap_router.register("ask_expert", make_ask_expert_handler(
                         _llm_rtr,
+                        expert_bridge=_expert_br,
+                        bulletin_store=_bull_store,
                     ), DEFAULT_CAPABILITY_SPECS["ask_expert"])
 
                     # Validate (Faza F)

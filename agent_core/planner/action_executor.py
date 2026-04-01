@@ -45,6 +45,11 @@ class ActionExecutor:
         self._semantic_search = None
         self._capability_router = None
         self._bulletin_store = None
+        self._expert_bridge = None
+
+    def set_expert_bridge(self, bridge) -> None:
+        """Set ExpertBridge for audit-aware expert queries."""
+        self._expert_bridge = bridge
 
     def set_bulletin_store(self, store) -> None:
         """Set BulletinStore for resolving cognitive needs after actions."""
@@ -508,13 +513,52 @@ class ActionExecutor:
             return {"success": False, "error": str(e)}
 
     def _exec_ask_expert(self, plan: Plan) -> Dict[str, Any]:
-        """Ask ChatGPT/Codex for knowledge via LLMRouter encyclopedia."""
+        """Ask expert LLM for knowledge, using ExpertBridge if available."""
+        topic = plan.action_params.get("topic", "")
+        goal_desc = plan.goal_description or ""
+        context_prompt = plan.action_params.get("context_prompt", "")
+
+        # Phase 4: ExpertBridge path (audit-aware, targeted prompts)
+        if self._expert_bridge is not None and topic:
+            try:
+                if context_prompt:
+                    resp = self._expert_bridge.ask_with_context(topic, context_prompt)
+                else:
+                    resp = self._expert_bridge.ask_about_topic(topic, goal_desc)
+
+                if not resp.success:
+                    return {
+                        "success": False, "error": resp.reason,
+                        "topic": topic, "gap_action": resp.gap_action,
+                    }
+
+                saved = False
+                try:
+                    self._save_expert_response(topic, resp.context_prompt, resp.response)
+                    saved = True
+                except Exception:
+                    pass
+
+                # Phase 5: resolve bulletin NEED_MATERIAL entries
+                if self._bulletin_store is not None and saved:
+                    self._resolve_bulletin_need(topic)
+
+                return {
+                    "success": True, "topic": topic,
+                    "response": resp.response[:500],
+                    "response_length": len(resp.response),
+                    "gap_action": resp.gap_action,
+                    "saved_to_input": saved,
+                }
+            except Exception as e:
+                logger.debug(f"[ASK_EXPERT] ExpertBridge error: {e}")
+
+        # Legacy fallback: generic prompt via ask_encyclopedia
         if self._llm_router is None or not hasattr(self._llm_router, 'ask_encyclopedia'):
             return {"success": False, "error": "No LLM router with encyclopedia"}
 
         try:
             question = plan.action_params.get("question", "")
-            topic = plan.action_params.get("topic", "")
             source = plan.action_params.get("source", "planner")
 
             if not question and topic:
@@ -537,7 +581,6 @@ class ActionExecutor:
             if not response or not response.strip():
                 return {"success": False, "error": "Empty response from encyclopedia"}
 
-            # Store response as learning material for future use
             result = {
                 "success": True,
                 "question": question[:200],
@@ -546,7 +589,6 @@ class ActionExecutor:
                 "topic": topic,
             }
 
-            # Save to input/ as learning material (if topic provided)
             if topic:
                 try:
                     self._save_expert_response(topic, question, response)
@@ -583,6 +625,20 @@ class ActionExecutor:
 
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(content)
+
+    def _resolve_bulletin_need(self, topic: str) -> None:
+        """Mark NEED_MATERIAL bulletin entries as resolved after expert response."""
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType, EntryStatus
+            entries = self._bulletin_store.find_open(
+                topic=topic, entry_type=EntryType.NEED_MATERIAL,
+            )
+            for entry in entries:
+                self._bulletin_store.update_status(
+                    entry.entry_id, EntryStatus.RESOLVED,
+                )
+        except Exception as e:
+            logger.debug(f"[ASK_EXPERT] Bulletin update failed: {e}")
 
     def _exec_validate(self, plan: Plan) -> Dict[str, Any]:
         """Cross-validate learned knowledge using a secondary LLM (Faza F)."""

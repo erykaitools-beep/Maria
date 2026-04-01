@@ -25,6 +25,10 @@ from agent_core.bulletin.gap_planner import (
     GapPlan,
     GapAction,
 )
+from agent_core.bulletin.expert_bridge import (
+    ExpertBridge,
+    ExpertResponse,
+)
 
 __all__ = [
     "BulletinEntry",
@@ -38,4 +42,6 @@ __all__ = [
     "GapPlanner",
     "GapPlan",
     "GapAction",
+    "ExpertBridge",
+    "ExpertResponse",
 ]
