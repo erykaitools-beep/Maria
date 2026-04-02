@@ -148,13 +148,14 @@ class EvidenceCollector:
         return evidence
 
     def collect_learning(self) -> List[Evidence]:
-        """Learning: files, chunks, exams, retention, strategy."""
+        """Learning: files, chunks, exams, retention, strategy, gaps."""
         evidence = []
 
         evidence.extend(self._collect_learning_summary())
         evidence.extend(self._collect_recent_exams())
         evidence.extend(self._collect_planner_last())
         evidence.extend(self._collect_evaluation_metrics())
+        evidence.extend(self._collect_knowledge_gaps())
 
         return evidence
 
@@ -531,6 +532,78 @@ class EvidenceCollector:
                     confidence="high",
                     timestamp=last.get("timestamp", 0),
                 ))
+
+        return evidence
+
+    def _collect_knowledge_gaps(self) -> List[Evidence]:
+        """Knowledge gaps from MemoryQuery and world model."""
+        evidence = []
+
+        # From MemoryQuery
+        if self._memory_query:
+            try:
+                gaps = self._memory_query.get_knowledge_gaps()
+                if gaps:
+                    gap_topics = [g.get("topic", "?") for g in gaps[:5]]
+                    evidence.append(Evidence(
+                        key="learning.knowledge_gaps",
+                        value=f"{len(gaps)} luk: {', '.join(gap_topics)}",
+                        source="memory_query",
+                        confidence="high", timestamp=time.time(),
+                    ))
+            except Exception:
+                pass
+
+        # From bulletin board (open needs)
+        bulletin_path = self._meta / "cognitive_bulletin.jsonl"
+        if bulletin_path.exists():
+            try:
+                open_needs = []
+                with open(bulletin_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = __import__("json").loads(line)
+                            if entry.get("status") == "open":
+                                topic = entry.get("topic", "?")[:40]
+                                open_needs.append(topic)
+                        except Exception:
+                            continue
+                if open_needs:
+                    evidence.append(Evidence(
+                        key="learning.open_needs",
+                        value=f"{len(open_needs)} otwartych potrzeb: {', '.join(open_needs[:3])}",
+                        source="cognitive_bulletin.jsonl",
+                        confidence="high", timestamp=time.time(),
+                    ))
+            except Exception:
+                pass
+
+        # From critique findings
+        critique_path = self._meta / "critique_reports.jsonl"
+        if critique_path.exists():
+            try:
+                last_line = ""
+                with open(critique_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            last_line = line.strip()
+                if last_line:
+                    report = __import__("json").loads(last_line)
+                    findings = report.get("findings", [])
+                    if findings:
+                        categories = [f.get("category", "?") for f in findings[:3]]
+                        evidence.append(Evidence(
+                            key="learning.critique_findings",
+                            value=f"{len(findings)} problemow jakosci: {', '.join(categories)}",
+                            source="critique_reports.jsonl",
+                            confidence="high",
+                            timestamp=report.get("timestamp", 0),
+                        ))
+            except Exception:
+                pass
 
         return evidence
 

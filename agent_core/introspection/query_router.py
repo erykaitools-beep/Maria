@@ -43,6 +43,11 @@ _MODE_PATTERNS = {
         "czego sie uczysz", "czego si\u0119 uczysz",
         "jak ci idzie nauka", "jak idzie nauka",
         "co uczysz", "learning",
+        "braki", "luki", "czego nie wiesz", "co ci brakuje",
+        "czego brakuje", "czego nie umiesz",
+        "co powinnas", "co powinna\u015b",
+        "slabe strony", "s\u0142abe strony",
+        "gaps", "what don't you know",
     ],
     ResponseMode.GROUNDED_PLANNER: [
         "plan ", "planer", "planner", "strategia", "cel ",
