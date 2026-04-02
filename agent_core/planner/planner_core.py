@@ -839,6 +839,28 @@ class PlannerCore:
         snapshot = context.get("knowledge_snapshot")
         metrics = context.get("evaluation_metrics", {})
 
+        # Forced action from operator (conversation command)
+        forced = goal.metadata.get("forced_action_type")
+        if forced:
+            try:
+                action = ActionType(forced)
+            except ValueError:
+                action = ActionType.NOOP
+            action_params = {}
+            topics = goal.metadata.get("topics")
+            if topics:
+                action_params["topics"] = topics
+            topic = goal.metadata.get("topic")
+            if topic:
+                action_params["topic"] = topic
+            action_params["source"] = "operator_command"
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=action,
+                action_params=action_params,
+            )
+
         # MAINTENANCE goals -> maintenance action
         if goal_type == "maintenance":
             return create_plan(

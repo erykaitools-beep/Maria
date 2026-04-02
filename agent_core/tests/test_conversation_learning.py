@@ -263,3 +263,97 @@ class TestCancelIntent:
         r = detect_cancel_intent("olej temat historii")
         assert r is not None
         assert "historii" in r["topic"]
+
+
+# ============================================================
+# Operational Intent Tests
+# ============================================================
+
+from agent_core.perception.learning_intent import detect_operational_intent
+
+
+class TestOperationalIntent:
+    def test_fetch_pl(self):
+        r = detect_operational_intent("zrob fetch")
+        assert r is not None
+        assert r["action"] == "fetch"
+
+    def test_fetch_pl2(self):
+        r = detect_operational_intent("pobierz nowe materialy")
+        assert r is not None
+        assert r["action"] == "fetch"
+
+    def test_evaluate_pl(self):
+        r = detect_operational_intent("zrob ewaluacje")
+        assert r is not None
+        assert r["action"] == "evaluate"
+
+    def test_evaluate_pl2(self):
+        r = detect_operational_intent("ocen swoje postepy")
+        assert r is not None
+        assert r["action"] == "evaluate"
+
+    def test_critique_pl(self):
+        r = detect_operational_intent("uruchom krytyke")
+        assert r is not None
+        assert r["action"] == "critique"
+
+    def test_critique_pl2(self):
+        r = detect_operational_intent("sprawdz jakosc wiedzy")
+        assert r is not None
+        assert r["action"] == "critique"
+
+    def test_self_analyze_pl(self):
+        r = detect_operational_intent("przeanalizuj sie")
+        assert r is not None
+        assert r["action"] == "self_analyze"
+
+    def test_self_analyze_pl2(self):
+        r = detect_operational_intent("zrob autoanalize")
+        assert r is not None
+        assert r["action"] == "self_analyze"
+
+    def test_creative_pl(self):
+        r = detect_operational_intent("zrob refleksje")
+        assert r is not None
+        assert r["action"] == "creative"
+
+    def test_validate_pl(self):
+        r = detect_operational_intent("zwaliduj wiedze")
+        assert r is not None
+        assert r["action"] == "validate"
+
+    def test_exam_with_topic(self):
+        r = detect_operational_intent("zrob egzamin z fizyki")
+        assert r is not None
+        assert r["action"] == "exam"
+        assert "fizyki" in r["topic"]
+
+    def test_exam_verify(self):
+        r = detect_operational_intent("sprawdz moja wiedze o chemii")
+        assert r is not None
+        assert r["action"] == "exam"
+        assert "chemii" in r["topic"]
+
+    def test_fetch_en(self):
+        r = detect_operational_intent("fetch new materials")
+        assert r is not None
+        assert r["action"] == "fetch"
+
+    def test_evaluate_en(self):
+        r = detect_operational_intent("run evaluation")
+        assert r is not None
+        assert r["action"] == "evaluate"
+
+    def test_critique_en(self):
+        r = detect_operational_intent("run critique")
+        assert r is not None
+        assert r["action"] == "critique"
+
+    def test_no_intent_normal_message(self):
+        assert detect_operational_intent("jak sie masz?") is None
+        assert detect_operational_intent("opowiedz mi o fizyce") is None
+
+    def test_no_intent_short(self):
+        assert detect_operational_intent("") is None
+        assert detect_operational_intent("hi") is None

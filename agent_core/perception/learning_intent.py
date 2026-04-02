@@ -133,6 +133,75 @@ def detect_cancel_intent(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+# Operational command patterns (Polish + English)
+# These trigger planner actions directly, not learning goals
+_OP_PATTERNS = [
+    # Fetch / download
+    (re.compile(r"(?:zrob|zr[oó]b)\s+fetch", re.IGNORECASE), "fetch", None),
+    (re.compile(r"pobierz\s+(?:nowe\s+)?materia[lł]y", re.IGNORECASE), "fetch", None),
+    (re.compile(r"(?:sciagnij|[sś]ci[aą]gnij)\s+(?:nowe\s+)?(?:artyku[lł]y|materia[lł]y)", re.IGNORECASE), "fetch", None),
+    (re.compile(r"fetch\s+(?:new\s+)?(?:materials?|articles?)", re.IGNORECASE), "fetch", None),
+    # Evaluate
+    (re.compile(r"(?:zrob|zr[oó]b)\s+(?:ewaluacj[eę]|ocen[eę])", re.IGNORECASE), "evaluate", None),
+    (re.compile(r"oce[nń]\s+(?:si[eę]|siebie|swoje\s+post[eę]py)", re.IGNORECASE), "evaluate", None),
+    (re.compile(r"(?:run|do)\s+evaluat", re.IGNORECASE), "evaluate", None),
+    # Critique
+    (re.compile(r"(?:zrob|zr[oó]b)\s+krytyk[eę]", re.IGNORECASE), "critique", None),
+    (re.compile(r"(?:uruchom|odpal)\s+krytyk[eę]", re.IGNORECASE), "critique", None),
+    (re.compile(r"(?:run|do)\s+critique", re.IGNORECASE), "critique", None),
+    (re.compile(r"(?:sprawd[zź]|przeanalizuj)\s+(?:jako[sś][cć]|sp[oó]jno[sś][cć])\s+wiedzy", re.IGNORECASE), "critique", None),
+    # Self-analysis
+    (re.compile(r"(?:przeanalizuj|zanalizuj)\s+(?:si[eę]|siebie)", re.IGNORECASE), "self_analyze", None),
+    (re.compile(r"(?:zrob|zr[oó]b)\s+(?:auto)?analiz[eę]", re.IGNORECASE), "self_analyze", None),
+    (re.compile(r"(?:run|do)\s+(?:self.?)?analysis", re.IGNORECASE), "self_analyze", None),
+    # Exam
+    (re.compile(r"(?:zrob|zr[oó]b)\s+(?:mi\s+)?egzamin\s+(?:z\s+)?(.+)", re.IGNORECASE), "exam", 1),
+    (re.compile(r"(?:sprawdz|sprawd[zź])\s+(?:moj[aą]?\s+)?wiedz[eę]\s+(?:o\s+|z\s+)?(.+)", re.IGNORECASE), "exam", 1),
+    (re.compile(r"(?:prze)?egzaminuj\s+(?:si[eę]\s+)?(?:z\s+)?(.+)", re.IGNORECASE), "exam", 1),
+    # Creative / reflection
+    (re.compile(r"(?:zrob|zr[oó]b)\s+refleksj[eę]", re.IGNORECASE), "creative", None),
+    (re.compile(r"(?:uruchom|odpal)\s+(?:modu[lł]\s+)?kreatywn", re.IGNORECASE), "creative", None),
+    # Validate
+    (re.compile(r"(?:zwaliduj|zweryfikuj)\s+wiedz[eę]", re.IGNORECASE), "validate", None),
+    (re.compile(r"(?:sprawd[zź])\s+(?:czy\s+)?wiedza\s+(?:si[eę]\s+)?zgadza", re.IGNORECASE), "validate", None),
+]
+
+
+def detect_operational_intent(text: str) -> Optional[Dict[str, Any]]:
+    """Detect operational command intent from user text.
+
+    Recognizes commands like "zrob fetch", "odpal krytykę", "przeanalizuj się".
+    These trigger planner actions, not learning goals.
+
+    Returns:
+        Dict with keys: action, topic (optional), confidence
+        Or None if no operational intent detected.
+    """
+    if not text or len(text) < 4:
+        return None
+
+    text = text.strip()
+
+    for pattern, action, topic_group in _OP_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            topic = None
+            if topic_group is not None:
+                try:
+                    topic = _clean_topic(match.group(topic_group))
+                except (IndexError, AttributeError):
+                    pass
+            result = {
+                "action": action,
+                "confidence": 0.9,
+            }
+            if topic:
+                result["topic"] = topic
+            return result
+
+    return None
+
+
 def _clean_topic(raw: str) -> str:
     """Clean extracted topic string."""
     topic = raw.strip()

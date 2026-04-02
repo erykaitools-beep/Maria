@@ -48,6 +48,20 @@
     if (data.status === 'learning_cancel_notfound') {
       addMessage('system', 'Nie znalazlam aktywnego celu nauki: ' + (data.topic || ''));
     }
+    if (data.status === 'operational_command') {
+      var labels = {
+        fetch: 'Pobieram nowe materialy',
+        evaluate: 'Uruchamiam ewaluacje',
+        critique: 'Uruchamiam krytyke wiedzy',
+        self_analyze: 'Uruchamiam autoanalize',
+        creative: 'Uruchamiam refleksje kreatywna',
+        validate: 'Uruchamiam walidacje krzyzowa',
+        exam: 'Uruchamiam egzamin'
+      };
+      var msg = labels[data.action] || ('Wykonuje: ' + data.action);
+      if (data.topic) msg += ': ' + data.topic;
+      addMessage('system', msg);
+    }
   });
 
   socket.on('chat_response', (data) => {
