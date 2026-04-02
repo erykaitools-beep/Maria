@@ -51,6 +51,7 @@ class TelegramBridge:
     def poll_and_respond(self):
         """
         Poll for new messages and handle commands.
+        Supports file attachments with caption as command.
 
         Returns:
             List of unhandled messages (non-command texts).
@@ -63,7 +64,24 @@ class TelegramBridge:
 
         for msg in messages:
             text = msg.get("text", "").strip()
+
+            # Handle document with caption as command
+            doc = msg.get("document")
+            if doc and text:
+                file_path = self._handle_document(doc, text)
+                if file_path:
+                    # Inject file path into command args
+                    text = text + f" [plik: {file_path}]"
+
             if not text:
+                if doc:
+                    # Document without caption
+                    file_path = self._handle_document(doc, "")
+                    if file_path:
+                        self.bot.send_message(
+                            f"Plik zapisany: {file_path}\n"
+                            f"Uzyj: /claude przeanalizuj {file_path}"
+                        )
                 continue
 
             # Parse command: first word is command, rest is args
@@ -83,6 +101,37 @@ class TelegramBridge:
                 unhandled.append(msg)
 
         return unhandled
+
+    def _handle_document(self, doc: dict, caption: str) -> str:
+        """Download document from Telegram and save to docs/incoming/.
+
+        Returns local file path or empty string on failure.
+        """
+        import os
+        file_id = doc.get("file_id", "")
+        file_name = doc.get("file_name", "unknown")
+        if not file_id:
+            return ""
+
+        # Only accept safe file types
+        allowed_ext = {".pdf", ".md", ".txt", ".py", ".json", ".csv"}
+        ext = os.path.splitext(file_name)[1].lower()
+        if ext not in allowed_ext:
+            self.bot.send_message(
+                f"Nieobslugiwany typ pliku: {ext}\n"
+                f"Dozwolone: {', '.join(sorted(allowed_ext))}"
+            )
+            return ""
+
+        # Save to docs/incoming/
+        from pathlib import Path
+        incoming_dir = Path(__file__).resolve().parents[2] / "docs" / "incoming"
+        incoming_dir.mkdir(parents=True, exist_ok=True)
+        dest = str(incoming_dir / file_name)
+
+        if self.bot.download_file(file_id, dest):
+            return dest
+        return ""
 
     def get_status(self):
         """Combined status from bot + notifier."""

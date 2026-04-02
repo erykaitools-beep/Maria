@@ -167,20 +167,82 @@ class TelegramBot:
                     self._last_update_id = update_id
 
                 msg = update.get("message", {})
-                text = msg.get("text", "")
-                if text:
-                    messages.append({
-                        "text": text,
-                        "from": msg.get("from", {}).get("username", "unknown"),
-                        "chat_id": msg.get("chat", {}).get("id", 0),
-                        "date": msg.get("date", 0),
-                        "message_id": msg.get("message_id", 0),
-                    })
+                text = msg.get("text", "") or msg.get("caption", "")
+                entry = {
+                    "text": text,
+                    "from": msg.get("from", {}).get("username", "unknown"),
+                    "chat_id": msg.get("chat", {}).get("id", 0),
+                    "date": msg.get("date", 0),
+                    "message_id": msg.get("message_id", 0),
+                }
+
+                # Handle file attachments (document, photo)
+                doc = msg.get("document")
+                if doc:
+                    entry["document"] = {
+                        "file_id": doc.get("file_id", ""),
+                        "file_name": doc.get("file_name", "unknown"),
+                        "mime_type": doc.get("mime_type", ""),
+                        "file_size": doc.get("file_size", 0),
+                    }
+
+                if text or doc:
+                    messages.append(entry)
 
             return messages
         except requests.RequestException as e:
             logger.debug(f"TelegramBot: poll error: {e}")
             return []
+
+    def download_file(self, file_id: str, dest_path: str) -> bool:
+        """
+        Download a file from Telegram servers.
+
+        Args:
+            file_id: Telegram file_id from document message
+            dest_path: Local path to save the file
+
+        Returns:
+            True if downloaded successfully.
+        """
+        if not self.configured:
+            return False
+
+        try:
+            # Step 1: get file path from Telegram
+            resp = requests.get(
+                self._api_url("getFile"),
+                params={"file_id": file_id},
+                timeout=_TIMEOUT,
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                logger.warning("TelegramBot: getFile failed: %s", data.get("description"))
+                return False
+
+            file_path = data["result"].get("file_path", "")
+            if not file_path:
+                return False
+
+            # Step 2: download file content
+            file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+            file_resp = requests.get(file_url, timeout=(5, 30))
+            if file_resp.status_code != 200:
+                return False
+
+            # Step 3: save to dest
+            from pathlib import Path
+            Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(dest_path, "wb") as f:
+                f.write(file_resp.content)
+
+            logger.info("TelegramBot: downloaded %s -> %s (%d bytes)",
+                        file_id[:12], dest_path, len(file_resp.content))
+            return True
+
+        except Exception as e:
+            logger.warning("TelegramBot: download error: %s", e)
+            return False
 
     def get_status(self) -> Dict[str, Any]:
         """Status info for diagnostics."""
