@@ -79,6 +79,17 @@ def _rewrite_jsonl(store) -> None:
 # ═══════════════════════════════════════════════════════
 
 
+# Belief type importance: FACTs are harder to prune than HYPOTHESEs
+_TYPE_IMPORTANCE = {
+    BeliefType.FACT: 1.0,         # Exam-verified, highest value
+    BeliefType.OBSERVATION: 0.6,  # Learned but not verified
+    BeliefType.HYPOTHESIS: 0.3,   # Speculative, easy to prune
+}
+
+# Evidence strength bonus: beliefs with strong provenance are more valuable
+_EVIDENCE_WEIGHT_THRESHOLD = 3  # beliefs with >= 3 evidence tuples get bonus
+
+
 def compute_belief_score(
     belief: Belief,
     now: float,
@@ -91,10 +102,12 @@ def compute_belief_score(
     Higher = more valuable (keep longer).
 
     Factors:
-    - 0.40 * confidence
-    - 0.25 * freshness (exponential decay from updated_at)
-    - 0.20 * revision factor (log-scaled)
-    - 0.15 * reference factor (how many other beliefs reference this entity)
+    - 0.30 * confidence
+    - 0.20 * freshness (exponential decay from updated_at)
+    - 0.15 * revision factor (log-scaled)
+    - 0.10 * reference factor (how many other beliefs reference this entity)
+    - 0.15 * type importance (FACT > OBSERVATION > HYPOTHESIS)
+    - 0.10 * evidence strength (beliefs with provenance are more valuable)
 
     Returns: float 0.0 to ~1.0
     """
@@ -111,11 +124,20 @@ def compute_belief_score(
     max_refs = 10
     reference_factor = min(1.0, ref_count / max(max_refs, 1))
 
+    # Type importance: FACTs survive longer
+    type_importance = _TYPE_IMPORTANCE.get(belief.belief_type, 0.5)
+
+    # Evidence strength: beliefs with provenance are more valuable
+    evidence_count = len(belief.evidence) if belief.evidence else 0
+    evidence_factor = min(1.0, evidence_count / max(_EVIDENCE_WEIGHT_THRESHOLD, 1))
+
     score = (
-        0.40 * belief.confidence
-        + 0.25 * freshness
-        + 0.20 * revision_factor
-        + 0.15 * reference_factor
+        0.30 * belief.confidence
+        + 0.20 * freshness
+        + 0.15 * revision_factor
+        + 0.10 * reference_factor
+        + 0.15 * type_importance
+        + 0.10 * evidence_factor
     )
     return round(score, 4)
 

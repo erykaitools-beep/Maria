@@ -265,10 +265,15 @@ class EvidenceCollector:
 
         # Planner
         pl = self._collect_planner_last()
+        pf = self._collect_planner_failures()
         if pl:
             action_ev = next((e for e in pl if e.key == "planner.last_action"), None)
             if action_ev:
                 parts.append(f"Ostatnia akcja: {action_ev.value}")
+        # NOOP loop warning in summary
+        noop_ev = next((e for e in pf if e.key == "planner.noop_loop"), None)
+        if noop_ev:
+            parts.append(f"UWAGA: {noop_ev.value}")
 
         # Learning
         ls = self._collect_learning_summary()
@@ -402,6 +407,42 @@ class EvidenceCollector:
                         confidence="high",
                         timestamp=last_fail.get("timestamp", 0),
                     ))
+
+        # Detect NOOP loop pattern (common stuck state)
+        noop_count = sum(1 for d in decisions if d.get("action_type") == "noop")
+        if noop_count >= 10:
+            # Identify which goal is stuck
+            noop_goals = {}
+            for d in decisions:
+                if d.get("action_type") == "noop":
+                    gid = d.get("goal_id", "unknown")
+                    noop_goals[gid] = noop_goals.get(gid, 0) + 1
+            stuck_goal = max(noop_goals, key=noop_goals.get) if noop_goals else "?"
+            evidence.append(Evidence(
+                key="planner.noop_loop",
+                value=f"{noop_count}/{len(decisions)} ostatnich decyzji to NOOP "
+                      f"(cel: {stuck_goal[:20]}). Planner nie ma co robic - "
+                      f"brak nowych materialow lub cel jest zbyt abstrakcyjny.",
+                source="planner_decisions.jsonl",
+                confidence="high",
+                timestamp=decisions[-1].get("timestamp", 0),
+            ))
+
+        # Detect low action diversity
+        action_counts = {}
+        for d in decisions:
+            a = d.get("action_type", "?")
+            action_counts[a] = action_counts.get(a, 0) + 1
+        if len(action_counts) <= 2 and len(decisions) >= 15:
+            dominant = max(action_counts, key=action_counts.get)
+            evidence.append(Evidence(
+                key="planner.low_diversity",
+                value=f"Monotonna aktywnosc: {dominant} stanowi "
+                      f"{action_counts[dominant]}/{len(decisions)} decyzji.",
+                source="planner_decisions.jsonl",
+                confidence="medium",
+                timestamp=decisions[-1].get("timestamp", 0),
+            ))
 
         return evidence
 
