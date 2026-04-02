@@ -390,7 +390,12 @@ class PlannerCore:
         if plan is not None:
             return self._finalize_plan(plan)
 
-        # K13: Creative reflection (after self-analysis, before NOOP)
+        # K11: Experiment proposal scan (after self-analysis, before creative)
+        plan = self._maybe_experiment_scan(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # K13: Creative reflection (after experiment scan, before NOOP)
         plan = self._maybe_creative(context)
         if plan is not None:
             return self._finalize_plan(plan)
@@ -674,6 +679,72 @@ class PlannerCore:
             action_type=ActionType.VALIDATE,
             action_params={"file_id": file_id},
         )
+
+    # K11: Experiment proposal scan trigger
+    EXPERIMENT_SCAN_INTERVAL_SEC = 14400  # 4h between scans
+
+    def _maybe_experiment_scan(self, context: Dict) -> Optional[Plan]:
+        """
+        Scan K4/K9 for experiment proposals (K11).
+
+        Triggers every 4h. If proposals are generated, the first approved
+        one becomes an EXPERIMENT plan. Proposals require manual approval
+        via /experiment approve or Telegram.
+        """
+        if self._experiment_system is None:
+            return None
+
+        if self._is_action_rate_limited("experiment"):
+            return None
+
+        now = time.time()
+        since_scan = now - self._state.last_experiment_scan_ts
+
+        if since_scan < self.EXPERIMENT_SCAN_INTERVAL_SEC:
+            return None
+
+        self._state.last_experiment_scan_ts = now
+
+        # Gather K4 metrics and K9 patterns
+        metrics = context.get("evaluation_metrics", {})
+        recommendations = context.get("recommendations", [])
+        k9_patterns = {}
+        if self._meta_cognition:
+            try:
+                k9_patterns = self._meta_cognition.analyze_patterns()
+            except Exception:
+                pass
+
+        # Scan for proposals
+        proposals = self._experiment_system.scan_for_proposals(
+            k4_metrics=metrics,
+            k4_recommendations=recommendations,
+            k9_patterns=k9_patterns,
+        )
+
+        if not proposals:
+            return None
+
+        logger.info(
+            "[K11] Experiment scan: %d new proposals generated",
+            len(proposals),
+        )
+
+        # Check if any approved proposal is ready to run
+        approved = [
+            p for p in self._experiment_system.proposal_engine.get_active_proposals()
+            if p.status.value == "approved"
+        ]
+        if approved:
+            proposal = approved[0]
+            return create_plan(
+                goal_id=None,
+                goal_description=f"Experiment: {proposal.hypothesis}",
+                action_type=ActionType.EXPERIMENT,
+                action_params={"proposal_id": proposal.proposal_id},
+            )
+
+        return None
 
     # Faza G: Knowledge critique trigger
 

@@ -103,13 +103,39 @@ class GoalStore:
         self._mark_dirty(goal.id)
         return goal.id
 
+    # Sources whose PROPOSED goals are auto-confirmed (low risk learning)
+    AUTO_CONFIRM_SOURCES = {"creative", "critic", "self_analysis"}
+
     def propose(self, goal: Goal) -> Optional[str]:
         """Create a PROPOSED goal (awaiting user confirmation).
+
+        Auto-confirm: goals from creative/critic/self_analysis with risk_level
+        "low" (or unset) and type LEARNING/META skip PROPOSED and go straight
+        to PENDING. Experiments (K11) always require manual approval.
 
         Enforces MAX_PROPOSED_GOALS. If at limit, replaces the lowest-priority
         PROPOSED goal when the new goal has higher priority (displacement).
         Returns None only if new goal cannot displace any existing one.
         """
+        # Auto-confirm low-risk learning goals
+        if self._should_auto_confirm(goal):
+            goal.status = GoalStatus.PENDING
+            goal.audit_trail.append(AuditEntry(
+                timestamp=time.time(),
+                old_status=None,
+                new_status="pending",
+                reason="auto-confirmed (low risk)",
+                actor="system",
+            ))
+            goal.updated_at = time.time()
+            self._goals[goal.id] = goal
+            self._mark_dirty(goal.id)
+            logger.info(
+                f"[GOALS] Auto-confirmed {goal.id} "
+                f"(source={goal.created_by}, type={goal.type.value})"
+            )
+            return goal.id
+
         proposed = [
             g for g in self._goals.values()
             if g.status == GoalStatus.PROPOSED
@@ -146,6 +172,20 @@ class GoalStore:
         self._goals[goal.id] = goal
         self._mark_dirty(goal.id)
         return goal.id
+
+    def _should_auto_confirm(self, goal: Goal) -> bool:
+        """Check if goal qualifies for auto-confirmation."""
+        # Only auto-confirm from known safe sources
+        if goal.created_by not in self.AUTO_CONFIRM_SOURCES:
+            return False
+        # Only learning and meta goals (not experiment/maintenance)
+        if goal.type not in (GoalType.LEARNING, GoalType.META):
+            return False
+        # High risk goals still need approval
+        risk = goal.metadata.get("risk_level", "low")
+        if risk in ("medium", "high"):
+            return False
+        return True
 
     # ---- Read ----
 

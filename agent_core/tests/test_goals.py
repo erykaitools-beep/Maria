@@ -765,3 +765,102 @@ class TestFindByTopic:
         store.create(g)
         results = store.find_by_topic("biologia")
         assert len(results) == 1
+
+
+# ============================================================
+# Auto-confirm Tests
+# ============================================================
+
+class TestGoalStoreAutoConfirm:
+    def test_auto_confirm_creative_learning(self, tmp_path):
+        """Creative low-risk learning goals are auto-confirmed."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Nauka fizyki", 0.6,
+            created_by="creative",
+            metadata={"risk_level": "low"},
+        )
+        gid = store.propose(g)
+        assert gid is not None
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PENDING
+        assert goal.audit_trail[-1].reason == "auto-confirmed (low risk)"
+
+    def test_auto_confirm_critic_meta(self, tmp_path):
+        """Critic meta goals are auto-confirmed."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.META, "Verify knowledge", 0.5,
+            created_by="critic",
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PENDING
+
+    def test_auto_confirm_self_analysis(self, tmp_path):
+        """Self-analysis goals are auto-confirmed."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Improve retention", 0.5,
+            created_by="self_analysis",
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PENDING
+
+    def test_no_auto_confirm_high_risk(self, tmp_path):
+        """High risk goals still require approval."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Risky experiment", 0.5,
+            created_by="creative",
+            metadata={"risk_level": "high"},
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PROPOSED
+
+    def test_no_auto_confirm_medium_risk(self, tmp_path):
+        """Medium risk goals still require approval."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Medium risk", 0.5,
+            created_by="creative",
+            metadata={"risk_level": "medium"},
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PROPOSED
+
+    def test_no_auto_confirm_unknown_source(self, tmp_path):
+        """Goals from unknown sources require approval."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "From user", 0.5,
+            created_by="user",
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PROPOSED
+
+    def test_no_auto_confirm_experiment_type(self, tmp_path):
+        """Maintenance/experiment goals require approval even from safe sources."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.MAINTENANCE, "Tune params", 0.5,
+            created_by="creative",
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PROPOSED
+
+    def test_auto_confirm_default_risk(self, tmp_path):
+        """No risk_level in metadata defaults to low (auto-confirm)."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(
+            GoalType.LEARNING, "Default risk", 0.5,
+            created_by="creative",
+        )
+        gid = store.propose(g)
+        goal = store.get(gid)
+        assert goal.status == GoalStatus.PENDING
