@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Critique{% endblock %}
+{% block page_class %}mo-page--critique{% endblock %}
+
+{% block content %}
+<div class="mo-critique">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Knowledge Critique (Faza G)</h2>
+    <button class="mo-btn mo-btn--sm" onclick="runCritique()">Run Critique</button>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-report">Raport</button>
+    <button class="mo-tab" data-tab="tab-findings">Findings</button>
+    <button class="mo-tab" data-tab="tab-history">Historia</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-report">
+    <div id="report-summary">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-findings">
+    <div id="findings-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-history">
+    <div id="history-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/critique.js') }}"></script>
+{% endblock %}

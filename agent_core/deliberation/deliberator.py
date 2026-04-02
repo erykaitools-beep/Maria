@@ -274,7 +274,7 @@ class Deliberator:
         new_files = context.get("new_files_available", False)
         weak_topics = context.get("weak_topics", [])
         topic = context.get("topic", "")
-        goal_type = context.get("goal_type", "")
+        goal_type = context.get("goal_type", "").upper()
 
         # Filter weak_topics: only truly weak ones (confidence < 0.5)
         # Knowledge gaps come from world model with confidence values

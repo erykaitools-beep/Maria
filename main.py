@@ -188,7 +188,12 @@ def register_modules(registry):
         from agent_core.modules.self_analysis_module import SelfAnalysisModule
         return SelfAnalysisModule()
 
+    def make_critique():
+        from agent_core.modules.critique_module import CritiqueModule
+        return CritiqueModule()
+
     registry.try_register(make_self_analysis, "self_analysis")
+    registry.try_register(make_critique, "critique")
 
 
 # ====== POMOC ======

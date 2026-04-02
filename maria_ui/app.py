@@ -2959,6 +2959,116 @@ def api_docs_download(filename):
     return send_from_directory(str(DOCS_DIR), filename, as_attachment=True)
 
 
+# ====== CRITIQUE (Faza G) ======
+
+@app.route('/critique')
+@require_auth
+def critique_page():
+    """Knowledge Critique dashboard page (Faza G)."""
+    return render_template('critique.html', active_page='critique')
+
+
+_CRITIQUE_REPORTS_PATH = PROJECT_ROOT / "meta_data" / "critique_reports.jsonl"
+
+
+def _read_critique_reports(limit=20):
+    """Read critique reports from JSONL."""
+    if not _CRITIQUE_REPORTS_PATH.exists():
+        return []
+    results = []
+    try:
+        with open(_CRITIQUE_REPORTS_PATH, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    results.append(json.loads(line))
+                except Exception:
+                    continue
+    except IOError:
+        pass
+    return results[-limit:]
+
+
+@app.route('/api/critique/report')
+@require_auth
+def api_critique_report():
+    """Get last critique report + status."""
+    reports = _read_critique_reports(limit=1)
+    report = reports[0] if reports else None
+
+    last_ts = report.get("timestamp", 0) if report else 0
+    status = {
+        "available": _CRITIQUE_REPORTS_PATH.exists(),
+        "last_critique_ts": last_ts,
+        "cooldown_sec": 28800,
+        "last_findings": len(report.get("findings", [])) if report else 0,
+        "last_findings_total": report.get("findings_total", 0) if report else 0,
+        "last_goals_created": len(report.get("goals_created", [])) if report else 0,
+    }
+
+    return jsonify({"report": report, "status": status})
+
+
+@app.route('/api/critique/findings')
+@require_auth
+def api_critique_findings():
+    """Get findings from last critique report."""
+    reports = _read_critique_reports(limit=1)
+    if not reports:
+        return jsonify({"findings": []})
+    return jsonify({"findings": reports[0].get("findings", [])})
+
+
+@app.route('/api/critique/history')
+@require_auth
+def api_critique_history():
+    """Get critique report history (last 20)."""
+    reports = _read_critique_reports(limit=20)
+    results = []
+    for r in reports:
+        results.append({
+            "report_id": r.get("report_id", ""),
+            "timestamp": r.get("timestamp", 0),
+            "trigger": r.get("trigger", ""),
+            "findings_count": len(r.get("findings", [])),
+            "findings_total": r.get("findings_total", 0),
+            "goals_count": len(r.get("goals_created", [])),
+            "findings_by_severity": r.get("findings_by_severity", {}),
+            "findings_by_category": r.get("findings_by_category", {}),
+            "duration_ms": r.get("duration_ms", 0),
+            "error": r.get("error"),
+        })
+    return jsonify({"reports": list(reversed(results))})
+
+
+@app.route('/api/critique/run', methods=['POST'])
+@require_auth
+def api_critique_run():
+    """Trigger manual critique run via CriticAgent."""
+    try:
+        from agent_core.critic import CriticAgent
+        from maria_core.sys.config import BASE_DIR
+
+        critic = CriticAgent(project_root=str(BASE_DIR))
+
+        # Wire belief store from JSONL (read-only for analysis)
+        from agent_core.world_model import BeliefStore
+        belief_store = BeliefStore(str(PROJECT_ROOT / "meta_data" / "beliefs.jsonl"))
+        critic.set_belief_store(belief_store)
+
+        report = critic.run_critique(trigger="manual")
+        return jsonify({
+            "success": not report.error,
+            "findings": len(report.findings),
+            "goals": len(report.goals_created),
+            "error": report.error,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("[START] M.A.R.I.A. Web UI (Sprint 5)")

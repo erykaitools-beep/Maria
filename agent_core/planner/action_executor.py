@@ -133,55 +133,45 @@ class ActionExecutor:
         """Set WorldModel for belief confidence updates (Faza F)."""
         self._world_model = world_model
 
+    # Action -> method name mapping (replaces Phase B if/elif chain)
+    _ACTION_MAP = {
+        ActionType.LEARN: "_exec_learn",
+        ActionType.EXAM: "_exec_exam",
+        ActionType.REVIEW: "_exec_review",
+        ActionType.EVALUATE: "_exec_evaluate",
+        ActionType.MAINTENANCE: "_exec_maintenance",
+        ActionType.FETCH: "_exec_fetch",
+        ActionType.EXPERIMENT: "_exec_experiment",
+        ActionType.EFFECTOR: "_exec_effector",
+        ActionType.SELF_ANALYZE: "_exec_self_analyze",
+        ActionType.CREATIVE: "_exec_creative",
+        ActionType.ASK_EXPERT: "_exec_ask_expert",
+        ActionType.VALIDATE: "_exec_validate",
+        ActionType.CRITIQUE: "_exec_critique",
+    }
+
     def execute(self, plan: Plan) -> Dict[str, Any]:
         """
         Execute a plan. Returns result dict.
 
-        Args:
-            plan: The Plan to execute
-
-        Returns:
-            Dict with at least {"success": bool, ...}
+        Primary path: CapabilityRouter (registry-based dispatch).
+        Fallback: internal _exec_* methods (for tests / no router).
         """
-        # Registry-based dispatch (Phase B: dual-path)
         if self._capability_router is not None:
             return self._capability_router.dispatch(plan)
 
-        # Legacy dispatch (backward compat, removed in Phase C)
         action = plan.action_type
         start = time.time()
 
         try:
-            if action == ActionType.LEARN:
-                result = self._exec_learn(plan)
-            elif action == ActionType.EXAM:
-                result = self._exec_exam(plan)
-            elif action == ActionType.REVIEW:
-                result = self._exec_review(plan)
-            elif action == ActionType.EVALUATE:
-                result = self._exec_evaluate(plan)
-            elif action == ActionType.MAINTENANCE:
-                result = self._exec_maintenance(plan)
-            elif action == ActionType.FETCH:
-                result = self._exec_fetch(plan)
-            elif action == ActionType.EXPERIMENT:
-                result = self._exec_experiment(plan)
-            elif action == ActionType.EFFECTOR:
-                result = self._exec_effector(plan)
-            elif action == ActionType.SELF_ANALYZE:
-                result = self._exec_self_analyze(plan)
-            elif action == ActionType.CREATIVE:
-                result = self._exec_creative(plan)
-            elif action == ActionType.ASK_EXPERT:
-                result = self._exec_ask_expert(plan)
-            elif action == ActionType.VALIDATE:
-                result = self._exec_validate(plan)
-            elif action == ActionType.CRITIQUE:
-                result = self._exec_critique(plan)
-            elif action == ActionType.NOOP:
+            if action == ActionType.NOOP:
                 result = {"success": True, "action": "noop"}
             else:
-                result = {"success": False, "error": f"Unknown action: {action}"}
+                method_name = self._ACTION_MAP.get(action)
+                if method_name is None:
+                    result = {"success": False, "error": f"Unknown action: {action}"}
+                else:
+                    result = getattr(self, method_name)(plan)
         except Exception as e:
             logger.warning(f"ActionExecutor error: {e}")
             result = {"success": False, "error": str(e)}
