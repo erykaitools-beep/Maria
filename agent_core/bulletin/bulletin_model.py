@@ -22,6 +22,8 @@ class EntryType(Enum):
     NEED_REVIEW = "need_review"           # Quality problem (from critic/validation)
     READY_TO_LEARN = "ready_to_learn"     # Material and conditions ready for pipeline
     WAITING_HUMAN = "waiting_human"       # Needs operator decision or approval
+    CODE_TASK = "code_task"               # Code task result from Codex
+    IMPROVEMENT = "improvement"           # Module analysis / upgrade proposal
 
 
 class EntryStatus(Enum):

@@ -36,11 +36,12 @@ from agent_core.bulletin.gap_planner import (
 
 class TestEntryType:
     def test_all_types(self):
-        assert len(EntryType) == 5
+        assert len(EntryType) == 7
         values = {t.value for t in EntryType}
         assert values == {
             "need_material", "need_test", "need_review",
             "ready_to_learn", "waiting_human",
+            "code_task", "improvement",
         }
 
 

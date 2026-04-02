@@ -1549,6 +1549,8 @@ def _register_telegram_commands(bridge, ctx):
             "/efreject <id> - odrzuc efektor\n"
             "/efstatus - status efektora\n"
             "/board - tablica potrzeb poznawczych\n"
+            "/code <zadanie> - zadanie kodowania (Codex)\n"
+            "/analyze <modul> - analiza modulu (Codex)\n"
             "/authority [level] - zmien poziom autoryzacji\n"
             "/restart - restart Marii\n"
             "/help - ta pomoc"
@@ -1603,6 +1605,127 @@ def _register_telegram_commands(bridge, ctx):
 
         return "Uzycie: /board [open|prune]"
 
+    def _cmd_code(args):
+        """Execute code task via Codex CLI: /code <task description>"""
+        if not args or not args.strip():
+            return (
+                "Uzycie: /code <opis zadania>\n"
+                "Przyklad: /code przeanalizuj modul critic i zaproponuj ulepszenia\n"
+                "Przyklad: /code znajdz TODO i FIXME w agent_core/planner/\n"
+                "Przyklad: /code napisz test dla funkcji compute_belief_score"
+            )
+        task = args.strip()
+
+        # Run async in background thread
+        import threading
+
+        def _run_codex_task():
+            try:
+                from agent_core.llm.codex_client import CodexClient
+                codex = CodexClient(timeout_s=180)
+                if not codex.is_available():
+                    bridge.bot.send_message("[Code] Codex CLI niedostepny.")
+                    return
+
+                # Build prompt with project context
+                prompt = (
+                    f"Projekt M.A.R.I.A. (Python, agent_core/). "
+                    f"Zadanie od operatora: {task}"
+                )
+
+                bridge.bot.send_message(f"[Code] Pracuje nad: {task[:80]}...")
+
+                result = codex.ask(prompt, source="telegram_code", context={"task": task})
+                if result:
+                    # Trim for Telegram (4096 char limit)
+                    if len(result) > 3800:
+                        result = result[:3800] + "\n...(obciete)"
+                    bridge.bot.send_message(f"[Code] Wynik:\n\n{result}")
+
+                    # Save to bulletin board
+                    bs = getattr(ctx, 'bulletin_store', None)
+                    if bs:
+                        try:
+                            from agent_core.bulletin.bulletin_model import EntryType
+                            bs.add_entry(
+                                entry_type=EntryType.CODE_TASK,
+                                topic=task[:100],
+                                content=result[:500],
+                                source="telegram_code",
+                                metadata={"full_result_length": len(result)},
+                            )
+                        except Exception:
+                            pass
+                else:
+                    bridge.bot.send_message("[Code] Codex nie zwrocil odpowiedzi.")
+            except Exception as e:
+                bridge.bot.send_message(f"[Code] Blad: {e}")
+
+        t = threading.Thread(target=_run_codex_task, daemon=True)
+        t.start()
+        return f"Przyjeto zadanie: '{task[:60]}'. Wynik za chwile..."
+
+    def _cmd_analyze(args):
+        """Analyze a module via Codex: /analyze <module_path>"""
+        if not args or not args.strip():
+            return (
+                "Uzycie: /analyze <sciezka modulu>\n"
+                "Przyklad: /analyze agent_core/critic\n"
+                "Przyklad: /analyze agent_core/planner/planner_core.py"
+            )
+        module_path = args.strip()
+
+        import threading
+
+        def _run_analysis():
+            try:
+                from agent_core.llm.codex_client import CodexClient
+                codex = CodexClient(timeout_s=180)
+                if not codex.is_available():
+                    bridge.bot.send_message("[Analyze] Codex CLI niedostepny.")
+                    return
+
+                prompt = (
+                    f"Przeanalizuj modul '{module_path}' w projekcie M.A.R.I.A. "
+                    f"(Python, katalog agent_core/). "
+                    f"Opisz: 1) Co robi modul 2) Jakie ma problemy/TODO "
+                    f"3) Propozycje ulepszen (max 3). "
+                    f"Odpowiedz zwiezle po polsku."
+                )
+
+                bridge.bot.send_message(f"[Analyze] Analizuje: {module_path}...")
+
+                result = codex.ask(prompt, source="telegram_analyze", context={"module": module_path})
+                if result:
+                    if len(result) > 3800:
+                        result = result[:3800] + "\n...(obciete)"
+                    bridge.bot.send_message(f"[Analyze] {module_path}:\n\n{result}")
+
+                    # Post improvement proposals to bulletin
+                    bs = getattr(ctx, 'bulletin_store', None)
+                    if bs:
+                        try:
+                            from agent_core.bulletin.bulletin_model import EntryType
+                            bs.add_entry(
+                                entry_type=EntryType.IMPROVEMENT,
+                                topic=f"Analiza: {module_path}",
+                                content=result[:500],
+                                source="telegram_analyze",
+                                metadata={"module": module_path},
+                            )
+                        except Exception:
+                            pass
+                else:
+                    bridge.bot.send_message("[Analyze] Codex nie zwrocil odpowiedzi.")
+            except Exception as e:
+                bridge.bot.send_message(f"[Analyze] Blad: {e}")
+
+        t = threading.Thread(target=_run_analysis, daemon=True)
+        t.start()
+        return f"Analizuje modul: '{module_path}'. Wynik za chwile..."
+
+    bridge.register_command("code", _cmd_code)
+    bridge.register_command("analyze", _cmd_analyze)
     bridge.register_command("board", _cmd_board)
     bridge.register_command("status", _cmd_status)
     bridge.register_command("goals", _cmd_goals)
