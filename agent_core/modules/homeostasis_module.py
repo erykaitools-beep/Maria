@@ -1549,6 +1549,7 @@ def _register_telegram_commands(bridge, ctx):
             "/efreject <id> - odrzuc efektor\n"
             "/efstatus - status efektora\n"
             "/board - tablica potrzeb poznawczych\n"
+            "/claude <zadanie> - zadanie dla Claude (3/h limit)\n"
             "/code <zadanie> - zadanie kodowania (Codex)\n"
             "/analyze <modul> - analiza modulu (Codex)\n"
             "/authority [level] - zmien poziom autoryzacji\n"
@@ -1724,6 +1725,74 @@ def _register_telegram_commands(bridge, ctx):
         t.start()
         return f"Analizuje modul: '{module_path}'. Wynik za chwile..."
 
+    def _cmd_claude(args):
+        """Execute task via Claude Code CLI: /claude <task>"""
+        if not args or not args.strip():
+            return (
+                "Uzycie: /claude <opis zadania>\n"
+                "Przyklad: /claude przeanalizuj planner_core.py i znajdz potencjalne bugi\n"
+                "Przyklad: /claude zaproponuj refactor modulu critic\n"
+                "Limit: 3/h, 15/dzien (subskrypcja operatora)"
+            )
+        task = args.strip()
+
+        import threading
+
+        def _run_claude_task():
+            try:
+                from agent_core.llm.claude_client import ClaudeClient
+                client = ClaudeClient()
+                if not client.is_available():
+                    bridge.bot.send_message("[Claude] CLI niedostepny.")
+                    return
+
+                stats = client.get_stats()
+                if stats["remaining_hour"] <= 0:
+                    bridge.bot.send_message(
+                        f"[Claude] Limit godzinowy wyczerpany "
+                        f"({stats['calls_this_hour']}/{stats['max_per_hour']}). "
+                        f"Sprobuj pozniej."
+                    )
+                    return
+
+                bridge.bot.send_message(
+                    f"[Claude] Pracuje nad: {task[:80]}...\n"
+                    f"(zostalo {stats['remaining_hour']}/{stats['max_per_hour']} na te godzine)"
+                )
+
+                result = client.ask(
+                    prompt=f"Projekt M.A.R.I.A. (Python, agent_core/). Zadanie: {task}",
+                    source="telegram_claude",
+                    context={"task": task},
+                )
+                if result:
+                    if len(result) > 3800:
+                        result = result[:3800] + "\n...(obciete)"
+                    bridge.bot.send_message(f"[Claude] Wynik:\n\n{result}")
+
+                    bs = getattr(ctx, 'bulletin_store', None)
+                    if bs:
+                        try:
+                            from agent_core.bulletin.bulletin_model import EntryType
+                            bs.add_entry(
+                                entry_type=EntryType.CODE_TASK,
+                                topic=task[:100],
+                                content=result[:500],
+                                source="telegram_claude",
+                                metadata={"backend": "claude"},
+                            )
+                        except Exception:
+                            pass
+                else:
+                    bridge.bot.send_message("[Claude] Brak odpowiedzi.")
+            except Exception as e:
+                bridge.bot.send_message(f"[Claude] Blad: {e}")
+
+        t = threading.Thread(target=_run_claude_task, daemon=True)
+        t.start()
+        return f"Przyjeto (Claude): '{task[:60]}'. Wynik za chwile..."
+
+    bridge.register_command("claude", _cmd_claude)
     bridge.register_command("code", _cmd_code)
     bridge.register_command("analyze", _cmd_analyze)
     bridge.register_command("board", _cmd_board)
