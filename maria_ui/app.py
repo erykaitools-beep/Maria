@@ -1951,38 +1951,49 @@ def handle_chat_message(data):
     if _op_handled:
         return
 
-    try:
-        # Get response from Ollama
-        response = brain.think(user_message)
+    # Retry brain.think() up to 2 times (ollama may be busy with planner)
+    response = None
+    last_error = None
+    for _attempt in range(2):
+        try:
+            response = brain.think(user_message)
+            break
+        except Exception as e:
+            last_error = e
+            print(f"[UI] [CHAT] Attempt {_attempt + 1} failed: {e}")
+            if _attempt == 0:
+                import time as _t
+                _t.sleep(2)  # brief pause before retry
 
-        # Trim history if needed
-        trim_brain_history()
+    # Trim history if needed
+    trim_brain_history()
 
-        if response:
-            print(f"[UI] [CHAT] Maria: {response[:50]}...")
+    if response:
+        print(f"[UI] [CHAT] Maria: {response[:50]}...")
 
-            # Save Maria's response to UI history
-            add_ui_chat_message("maria", response)
+        # Save Maria's response to UI history
+        add_ui_chat_message("maria", response)
 
-            # Save to file periodically
-            maybe_save_chat("maria", response)
+        # Save to file periodically
+        maybe_save_chat("maria", response)
 
-            emit('chat_response', {
-                'success': True,
-                'message': response,
-                'fallback': False
-            })
-        else:
-            emit('chat_response', {
-                'success': False,
-                'error': 'Brak odpowiedzi od Ollamy'
-            })
-
-    except Exception as e:
-        print(f"[UI] [ERROR] Chat error: {e}")
         emit('chat_response', {
-            'success': False,
-            'error': 'Blad komunikacji z Ollama'
+            'success': True,
+            'message': response,
+            'fallback': False
+        })
+    elif last_error:
+        print(f"[UI] [ERROR] Chat error after retries: {last_error}")
+        emit('chat_response', {
+            'success': True,
+            'message': 'Przepraszam, Ollama jest teraz zajeta (planner pracuje). Sprobuj za chwile.',
+            'fallback': True
+        })
+    else:
+        emit('chat_response', {
+            'success': True,
+            'message': 'Przepraszam, nie udalo mi sie wygenerowac odpowiedzi. Sprobuj ponownie.',
+            'fallback': True
         })
 
 
