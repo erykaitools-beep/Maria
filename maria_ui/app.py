@@ -512,7 +512,11 @@ def _check_planner_notifications():
         return
 
     # Notify about interesting decisions (skip NOOP and MAINTENANCE)
-    NOTIFY_ACTIONS = {"learn", "exam", "review", "evaluate"}
+    NOTIFY_ACTIONS = {
+        "learn", "exam", "review", "evaluate",
+        "fetch", "critique", "self_analyze", "creative", "validate",
+        "ask_expert", "experiment",
+    }
 
     for decision in new_decisions:
         action = decision.get("action_type", "")
@@ -1872,6 +1876,7 @@ def handle_chat_message(data):
             except Exception as e:
                 print(f"[UI] [CDL] Goal creation failed: {e}")
         # Check operational intent (fetch, critique, evaluate, etc.)
+        _op_handled = False
         if not intent and not cancel:
             from agent_core.perception.learning_intent import detect_operational_intent
             op_intent = detect_operational_intent(user_message)
@@ -1879,64 +1884,72 @@ def handle_chat_message(data):
                 _op_action = op_intent["action"]
                 _op_topic = op_intent.get("topic")
                 try:
-                    from agent_core.planner.planner_model import ActionType
-                    # Map intent to ActionType
-                    _ACTION_MAP = {
-                        "fetch": ActionType.FETCH,
-                        "evaluate": ActionType.EVALUATE,
-                        "critique": ActionType.CRITIQUE,
-                        "self_analyze": ActionType.SELF_ANALYZE,
-                        "creative": ActionType.CREATIVE,
-                        "validate": ActionType.VALIDATE,
-                        "exam": ActionType.EXAM,
+                    from agent_core.goals.goal_model import GoalType, GoalStatus, create_goal
+                    from agent_core.goals.store import GoalStore
+                    from pathlib import Path as _GPath
+                    _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
+                    _gs.load()
+                    _meta = {
+                        "source": "conversation",
+                        "channel": "webui",
+                        "action": _op_action,
+                        "forced_action_type": _op_action,
                     }
-                    _at = _ACTION_MAP.get(_op_action)
-                    if _at:
-                        # Write a one-shot plan request to planner_decisions
-                        # by creating a high-priority USER goal
-                        from agent_core.goals.goal_model import GoalType, GoalStatus, create_goal
-                        from agent_core.goals.store import GoalStore
-                        from pathlib import Path as _GPath
-                        _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
-                        _gs.load()
-                        _meta = {
-                            "source": "conversation",
-                            "channel": "webui",
-                            "action": _op_action,
-                            "forced_action_type": _op_action,
-                        }
-                        if _op_topic:
-                            _meta["topic"] = _op_topic
-                            _meta["topics"] = [_op_topic]
-                        _desc = {
-                            "fetch": "Pobierz nowe materialy z internetu",
-                            "evaluate": "Ewaluacja: ocen postepy",
-                            "critique": "Krytyka jakosci wiedzy",
-                            "self_analyze": "Autoanaliza stanu",
-                            "creative": "Refleksja kreatywna",
-                            "validate": "Walidacja krzyzowa wiedzy",
-                            "exam": f"Egzamin: {_op_topic}" if _op_topic else "Egzamin",
-                        }
-                        _g = create_goal(
-                            goal_type=GoalType.USER,
-                            description=_desc.get(_op_action, _op_action),
-                            priority=1.2,  # Higher than seed goals
-                            status=GoalStatus.PENDING,
-                            created_by="user_conversation",
-                            metadata=_meta,
-                        )
-                        _gs.create(_g)
-                        _gs.save()
-                        emit('chat_status', {
-                            'status': 'operational_command',
-                            'action': _op_action,
-                            'topic': _op_topic,
-                        })
-                        print(f"[UI] [CDL] Operational intent: {_op_action}")
+                    if _op_topic:
+                        _meta["topic"] = _op_topic
+                        _meta["topics"] = [_op_topic]
+                    _desc = {
+                        "fetch": "Pobierz nowe materialy z internetu",
+                        "evaluate": "Ewaluacja: ocen postepy",
+                        "critique": "Krytyka jakosci wiedzy",
+                        "self_analyze": "Autoanaliza stanu",
+                        "creative": "Refleksja kreatywna",
+                        "validate": "Walidacja krzyzowa wiedzy",
+                        "exam": f"Egzamin: {_op_topic}" if _op_topic else "Egzamin",
+                    }
+                    _g = create_goal(
+                        goal_type=GoalType.USER,
+                        description=_desc.get(_op_action, _op_action),
+                        priority=1.2,  # Higher than seed goals
+                        status=GoalStatus.PENDING,
+                        created_by="user_conversation",
+                        metadata=_meta,
+                    )
+                    _gid = _gs.create(_g)
+                    _gs.save()
+                    emit('chat_status', {
+                        'status': 'operational_command',
+                        'action': _op_action,
+                        'topic': _op_topic,
+                    })
+                    # Immediate response - don't wait for brain
+                    _labels = {
+                        "fetch": "Przyjelam - zlecam pobieranie nowych materialow z internetu.",
+                        "evaluate": "Przyjelam - uruchamiam ewaluacje postepow.",
+                        "critique": "Przyjelam - uruchamiam analize jakosci wiedzy.",
+                        "self_analyze": "Przyjelam - uruchamiam autoanalize.",
+                        "creative": "Przyjelam - uruchamiam refleksje kreatywna.",
+                        "validate": "Przyjelam - uruchamiam walidacje krzyzowa.",
+                        "exam": "Przyjelam - uruchamiam egzamin" + (f" z: {_op_topic}." if _op_topic else "."),
+                    }
+                    _resp = _labels.get(_op_action, f"Przyjelam polecenie: {_op_action}.")
+                    _resp += " Dam znac o wyniku."
+                    add_ui_chat_message("maria", _resp)
+                    emit('chat_response', {
+                        'success': True,
+                        'message': _resp,
+                        'fallback': False,
+                    })
+                    _op_handled = True
+                    print(f"[UI] [CDL] Operational intent: {_op_action}")
                 except Exception as e:
                     print(f"[UI] [CDL] Operational goal failed: {e}")
     except Exception:
         pass
+
+    # Skip brain.think() for operational commands (already responded)
+    if _op_handled:
+        return
 
     try:
         # Get response from Ollama
