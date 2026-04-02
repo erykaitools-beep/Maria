@@ -88,6 +88,17 @@
 | **2026-03-30** | **Faza G: Agent Krytyk** - knowledge quality gate, 7 wymiarow analizy, READ-ONLY critic (69 testow) |
 | **2026-03-31** | **Learning Upgrade Phase 1-3** - BulletinStore, KnowledgeAuditor, GapPlanner (57 testow) |
 | **2026-04-01** | **Learning Upgrade Phase 4-5** - ExpertBridge (audit-aware expert queries), full wiring to input/ (42 testow) |
+| **2026-04-02** | Fix: deliberation case mismatch (NOOP loop na meta-goalach) |
+| **2026-04-02** | **Critique UI** - REPL /critique + Web UI /critique page (3 taby, 4 API endpoints, 14 testow) |
+| **2026-04-02** | Phase C cleanup - ActionExecutor if/elif -> _ACTION_MAP lookup |
+| **2026-04-02** | **Auto-confirm** - low risk goals z creative/critic/self_analysis skip /approve (8 testow) |
+| **2026-04-02** | **K11 trigger** - _maybe_experiment_scan() co 4h w planner loop |
+| **2026-04-02** | **BeliefStore v3** - importance-based pruning (type weight + evidence strength) |
+| **2026-04-02** | **NOOP detection** - EvidenceCollector wykrywa stuck planner, surfaced w chacie |
+| **2026-04-02** | **CDL v3** - operational commands w Web UI chat ("zrob fetch", "uruchom krytyke") + async feedback (17 testow) |
+| **2026-04-02** | **Claude + Codex backends** - /claude (3/h) + /code (10/h) + /analyze komendy Telegram |
+| **2026-04-02** | **Telegram file upload** - PDF/MD/TXT/PY -> docs/incoming/, caption jako komenda |
+| **2026-04-02** | **Kamera** - Innomaker U20CAM-1080PD&N-S1 zweryfikowana, Vision ODBLOKOWANA |
 
 ## Aktualny stan projektu
 
@@ -95,8 +106,8 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade |
-| **Testy** | 2730 passing |
-| **Faza** | Stabilization COMPLETE + Faza F COMPLETE + Faza G COMPLETE + Learning Upgrade COMPLETE |
+| **Testy** | 2769 passing |
+| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -1079,4 +1090,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-01 (Learning Upgrade Phase 4-5 + ExpertBridge, 2730 testow)*
+*Ostatnia aktualizacja: 2026-04-02 (Critique UI, Auto-confirm, CDL v3, Claude/Codex backends, kamera, 2769 testow)*
