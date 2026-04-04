@@ -122,6 +122,13 @@ class ExpertBridge:
                 success=False, topic=topic, reason="no_llm_fn",
             )
 
+        # Step 0: Check if expert material already exists for this topic
+        if self._expert_file_exists(topic):
+            return ExpertResponse(
+                success=False, topic=topic,
+                reason="expert_material_already_exists",
+            )
+
         # Step 1: Audit (if auditor available)
         audit = None
         if self._auditor:
@@ -251,6 +258,29 @@ class ExpertBridge:
             reason="direct_context_query",
             duration_ms=duration_ms,
         )
+
+    # ----------------------------------------------------------
+    # Dedup
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def _expert_file_exists(topic: str) -> bool:
+        """Check if input/expert_{topic}.txt already has substantial content."""
+        import re
+        from pathlib import Path
+
+        slug = re.sub(r'[^a-z0-9]+', '_', topic.lower().strip())[:60].strip('_')
+        filepath = Path(__file__).resolve().parents[2] / "input" / f"expert_{slug}.txt"
+        try:
+            if filepath.exists() and filepath.stat().st_size > 5000:
+                logger.info(
+                    f"[ExpertBridge] Skipping '{topic}': expert file "
+                    f"already has {filepath.stat().st_size} bytes"
+                )
+                return True
+        except OSError:
+            pass
+        return False
 
     # ----------------------------------------------------------
     # Prompt builders

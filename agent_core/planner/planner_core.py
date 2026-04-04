@@ -1009,6 +1009,7 @@ class PlannerCore:
         Priority logic:
         - P1: Files in "learning" status -> LEARN (continue partial)
         - P2: Files in "learned" status (ready for exam) -> EXAM
+        - P2.5: Weak beliefs (confidence < 0.3) -> REVIEW weak topic
         - P3: New/unindexed files available -> LEARN (start new)
         - P4: Low retention -> REVIEW (spaced repetition)
         - P5: No materials left -> FETCH (get new content from web)
@@ -1028,6 +1029,11 @@ class PlannerCore:
             if not self._is_action_rate_limited("exam"):
                 return ActionType.EXAM
             # Exam blocked by K7 -> force review to break deadlock
+            return ActionType.REVIEW
+
+        # P2.5: Weak beliefs - prioritize gap-filling over new content
+        weak_file = self._find_weak_topic_file(snapshot)
+        if weak_file:
             return ActionType.REVIEW
 
         # P3: New files (indexed "new" status OR unindexed files in input/)
@@ -1055,6 +1061,60 @@ class PlannerCore:
         self._post_need_material_if_missing()
 
         return ActionType.NOOP
+
+    def _find_weak_topic_file(self, snapshot: Optional[Dict]) -> Optional[str]:
+        """
+        Find a file associated with weak beliefs (confidence < 0.3).
+
+        Checks world_model for low-confidence topics, then maps them to
+        completed/hard_topic files in knowledge_index via topic_file_map.
+        Rate-limited to 1 review per 2h to avoid infinite review loops.
+
+        Returns:
+            file_id string if a weak topic file is found, None otherwise.
+        """
+        if not getattr(self, "_world_model", None):
+            return None
+        if self._is_action_rate_limited("review"):
+            return None
+
+        try:
+            gaps = self._world_model.query.get_knowledge_gaps()
+            weak_topics = [
+                g["topic"] for g in gaps
+                if g.get("confidence", 1.0) < 0.3
+            ]
+            if not weak_topics:
+                return None
+
+            # Map topics to files via knowledge_analyzer
+            topic_file_map = {}
+            if getattr(self, "_knowledge_analyzer", None):
+                topic_file_map = self._knowledge_analyzer.get_topic_file_map()
+
+            # Also check hard_topic and completed files
+            by_status = (snapshot or {}).get("files_by_status", {})
+            reviewable = set()
+            for f in by_status.get("hard_topic", []):
+                reviewable.add(f.get("id", f.get("file", "")))
+            for f in by_status.get("completed", []):
+                reviewable.add(f.get("id", f.get("file", "")))
+
+            # Find first weak topic that maps to a reviewable file
+            for topic in weak_topics:
+                mapped_files = topic_file_map.get(topic, [])
+                for fid in mapped_files:
+                    if fid in reviewable:
+                        logger.info(
+                            f"[PLANNER] P2.5: weak topic '{topic}' "
+                            f"(file={fid}) prioritized over new content"
+                        )
+                        return fid
+
+        except Exception as exc:
+            logger.debug(f"[PLANNER] _find_weak_topic_file error: {exc}")
+
+        return None
 
     def _pick_expert_topic(self) -> Optional[str]:
         """Pick a topic to ask the expert about, based on knowledge gaps."""

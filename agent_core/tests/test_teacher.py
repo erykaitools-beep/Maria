@@ -533,20 +533,28 @@ class TestTeacherDecisions:
         assert strategy.target_file_id == "reviewed.txt"
         assert strategy.params["reason"] == "spaced_repetition"
 
-    def test_p5_retry_hard_topic(self, tmp_path):
-        """P5: Retry hard topic after enough successes."""
+    def test_p2_5_hard_topic_before_new_files(self, tmp_path):
+        """P2.5: Hard topics prioritized before new content."""
         agent = _make_teacher(tmp_path, index_records=[
             _make_index_record("hard.txt", status="hard_topic", exam_attempts=2),
-            # Need 3+ completed files to trigger P5
             _make_index_record("c1.txt", status="completed",
                                last_scores=[0.95],
                                updated_at=(datetime.now() - timedelta(hours=1)).isoformat() + "Z"),
-            _make_index_record("c2.txt", status="completed",
-                               last_scores=[0.95],
-                               updated_at=(datetime.now() - timedelta(hours=1)).isoformat() + "Z"),
-            _make_index_record("c3.txt", status="completed",
-                               last_scores=[0.95],
-                               updated_at=(datetime.now() - timedelta(hours=1)).isoformat() + "Z"),
+        ])
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        # Add new files to verify hard_topic wins
+        snapshot["new_files_available"] = [{"id": "new.txt", "priority": 50}]
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.strategy_type == TeachingStrategy.FILL_GAP
+        assert strategy.target_file_id == "hard.txt"
+        assert strategy.params["reason"] == "weak_topic_priority"
+
+    def test_p2_5_hard_topic_no_gate(self, tmp_path):
+        """P2.5: Hard topics retried even without 3+ completions (old P5 gate removed)."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("hard.txt", status="hard_topic"),
         ])
         snapshot = agent.analyzer.get_knowledge_snapshot()
         strategy = agent._decide_next_strategy(snapshot, 1)
@@ -554,21 +562,6 @@ class TestTeacherDecisions:
         assert strategy is not None
         assert strategy.strategy_type == TeachingStrategy.FILL_GAP
         assert strategy.target_file_id == "hard.txt"
-        assert strategy.params["reason"] == "retry_hard_topic"
-
-    def test_p5_hard_topic_not_retried_without_enough_completions(self, tmp_path):
-        """P5: Don't retry hard topic if < 3 completions."""
-        agent = _make_teacher(tmp_path, index_records=[
-            _make_index_record("hard.txt", status="hard_topic"),
-            _make_index_record("c1.txt", status="completed",
-                               last_scores=[0.95],
-                               updated_at=(datetime.now() - timedelta(hours=1)).isoformat() + "Z"),
-        ])
-        snapshot = agent.analyzer.get_knowledge_snapshot()
-        strategy = agent._decide_next_strategy(snapshot, 1)
-
-        # Should skip P5 (only 1 completion) and go to P6 or None
-        assert strategy is None or strategy.params.get("reason") != "retry_hard_topic"
 
     def test_p1_takes_priority_over_p2(self, tmp_path):
         """P1 (continue learning) beats P2 (exam ready)."""

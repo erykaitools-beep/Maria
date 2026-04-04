@@ -231,6 +231,19 @@ class TeacherAgent:
                 params={"reason": "exam_ready"},
             )
 
+        # P2.5: Retry hard topics before starting new content
+        # (was P5 with completed_count >= 3 gate - too late)
+        hard_topics = self._filter_records(by_status.get("hard_topic", []))
+        if hard_topics:
+            target = hard_topics[0]
+            file_id = target.get("id", target.get("file", ""))
+            return TeachingStrategy(
+                TeachingStrategy.FILL_GAP,
+                file_id,
+                params={"reason": "weak_topic_priority",
+                        "attempts": target.get("exam_attempts", 0)},
+            )
+
         # P3: Start new file
         new_files = self._filter_records(
             snapshot.get("new_files_available", [])
@@ -260,19 +273,7 @@ class TeacherAgent:
                         "last_score": scores[-1] if scores else 0},
             )
 
-        # P5: Retry hard topic
-        hard_topics = self._filter_records(by_status.get("hard_topic", []))
-        completed_count = len(by_status.get("completed", []))
-        # Only retry hard topics after some successful completions
-        if hard_topics and completed_count >= 3:
-            target = hard_topics[0]
-            file_id = target.get("id", target.get("file", ""))
-            return TeachingStrategy(
-                TeachingStrategy.FILL_GAP,
-                file_id,
-                params={"reason": "retry_hard_topic",
-                        "attempts": target.get("exam_attempts", 0)},
-            )
+        # P5: (moved to P2.5 - hard topics now prioritized before new content)
 
         # P6: NIM gap analysis (skip if topic-filtered - NIM doesn't know about filter)
         if self._filter_file_ids is None and self._nim_planning_used < self._max_nim_planning:

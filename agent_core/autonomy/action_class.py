@@ -38,6 +38,7 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
     "creative": ActionClassification.GUARDED,      # K13: strategic reflection
     "ask_expert": ActionClassification.GUARDED,   # ChatGPT encyclopedia queries
     "validate": ActionClassification.GUARDED,    # Cross-LLM validation (Faza F)
+    "critique": ActionClassification.GUARDED,    # Faza G: READ-ONLY knowledge critic
 }
 
 

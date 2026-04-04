@@ -604,7 +604,19 @@ class ActionExecutor:
         input_dir = Path(__file__).resolve().parents[2] / "input"
         filepath = input_dir / filename
 
-        # Don't overwrite - append if exists
+        # Skip if file already has substantial content (dedup)
+        if filepath.exists():
+            try:
+                size = filepath.stat().st_size
+                if size > 5000:
+                    logger.info(
+                        f"[ASK_EXPERT] Skip save: {filename} already has "
+                        f"{size} bytes of content"
+                    )
+                    return
+            except OSError:
+                pass
+
         header = (
             f"# Zrodlo: ChatGPT (Codex CLI)\n"
             f"# Temat: {topic}\n"
@@ -613,7 +625,8 @@ class ActionExecutor:
         )
         content = header + response + "\n"
 
-        with open(filepath, "a", encoding="utf-8") as f:
+        # Write (not append) - one good response is enough
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
     def _resolve_bulletin_need(self, topic: str) -> None:
