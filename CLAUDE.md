@@ -104,15 +104,16 @@
 | **2026-04-05** | **V3 Phase A Module 2+3** - OnboardingFlow + UserFacingSelfModel (65 testow) |
 | **2026-04-05** | **V3 Phase B Module 4-6** - TaskOrchestrator + TaskDecomposer + ExecutionPlanBuilder (70 testow) |
 | **2026-04-05** | **V3 Phase C Module 7-9** - CostEstimator + TimeEstimator + FreeVsPaidPlanner (49 testow) |
+| **2026-04-05** | **V3 Phase D Module 10-13** - ExecutionRouter + ToolRegistry + ProgressTracker + LimitationReporter (41 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A+B+C |
-| **Testy** | 3250 passing |
-| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A+B+C COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Vision + V3 Phase A-D (13/15 modules) |
+| **Testy** | 3291 passing |
+| **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + V3 Phase A-D COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -168,7 +169,7 @@ project/
 │   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex
 │   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 3250 tests
+│   └── tests/           # 3291 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -718,11 +719,16 @@ Usunieto:
 - [x] Module 9: FreeVsPaidPlanner - ResourceStrategy (LOCAL_ONLY/MIXED/PREFER_PAID), budget-aware recommendations
 - [x] 49 nowych testow (3250 total)
 
-### NASTEPNE: V3 Phase D - Execution Bridge
-- [ ] Module 10: ExecutionRouter (wraps CapabilityRouter)
-- [ ] Module 11: ToolCapabilityRegistry (user-facing)
-- [ ] Module 12: TaskProgressTracker
-- [ ] Module 13: LimitationReporter
+### DONE: V3 Phase D - Execution Bridge (2026-04-05)
+- [x] Module 10: ExecutionRouter - can_execute/execute/list_available with cost+time enrichment
+- [x] Module 11: ToolCapabilityRegistry - list_all/list_by_category/search/list_external_services
+- [x] Module 12: TaskProgressTracker - goal progress, timeline, planner stats
+- [x] Module 13: LimitationReporter - mode/autonomy/resource/hardware limitations, can_do(), blocked_actions
+- [x] 41 nowych testow (3291 total)
+
+### NASTEPNE: V3 Phase E - Product Hardening
+- [ ] Module 14: ProductShell
+- [ ] Module 15: V3 UX Integration
 
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
@@ -1123,4 +1129,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A+B+C complete, CostEstimator, TimeEstimator, FreeVsPaidPlanner, 3250 testow)*
+*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A-D complete, 13/15 modules, 3291 testow)*

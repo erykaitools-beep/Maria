@@ -52,12 +52,13 @@ end-to-end result.
 
 | # | Module | Status | Bazuje na |
 |---|--------|--------|-----------|
-| 10 | ExecutionRouter | ~80% | CapabilityRouter (14 caps) |
-| 11 | ToolCapabilityRegistry (user-facing) | ~60% | /api/capabilities + OpenClaw + Claude/Codex |
-| 12 | TaskProgressTracker | ~40% | Traces + planner_state + Telegram |
-| 13 | LimitationReporter | ~30% | K7 + K9 + K10 |
+| 10 | ExecutionRouter | DONE | CapabilityRouter + Cost/Time enrichment |
+| 11 | ToolCapabilityRegistry | DONE | CapabilityRouter + external services |
+| 12 | TaskProgressTracker | DONE | GoalStore + PlannerCore + TraceStore |
+| 13 | LimitationReporter | DONE | K7 + K9 + mode + resources + hardware |
 
 **Outcome:** Maria can move from plan to action with visibility.
+**Status:** COMPLETE (2026-04-05) - 41 tests, all 4 modules done.
 
 ## Phase E - Product Hardening (P4)
 
@@ -76,10 +77,10 @@ end-to-end result.
 | 2 | First-run guidance | DONE |
 | 3 | Stable self-model | DONE |
 | 4 | Real task execution | DONE |
-| 5 | Tool orchestration | ~70% |
+| 5 | Tool orchestration | DONE |
 | 6 | Cost/time planning | DONE |
-| 7 | Limitation handling | ~80% |
-| 8 | Operator visibility | ~90% |
+| 7 | Limitation handling | DONE |
+| 8 | Operator visibility | DONE |
 | 9 | Memory continuity | ~85% |
 | 10 | Product coherence | ~40% |
 
