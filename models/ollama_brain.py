@@ -44,6 +44,7 @@ class OllamaBrain:
         self._base_system_prompt = system_prompt or (
             "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
             "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
+            "Masz oko (kamere USB) - widzisz otoczenie i wiesz co sie wokol Ciebie dzieje.\n"
             "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
         )
 
@@ -379,14 +380,26 @@ class OllamaBrain:
 
         # 2. Try LLM formatting (optional improvement)
         try:
-            format_prompt = (
-                f"Operator pyta: {prompt}\n\n"
-                f"Odpowiedz WYLACZNIE na podstawie tych danych operacyjnych:\n"
-                f"{grounded.text}\n\n"
-                f"Formatuj naturalnie po polsku. NIE dodawaj informacji spoza danych. "
-                f"Uzyj zwrotow: 'Widze w logach...', 'Ostatnia akcja to...'. "
-                f"Podaj zrodla danych."
-            )
+            from agent_core.introspection.query_router import ResponseMode as _RM
+            if mode == _RM.GROUNDED_VISION:
+                format_prompt = (
+                    f"Operator pyta: {prompt}\n\n"
+                    f"Masz kamere USB (oko) i widzisz otoczenie. "
+                    f"Oto co teraz widzisz:\n"
+                    f"{grounded.text}\n\n"
+                    f"Odpowiedz naturalnie po polsku opisujac co widzisz. "
+                    f"Mow w pierwszej osobie: 'Widze...', 'Przed soba mam...'. "
+                    f"NIE dodawaj informacji spoza danych."
+                )
+            else:
+                format_prompt = (
+                    f"Operator pyta: {prompt}\n\n"
+                    f"Odpowiedz WYLACZNIE na podstawie tych danych operacyjnych:\n"
+                    f"{grounded.text}\n\n"
+                    f"Formatuj naturalnie po polsku. NIE dodawaj informacji spoza danych. "
+                    f"Uzyj zwrotow: 'Widze w logach...', 'Ostatnia akcja to...'. "
+                    f"Podaj zrodla danych."
+                )
             # Use a fresh message list (not history) for grounded formatting
             messages = [
                 {"role": "system", "content": self.system_prompt},

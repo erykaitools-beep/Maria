@@ -129,6 +129,39 @@
     </div>
   </section>
 
+  <!-- I. Vision -->
+  <section class="mo-card mo-panel-vision">
+    <div class="mo-sh">
+      <span class="mo-sh__title">Vision</span>
+      <span class="mo-badge mo-badge--off" id="visionBadge">--</span>
+    </div>
+    <div style="text-align:center;margin-bottom:var(--mo-sp-2)">
+      <a href="/vision">
+        <img id="visionThumb" src="/api/vision/frame" alt="Kamera"
+             style="max-width:100%;max-height:120px;border-radius:var(--mo-r-md);border:1px solid var(--mo-border);"
+             onerror="this.style.display='none'">
+      </a>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Health</span>
+      <span class="mo-metric__value" id="visionHealth">--</span>
+    </div>
+    <div class="mo-progress"><div class="mo-progress__fill mo-progress__fill--ok" id="visionHealthBar" style="width:0"></div></div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Quality</span>
+      <span class="mo-metric__value" id="visionQuality">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Degradation</span>
+      <span class="mo-metric__value mo-text-sm" id="visionDegradation">--</span>
+    </div>
+    <div class="mo-metric">
+      <span class="mo-metric__label">Sensor</span>
+      <span class="mo-metric__value mo-text-sm mo-muted" id="visionSensor">--</span>
+    </div>
+    <div class="mo-text-xs mo-secondary mo-mt-2" id="visionSummary" style="line-height:1.4">--</div>
+  </section>
+
   <!-- D. Homeostasis -->
   <section class="mo-card mo-panel-homeo">
     <div class="mo-sh">

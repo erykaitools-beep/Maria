@@ -61,6 +61,7 @@ class ResponseBuilder:
             ResponseMode.GROUNDED_LEARNING: self._build_learning,
             ResponseMode.GROUNDED_PLANNER: self._build_planner,
             ResponseMode.GROUNDED_KNOWLEDGE: self._build_knowledge,
+            ResponseMode.GROUNDED_VISION: self._build_vision,
         }
 
         builder_fn = builders.get(mode, self._build_status)
@@ -260,6 +261,34 @@ class ResponseBuilder:
                 lines.append(f"  - {r.value}")
 
         return "\n".join(lines) if lines else "Nie znaleziono informacji."
+
+    def _build_vision(self, evidence: List[Evidence]) -> str:
+        """Build vision response - what Maria sees."""
+        lines = []
+
+        summary = self._find(evidence, "vision_summary")
+        if summary:
+            lines.append(summary.value)
+
+        quality = self._find(evidence, "vision_quality")
+        health = self._find(evidence, "vision_health")
+        if quality or health:
+            parts = []
+            if quality:
+                parts.append(f"jakosc obrazu: {quality.value}")
+            if health:
+                parts.append(f"zdrowie sensora: {health.value}")
+            lines.append("Stan: " + ", ".join(parts) + ".")
+
+        motion = self._find(evidence, "vision_motion")
+        if motion:
+            lines.append(f"Ruch: {motion.value}.")
+
+        scene = self._find(evidence, "vision_scene")
+        if scene:
+            lines.append(f"Opis sceny: {scene.value}")
+
+        return "\n".join(lines) if lines else "Nie mam aktualnych danych z kamery."
 
     @staticmethod
     def _find(evidence: List[Evidence], key: str):

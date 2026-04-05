@@ -25,6 +25,7 @@
     updateSystem(data.system, data.homeostasis);
     updateModels(data.models, data.nim, data.brain);
     updateOpenClaw(data.openclaw);
+    updateVision(data.vision);
     updateHomeostasis(data.homeostasis);
     updatePlanner(data.planner, data.goals);
     updateMemory(data.memory);
@@ -209,6 +210,38 @@
     M.$('clawFailed').textContent = M.fmtNumber(claw.failed_calls);
     M.$('clawError').textContent = claw.last_error || 'none';
     M.$('clawError').title = claw.last_error || '';
+  }
+
+
+  // --- I. Vision ---
+  function updateVision(v) {
+    if (!v || !v.available) {
+      const badge = M.$('visionBadge');
+      if (badge) { badge.textContent = 'OFFLINE'; badge.className = 'mo-badge mo-badge--error'; }
+      return;
+    }
+
+    const badge = M.$('visionBadge');
+    const healthPct = Math.round((v.health_overall || 0) * 100);
+    badge.textContent = v.degradation || 'unknown';
+    badge.className = 'mo-badge ' + (healthPct >= 60 ? 'mo-badge--ok' : healthPct >= 30 ? 'mo-badge--warn' : 'mo-badge--error');
+
+    M.$('visionHealth').textContent = healthPct + '%';
+    const healthBar = M.$('visionHealthBar');
+    healthBar.style.width = healthPct + '%';
+    healthBar.className = 'mo-progress__fill ' + (healthPct >= 60 ? 'mo-progress__fill--ok' : healthPct >= 30 ? 'mo-progress__fill--warn' : 'mo-progress__fill--error');
+
+    M.$('visionQuality').textContent = Math.round((v.quality || 0) * 100) + '%';
+    M.$('visionDegradation').textContent = v.degradation || '--';
+    M.$('visionSensor').textContent = v.active_sensor || 'brak';
+    M.$('visionSummary').textContent = v.summary || '--';
+
+    // Refresh thumbnail
+    const thumb = M.$('visionThumb');
+    if (thumb && v.has_frame) {
+      thumb.src = '/api/vision/frame?t=' + Date.now();
+      thumb.style.display = 'block';
+    }
   }
 
 

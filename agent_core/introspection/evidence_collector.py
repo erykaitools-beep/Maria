@@ -58,6 +58,7 @@ class EvidenceCollector:
         self._self_analysis = None
         self._goal_store = None
         self._memory_query = None
+        self._vision_cortex = None
 
         # Compact summary cache
         self._summary_cache: str = ""
@@ -90,6 +91,9 @@ class EvidenceCollector:
     def set_memory_query(self, mq):
         self._memory_query = mq
 
+    def set_vision_cortex(self, vc):
+        self._vision_cortex = vc
+
     # -- Public API --
 
     def collect_for_mode(self, mode: ResponseMode, query_text: str = "") -> List[Evidence]:
@@ -99,6 +103,7 @@ class EvidenceCollector:
             ResponseMode.GROUNDED_ERROR: self.collect_error,
             ResponseMode.GROUNDED_LEARNING: self.collect_learning,
             ResponseMode.GROUNDED_PLANNER: self.collect_planner,
+            ResponseMode.GROUNDED_VISION: self.collect_vision,
         }
 
         # Knowledge mode needs the query text to extract topic
@@ -240,6 +245,101 @@ class EvidenceCollector:
 
         except Exception as e:
             logger.debug(f"[EvidenceCollector] knowledge query failed: {e}")
+
+        return evidence
+
+    def collect_vision(self) -> List[Evidence]:
+        """Vision: what Maria sees through her camera.
+
+        Uses sensor statistics (lighting, colors, motion, quality).
+        No LLaVA (too heavy for local hardware).
+        """
+        evidence = []
+
+        # Try live cortex first, then state file
+        last = None
+        source = "vision_cortex"
+        if self._vision_cortex:
+            last = self._vision_cortex.last_percept
+
+        if last:
+            # Build natural description from sensor data
+            parts = []
+            if last.scene:
+                s = last.scene
+                lighting_pl = {
+                    "bright": "jasno", "very_bright": "bardzo jasno",
+                    "dim": "przyciemnione", "dark": "ciemno",
+                }.get(s.lighting, s.lighting)
+                colors_pl = ", ".join(s.dominant_colors[:3])
+                parts.append(f"Jest {lighting_pl}")
+                parts.append(f"dominujace kolory: {colors_pl}")
+                if s.complexity > 0.7:
+                    parts.append("widze wiele szczegulow i krawedzi")
+                elif s.complexity < 0.3:
+                    parts.append("obraz jest prosty, niewiele elementow")
+
+            if last.motion and last.motion.motion_detected:
+                cls_pl = {
+                    "person_movement": "ruch osoby",
+                    "object_movement": "ruch obiektu",
+                    "camera_shake": "drgania kamery",
+                }.get(last.motion.classification.value, "ruch")
+                parts.append(f"wykrywam {cls_pl} (poziom {last.motion.motion_level:.0%})")
+            elif last.motion:
+                parts.append("nie wykrywam ruchu")
+
+            description = ". ".join(parts) + "." if parts else last.summary
+            evidence.append(Evidence(
+                key="vision_summary",
+                value=f"Moje oko (kamera USB) widzi: {description}",
+                source=source,
+                confidence=0.9,
+            ))
+            evidence.append(Evidence(
+                key="vision_quality",
+                value=f"jakosc obrazu {last.quality:.0%}, zdrowie sensora {last.vision_health.overall:.0%}",
+                source=source,
+                confidence=0.9,
+            ))
+        else:
+            # Try state file fallback
+            try:
+                state_path = Path(self._project_root) / "meta_data" / "vision_state.json"
+                if state_path.exists():
+                    import json as _json
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        state = _json.loads(f.read())
+                    percept = state.get("last_percept", {})
+                    scene = percept.get("scene", {})
+                    if scene:
+                        lighting = scene.get("lighting", "unknown")
+                        colors = ", ".join(scene.get("dominant_colors", []))
+                        motion = percept.get("motion", {})
+                        motion_str = "nie wykrywam ruchu" if not motion.get("motion_detected") else "wykrywam ruch"
+                        evidence.append(Evidence(
+                            key="vision_summary",
+                            value=f"Moje oko (kamera USB) widzi: oswietlenie {lighting}, kolory: {colors}, {motion_str}.",
+                            source="vision_state.json",
+                            confidence=0.8,
+                        ))
+                    elif percept.get("summary"):
+                        evidence.append(Evidence(
+                            key="vision_summary",
+                            value=f"Moje oko (kamera USB) widzi: {percept['summary']}",
+                            source="vision_state.json",
+                            confidence=0.8,
+                        ))
+            except Exception:
+                pass
+
+        if not evidence:
+            evidence.append(Evidence(
+                key="vision_summary",
+                value="Kamera jest podlaczona ale nie mam jeszcze danych z obrazu.",
+                source="vision_cortex",
+                confidence=0.5,
+            ))
 
         return evidence
 

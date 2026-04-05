@@ -144,6 +144,12 @@ class HomeostasisCore:
         # Model Scheduler (multi-organ model stack)
         self._model_scheduler = None
 
+        # Vision cortex (visual perception pipeline)
+        self._vision_cortex = None
+        self._vision_adapter = None
+        self._vision_interval = 1  # perceive every N ticks
+        self._vision_last_tick = 0
+
         # Telegram bridge (operator notifications)
         self._telegram_bridge = None
         self._telegram_poll_interval = 30  # seconds
@@ -202,6 +208,21 @@ class HomeostasisCore:
         Called from HomeostasisModule after init.
         """
         self._telegram_bridge = bridge
+
+    def set_vision_cortex(self, cortex) -> None:
+        """
+        Set vision cortex for visual perception pipeline.
+
+        Cortex perceive() runs in Phase 8.5 (after sensor aggregation).
+        Events flow through VisionPerceptionAdapter into PerceptionBuffer.
+        Called from HomeostasisModule after init.
+        """
+        self._vision_cortex = cortex
+        try:
+            from agent_core.vision.adapter import VisionPerceptionAdapter
+            self._vision_adapter = VisionPerceptionAdapter()
+        except Exception as e:
+            logger.debug(f"VisionPerceptionAdapter not created: {e}")
 
     def set_perception_buffer(self, buffer) -> None:
         """
@@ -394,6 +415,11 @@ class HomeostasisCore:
         )
 
         # ──────────────────────────────────────
+        # PHASE 8.5: VISION (visual perception pipeline)
+        # ──────────────────────────────────────
+        self._perceive_vision()
+
+        # ──────────────────────────────────────
         # PHASE 9: AUDIT & LOG
         # ──────────────────────────────────────
         if self._tick_count % self.LOG_INTERVAL_TICKS == 0:
@@ -475,6 +501,101 @@ class HomeostasisCore:
 
         except Exception as e:
             logger.debug(f"Perception aggregation error: {e}")
+
+    def _perceive_vision(self) -> None:
+        """
+        Phase 8.5: Capture and process frame from vision cortex.
+
+        Runs every _vision_interval ticks (default 5) to avoid CPU overhead.
+        Events flow through VisionPerceptionAdapter into PerceptionBuffer.
+        Writes state to meta_data/vision_state.json for Web UI.
+        Graceful: no-op if vision not wired or camera unavailable.
+        """
+        if self._vision_cortex is None or self._vision_adapter is None:
+            return
+        if self._perception_buffer is None:
+            return
+
+        # Rate limit: not every tick
+        if (self._tick_count - self._vision_last_tick) < self._vision_interval:
+            return
+        self._vision_last_tick = self._tick_count
+
+        try:
+            percept = self._vision_cortex.perceive()
+            if percept is not None:
+                events = self._vision_adapter.adapt(percept)
+                if events:
+                    self._perception_buffer.push_many(events)
+                # Write state for Web UI (every perception, not every tick)
+                self._write_vision_state(percept)
+        except Exception as e:
+            logger.debug(f"Vision perception error: {e}")
+
+    def _write_vision_state(self, percept) -> None:
+        """Write vision state to JSON for Web UI consumption."""
+        import json
+        try:
+            status = self._vision_cortex.get_status()
+            state = {
+                "status": status,
+                "last_percept": {
+                    "timestamp": percept.timestamp,
+                    "summary": percept.summary,
+                    "quality": round(percept.quality, 3),
+                    "health": round(percept.vision_health.overall, 3),
+                    "modules_run": percept.modules_run,
+                    "sensor_id": percept.sensor_id,
+                    "processing_time_ms": percept.total_processing_time_ms,
+                },
+            }
+            # Motion data
+            if percept.motion:
+                state["last_percept"]["motion"] = {
+                    "motion_detected": percept.motion.motion_detected,
+                    "motion_level": round(percept.motion.motion_level, 3),
+                    "classification": percept.motion.classification.value,
+                    "alert_level": percept.motion.alert_level.value,
+                    "regions_count": len(percept.motion.regions),
+                }
+            # Scene data
+            if percept.scene:
+                state["last_percept"]["scene"] = {
+                    "description": percept.scene.description,
+                    "lighting": percept.scene.lighting,
+                    "dominant_colors": list(percept.scene.dominant_colors),
+                    "complexity": round(percept.scene.complexity, 3),
+                    "backend_used": percept.scene.backend_used,
+                }
+            # Sensor health
+            sensor = self._vision_cortex.active_sensor
+            if sensor:
+                h = sensor.health
+                state["health"] = {
+                    "sensor_id": sensor.sensor_id,
+                    "health": h.to_dict(),
+                    "description": h.to_human_description(),
+                }
+
+            meta_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "meta_data",
+            )
+            state_path = os.path.join(meta_dir, "vision_state.json")
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False)
+
+            # Save last frame as JPEG for Web UI preview
+            frame_image = getattr(self._vision_cortex, '_last_frame_image', None)
+            if frame_image is not None:
+                try:
+                    import cv2
+                    frame_path = os.path.join(meta_dir, "vision_frame.jpg")
+                    cv2.imwrite(frame_path, frame_image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"Vision state write error: {e}")
 
     def _transition_mode(self, old_mode: Mode, new_mode: Mode) -> None:
         """

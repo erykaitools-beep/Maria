@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Vision{% endblock %}
+{% block page_class %}mo-page--vision{% endblock %}
+
+{% block content %}
+<div class="mo-vision">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Vision (percepcja wizualna)</h2>
+    <button class="mo-btn mo-btn--sm" onclick="takeSnap()">Snap</button>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-camera">Kamera</button>
+    <button class="mo-tab" data-tab="tab-percept">Analiza</button>
+    <button class="mo-tab" data-tab="tab-health">Health</button>
+  </div>
+
+  <div class="mo-tab-content mo-tab-content--active" id="tab-camera">
+    <div class="mo-card mo-mb-2">
+      <div class="mo-card__title">Co widze (LIVE ~1fps)</div>
+      <div id="vision-frame" style="text-align:center; padding:var(--mo-s-3);">
+        <img id="camera-img" src="/api/vision/frame" alt="Obraz z kamery"
+             style="max-width:100%; border-radius:var(--mo-r-md); border:1px solid var(--mo-border);"
+             onerror="this.style.display='none'; document.getElementById('no-frame').style.display='block';">
+        <div id="no-frame" style="display:none;" class="mo-empty-state">Brak obrazu z kamery</div>
+      </div>
+      <div id="vision-summary" style="padding:0 var(--mo-s-3) var(--mo-s-3); text-align:center; color:var(--mo-text-secondary);"></div>
+    </div>
+    <div id="vision-status"></div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-percept">
+    <div id="vision-percept">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <div class="mo-tab-content" id="tab-health">
+    <div id="vision-health">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/vision.js') }}"></script>
+{% endblock %}

@@ -3,7 +3,7 @@ M.A.R.I.A. Web UI - Flask Application
 Sprint 5: Proactive notifications
 """
 
-from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
 import sys
 import time
@@ -62,6 +62,7 @@ except ImportError:
 # Import consciousness for identity (with fallback)
 try:
     from agent_core.consciousness import IdentityStore, HumanStateMapper
+    from agent_core.consciousness.conversation_memory import ConversationMemory
     CONSCIOUSNESS_AVAILABLE = True
 except ImportError:
     CONSCIOUSNESS_AVAILABLE = False
@@ -301,6 +302,9 @@ def get_maria_brain():
         with _brain_lock:
             if _maria_brain is None and OLLAMA_AVAILABLE:
                 try:
+                    # Wire identity store so Maria knows who she is
+                    _id_store = _get_identity_store()
+
                     brain = OllamaBrain(
                         model="llama3.1:8b",
                         system_prompt=(
@@ -310,8 +314,22 @@ def get_maria_brain():
                             "Odpowiadasz zwiezle ale cieplo. Pamietasz kontekst rozmowy. "
                             "Jesli nie znasz odpowiedzi, mowisz o tym szczerze."
                         ),
+                        identity_store=_id_store,
                         verify_model=False
                     )
+
+                    # Wire conversation memory for persistent context
+                    if CONSCIOUSNESS_AVAILABLE:
+                        try:
+                            _session_id = _id_store.get_session_count() if _id_store else 0
+                            _conv_mem = ConversationMemory(
+                                session_id=_session_id,
+                                source="web",
+                            )
+                            brain.set_conversation_memory(_conv_mem)
+                            print("[UI] [OK] Conversation memory wired")
+                        except Exception as e:
+                            print(f"[UI] [WARN] Conversation memory not available: {e}")
                     # Wire state-grounded operator response pipeline
                     try:
                         from agent_core.introspection.query_router import OperationalQueryRouter
@@ -353,9 +371,12 @@ def trim_brain_history():
     with _brain_lock:
         if _maria_brain and len(_maria_brain.history) > MAX_HISTORY_MESSAGES + 1:
             # Keep system prompt (first) + last N messages
-            system_prompt = _maria_brain.history[0]
-            recent = _maria_brain.history[-(MAX_HISTORY_MESSAGES):]
-            _maria_brain.history = [system_prompt] + recent
+            # deque doesn't support slicing - convert to list first
+            history_list = list(_maria_brain.history)
+            system_prompt = history_list[0]
+            recent = history_list[-(MAX_HISTORY_MESSAGES):]
+            from collections import deque
+            _maria_brain.history = deque([system_prompt] + recent, maxlen=_maria_brain.history.maxlen)
             print(f"[UI] [INFO] Trimmed history to {len(_maria_brain.history)} messages")
 
 
@@ -994,7 +1015,8 @@ def api_status_full():
         "event_stream": event_stream,
         "chat_logs_count": chat_logs_count,
         "introspection": introspection_data,
-        "learning_queue": _get_learning_queue()
+        "learning_queue": _get_learning_queue(),
+        "vision": _get_vision_status_data(),
     })
 
 
@@ -1399,6 +1421,32 @@ def _get_models_data():
 _openclaw_cache = None
 _openclaw_cache_ts = 0
 _OPENCLAW_CACHE_TTL = 10  # seconds
+
+
+def _get_vision_status_data():
+    """Get vision subsystem status from state file."""
+    state = _read_vision_state()
+    if state is None:
+        return {"available": False}
+
+    status = state.get("status", {})
+    percept = state.get("last_percept", {})
+    health_data = state.get("health", {})
+    health = health_data.get("health", {}) if health_data else {}
+
+    return {
+        "available": True,
+        "sensor_count": status.get("sensor_count", 0),
+        "active_sensor": status.get("active_sensor", "brak"),
+        "modules": status.get("active_modules", []),
+        "health_overall": health.get("overall", 0),
+        "degradation": health.get("degradation_level", "unknown"),
+        "health_description": health_data.get("description", ""),
+        "quality": percept.get("quality", 0),
+        "summary": percept.get("summary", ""),
+        "timestamp": percept.get("timestamp", 0),
+        "has_frame": (_VISION_STATE_PATH.parent / "vision_frame.jpg").exists(),
+    }
 
 
 def _get_openclaw_data():
@@ -3155,6 +3203,93 @@ def api_critique_run():
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+# ====== VISION (percepcja wizualna) ======
+
+@app.route('/vision')
+@require_auth
+def vision_page():
+    return render_template('vision.html', active_page='vision')
+
+
+_VISION_STATE_PATH = PROJECT_ROOT / "meta_data" / "vision_state.json"
+
+
+def _read_vision_state():
+    """Read vision state from JSON file (written by tick loop)."""
+    if not _VISION_STATE_PATH.exists():
+        return None
+    try:
+        with open(_VISION_STATE_PATH, "r", encoding="utf-8") as fh:
+            return json.loads(fh.read())
+    except Exception:
+        return None
+
+
+@app.route('/api/vision/status')
+@require_auth
+def api_vision_status():
+    """Get vision subsystem status."""
+    state = _read_vision_state()
+    if state is None:
+        return jsonify({"available": False, "status": None})
+    return jsonify({
+        "available": True,
+        "status": state.get("status", {}),
+    })
+
+
+@app.route('/api/vision/last')
+@require_auth
+def api_vision_last():
+    """Get last vision percept."""
+    state = _read_vision_state()
+    if state is None:
+        return jsonify({"percept": None})
+    return jsonify({"percept": state.get("last_percept")})
+
+
+@app.route('/api/vision/health')
+@require_auth
+def api_vision_health():
+    """Get vision sensor health details."""
+    state = _read_vision_state()
+    if state is None:
+        return jsonify({"health": None})
+    health_data = state.get("health")
+    if health_data is None:
+        return jsonify({"health": None})
+    return jsonify(health_data)
+
+
+@app.route('/api/vision/frame')
+@require_auth
+def api_vision_frame():
+    """Serve the last captured frame as JPEG."""
+    frame_path = PROJECT_ROOT / "meta_data" / "vision_frame.jpg"
+    if not frame_path.exists():
+        return "No frame available", 404
+    return send_file(str(frame_path), mimetype='image/jpeg')
+
+
+@app.route('/api/vision/snap', methods=['POST'])
+@require_auth
+def api_vision_snap():
+    """Trigger a vision snapshot (returns last known state, actual snap via REPL)."""
+    # Vision cortex runs in daemon process, not Web UI process.
+    # The snap button refreshes the page data from the latest state file.
+    state = _read_vision_state()
+    if state is None:
+        return jsonify({"success": False, "error": "Vision not available (daemon not running?)"})
+    percept = state.get("last_percept")
+    if percept is None:
+        return jsonify({"success": False, "error": "No percept available"})
+    return jsonify({
+        "success": True,
+        "summary": percept.get("summary", ""),
+        "quality": percept.get("quality", 0),
+    })
 
 
 if __name__ == '__main__':

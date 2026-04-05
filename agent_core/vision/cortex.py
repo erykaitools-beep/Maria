@@ -61,6 +61,7 @@ class VisionCortex:
         self._preprocessor = preprocessor or VisionPreprocessor()
         self._active_sensor_id: Optional[str] = None
         self._last_percept: Optional[VisionPercept] = None
+        self._last_frame_image: Optional[Any] = None  # np.ndarray from last capture
 
     def add_sensor(self, sensor: VisionSensor) -> None:
         """Register a sensor."""
@@ -173,6 +174,7 @@ class VisionCortex:
         )
 
         self._last_percept = percept
+        self._last_frame_image = processed.image
         return percept
 
     def open_all_sensors(self) -> int:

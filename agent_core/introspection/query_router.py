@@ -23,12 +23,23 @@ class ResponseMode(Enum):
     GROUNDED_LEARNING = "grounded_learning" # "czego sie uczysz", learning
     GROUNDED_PLANNER = "grounded_planner"   # "jaki plan", strategy
     GROUNDED_KNOWLEDGE = "grounded_knowledge"  # "co wiesz o X", memory query
+    GROUNDED_VISION = "grounded_vision"        # "co widzisz", visual perception
 
 
 # Keyword patterns per mode (Polish + English).
 # Order matters: more specific modes checked first.
 # Patterns are lowercased substrings matched against lowercased message.
 _MODE_PATTERNS = {
+    ResponseMode.GROUNDED_VISION: [
+        "co widzisz", "co widzi", "co widac",
+        "co wida\u0107",  # co widać
+        "obraz", "kamera", "oko", "wzrok",
+        "what do you see", "what can you see",
+        "jak wyglada", "jak wygl\u0105da",
+        "opisz co widzisz", "pokaz co widzisz",
+        "poka\u017c co widzisz",
+        "widzisz co", "widzisz cos",
+    ],
     ResponseMode.GROUNDED_ERROR: [
         "blad", "b\u0142\u0105d", "error", "nie dziala", "nie dzia\u0142a",
         "crash", "zapetla", "zap\u0119tla", "problem", "awaria",

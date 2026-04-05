@@ -51,6 +51,7 @@ class SharedContext:
     semantic_search: Any = None       # SemanticMemory (nomic-embed-text vector store)
     trace_store: Any = None            # TraceStore (Phase 1 decision traceability)
     memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
+    vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
 
     # REPL state
     last_result: Any = None

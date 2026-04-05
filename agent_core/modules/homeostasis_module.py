@@ -759,6 +759,64 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"Telegram bridge not initialized: {e}")
 
+        # Initialize Vision cortex (visual perception pipeline)
+        if core:
+            try:
+                from agent_core.vision.cortex import VisionCortex
+                from agent_core.vision.preprocessing.preprocessor import VisionPreprocessor
+                from agent_core.vision.modules.motion.detector import MotionModule
+                from agent_core.vision.modules.scene.analyzer import SceneModule
+
+                preprocessor = VisionPreprocessor(target_resolution=(640, 480))
+                vision_cortex = VisionCortex(preprocessor=preprocessor)
+
+                # LLaVA function for scene descriptions
+                def _llava_describe(prompt: str, image_b64: str):
+                    """Call LLaVA via Ollama /api/generate."""
+                    import requests
+                    try:
+                        resp = requests.post(
+                            "http://localhost:11434/api/generate",
+                            json={
+                                "model": "llava",
+                                "prompt": prompt,
+                                "images": [image_b64],
+                                "stream": False,
+                            },
+                            timeout=30,
+                        )
+                        if resp.status_code == 200:
+                            return resp.json().get("response", "")
+                    except Exception as e:
+                        logger.debug(f"LLaVA call failed: {e}")
+                    return None
+
+                # Add modules (LLaVA NOT in tick loop - too slow, 30s/call)
+                # SceneModule uses stats fallback in tick, LLaVA only via /vision snap
+                vision_cortex.add_module(MotionModule())
+                scene = SceneModule(use_polish=True)
+                scene._llava_describe = _llava_describe  # store for on-demand use
+                vision_cortex.add_module(scene)
+
+                # Try to add USB webcam sensor (graceful if no camera)
+                try:
+                    from agent_core.vision.sensors.usb_webcam import USBWebcamSensor
+                    sensor = USBWebcamSensor(device=0, flip=True)
+                    if sensor.open():
+                        vision_cortex.add_sensor(sensor)
+                        print(f"[Homeostasis] [OK] VisionCortex initialized (sensor: {sensor.sensor_id})")
+                    else:
+                        vision_cortex.add_sensor(sensor)  # add anyway, health will show disconnected
+                        print("[Homeostasis] [OK] VisionCortex initialized (sensor: not connected)")
+                except Exception as e:
+                    logger.debug(f"USB webcam not available: {e}")
+                    print("[Homeostasis] [OK] VisionCortex initialized (no sensor)")
+
+                ctx.vision_cortex = vision_cortex
+                core.set_vision_cortex(vision_cortex)
+            except Exception as e:
+                logger.debug(f"VisionCortex not initialized: {e}")
+
         # Wire state-grounded operator response pipeline (Phase 2)
         try:
             from agent_core.introspection.query_router import OperationalQueryRouter
@@ -786,6 +844,8 @@ class HomeostasisModule(MariaModule):
                 ec.set_goal_store(ctx.goal_store)
             if hasattr(ctx, 'memory_query') and ctx.memory_query:
                 ec.set_memory_query(ctx.memory_query)
+            if ctx.vision_cortex:
+                ec.set_vision_cortex(ctx.vision_cortex)
 
             ctx.evidence_collector = ec
 
@@ -1879,6 +1939,15 @@ def _build_work_context(ctx) -> str:
                     parts.append(f"Ucze sie: {learning} plikow w toku, {completed}/{total} ukonczonych")
                 elif total > 0:
                     parts.append(f"Wiedza: {completed}/{total} plikow ukonczonych")
+        except Exception:
+            pass
+
+    # Vision - what Maria sees
+    if ctx.vision_cortex:
+        try:
+            last = ctx.vision_cortex.last_percept
+            if last and last.summary:
+                parts.append(f"Wzrok: {last.summary}")
         except Exception:
             pass
 
