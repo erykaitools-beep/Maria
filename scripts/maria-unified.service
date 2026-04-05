@@ -1,0 +1,36 @@
+# M.A.R.I.A. Unified Service (V3) - daemon + Web UI in one process
+# Replaces separate maria.service + maria-ui.service
+#
+# Install:
+#   sudo cp scripts/maria-unified.service /etc/systemd/system/maria-unified.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable maria-unified
+#   sudo systemctl start maria-unified
+#
+# Disable old services:
+#   sudo systemctl disable maria maria-ui
+#   sudo systemctl stop maria maria-ui
+
+[Unit]
+Description=M.A.R.I.A. - Unified Cognitive System
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=maria
+WorkingDirectory=/home/maria/maria
+ExecStart=/home/maria/maria/venv/bin/python maria.py
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+EnvironmentFile=/home/maria/maria/.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=maria
+
+[Install]
+WantedBy=multi-user.target
