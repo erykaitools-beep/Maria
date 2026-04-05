@@ -99,15 +99,18 @@
 | **2026-04-02** | **Claude + Codex backends** - /claude (3/h) + /code (10/h) + /analyze komendy Telegram |
 | **2026-04-02** | **Telegram file upload** - PDF/MD/TXT/PY -> docs/incoming/, caption jako komenda |
 | **2026-04-02** | **Kamera** - Innomaker U20CAM-1080PD&N-S1 zweryfikowana, Vision ODBLOKOWANA |
+| **2026-04-05** | **Vision Phase 1-4** - sensor, preprocessing, modules, cortex (297 testow) |
+| **2026-04-05** | **V3 Phase A Module 1** - UnifiedLauncher (maria.py) - single entry point |
+| **2026-04-05** | **V3 Phase A Module 2+3** - OnboardingFlow + UserFacingSelfModel (65 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade |
-| **Testy** | 2769 passing |
-| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A |
+| **Testy** | 3131 passing |
+| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -122,8 +125,9 @@
 
 ```
 project/
+├── maria.py             # V3 UnifiedLauncher (daemon + Web UI + onboarding)
 ├── main.py              # REPL interface (Ver.1.2)
-├── run_maria.py         # Daemon mode (learning loop)
+├── run_maria.py         # Daemon mode (legacy, replaced by maria.py)
 ├── maria_core/          # Legacy modules
 │   ├── brain/           # ollama_brain.py
 │   ├── learning/        # learning_agent.py, exam_agent.py
@@ -159,8 +163,10 @@ project/
 │   ├── critic/          # Faza G: Agent Krytyk - knowledge quality gate (7 dimensions)
 │   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
+│   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex
+│   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 2202 tests
+│   └── tests/           # 3131 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -691,13 +697,25 @@ Usunieto:
 - [x] Plan od ChatGPT: docs/plans/plan_upgrade_nauki_maria.pdf (5 faz, wszystkie zaimplementowane)
 - [x] 95 nowych testow (2730 total)
 
+### DONE: V3 Phase A - Foundation (2026-04-05)
+- [x] Module 1: UnifiedLauncher (maria.py) - single entry point, daemon+UI+signals
+- [x] Module 2: OnboardingFlow - 5-step first-run guidance, IdentityStore persistence
+- [x] Module 3: UserFacingSelfModel - unified self-model aggregation (identity+personality+capabilities+awareness+limitations)
+- [x] SharedContext: capability_router, context_builder, user_facing_self_model, onboarding_flow
+- [x] 65 nowych testow (3131 total)
+
+### NASTEPNE: V3 Phase B - Task Pipeline
+- [ ] Module 4: TaskOrchestrator (~30% V2 coverage via PlannerCore)
+- [ ] Module 5: TaskDecomposer (~20% V2 coverage via K8 Deliberation)
+- [ ] Module 6: ExecutionPlanBuilder (~20% V2 coverage via Planner + ActionExecutor)
+
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
 - Web UI /critique page (opcjonalnie)
 - Operator UX / dense mode (Web UI v2 polish)
 
-### ODROCZONE: Zmysly (czeka na sprzet)
-- Vision (Warstwa 10) - czeka na kamere Tapo C200 z RTSP
+### ODROCZONE: Zmysly
+- Vision wiring (homeostasis tick, REPL /vision, Web UI) - kod gotowy, czeka na podlaczenie
 - Smart Home (Warstwa 11) - czeka na sprzet
 
 ## Znane problemy
@@ -1090,4 +1108,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-02 (Critique UI, Auto-confirm, CDL v3, Claude/Codex backends, kamera, 2769 testow)*
+*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A complete, Vision Phase 1-4, UnifiedLauncher, OnboardingFlow, UserFacingSelfModel, 3131 testow)*

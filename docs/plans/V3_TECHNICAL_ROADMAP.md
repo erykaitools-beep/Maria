@@ -19,11 +19,12 @@ end-to-end result.
 
 | # | Module | Status | Bazuje na |
 |---|--------|--------|-----------|
-| 1 | UnifiedLauncher | NEW | run_maria.py + run_ui.py |
-| 2 | OnboardingFlow | NEW | - |
-| 3 | UserFacingSelfModel | ~50% | introspection + /awareness + CapabilityRouter |
+| 1 | UnifiedLauncher | DONE | run_maria.py + run_ui.py |
+| 2 | OnboardingFlow | DONE | UserFacingSelfModel + IdentityStore |
+| 3 | UserFacingSelfModel | DONE | SelfModelBuilder + CapabilityRouter + ContextBuilder |
 
 **Outcome:** Maria becomes understandable and launchable as one system.
+**Status:** COMPLETE (2026-04-05) - 65 tests, all 3 modules done.
 
 ## Phase B - Task Pipeline (P1)
 
@@ -69,9 +70,9 @@ end-to-end result.
 
 | Gate | Requirement | V2 Coverage |
 |------|-------------|-------------|
-| 1 | Unified startup | ~70% |
-| 2 | First-run guidance | ~20% |
-| 3 | Stable self-model | ~80% |
+| 1 | Unified startup | DONE |
+| 2 | First-run guidance | DONE |
+| 3 | Stable self-model | DONE |
 | 4 | Real task execution | ~60% |
 | 5 | Tool orchestration | ~70% |
 | 6 | Cost/time planning | ~10% |

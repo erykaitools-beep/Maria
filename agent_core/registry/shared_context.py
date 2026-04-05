@@ -53,6 +53,12 @@ class SharedContext:
     memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
     vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
 
+    # V3 Orchestrator (Phase A)
+    capability_router: Any = None      # CapabilityRouter (registry-based dispatch)
+    context_builder: Any = None        # ContextBuilder (self-awareness aggregator)
+    user_facing_self_model: Any = None # UserFacingSelfModel (V3 Module 3)
+    onboarding_flow: Any = None        # OnboardingFlow (V3 Module 2)
+
     # REPL state
     last_result: Any = None
 

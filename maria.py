@@ -282,7 +282,33 @@ def main():
     registry = ModuleRegistry()
     register_modules(registry)
     registry.init_all(ctx)
-    print("  Modules: initialized\n")
+    print("  Modules: initialized")
+
+    # ── V3 Orchestrator (Phase A) ──
+    try:
+        from agent_core.awareness import ContextBuilder
+        from agent_core.orchestrator import UserFacingSelfModel, OnboardingFlow
+
+        if not ctx.context_builder:
+            ctx.context_builder = ContextBuilder()
+
+        self_model = UserFacingSelfModel(ctx)
+        ctx.user_facing_self_model = self_model
+
+        onboarding = OnboardingFlow(ctx, self_model)
+        ctx.onboarding_flow = onboarding
+
+        if onboarding.should_run() and mode != "daemon":
+            result = onboarding.run()
+            print(result["text"])
+        else:
+            logger.debug("Onboarding already completed - skipping")
+
+        logger.info("V3 orchestrator initialized")
+    except Exception as e:
+        logger.warning(f"V3 orchestrator init failed (non-critical): {e}")
+
+    print()
 
     # ── Daemon-only mode ──
     if mode == "daemon":
