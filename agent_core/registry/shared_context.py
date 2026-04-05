@@ -59,6 +59,7 @@ class SharedContext:
     user_facing_self_model: Any = None # UserFacingSelfModel (V3 Module 3)
     onboarding_flow: Any = None        # OnboardingFlow (V3 Module 2)
     task_orchestrator: Any = None      # TaskOrchestrator (V3 Module 4)
+    product_shell: Any = None          # ProductShell (V3 Module 14)
 
     # REPL state
     last_result: Any = None

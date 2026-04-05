@@ -5,6 +5,7 @@ Phase A: Foundation (Module 1-3)
 Phase B: Task Pipeline (Module 4-6)
 Phase C: Practical Intelligence (Module 7-9)
 Phase D: Execution Bridge (Module 10-13)
+Phase E: Product Hardening (Module 14-15)
 """
 
 from agent_core.orchestrator.self_model_facade import UserFacingSelfModel
@@ -19,6 +20,7 @@ from agent_core.orchestrator.execution_router import ExecutionRouter
 from agent_core.orchestrator.tool_registry import ToolCapabilityRegistry
 from agent_core.orchestrator.progress_tracker import TaskProgressTracker
 from agent_core.orchestrator.limitation_reporter import LimitationReporter
+from agent_core.orchestrator.product_shell import ProductShell
 
 __all__ = [
     "UserFacingSelfModel", "OnboardingFlow",
@@ -26,4 +28,5 @@ __all__ = [
     "CostEstimator", "TimeEstimator", "FreeVsPaidPlanner",
     "ExecutionRouter", "ToolCapabilityRegistry",
     "TaskProgressTracker", "LimitationReporter",
+    "ProductShell",
 ]

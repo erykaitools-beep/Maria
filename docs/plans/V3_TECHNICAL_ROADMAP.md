@@ -64,10 +64,11 @@ end-to-end result.
 
 | # | Module | Status | Bazuje na |
 |---|--------|--------|-----------|
-| 14 | ProductShell | NEW | Web UI v2 |
-| 15 | V3 UX Integration | NEW | - |
+| 14 | ProductShell | DONE | All V3 modules unified facade |
+| 15 | V3 UX Integration | DONE | REPL /v3 command (12 subcommands) |
 
 **Outcome:** Maria feels like a product, not a lab.
+**Status:** COMPLETE (2026-04-05) - 26 tests, all 2 modules done.
 
 ## V3 Release Gates
 
@@ -82,7 +83,7 @@ end-to-end result.
 | 7 | Limitation handling | DONE |
 | 8 | Operator visibility | DONE |
 | 9 | Memory continuity | ~85% |
-| 10 | Product coherence | ~40% |
+| 10 | Product coherence | DONE |
 
 ## Milestone Definitions
 

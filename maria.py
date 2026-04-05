@@ -318,13 +318,12 @@ def main():
         task_orch._time_estimator = TimeEstimator(ctx)
         task_orch._resource_planner = FreeVsPaidPlanner(ctx)
 
-        # Phase D: Execution Bridge
-        task_orch._execution_router = ExecutionRouter(ctx)
-        task_orch._tool_registry = ToolCapabilityRegistry(ctx)
-        task_orch._progress_tracker = TaskProgressTracker(ctx)
-        task_orch._limitation_reporter = LimitationReporter(ctx)
+        # Phase D+E: Execution Bridge + Product Shell
+        from agent_core.orchestrator import ProductShell
+        product_shell = ProductShell(ctx)
+        ctx.product_shell = product_shell
 
-        logger.info("V3 orchestrator initialized (Phase A-D)")
+        logger.info("V3 orchestrator initialized (Phase A-E, all 15 modules)")
     except Exception as e:
         logger.warning(f"V3 orchestrator init failed (non-critical): {e}")
 

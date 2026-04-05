@@ -200,6 +200,12 @@ def register_modules(registry):
     registry.try_register(make_critique, "critique")
     registry.try_register(make_vision, "vision")
 
+    def make_v3():
+        from agent_core.modules.v3_module import V3Module
+        return V3Module()
+
+    registry.try_register(make_v3, "v3")
+
 
 # ====== POMOC ======
 

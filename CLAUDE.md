@@ -105,15 +105,16 @@
 | **2026-04-05** | **V3 Phase B Module 4-6** - TaskOrchestrator + TaskDecomposer + ExecutionPlanBuilder (70 testow) |
 | **2026-04-05** | **V3 Phase C Module 7-9** - CostEstimator + TimeEstimator + FreeVsPaidPlanner (49 testow) |
 | **2026-04-05** | **V3 Phase D Module 10-13** - ExecutionRouter + ToolRegistry + ProgressTracker + LimitationReporter (41 testow) |
+| **2026-04-05** | **V3 Phase E Module 14-15** - ProductShell + V3Module REPL /v3 (26 testow) - **V3 COMPLETE** |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Vision + V3 Phase A-D (13/15 modules) |
-| **Testy** | 3291 passing |
-| **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + V3 Phase A-D COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Vision + **V3 COMPLETE** (15/15 modules) |
+| **Testy** | 3317 passing |
+| **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + **V3 Phase A-E COMPLETE** |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -169,7 +170,7 @@ project/
 │   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex
 │   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 3291 tests
+│   └── tests/           # 3317 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -726,9 +727,11 @@ Usunieto:
 - [x] Module 13: LimitationReporter - mode/autonomy/resource/hardware limitations, can_do(), blocked_actions
 - [x] 41 nowych testow (3291 total)
 
-### NASTEPNE: V3 Phase E - Product Hardening
-- [ ] Module 14: ProductShell
-- [ ] Module 15: V3 UX Integration
+### DONE: V3 Phase E - Product Hardening (2026-04-05)
+- [x] Module 14: ProductShell - unified facade (do/approve/cancel/progress/who/what/limits)
+- [x] Module 15: V3Module REPL - /v3 command (12 subcommands: do, approve, cancel, progress, tasks, who, what, limits, tools, budget, onboarding, status)
+- [x] 26 nowych testow (3317 total)
+- [x] **V3 COMPLETE - all 15 modules, all 5 phases**
 
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
@@ -1129,4 +1132,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A-D complete, 13/15 modules, 3291 testow)*
+*Ostatnia aktualizacja: 2026-04-05 (V3 COMPLETE - all 15 modules, 5 phases, ProductShell + /v3 REPL, 3317 testow)*
