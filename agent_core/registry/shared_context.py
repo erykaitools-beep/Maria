@@ -58,6 +58,7 @@ class SharedContext:
     context_builder: Any = None        # ContextBuilder (self-awareness aggregator)
     user_facing_self_model: Any = None # UserFacingSelfModel (V3 Module 3)
     onboarding_flow: Any = None        # OnboardingFlow (V3 Module 2)
+    task_orchestrator: Any = None      # TaskOrchestrator (V3 Module 4)
 
     # REPL state
     last_result: Any = None

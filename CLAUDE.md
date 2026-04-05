@@ -102,15 +102,16 @@
 | **2026-04-05** | **Vision Phase 1-4** - sensor, preprocessing, modules, cortex (297 testow) |
 | **2026-04-05** | **V3 Phase A Module 1** - UnifiedLauncher (maria.py) - single entry point |
 | **2026-04-05** | **V3 Phase A Module 2+3** - OnboardingFlow + UserFacingSelfModel (65 testow) |
+| **2026-04-05** | **V3 Phase B Module 4-6** - TaskOrchestrator + TaskDecomposer + ExecutionPlanBuilder (70 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A |
-| **Testy** | 3131 passing |
-| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A+B |
+| **Testy** | 3201 passing |
+| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A+B COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -164,9 +165,9 @@ project/
 │   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex
-│   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel
+│   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 3131 tests
+│   └── tests/           # 3201 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -704,10 +705,16 @@ Usunieto:
 - [x] SharedContext: capability_router, context_builder, user_facing_self_model, onboarding_flow
 - [x] 65 nowych testow (3131 total)
 
-### NASTEPNE: V3 Phase B - Task Pipeline
-- [ ] Module 4: TaskOrchestrator (~30% V2 coverage via PlannerCore)
-- [ ] Module 5: TaskDecomposer (~20% V2 coverage via K8 Deliberation)
-- [ ] Module 6: ExecutionPlanBuilder (~20% V2 coverage via Planner + ActionExecutor)
+### DONE: V3 Phase B - Task Pipeline (2026-04-05)
+- [x] Module 4: TaskOrchestrator - submit/approve/cancel/progress, Goal lifecycle, in-memory task store
+- [x] Module 5: TaskDecomposer - keyword classification (6 categories), step building (mirrors K8 templates)
+- [x] Module 6: ExecutionPlanBuilder - LLM cost estimates, K7 blocked check, feasibility, warnings
+- [x] 70 nowych testow (3201 total)
+
+### NASTEPNE: V3 Phase C - Practical Intelligence
+- [ ] Module 7: CostEstimator
+- [ ] Module 8: TimeEstimator
+- [ ] Module 9: FreeVsPaidPlanner
 
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
@@ -1108,4 +1115,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A complete, Vision Phase 1-4, UnifiedLauncher, OnboardingFlow, UserFacingSelfModel, 3131 testow)*
+*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A+B complete, Vision Phase 1-4, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder, 3201 testow)*

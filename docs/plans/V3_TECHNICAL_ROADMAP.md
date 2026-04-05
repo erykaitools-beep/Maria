@@ -30,11 +30,12 @@ end-to-end result.
 
 | # | Module | Status | Bazuje na |
 |---|--------|--------|-----------|
-| 4 | TaskOrchestrator | ~30% | PlannerCore + K5 |
-| 5 | TaskDecomposer | ~20% | K8 Deliberation |
-| 6 | ExecutionPlanBuilder | ~20% | Planner + ActionExecutor |
+| 4 | TaskOrchestrator | DONE | PlannerCore + K5 + GoalStore |
+| 5 | TaskDecomposer | DONE | K8 Deliberation templates |
+| 6 | ExecutionPlanBuilder | DONE | CapabilityRouter + K7 + ActionExecutor |
 
 **Outcome:** Maria can turn user intent into structured work.
+**Status:** COMPLETE (2026-04-05) - 70 tests, all 3 modules done.
 
 ## Phase C - Practical Intelligence (P2)
 
@@ -73,7 +74,7 @@ end-to-end result.
 | 1 | Unified startup | DONE |
 | 2 | First-run guidance | DONE |
 | 3 | Stable self-model | DONE |
-| 4 | Real task execution | ~60% |
+| 4 | Real task execution | DONE |
 | 5 | Tool orchestration | ~70% |
 | 6 | Cost/time planning | ~10% |
 | 7 | Limitation handling | ~80% |

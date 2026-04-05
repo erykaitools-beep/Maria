@@ -287,7 +287,9 @@ def main():
     # ── V3 Orchestrator (Phase A) ──
     try:
         from agent_core.awareness import ContextBuilder
-        from agent_core.orchestrator import UserFacingSelfModel, OnboardingFlow
+        from agent_core.orchestrator import (
+            UserFacingSelfModel, OnboardingFlow, TaskOrchestrator,
+        )
 
         if not ctx.context_builder:
             ctx.context_builder = ContextBuilder()
@@ -304,7 +306,11 @@ def main():
         else:
             logger.debug("Onboarding already completed - skipping")
 
-        logger.info("V3 orchestrator initialized")
+        # Phase B: Task Pipeline
+        task_orch = TaskOrchestrator(ctx)
+        ctx.task_orchestrator = task_orch
+
+        logger.info("V3 orchestrator initialized (Phase A + B)")
     except Exception as e:
         logger.warning(f"V3 orchestrator init failed (non-critical): {e}")
 
