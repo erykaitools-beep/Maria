@@ -289,6 +289,7 @@ def main():
         from agent_core.awareness import ContextBuilder
         from agent_core.orchestrator import (
             UserFacingSelfModel, OnboardingFlow, TaskOrchestrator,
+            CostEstimator, TimeEstimator, FreeVsPaidPlanner,
         )
 
         if not ctx.context_builder:
@@ -310,7 +311,12 @@ def main():
         task_orch = TaskOrchestrator(ctx)
         ctx.task_orchestrator = task_orch
 
-        logger.info("V3 orchestrator initialized (Phase A + B)")
+        # Phase C: Practical Intelligence (estimation engines)
+        task_orch._cost_estimator = CostEstimator(ctx)
+        task_orch._time_estimator = TimeEstimator(ctx)
+        task_orch._resource_planner = FreeVsPaidPlanner(ctx)
+
+        logger.info("V3 orchestrator initialized (Phase A + B + C)")
     except Exception as e:
         logger.warning(f"V3 orchestrator init failed (non-critical): {e}")
 

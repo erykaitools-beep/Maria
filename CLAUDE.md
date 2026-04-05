@@ -103,15 +103,16 @@
 | **2026-04-05** | **V3 Phase A Module 1** - UnifiedLauncher (maria.py) - single entry point |
 | **2026-04-05** | **V3 Phase A Module 2+3** - OnboardingFlow + UserFacingSelfModel (65 testow) |
 | **2026-04-05** | **V3 Phase B Module 4-6** - TaskOrchestrator + TaskDecomposer + ExecutionPlanBuilder (70 testow) |
+| **2026-04-05** | **V3 Phase C Module 7-9** - CostEstimator + TimeEstimator + FreeVsPaidPlanner (49 testow) |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A+B |
-| **Testy** | 3201 passing |
-| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A+B COMPLETE |
+| **Etap** | K1-K13 Phase 2 + Semantic Memory + Telegram + Tracing + MemoryQuery + Effector Safety + ModelScheduler + OpenClaw + Registry v2 + Web UI v2 + CapabilityRouter + CriticAgent + Learning Upgrade + Vision + V3 Phase A+B+C |
+| **Testy** | 3250 passing |
+| **Faza** | Stabilization COMPLETE + Faza F/G COMPLETE + Learning Upgrade COMPLETE + CDL v3 + Claude/Codex backends + V3 Phase A+B+C COMPLETE |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -167,7 +168,7 @@ project/
 │   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex
 │   ├── orchestrator/    # V3 Orchestrator: OnboardingFlow, UserFacingSelfModel, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder
 │   ├── adapters/        # Wrappers for legacy maria_core
-│   └── tests/           # 3201 tests
+│   └── tests/           # 3250 tests
 └── docs/                # Documentation (incl. MODEL_REGISTRY, DEPLOYMENT_ORDER)
 ```
 
@@ -711,10 +712,17 @@ Usunieto:
 - [x] Module 6: ExecutionPlanBuilder - LLM cost estimates, K7 blocked check, feasibility, warnings
 - [x] 70 nowych testow (3201 total)
 
-### NASTEPNE: V3 Phase C - Practical Intelligence
-- [ ] Module 7: CostEstimator
-- [ ] Module 8: TimeEstimator
-- [ ] Module 9: FreeVsPaidPlanner
+### DONE: V3 Phase C - Practical Intelligence (2026-04-05)
+- [x] Module 7: CostEstimator - NIM tokens, local LLM calls, external calls per action
+- [x] Module 8: TimeEstimator - seconds estimate from model timeouts + historical latencies, cold start penalties
+- [x] Module 9: FreeVsPaidPlanner - ResourceStrategy (LOCAL_ONLY/MIXED/PREFER_PAID), budget-aware recommendations
+- [x] 49 nowych testow (3250 total)
+
+### NASTEPNE: V3 Phase D - Execution Bridge
+- [ ] Module 10: ExecutionRouter (wraps CapabilityRouter)
+- [ ] Module 11: ToolCapabilityRegistry (user-facing)
+- [ ] Module 12: TaskProgressTracker
+- [ ] Module 13: LimitationReporter
 
 ### NASTEPNE: Autorozwoj i stabilnosc
 - REPL /critique command
@@ -1115,4 +1123,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A+B complete, Vision Phase 1-4, TaskOrchestrator, TaskDecomposer, ExecutionPlanBuilder, 3201 testow)*
+*Ostatnia aktualizacja: 2026-04-05 (V3 Phase A+B+C complete, CostEstimator, TimeEstimator, FreeVsPaidPlanner, 3250 testow)*

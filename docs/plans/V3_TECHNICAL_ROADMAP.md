@@ -41,11 +41,12 @@ end-to-end result.
 
 | # | Module | Status | Bazuje na |
 |---|--------|--------|-----------|
-| 7 | CostEstimator | NEW | - |
-| 8 | TimeEstimator | NEW | - |
-| 9 | FreeVsPaidPlanner | NEW | - |
+| 7 | CostEstimator | DONE | TokenBudget + ModelRegistry + LLMTape |
+| 8 | TimeEstimator | DONE | execution_budget timeouts + LLMTape latencies |
+| 9 | FreeVsPaidPlanner | DONE | CostEstimator + routing decisions |
 
 **Outcome:** Maria becomes useful for real decision-making.
+**Status:** COMPLETE (2026-04-05) - 49 tests, all 3 modules done.
 
 ## Phase D - Execution Bridge (P3)
 
@@ -76,7 +77,7 @@ end-to-end result.
 | 3 | Stable self-model | DONE |
 | 4 | Real task execution | DONE |
 | 5 | Tool orchestration | ~70% |
-| 6 | Cost/time planning | ~10% |
+| 6 | Cost/time planning | DONE |
 | 7 | Limitation handling | ~80% |
 | 8 | Operator visibility | ~90% |
 | 9 | Memory continuity | ~85% |
