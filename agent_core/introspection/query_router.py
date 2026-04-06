@@ -24,6 +24,7 @@ class ResponseMode(Enum):
     GROUNDED_PLANNER = "grounded_planner"   # "jaki plan", strategy
     GROUNDED_KNOWLEDGE = "grounded_knowledge"  # "co wiesz o X", memory query
     GROUNDED_VISION = "grounded_vision"        # "co widzisz", visual perception
+    GROUNDED_IDENTITY = "grounded_identity"    # "kim jestes", "opisz siebie", self-description
 
 
 # Keyword patterns per mode (Polish + English).
@@ -72,6 +73,22 @@ _MODE_PATTERNS = {
         "powiedz mi o", "opowiedz o", "opowiedz mi o",
         "what do you know about", "tell me about",
         "ile wiesz o", "jak dobrze znasz",
+    ],
+    ResponseMode.GROUNDED_IDENTITY: [
+        "kim jestes", "kim jeste\u015b", "czym jestes", "czym jeste\u015b",
+        "opisz siebie", "opisz mi siebie", "opowiedz o sobie",
+        "co potrafisz", "co umiesz", "jakie masz mozliwosci",
+        "jakie masz mo\u017cliwo\u015bci",
+        "jak jestes zbudowana", "jak jeste\u015b zbudowana",
+        "jaka jest twoja architektura", "twoja architektura",
+        "z czego sie skladasz", "z czego si\u0119 sk\u0142adasz",
+        "jak dzialasz", "jak dzia\u0142asz",
+        "przedstaw sie", "przedstaw si\u0119",
+        "who are you", "what can you do",
+        "describe yourself", "your architecture",
+        "co masz", "jakie moduly",
+        "w jakim kierunku", "kierunek rozwoju",
+        "twoje ograniczenia", "twoje limity",
     ],
     ResponseMode.GROUNDED_STATUS: [
         "co robisz", "co teraz", "status", "jak ci idzie",

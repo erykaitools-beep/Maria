@@ -62,6 +62,7 @@ class ResponseBuilder:
             ResponseMode.GROUNDED_PLANNER: self._build_planner,
             ResponseMode.GROUNDED_KNOWLEDGE: self._build_knowledge,
             ResponseMode.GROUNDED_VISION: self._build_vision,
+            ResponseMode.GROUNDED_IDENTITY: self._build_identity,
         }
 
         builder_fn = builders.get(mode, self._build_status)
@@ -289,6 +290,40 @@ class ResponseBuilder:
             lines.append(f"Opis sceny: {scene.value}")
 
         return "\n".join(lines) if lines else "Nie mam aktualnych danych z kamery."
+
+    def _build_identity(self, evidence: List[Evidence]) -> str:
+        """Build identity response - who Maria is, what she can do."""
+        lines = []
+
+        arch = self._find(evidence, "identity_architecture")
+        if arch:
+            lines.append(arch.value)
+
+        layers = self._find(evidence, "identity_layers")
+        if layers:
+            lines.append(layers.value)
+
+        subsystems = self._find(evidence, "identity_subsystems")
+        if subsystems:
+            lines.append(subsystems.value)
+
+        caps = self._find(evidence, "identity_capabilities")
+        if caps:
+            lines.append(caps.value)
+
+        backend = self._find(evidence, "identity_backend")
+        if backend:
+            lines.append(backend.value)
+
+        limits = self._find(evidence, "identity_limitations")
+        if limits:
+            lines.append(limits.value)
+
+        direction = self._find(evidence, "identity_direction")
+        if direction:
+            lines.append(direction.value)
+
+        return "\n\n".join(lines) if lines else "Jestem M.A.R.I.A. - autonomiczny agent AI."
 
     @staticmethod
     def _find(evidence: List[Evidence], key: str):

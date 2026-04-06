@@ -104,6 +104,7 @@ class EvidenceCollector:
             ResponseMode.GROUNDED_LEARNING: self.collect_learning,
             ResponseMode.GROUNDED_PLANNER: self.collect_planner,
             ResponseMode.GROUNDED_VISION: self.collect_vision,
+            ResponseMode.GROUNDED_IDENTITY: self.collect_identity,
         }
 
         # Knowledge mode needs the query text to extract topic
@@ -245,6 +246,141 @@ class EvidenceCollector:
 
         except Exception as e:
             logger.debug(f"[EvidenceCollector] knowledge query failed: {e}")
+
+        return evidence
+
+    def collect_identity(self) -> List[Evidence]:
+        """Identity: who Maria is, what she can do, her architecture.
+
+        Uses UserFacingSelfModel (V3), introspection, and capability router.
+        """
+        evidence = []
+
+        # V3 UserFacingSelfModel (best source)
+        try:
+            from agent_core.orchestrator.self_model_facade import UserFacingSelfModel
+            # Try to get from project-level import
+            model_path = Path(self._project_root) / "meta_data" / "code_self_model.json"
+            if model_path.exists():
+                import json as _json
+                with open(model_path, "r", encoding="utf-8") as f:
+                    code_model = _json.load(f)
+                stats = code_model.get("statistics", {})
+                evidence.append(Evidence(
+                    key="identity_architecture",
+                    value=(
+                        f"Jestem M.A.R.I.A. (Meta Analysis Recalibration Intelligence Architecture). "
+                        f"Moj kod sklada sie z {stats.get('files', '?')} plikow, "
+                        f"{stats.get('lines', '?')} linii, "
+                        f"{stats.get('functions', '?')} funkcji, "
+                        f"{stats.get('classes', '?')} klas."
+                    ),
+                    source="code_self_model.json",
+                    confidence=0.95,
+                ))
+                # Layers
+                layers = code_model.get("layers", {})
+                if layers:
+                    layer_desc = []
+                    for name, modules in layers.items():
+                        count = len(modules) if isinstance(modules, list) else 0
+                        layer_desc.append(f"{name} ({count} modulow)")
+                    evidence.append(Evidence(
+                        key="identity_layers",
+                        value=f"Moje warstwy architektoniczne: {', '.join(layer_desc)}.",
+                        source="code_self_model.json",
+                        confidence=0.9,
+                    ))
+        except Exception as e:
+            logger.debug(f"[EvidenceCollector] code_self_model failed: {e}")
+
+        # Capabilities from CapabilityRouter or hardcoded
+        try:
+            # Try reading capability info
+            cap_info = []
+            cap_categories = {
+                "Nauka": ["learn", "exam", "review", "fetch"],
+                "Samoanaliza": ["self_analyze", "creative", "critique"],
+                "Kodowanie": ["code_design", "code_generate", "code_test"],
+                "System": ["maintenance", "evaluate", "experiment"],
+                "Internet": ["fetch", "ask_expert"],
+                "Efektory": ["effector"],
+                "Wzrok": ["vision"],
+            }
+            for cat, actions in cap_categories.items():
+                cap_info.append(f"{cat}: {', '.join(actions)}")
+            evidence.append(Evidence(
+                key="identity_capabilities",
+                value="Moje zdolnosci: " + "; ".join(cap_info) + ".",
+                source="capability_registry",
+                confidence=0.9,
+            ))
+        except Exception:
+            pass
+
+        # Core subsystems
+        evidence.append(Evidence(
+            key="identity_subsystems",
+            value=(
+                "Moje kluczowe podsystemy: "
+                "Homeostasis (zarzadzanie zasobami, tryby ACTIVE/REDUCED/SLEEP), "
+                "K1-K13 cognitive core (percepcja, cele, planner, swiat, autonomia, deliberacja, meta-kognicja, bezpieczenstwo, eksperymenty, samoanaliza, kreatywnosc), "
+                "Vision (kamera USB + LLaVA), "
+                "Semantic Memory (nomic-embed-text, wektory 768-dim), "
+                "Code Agent (autonomiczne kodowanie przez Claude/Codex + OpenClaw), "
+                "Telegram Bridge (komunikacja z operatorem), "
+                "Web UI (panel zarzadzania)."
+            ),
+            source="architecture",
+            confidence=0.95,
+        ))
+
+        # LLM backend
+        evidence.append(Evidence(
+            key="identity_backend",
+            value=(
+                "Backend LLM: Ollama llama3.1:8b (executor, lokalny), "
+                "qwen3:8b (planner), NIM z-ai/glm5 (cloud), "
+                "Claude Code CLI (3/h), Codex/ChatGPT (10/h). "
+                "Dzialaje offline-first na mini PC (AMD Ryzen 5, 32GB RAM, Ubuntu)."
+            ),
+            source="model_registry",
+            confidence=0.95,
+        ))
+
+        # Limitations
+        evidence.append(Evidence(
+            key="identity_limitations",
+            value=(
+                "Moje ograniczenia: lokalny LLM (8B parametrow), "
+                "brak stalego internetu, nauka tylko z plikow tekstowych, "
+                "kodowanie ograniczone limitem Claude 3/h, "
+                "efektory przez OpenClaw (z approval gates)."
+            ),
+            source="self_model",
+            confidence=0.9,
+        ))
+
+        # Development direction
+        evidence.append(Evidence(
+            key="identity_direction",
+            value=(
+                "Kierunek rozwoju: V3 complete (15 modulow), "
+                "Code Agent (Maria umie kodowac), "
+                "nastepne: Mobile Body (Android), Smart Home (Shelly/Tasmota), "
+                "glos (TTS/STT), open source na GitHub."
+            ),
+            source="roadmap",
+            confidence=0.85,
+        ))
+
+        if not evidence:
+            evidence.append(Evidence(
+                key="identity_basic",
+                value="Jestem M.A.R.I.A. - autonomiczny agent AI do samodzielnego uczenia sie.",
+                source="default",
+                confidence=0.7,
+            ))
 
         return evidence
 
