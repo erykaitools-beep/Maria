@@ -5,6 +5,7 @@ Sprint 5: Proactive notifications
 
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
+import os
 import sys
 import time
 import json
@@ -283,10 +284,25 @@ def _create_ui_router(brain):
 
         from agent_core.llm import NIMClient, TokenBudget, LLMRouter
 
+        # Check if NIM should handle chat (env var NIM_CHAT_ENABLED=true)
+        nim_chat_enabled = os.environ.get("NIM_CHAT_ENABLED", "").lower() in ("true", "1", "yes")
+
+        # When NIM handles chat, pass Maria's personality as system prompt
+        nim_system_prompt = None
+        if nim_chat_enabled:
+            nim_system_prompt = (
+                "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture. "
+                "Jestes przyjazna, pomocna asystentka AI. Rozmawiasz po polsku. "
+                "Masz wlasna osobowosc - jestes ciekawa swiata, lubisz sie uczyc. "
+                "Odpowiadasz zwiezle ale cieplo. Pamietasz kontekst rozmowy. "
+                "Jesli nie znasz odpowiedzi, mowisz o tym szczerze."
+            )
+
         nim = NIMClient(
             api_key=NVIDIA_NIM_API_KEY,
             model=NVIDIA_NIM_MODEL,
             base_url=NVIDIA_NIM_BASE_URL,
+            system_prompt=nim_system_prompt,
         )
         budget = TokenBudget(
             daily_limit=NIM_DAILY_TOKEN_LIMIT,
@@ -296,8 +312,10 @@ def _create_ui_router(brain):
             ollama_brain=brain,
             nim_client=nim,
             token_budget=budget,
+            use_nim_for_chat=nim_chat_enabled,
         )
-        print(f"[UI] [OK] LLM Router: hybrid (NIM: {NVIDIA_NIM_MODEL} + Ollama)")
+        chat_mode = f"NIM chat ON ({NVIDIA_NIM_MODEL})" if nim_chat_enabled else "Ollama chat"
+        print(f"[UI] [OK] LLM Router: {chat_mode} + NIM learning")
         return router
     except Exception as e:
         print(f"[UI] [WARN] LLM Router disabled: {e}")

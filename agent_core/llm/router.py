@@ -49,6 +49,7 @@ class LLMRouter:
         ollama_brain,
         nim_client=None,
         token_budget=None,
+        use_nim_for_chat: bool = False,
     ):
         """
         Initialize LLM router.
@@ -57,10 +58,12 @@ class LLMRouter:
             ollama_brain: OllamaBrain instance (required, always available)
             nim_client: NIMClient instance (optional, for learning)
             token_budget: TokenBudget instance (optional, for tracking)
+            use_nim_for_chat: Route chat (think) through NIM instead of Ollama
         """
         self.ollama = ollama_brain
         self.nim = nim_client
         self.budget = token_budget
+        self.use_nim_for_chat = use_nim_for_chat
         self._model_scheduler = None
         self._llm_tape = None
         self._codex_client = None
@@ -77,7 +80,11 @@ class LLMRouter:
 
     def think(self, prompt: str, temperature: float = 0.3, **kwargs) -> str:
         """
-        Chat with history - always uses Ollama.
+        Chat with history - uses NIM if use_nim_for_chat enabled, else Ollama.
+
+        Grounded queries (vision, status, errors) ALWAYS go through Ollama
+        because the grounding pipeline (evidence collector, camera) lives there.
+        Only regular chat is routed through NIM.
 
         Args:
             prompt: User message
@@ -86,12 +93,51 @@ class LLMRouter:
         Returns:
             Response text
         """
-        self._ollama_calls += 1
         start = time.time()
+
+        # Grounded queries MUST go through Ollama (camera, logs, evidence)
+        needs_grounding = self._is_grounded_query(prompt)
+
+        # NIM chat path (with Ollama fallback) - only for regular chat
+        if (self.use_nim_for_chat and self._should_use_nim()
+                and not needs_grounding):
+            try:
+                response = self.nim.think(prompt, temperature=temperature)
+                self._record_nim_usage()
+                self._nim_calls += 1
+                self._record_tape("chat", self.nim.model, prompt, response, start,
+                                  route_reason="chat_nim_enabled")
+                return response
+            except Exception as e:
+                logger.warning(f"NIM chat failed, falling back to Ollama: {e}")
+                self._nim_fallbacks += 1
+
+        # Default: Ollama (always for grounded, fallback for NIM failure)
+        self._ollama_calls += 1
         response = self.ollama.think(prompt, temperature=temperature, **kwargs)
+        if needs_grounding:
+            reason = "grounded_query_always_ollama"
+        elif self.use_nim_for_chat:
+            reason = "nim_chat_fallback"
+        else:
+            reason = "chat_always_ollama"
         self._record_tape("chat", self.ollama.model, prompt, response, start,
-                          route_reason="chat_always_ollama")
+                          route_reason=reason)
         return response
+
+    def _is_grounded_query(self, prompt: str) -> bool:
+        """Check if prompt needs grounding pipeline (vision, status, etc).
+
+        Grounded queries must go through OllamaBrain which has the
+        evidence collector, camera access, and response builder wired.
+        """
+        if not hasattr(self.ollama, '_query_router') or not self.ollama._query_router:
+            return False
+        try:
+            mode = self.ollama._query_router.classify(prompt)
+            return self.ollama._query_router.is_grounded(mode)
+        except Exception:
+            return False
 
     def _ask_once(
         self, prompt: str, temperature: float = 0.3, **kwargs
@@ -449,9 +495,11 @@ class LLMRouter:
         if self.nim is not None:
             stats["nim_model"] = self.nim.model
             stats["nim_available"] = bool(self.nim.api_key)
+            stats["nim_chat_enabled"] = self.use_nim_for_chat
         else:
             stats["nim_model"] = None
             stats["nim_available"] = False
+            stats["nim_chat_enabled"] = False
 
         if self._model_scheduler is not None:
             stats["scheduler"] = self._model_scheduler.get_status()
@@ -482,11 +530,16 @@ class LLMRouter:
 
     @property
     def history(self):
-        """Get conversation history (from Ollama)."""
+        """Get conversation history (from active chat backend)."""
+        if self.use_nim_for_chat and self.nim is not None:
+            return getattr(self.nim, "history", [])
         return getattr(self.ollama, "history", [])
 
     @history.setter
     def history(self, value):
-        """Set conversation history (delegated to Ollama)."""
+        """Set conversation history (delegated to active chat backend)."""
+        if self.use_nim_for_chat and self.nim is not None:
+            if hasattr(self.nim, "history"):
+                self.nim.history = value
         if hasattr(self.ollama, "history"):
             self.ollama.history = value

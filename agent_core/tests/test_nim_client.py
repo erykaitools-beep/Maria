@@ -472,6 +472,7 @@ class TestLLMRouter:
         }
         mock.model = "llama3.1:8b"
         mock.history = []
+        mock._query_router = None  # No grounding pipeline in tests
         return mock
 
     @pytest.fixture
@@ -644,3 +645,92 @@ class TestLLMRouter:
         """Delegates refresh_time_context to Ollama."""
         router.refresh_time_context()
         ollama.refresh_time_context.assert_called_once()
+
+    # --- NIM Chat mode ---
+
+    def test_think_nim_chat_enabled(self, ollama, nim, budget):
+        """think() routes through NIM when use_nim_for_chat=True."""
+        nim.think.return_value = "NIM chat response"
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        result = router.think("Czesc")
+        assert result == "NIM chat response"
+        nim.think.assert_called_once()
+        ollama.think.assert_not_called()
+
+    def test_think_nim_chat_fallback_on_error(self, ollama, nim, budget):
+        """think() falls back to Ollama when NIM chat fails."""
+        nim.think.side_effect = Exception("NIM timeout")
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        result = router.think("Czesc")
+        assert result == "Ollama response"
+        ollama.think.assert_called_once()
+
+    def test_think_nim_chat_respects_budget(self, ollama, nim, budget):
+        """think() uses Ollama when NIM budget depleted even with chat enabled."""
+        # Exhaust RPM budget (40 requests in default window)
+        for _ in range(50):
+            budget.record_request()
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        result = router.think("Czesc")
+        assert result == "Ollama response"
+        nim.think.assert_not_called()
+
+    def test_think_nim_chat_disabled_default(self, ollama, nim, budget):
+        """use_nim_for_chat defaults to False."""
+        router = LLMRouter(ollama, nim, budget)
+        assert router.use_nim_for_chat is False
+        router.think("Czesc")
+        ollama.think.assert_called_once()
+        nim.think.assert_not_called()
+
+    def test_history_returns_nim_when_chat_enabled(self, ollama, nim, budget):
+        """history property returns NIM history when NIM chat enabled."""
+        nim.history = [{"role": "user", "content": "test"}]
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        assert router.history == nim.history
+
+    def test_history_returns_ollama_when_chat_disabled(self, router):
+        """history property returns Ollama history when NIM chat disabled."""
+        assert router.history == router.ollama.history
+
+    def test_stats_include_nim_chat_flag(self, ollama, nim, budget):
+        """get_stats() includes nim_chat_enabled flag."""
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        stats = router.get_stats()
+        assert stats["nim_chat_enabled"] is True
+
+    def test_think_nim_chat_records_usage(self, ollama, nim, budget):
+        """think() with NIM chat records token usage to budget."""
+        nim.think.return_value = "NIM response"
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        requests_before = len(budget._request_timestamps)
+        router.think("Test")
+        assert len(budget._request_timestamps) == requests_before + 1
+
+    def test_think_nim_chat_grounded_uses_ollama(self, ollama, nim, budget):
+        """Grounded queries (vision, status) bypass NIM and use Ollama."""
+        from unittest.mock import Mock as _Mock
+        nim.think.return_value = "NIM response"
+        # Wire a query router that detects grounded queries
+        qr = _Mock()
+        qr.classify.return_value = "grounded_vision"
+        qr.is_grounded.return_value = True
+        ollama._query_router = qr
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        result = router.think("co widzisz?")
+        assert result == "Ollama response"
+        nim.think.assert_not_called()
+        ollama.think.assert_called_once()
+
+    def test_think_nim_chat_normal_skips_grounding(self, ollama, nim, budget):
+        """Normal chat goes through NIM even with query router wired."""
+        from unittest.mock import Mock as _Mock
+        nim.think.return_value = "NIM response"
+        qr = _Mock()
+        qr.classify.return_value = "normal"
+        qr.is_grounded.return_value = False
+        ollama._query_router = qr
+        router = LLMRouter(ollama, nim, budget, use_nim_for_chat=True)
+        result = router.think("Czesc, jak sie masz?")
+        assert result == "NIM response"
+        nim.think.assert_called_once()

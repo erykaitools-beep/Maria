@@ -260,7 +260,7 @@ class EvidenceCollector:
         try:
             from agent_core.orchestrator.self_model_facade import UserFacingSelfModel
             # Try to get from project-level import
-            model_path = Path(self._project_root) / "meta_data" / "code_self_model.json"
+            model_path = Path(self._root) / "meta_data" / "code_self_model.json"
             if model_path.exists():
                 import json as _json
                 with open(model_path, "r", encoding="utf-8") as f:
@@ -387,8 +387,11 @@ class EvidenceCollector:
     def collect_vision(self) -> List[Evidence]:
         """Vision: what Maria sees through her camera.
 
-        On-demand: triggers LLaVA snap for natural language scene description.
-        Fallback: sensor statistics (lighting, colors, motion, quality).
+        Priority order:
+        1. Live cortex + LLaVA (best: real-time frame + multimodal description)
+        2. Frame file + LLaVA (good: daemon's last frame + multimodal description)
+        3. Live cortex stats (ok: lighting, colors, motion from live percept)
+        4. State file stats (fallback: lighting, colors from JSON)
         """
         evidence = []
 
@@ -398,13 +401,17 @@ class EvidenceCollector:
         if self._vision_cortex:
             last = self._vision_cortex.last_percept
 
-        # On-demand LLaVA description (fresh frame, ~30s)
+        # --- Priority 1: Live cortex + LLaVA ---
         llava_desc = None
         if self._vision_cortex:
             try:
                 llava_desc = self._vision_cortex.describe_scene_llava()
             except Exception as e:
                 logger.debug(f"[EvidenceCollector] LLaVA snap failed: {e}")
+
+        # --- Priority 2: Frame file + LLaVA (when Web UI has no live cortex) ---
+        if not llava_desc and not self._vision_cortex:
+            llava_desc = self._describe_frame_via_llava()
 
         if llava_desc:
             evidence.append(Evidence(
@@ -420,7 +427,7 @@ class EvidenceCollector:
                 confidence=0.85,
             ))
         elif last:
-            # Fallback: stats-based description from last tick
+            # --- Priority 3: Stats from live percept ---
             parts = []
             if last.scene:
                 s = last.scene
@@ -461,10 +468,10 @@ class EvidenceCollector:
                 source=source,
                 confidence=0.9,
             ))
-        else:
-            # Try state file fallback
+        elif not evidence:
+            # --- Priority 4: Stats from state file ---
             try:
-                state_path = Path(self._project_root) / "meta_data" / "vision_state.json"
+                state_path = Path(self._root) / "meta_data" / "vision_state.json"
                 if state_path.exists():
                     import json as _json
                     with open(state_path, "r", encoding="utf-8") as f:
@@ -501,6 +508,57 @@ class EvidenceCollector:
             ))
 
         return evidence
+
+    def _describe_frame_via_llava(self) -> Optional[str]:
+        """Send last camera frame to LLaVA for scene description.
+
+        Used when Web UI runs without live vision cortex (separate process).
+        Reads frame saved by daemon tick loop (meta_data/vision_frame.jpg).
+
+        Returns:
+            Scene description in Polish, or None on failure.
+        """
+        try:
+            import base64
+            import requests as _requests
+
+            frame_path = Path(self._root) / "meta_data" / "vision_frame.jpg"
+            if not frame_path.exists():
+                return None
+
+            # Check frame freshness (skip if older than 60s)
+            import time as _time
+            age = _time.time() - frame_path.stat().st_mtime
+            if age > 60:
+                logger.debug(f"[EvidenceCollector] Vision frame too old ({age:.0f}s)")
+                return None
+
+            # Read and encode frame
+            with open(frame_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            # Call LLaVA via Ollama (cold start can take up to 90s)
+            resp = _requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "llava",
+                    "prompt": (
+                        "Describe exactly what you see in this image in 2-3 sentences. "
+                        "Name specific objects, colors, and surroundings. Be concrete."
+                    ),
+                    "images": [image_b64],
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                result = resp.json().get("response", "").strip()
+                if result:
+                    logger.info(f"[EvidenceCollector] LLaVA frame description: {result[:80]}...")
+                    return result
+        except Exception as e:
+            logger.debug(f"[EvidenceCollector] LLaVA frame failed: {e}")
+        return None
 
     def build_compact_summary(self) -> str:
         """
