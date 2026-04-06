@@ -197,6 +197,45 @@ class VisionCortex:
                 logger.exception("Failed to close sensor %s", sensor.sensor_id)
         self._active_sensor_id = None
 
+    def describe_scene_llava(self) -> Optional[str]:
+        """On-demand scene description using LLaVA (~30s).
+
+        Temporarily enables LLaVA on SceneModule, captures a fresh frame,
+        and returns the description. Used for chat queries ("co widzisz?"),
+        not in the tick loop.
+        """
+        scene_mod = self._modules.get("scene")
+        if not isinstance(scene_mod, SceneModule):
+            return None
+
+        llava_fn = getattr(scene_mod, '_llava_describe', None)
+        if llava_fn is None:
+            return None
+
+        sensor = self._select_best_sensor()
+        if sensor is None:
+            return None
+
+        frame = sensor.capture_frame()
+        if frame is None:
+            return None
+
+        processed = self._preprocessor.process(frame)
+        if processed.quality.overall < _QUALITY_FOR_SCENE:
+            return None
+
+        # Temporarily enable LLaVA for this one call
+        old_fn = scene_mod._llava_fn
+        scene_mod._llava_fn = llava_fn
+        try:
+            result = scene_mod.analyze(processed)
+            if result and result.backend_used == "llava":
+                return result.description
+        finally:
+            scene_mod._llava_fn = old_fn
+
+        return None
+
     def reset(self) -> None:
         """Reset internal state (preprocessor + modules)."""
         self._preprocessor.reset()

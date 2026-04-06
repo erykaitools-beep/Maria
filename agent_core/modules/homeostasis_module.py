@@ -817,6 +817,25 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"VisionCortex not initialized: {e}")
 
+        # Initialize Code Agent (autonomous coding)
+        try:
+            from agent_core.code_agent.agent import CodeAgent
+            code_agent = CodeAgent(ctx)
+            if ctx.openclaw_client:
+                code_agent.set_openclaw(ctx.openclaw_client)
+            # Wire Claude/Codex LLM functions
+            if hasattr(ctx, 'claude_client') and ctx.claude_client:
+                code_agent.set_claude_fn(ctx.claude_client.ask)
+            elif hasattr(ctx, 'codex_client') and ctx.codex_client:
+                code_agent.set_codex_fn(ctx.codex_client.ask)
+            # Wire Telegram notifications
+            if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'notifier'):
+                code_agent.set_notify_fn(ctx.telegram_bridge.notifier.send_message)
+            ctx.code_agent = code_agent
+            print("[Homeostasis] [OK] Code Agent initialized")
+        except Exception as e:
+            logger.debug(f"Code Agent not initialized: {e}")
+
         # Wire state-grounded operator response pipeline (Phase 2)
         try:
             from agent_core.introspection.query_router import OperationalQueryRouter
@@ -1590,31 +1609,39 @@ def _register_telegram_commands(bridge, ctx):
             return f"Blad: {e}"
 
     def _cmd_help(args):
-        """List available commands."""
+        """List available commands grouped by category."""
         return (
-            "*Komendy ClawBot:*\n"
+            "*ClawBot - Komendy*\n"
+            "\n*System:*\n"
             "/status - stan systemu\n"
+            "/restart - restart Marii\n"
+            "/authority [level] - autoryzacja\n"
+            "\n*Cele i zatwierdzanie:*\n"
             "/goals - lista celow\n"
-            "/nauka [temat] - cele nauki + postep\n"
-            "/beliefs [gaps|maintain] - belief store\n"
-            "/trace [N|stats|failed|ep-ID] - traces\n"
-            "/memory <temat> - co Maria wie\n"
-            "/memory gaps - luki w wiedzy\n"
-            "/learn <temat> - naucz sie o temacie\n"
-            "/validate [disputes|unresolved] - cross-validation\n"
             "/approve <id> - zatwierdz cel\n"
             "/reject <id> - odrzuc cel\n"
-            "/priority <id> <0-1> - zmien priorytet\n"
+            "/priority <id> <0-1> - priorytet\n"
+            "\n*Wiedza i nauka:*\n"
+            "/learn <temat> - naucz sie\n"
+            "/nauka [temat] - postep nauki\n"
+            "/memory <temat> - co Maria wie\n"
+            "/beliefs [gaps|maintain] - beliefs\n"
+            "/validate - cross-validation\n"
+            "/board - tablica potrzeb\n"
+            "\n*Kodowanie (Code Agent):*\n"
+            "/code <zadanie> - zlec kodowanie\n"
+            "/code approve - zatwierdz krok\n"
+            "/code status - aktywna sesja\n"
+            "/code history - historia\n"
+            "\n*AI asystenci:*\n"
+            "/claude <zadanie> - Claude (3/h)\n"
+            "/codex <zadanie> - Codex/ChatGPT\n"
+            "/analyze <modul> - analiza kodu\n"
+            "\n*Diagnostyka:*\n"
+            "/trace [N|stats] - traces\n"
             "/efapprove <id> - zatwierdz efektor\n"
             "/efreject <id> - odrzuc efektor\n"
-            "/efstatus - status efektora\n"
-            "/board - tablica potrzeb poznawczych\n"
-            "/claude <zadanie> - zadanie dla Claude (3/h limit)\n"
-            "/code <zadanie> - zadanie kodowania (Codex)\n"
-            "/analyze <modul> - analiza modulu (Codex)\n"
-            "/authority [level] - zmien poziom autoryzacji\n"
-            "/restart - restart Marii\n"
-            "/help - ta pomoc"
+            "/efstatus - status efektora"
         )
 
     def _cmd_board(args):
@@ -1666,14 +1693,14 @@ def _register_telegram_commands(bridge, ctx):
 
         return "Uzycie: /board [open|prune]"
 
-    def _cmd_code(args):
-        """Execute code task via Codex CLI: /code <task description>"""
+    def _cmd_codex(args):
+        """Execute code task via Codex CLI: /codex <task description>"""
         if not args or not args.strip():
             return (
-                "Uzycie: /code <opis zadania>\n"
-                "Przyklad: /code przeanalizuj modul critic i zaproponuj ulepszenia\n"
-                "Przyklad: /code znajdz TODO i FIXME w agent_core/planner/\n"
-                "Przyklad: /code napisz test dla funkcji compute_belief_score"
+                "Uzycie: /codex <opis zadania>\n"
+                "Przyklad: /codex przeanalizuj modul critic i zaproponuj ulepszenia\n"
+                "Przyklad: /codex znajdz TODO i FIXME w agent_core/planner/\n"
+                "Przyklad: /codex napisz test dla funkcji compute_belief_score"
             )
         task = args.strip()
 
@@ -1725,6 +1752,116 @@ def _register_telegram_commands(bridge, ctx):
         t = threading.Thread(target=_run_codex_task, daemon=True)
         t.start()
         return f"Przyjeto zadanie: '{task[:60]}'. Wynik za chwile..."
+
+    def _cmd_code(args):
+        """Code Agent: /code <task|status|approve|reject|cancel|history>"""
+        code_agent = getattr(ctx, 'code_agent', None)
+        if not code_agent:
+            return "Code Agent niedostepny."
+
+        if not args or not args.strip():
+            # Show status or help
+            active = code_agent.get_active()
+            if active:
+                return active.describe()
+            return (
+                "*Code Agent - autonomiczne kodowanie*\n\n"
+                "/code <zadanie> - zlec kodowanie\n"
+                "/code status - aktywna sesja\n"
+                "/code approve - zatwierdz krok\n"
+                "/code reject - odrzuc krok\n"
+                "/code cancel - anuluj sesje\n"
+                "/code history - historia sesji\n\n"
+                "Przyklad: /code zrob modul do glosu"
+            )
+
+        parts = args.strip().split(None, 1)
+        subcmd = parts[0].lower()
+        sub_args = parts[1] if len(parts) > 1 else ""
+
+        if subcmd == "status":
+            active = code_agent.get_active()
+            if not active:
+                return "Brak aktywnej sesji kodowania."
+            return active.describe()
+
+        elif subcmd == "approve":
+            active = code_agent.get_active()
+            if not active:
+                return "Brak sesji czekajacych na zatwierdzenie."
+            sid = sub_args.strip() if sub_args.strip() else active.session_id
+            if code_agent.approve_checkpoint(sid):
+                # Resume in background
+                import threading
+                def _resume():
+                    try:
+                        code_agent.resume(active.session_id)
+                    except Exception as e:
+                        bridge.bot.send_message(f"[Code] Blad przy wznowieniu: {e}")
+                threading.Thread(target=_resume, daemon=True).start()
+                return f"Zatwierdzono. Kontynuuje sesje {active.session_id[:8]}..."
+            return "Nie ma czekajacego checkpointu."
+
+        elif subcmd == "reject":
+            active = code_agent.get_active()
+            if not active:
+                return "Brak sesji do odrzucenia."
+            sid = sub_args.strip() if sub_args.strip() else active.session_id
+            if code_agent.reject_checkpoint(sid):
+                return f"Odrzucono - sesja anulowana."
+            return "Nie ma czekajacego checkpointu."
+
+        elif subcmd == "cancel":
+            active = code_agent.get_active()
+            if not active:
+                return "Brak aktywnej sesji."
+            if code_agent.cancel(active.session_id):
+                return f"Sesja {active.session_id[:8]} anulowana."
+            return "Nie mozna anulowac."
+
+        elif subcmd == "history":
+            sessions = code_agent.list_sessions(5)
+            if not sessions:
+                return "Brak sesji w historii."
+            lines = ["*Historia Code Agent:*"]
+            for s in sessions:
+                files = len(s.files_written)
+                lines.append(
+                    f"  {s.session_id[:8]} {s.status.value} "
+                    f"({files} plikow) {s.task_description[:40]}"
+                )
+            return "\n".join(lines)
+
+        else:
+            # Everything else is a task description
+            task = args.strip()
+            active = code_agent.get_active()
+            if active and not active.status.is_terminal:
+                return (
+                    f"Aktywna sesja: {active.session_id[:8]} ({active.status.value})\n"
+                    f"Uzyj /code cancel aby anulowac."
+                )
+
+            import threading
+            def _run_code():
+                try:
+                    session = code_agent.start(task)
+                    if session.status.value == "awaiting_approval":
+                        pass  # Notification already sent by agent
+                    elif session.status.value == "waiting_budget":
+                        bridge.bot.send_message(
+                            f"[Code] Brak budgetu LLM. Sesja {session.session_id[:8]} "
+                            f"wznowi sie automatycznie."
+                        )
+                    elif session.status.value == "failed":
+                        bridge.bot.send_message(
+                            f"[Code] Nie udalo sie: {session.result_summary}"
+                        )
+                except Exception as e:
+                    bridge.bot.send_message(f"[Code] Blad: {e}")
+
+            threading.Thread(target=_run_code, daemon=True).start()
+            return f"Rozpoczynam kodowanie: '{task[:60]}'. Plan za chwile..."
 
     def _cmd_analyze(args):
         """Analyze a module via Codex: /analyze <module_path>"""
@@ -1854,6 +1991,7 @@ def _register_telegram_commands(bridge, ctx):
 
     bridge.register_command("claude", _cmd_claude)
     bridge.register_command("code", _cmd_code)
+    bridge.register_command("codex", _cmd_codex)
     bridge.register_command("analyze", _cmd_analyze)
     bridge.register_command("board", _cmd_board)
     bridge.register_command("status", _cmd_status)

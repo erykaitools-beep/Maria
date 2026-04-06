@@ -1,9 +1,14 @@
-# M.A.R.I.A. Web UI - systemd service
-# Copy to /etc/systemd/system/maria-ui.service
-# Then: sudo systemctl daemon-reload && sudo systemctl enable maria-ui
+# OBSOLETE - Web UI is now integrated into maria.py (V3 Unified Launcher)
+# To disable: sudo systemctl disable maria-ui
+# To remove: sudo rm /etc/systemd/system/maria-ui.service && sudo systemctl daemon-reload
+#
+# If you need Web UI ONLY (without daemon), use:
+#   python maria.py --ui
+#
+# This file is kept for reference. Do not enable alongside maria.service.
 
 [Unit]
-Description=M.A.R.I.A. Web UI
+Description=M.A.R.I.A. Web UI (OBSOLETE - use maria.service instead)
 After=network.target maria.service
 Wants=maria.service
 

@@ -1,9 +1,13 @@
-# M.A.R.I.A. AI Agent - systemd service
+# M.A.R.I.A. AI Agent - V3 Unified Launcher
+# Runs daemon (homeostasis tick loop) + Web UI in one process.
+# Replaces separate maria.service + maria-ui.service.
+#
 # Copy to /etc/systemd/system/maria.service
 # Then: sudo systemctl daemon-reload && sudo systemctl enable maria
+# Disable old: sudo systemctl disable maria-ui
 
 [Unit]
-Description=M.A.R.I.A. AI Agent
+Description=M.A.R.I.A. AI Agent (V3)
 After=network.target ollama.service
 Wants=ollama.service
 
@@ -11,7 +15,7 @@ Wants=ollama.service
 Type=simple
 User=maria
 WorkingDirectory=/home/maria/maria
-ExecStart=/home/maria/maria/venv/bin/python run_maria.py
+ExecStart=/home/maria/maria/venv/bin/python maria.py
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT

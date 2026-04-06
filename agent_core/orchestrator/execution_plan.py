@@ -140,10 +140,17 @@ _LLM_CALL_ESTIMATES = {
     "ask_expert": 1,
     "effector": 0,
     "noop": 0,
+    # Code Agent steps
+    "code_design": 1,
+    "code_generate": 3,
+    "code_write": 0,
+    "code_test": 0,
+    "code_fix": 2,
+    "code_review": 1,
 }
 
 # Actions that need operator approval (restricted in K7)
-_APPROVAL_ACTIONS = {"effector"}
+_APPROVAL_ACTIONS = {"effector", "code_generate", "code_write"}
 
 
 class ExecutionPlanBuilder:

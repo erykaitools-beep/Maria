@@ -57,6 +57,11 @@ EVENT_TYPE_DEFAULTS: Dict[str, tuple] = {
     # PLANNER events (Warstwa 2)
     "planner_decision":          (0.5, 300.0, False),
     "planner_cycle_complete":    (0.3, 60.0, True),
+    # VISION events (Phase 8.5 - VisionPerceptionAdapter)
+    "vision_percept":            (0.3, 5.0, True),   # Regular tick, dedupable
+    "vision_motion":             (0.7, 60.0, False),  # Motion detected
+    "vision_alert":              (0.9, 0.0, False),   # Danger alert, high priority
+    "vision_health":             (0.4, 30.0, True),   # Health status change, dedupable
     # SYSTEM events
     "mode_change":               (0.8, 0.0, False),
     "alert":                     (1.0, 0.0, False),

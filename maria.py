@@ -341,6 +341,15 @@ def main():
     # ── Full mode: daemon + Web UI ──
     print("  Starting daemon + Web UI...\n")
 
+    # Share vision cortex with Web UI (same process, on-demand LLaVA)
+    if getattr(ctx, 'vision_cortex', None):
+        try:
+            from maria_ui.app import set_vision_cortex
+            set_vision_cortex(ctx.vision_cortex)
+            logger.info("Vision cortex shared with Web UI")
+        except Exception as e:
+            logger.debug(f"Could not share vision cortex with Web UI: {e}")
+
     # Start Web UI in background thread
     ui_thread = threading.Thread(target=run_web_ui, name="web-ui", daemon=True)
     ui_thread.start()

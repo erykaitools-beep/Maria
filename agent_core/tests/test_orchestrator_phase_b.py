@@ -217,7 +217,7 @@ class TestDecomposedTask:
 
     def test_categories_list(self, decomposer):
         cats = decomposer.get_available_categories()
-        assert len(cats) == 6
+        assert len(cats) == 7  # 6 original + CODE
         assert all("category" in c for c in cats)
 
 

@@ -95,6 +95,15 @@ UI_START_TIME = time.time()
 _maria_brain = None
 _brain_lock = threading.Lock()
 
+# Vision cortex reference (set from maria.py when running in unified mode)
+_vision_cortex = None
+
+
+def set_vision_cortex(cortex) -> None:
+    """Set vision cortex for evidence collector (called from maria.py)."""
+    global _vision_cortex
+    _vision_cortex = cortex
+
 # Rate limiting storage: {session_id: [timestamp1, timestamp2, ...]}
 _rate_limit_data = {}
 _rate_limit_lock = threading.Lock()
@@ -349,6 +358,11 @@ def get_maria_brain():
                             brain.set_llm_tape(_tape)
                         except Exception:
                             pass
+
+                        # Wire vision cortex for "co widzisz?" queries
+                        if _vision_cortex is not None:
+                            _ec.set_vision_cortex(_vision_cortex)
+                            print("[UI] [OK] Vision cortex wired to evidence collector")
 
                         brain.set_grounding_pipeline(_qr, _ec, _rb)
                         print("[UI] [OK] Grounding pipeline wired")

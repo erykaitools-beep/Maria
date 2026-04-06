@@ -251,8 +251,8 @@ class EvidenceCollector:
     def collect_vision(self) -> List[Evidence]:
         """Vision: what Maria sees through her camera.
 
-        Uses sensor statistics (lighting, colors, motion, quality).
-        No LLaVA (too heavy for local hardware).
+        On-demand: triggers LLaVA snap for natural language scene description.
+        Fallback: sensor statistics (lighting, colors, motion, quality).
         """
         evidence = []
 
@@ -262,8 +262,29 @@ class EvidenceCollector:
         if self._vision_cortex:
             last = self._vision_cortex.last_percept
 
-        if last:
-            # Build natural description from sensor data
+        # On-demand LLaVA description (fresh frame, ~30s)
+        llava_desc = None
+        if self._vision_cortex:
+            try:
+                llava_desc = self._vision_cortex.describe_scene_llava()
+            except Exception as e:
+                logger.debug(f"[EvidenceCollector] LLaVA snap failed: {e}")
+
+        if llava_desc:
+            evidence.append(Evidence(
+                key="vision_scene",
+                value=llava_desc,
+                source="llava",
+                confidence=0.85,
+            ))
+            evidence.append(Evidence(
+                key="vision_summary",
+                value=f"Moje oko (kamera USB) widzi: {llava_desc}",
+                source="llava",
+                confidence=0.85,
+            ))
+        elif last:
+            # Fallback: stats-based description from last tick
             parts = []
             if last.scene:
                 s = last.scene
@@ -296,6 +317,8 @@ class EvidenceCollector:
                 source=source,
                 confidence=0.9,
             ))
+
+        if last:
             evidence.append(Evidence(
                 key="vision_quality",
                 value=f"jakosc obrazu {last.quality:.0%}, zdrowie sensora {last.vision_health.overall:.0%}",

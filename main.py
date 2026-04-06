@@ -206,6 +206,12 @@ def register_modules(registry):
 
     registry.try_register(make_v3, "v3")
 
+    def make_code():
+        from agent_core.modules.code_module import CodeModule
+        return CodeModule()
+
+    registry.try_register(make_code, "code")
+
 
 # ====== POMOC ======
 

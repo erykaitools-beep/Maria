@@ -52,6 +52,7 @@ class SharedContext:
     trace_store: Any = None            # TraceStore (Phase 1 decision traceability)
     memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
     vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
+    code_agent: Any = None             # CodeAgent (autonomous coding)
 
     # V3 Orchestrator (Phase A)
     capability_router: Any = None      # CapabilityRouter (registry-based dispatch)

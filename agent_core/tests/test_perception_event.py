@@ -276,8 +276,8 @@ class TestEventTypeDefaults:
     """Tests for EVENT_TYPE_DEFAULTS registry."""
 
     def test_all_types_registered(self):
-        """Event Type Registry should have all types (22 original + 2 planner)."""
-        assert len(EVENT_TYPE_DEFAULTS) == 24
+        """Event Type Registry should have all types (22 original + 2 planner + 4 vision)."""
+        assert len(EVENT_TYPE_DEFAULTS) == 28
 
     def test_sensor_types_present(self):
         """All 5 sensor reading types should be registered."""

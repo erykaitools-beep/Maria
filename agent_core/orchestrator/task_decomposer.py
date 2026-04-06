@@ -35,6 +35,7 @@ class TaskCategory(Enum):
     ANALYZE = "analyze"
     FETCH_INFO = "fetch_info"
     SYSTEM_CHECK = "system_check"
+    CODE = "code"
     UNKNOWN = "unknown"
 
 
@@ -127,6 +128,12 @@ _SYSTEM_KEYWORDS = {
     "status", "health", "diagnostyka", "maintenance",
     "konserwacja", "eksperyment", "experiment",
 }
+_CODE_KEYWORDS = {
+    "zrob", "napisz", "build", "implement", "code", "coding",
+    "modul", "module", "feature", "napraw", "fix", "refactor",
+    "zaprogramuj", "program", "script", "skrypt", "stwórz",
+    "stworz", "zaprojektuj", "design", "zaimplementuj",
+}
 
 
 class TaskDecomposer:
@@ -192,6 +199,8 @@ class TaskDecomposer:
              "description": "Pobierz materialy z Wikipedia/RSS"},
             {"category": "system_check", "label": "Diagnostyka",
              "description": "Sprawdz stan systemu, uruchom konserwacje"},
+            {"category": "code", "label": "Kodowanie",
+             "description": "Zaprojektuj, napisz, przetestuj i dostarcz kod"},
         ]
 
     # ------------------------------------------------------------------
@@ -210,6 +219,7 @@ class TaskDecomposer:
             TaskCategory.ANALYZE: self._keyword_score(words, lower, _ANALYZE_KEYWORDS),
             TaskCategory.FETCH_INFO: self._keyword_score(words, lower, _FETCH_KEYWORDS),
             TaskCategory.SYSTEM_CHECK: self._keyword_score(words, lower, _SYSTEM_KEYWORDS),
+            TaskCategory.CODE: self._keyword_score(words, lower, _CODE_KEYWORDS),
         }
 
         best = max(scores, key=scores.get)
@@ -239,6 +249,7 @@ class TaskDecomposer:
         remove_words = (
             _LEARN_KEYWORDS | _EXPLORE_KEYWORDS | _CONSOLIDATE_KEYWORDS |
             _ANALYZE_KEYWORDS | _FETCH_KEYWORDS | _SYSTEM_KEYWORDS |
+            _CODE_KEYWORDS |
             {"sie", "o", "z", "na", "w", "do", "i", "co", "jak",
              "mnie", "mi", "to", "ten", "ta", "te", "moj", "moja"}
         )
@@ -270,6 +281,7 @@ class TaskDecomposer:
             TaskCategory.ANALYZE: self._steps_analyze,
             TaskCategory.FETCH_INFO: self._steps_fetch_info,
             TaskCategory.SYSTEM_CHECK: self._steps_system_check,
+            TaskCategory.CODE: self._steps_code,
         }
         builder = builders.get(category)
         if builder:
@@ -423,6 +435,49 @@ class TaskDecomposer:
             ),
         ]
 
+    def _steps_code(self, topic: Optional[str]) -> List[TaskStep]:
+        """Code: design -> generate -> write -> test -> (fix loop) -> review."""
+        t = topic or "nowy kod"
+        return [
+            TaskStep(
+                order=0, action="code_design",
+                description=f"Projektowanie: {t}",
+                estimated_actions=1, requires_llm=True,
+                k7_classification="guarded",
+            ),
+            TaskStep(
+                order=1, action="code_generate",
+                description=f"Generowanie kodu: {t}",
+                estimated_actions=3, requires_llm=True,
+                k7_classification="restricted",
+            ),
+            TaskStep(
+                order=2, action="code_write",
+                description=f"Zapis plikow: {t}",
+                estimated_actions=0,
+                k7_classification="restricted",
+            ),
+            TaskStep(
+                order=3, action="code_test",
+                description=f"Testowanie: {t}",
+                estimated_actions=0,
+                k7_classification="restricted",
+            ),
+            TaskStep(
+                order=4, action="code_fix",
+                description=f"Naprawa bledow: {t}",
+                estimated_actions=2, requires_llm=True,
+                k7_classification="restricted",
+                fallback_order=2,
+            ),
+            TaskStep(
+                order=5, action="code_review",
+                description=f"Code review: {t}",
+                estimated_actions=1, requires_llm=True,
+                k7_classification="guarded",
+            ),
+        ]
+
     # ------------------------------------------------------------------
     # Feasibility
     # ------------------------------------------------------------------
@@ -481,5 +536,6 @@ class TaskDecomposer:
             TaskCategory.ANALYZE: None,
             TaskCategory.FETCH_INFO: None,
             TaskCategory.SYSTEM_CHECK: None,
+            TaskCategory.CODE: "code_implementation",
         }
         return mapping.get(category)
