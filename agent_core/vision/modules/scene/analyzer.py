@@ -28,17 +28,27 @@ from agent_core.vision.preprocessing.preprocessor import ProcessedFrame
 
 logger = logging.getLogger(__name__)
 
-# LLaVA prompt for scene description
+# LLaVA prompt for scene description (3-layer: detection, confidence, description)
 _SCENE_PROMPT = (
-    "Describe what you see in this image in 1-2 sentences. "
-    "Focus on: the type of room or space, main objects, "
-    "people if present, lighting conditions. Be concise."
+    "Analyze this image in three layers:\n"
+    "1. OBJECTS: List each detected object (building, tree, person, car, etc.)\n"
+    "2. CONFIDENCE: For each object mark: CERTAIN, POSSIBLE, or UNCERTAIN\n"
+    "3. SUMMARY: One factual sentence, no poetry, no adjectives like "
+    "'charming' or 'peaceful' - only what is visible.\n"
+    "Format:\n"
+    "OBJECTS: object1 [CERTAIN], object2 [POSSIBLE], ...\n"
+    "SUMMARY: <factual description>"
 )
 
 _SCENE_PROMPT_PL = (
-    "Opisz co widzisz na tym obrazie w 1-2 zdaniach po polsku. "
-    "Skup sie na: typ pomieszczenia, glowne przedmioty, "
-    "osoby jesli sa, warunki oswietlenia. Badz zwiezly."
+    "Przeanalizuj obraz w trzech warstwach:\n"
+    "1. OBIEKTY: Wymien kazdy wykryty obiekt (budynek, drzewo, osoba, auto, itp.)\n"
+    "2. PEWNOSC: Przy kazdym obiekcie oznacz: PEWNE, MOZLIWE, lub NIEPEWNE\n"
+    "3. OPIS: Jedno zdanie z faktami, bez poetyki, bez 'urokliwy', "
+    "'tradycyjny', 'spokojne miejsce' - tylko to co widac.\n"
+    "Format:\n"
+    "OBIEKTY: obiekt1 [PEWNE], obiekt2 [MOZLIWE], ...\n"
+    "OPIS: <opis faktyczny>"
 )
 
 
