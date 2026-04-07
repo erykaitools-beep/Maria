@@ -557,7 +557,10 @@ class KnowledgeCritic:
 
         for file_id, record in records.items():
             status = record.get("status", "")
-            updated = record.get("updated_at", record.get("timestamp", now))
+            try:
+                updated = float(record.get("updated_at", record.get("timestamp", now)))
+            except (TypeError, ValueError):
+                updated = now
 
             # Grace period - skip fresh files
             if updated > grace_cutoff:
@@ -748,6 +751,8 @@ class KnowledgeCritic:
         for file_id, exams in by_file.items():
             exams.sort(key=lambda e: e["timestamp"])
             scores = [e["score"] for e in exams]
+            if not scores:
+                continue
             best = max(scores)
             latest = scores[-1]
             count = len(scores)

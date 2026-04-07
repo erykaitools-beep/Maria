@@ -106,15 +106,24 @@
 | **2026-04-05** | **V3 Phase C Module 7-9** - CostEstimator + TimeEstimator + FreeVsPaidPlanner (49 testow) |
 | **2026-04-05** | **V3 Phase D Module 10-13** - ExecutionRouter + ToolRegistry + ProgressTracker + LimitationReporter (41 testow) |
 | **2026-04-05** | **V3 Phase E Module 14-15** - ProductShell + V3Module REPL /v3 (26 testow) - **V3 COMPLETE** |
+| **2026-04-06** | **Vision wiring** - homeostasis tick (Phase 8.5), REPL /vision, Web UI /api/vision/*, LLaVA on-demand |
+| **2026-04-06** | **NIM chat routing** - regular chat via NIM, grounded queries via Ollama |
+| **2026-04-06** | **Grounded Vision** - "co widzisz?" -> EvidenceCollector -> LLaVA describe_scene |
+| **2026-04-07** | **Task Pipeline** - TaskStore JSONL persistence for /claude /codex /analyze (22 testow) |
+| **2026-04-07** | **PDF Export** - auto PDF via Telegram, /tasks, /pdf commands, send_document (13 testow) |
+| **2026-04-07** | Timeout fix: 3min -> 5min, explicit error messages, startup cooldown 1h -> 6h |
+| **2026-04-07** | **V3 Migration** - maria.py full mode (daemon+UI), maria-ui.service disabled |
+| **2026-04-07** | Critic bugfix: max() empty sequence + timestamp type coercion |
 
 ## Aktualny stan projektu
 
 | Aspekt | Wartość |
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
-| **Etap** | K1-K13 Phase 2 + Vision + **V3 COMPLETE** (15/15 modules) |
-| **Testy** | 3317 passing |
-| **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + **V3 Phase A-E COMPLETE** |
+| **Etap** | K1-K13 Phase 2 + Vision + **V3 DEPLOYED** (maria.py full mode) |
+| **Testy** | 3352 passing |
+| **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + V3 + Task Pipeline + PDF Export |
+| **Runtime** | `maria.py` (daemon + Web UI, one process, systemd) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
 
 ## Co to jest M.A.R.I.A.?
@@ -346,21 +355,33 @@ Unified memory query with provenance (w `agent_core/memory/query.py`):
 - **Wiring:** homeostasis_module.py -> MemoryQuery -> SharedContext + EvidenceCollector
 - **24 testow** (test_memory_query.py)
 
-## Telegram Bridge - ClawBot (2026-03-26)
+## Telegram Bridge - ClawBot (2026-03-26, updated 2026-04-07)
 
 Komunikacja Maria <-> operator przez Telegram (w `agent_core/telegram/`):
 
 - **Bot:** ClawBot (Telegram @BotFather), token w `.env`
-- **TelegramBot:** send_message + get_updates via requests (zero nowych deps)
-- **TelegramNotifier:** 7 typow alertow z cooldownami per kategoria
+- **TelegramBot:** send_message + send_document + get_updates via requests (zero nowych deps)
+- **TelegramNotifier:** 7 typow alertow z cooldownami per kategoria, startup cooldown 6h
 - **TelegramBridge:** facade + command handler
 - **Komendy:**
   - `/status` - stan systemu (mode, health, planner, knowledge, goals)
   - `/goals` - lista celow (active + proposed)
   - `/approve <id>` - zatwierdz proposed goal
   - `/reject <id>` - odrzuc proposed goal
+  - `/claude <task>` - Claude Code CLI (3/h, 15/day, 5min timeout)
+  - `/codex <task>` - Codex/ChatGPT (10/h, 5min timeout)
+  - `/analyze <modul>` - analiza kodu via Codex
+  - `/tasks [N]` - historia taskow Claude/Codex z ID i statusem
+  - `/pdf <task_id>` - re-export wyniku jako PDF
   - `/restart` - restart Marii (systemd wskrzesi po 10s)
   - `/help` - lista komend
+- **Task Pipeline (2026-04-07):**
+  - TaskStore: `agent_core/llm/task_store.py` - JSONL persistence (`meta_data/claude_tasks.jsonl`)
+  - Lifecycle: PENDING -> RUNNING -> COMPLETED/FAILED/TIMEOUT/INTERRUPTED
+  - Recovery: `recover_interrupted()` at startup, operator notified
+  - PDF Export: `agent_core/telegram/pdf_export.py` (fpdf2 + DejaVu, polskie znaki)
+  - Auto PDF: kazdy wynik Claude/Codex wysylany jako dokument PDF
+  - 35 testow (22 task_store + 13 pdf_export)
 - **Maria powiadamia o:**
   - Napieciach creative (K13) - co 2h
   - Rekomendacjach K12 self-analysis - co 4h
@@ -368,10 +389,10 @@ Komunikacja Maria <-> operator przez Telegram (w `agent_core/telegram/`):
   - Health drop - co 30min
   - Zmiana trybu (degradacja) - co 10min
   - Blokada K7 consecutive failures - co 1h
-  - Startup
-- **Integracja:** Phase 11 w tick loop (poll co 30s), notify w action_executor (K13/K12)
+  - Startup (cooldown 6h)
+- **Integracja:** Phase 11 w tick loop (poll co tick), notify w action_executor (K13/K12)
 - **Config:** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` w `.env`
-- **42 testy**
+- **77 testow** (42 telegram + 35 task/pdf)
 
 ## Planner - Warstwa 2 (K5)
 
@@ -733,13 +754,34 @@ Usunieto:
 - [x] 26 nowych testow (3317 total)
 - [x] **V3 COMPLETE - all 15 modules, all 5 phases**
 
+### DONE: V3 Migration (2026-04-07)
+- [x] maria.py full mode deployed (daemon + Web UI in one process)
+- [x] maria-ui.service disabled
+- [x] Vision cortex shared with Web UI (same process)
+- [x] run_maria.py + run_ui.py = legacy fallback
+
+### DONE: Task Pipeline + PDF Export (2026-04-07)
+- [x] TaskStore wired into /claude, /codex, /analyze (JSONL persistence)
+- [x] Recovery: interrupted tasks marked at startup, operator notified
+- [x] Timeout: 3min -> 5min, explicit error messages
+- [x] PDF auto-export: every result sent as PDF via Telegram
+- [x] /tasks [N] + /pdf <task_id> commands
+- [x] Startup notification cooldown: 1h -> 6h
+- [x] Critic bugfix: max() empty sequence + timestamp type coercion
+- [x] 35 nowych testow (22 task_store + 13 pdf_export)
+
+### DONE: Vision Wiring (2026-04-06)
+- [x] Vision wired: homeostasis tick (Phase 8.5), REPL /vision, Web UI /api/vision/*
+- [x] LLaVA on-demand (describe_scene_llava, 30s timeout)
+- [x] Grounded Vision: "co widzisz?" -> EvidenceCollector -> LLaVA
+- [x] NIM chat routing: regular chat via NIM, grounded queries via Ollama
+
 ### NASTEPNE: Autorozwoj i stabilnosc
-- REPL /critique command
-- Web UI /critique page (opcjonalnie)
+- Web UI + Telegram integration (task pipeline w Web UI)
+- Git remote (GitHub private repo - sync na laptop)
 - Operator UX / dense mode (Web UI v2 polish)
 
 ### ODROCZONE: Zmysly
-- Vision wiring (homeostasis tick, REPL /vision, Web UI) - kod gotowy, czeka na podlaczenie
 - Smart Home (Warstwa 11) - czeka na sprzet
 
 ## Znane problemy
@@ -768,21 +810,22 @@ python -m pytest agent_core/tests/ -v
 # Uruchom REPL
 python main.py
 
-# Automatyczna nauka z input/
-/learn
+# Uruchom pelny system (daemon + Web UI)
+python maria.py
+# -> http://192.168.178.32:5000
 
-# Sprawdz homeostasis w REPL
-/homeostasis
+# Uruchom tylko daemon (bez Web UI)
+python maria.py --daemon
 
-# Sprawdz introspekcje kodu (jak Maria sie widzi)
-/introspect
+# Uruchom tylko Web UI
+python maria.py --ui
 
-# Uruchom daemon (learning loop)
-python run_maria.py
+# Sprawdz srodowisko
+python maria.py --check
 
-# Uruchom Web UI
-python run_ui.py
-# -> http://localhost:5000 (PIN: 1234)
+# Legacy (nadal dziala, ale preferuj maria.py):
+# python run_maria.py   # daemon only
+# python run_ui.py      # Web UI only
 ```
 
 ## Decyzje architektoniczne (ADR)
@@ -1132,4 +1175,4 @@ agent_core/planner/
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-05 (V3 COMPLETE - all 15 modules, 5 phases, ProductShell + /v3 REPL, 3317 testow)*
+*Ostatnia aktualizacja: 2026-04-07 (V3 DEPLOYED - maria.py full mode, Task Pipeline + PDF Export, Critic bugfix, 3352 testow)*
