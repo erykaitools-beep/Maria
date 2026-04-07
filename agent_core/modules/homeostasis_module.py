@@ -753,6 +753,26 @@ class HomeostasisModule(MariaModule):
 
                     # Send startup notification
                     telegram.notifier.notify_startup()
+
+                    # Recover interrupted tasks from previous run
+                    try:
+                        from agent_core.llm.task_store import TaskStore
+                        _task_store = TaskStore()
+                        interrupted = _task_store.recover_interrupted()
+                        if interrupted:
+                            lines = [f"*{len(interrupted)} przerwanych taskow:*"]
+                            for t in interrupted[:5]:
+                                backend = t.get("backend", "?")
+                                text = t.get("task_text", "?")[:60]
+                                lines.append(f"  [{backend}] {text}")
+                            telegram.notifier.send_raw("\n".join(lines))
+                            logger.info(
+                                "[TaskStore] Recovered %d interrupted tasks",
+                                len(interrupted),
+                            )
+                    except Exception as e:
+                        logger.debug(f"TaskStore recovery skipped: {e}")
+
                     print("[Homeostasis] [OK] Telegram bridge wired (ClawBot)")
                 else:
                     print("[Homeostasis] [--] Telegram not configured (set TELEGRAM_BOT_TOKEN in .env)")
@@ -1638,6 +1658,8 @@ def _register_telegram_commands(bridge, ctx):
             "/codex <zadanie> - Codex/ChatGPT\n"
             "/analyze <modul> - analiza kodu\n"
             "\n*Diagnostyka:*\n"
+            "/tasks [N] - historia taskow Claude/Codex\n"
+            "/pdf <task_id> - wyslij wynik jako PDF\n"
             "/trace [N|stats] - traces\n"
             "/efapprove <id> - zatwierdz efektor\n"
             "/efreject <id> - odrzuc efektor\n"
@@ -1693,6 +1715,23 @@ def _register_telegram_commands(bridge, ctx):
 
         return "Uzycie: /board [open|prune]"
 
+    def _send_result_pdf(task_id, backend, task_text, result, duration_ms=None, timestamp=None):
+        """Generate PDF from result and send via Telegram."""
+        try:
+            from agent_core.telegram.pdf_export import generate_task_pdf
+            pdf_path = generate_task_pdf(
+                task_id=task_id, backend=backend,
+                task_text=task_text, result=result,
+                duration_ms=duration_ms, timestamp=timestamp,
+            )
+            if pdf_path:
+                bridge.bot.send_document(
+                    pdf_path,
+                    caption=f"[{backend}] {task_text[:80]}",
+                )
+        except Exception as e:
+            logger.debug(f"PDF export failed: {e}")
+
     def _cmd_codex(args):
         """Execute code task via Codex CLI: /codex <task description>"""
         if not args or not args.strip():
@@ -1708,10 +1747,17 @@ def _register_telegram_commands(bridge, ctx):
         import threading
 
         def _run_codex_task():
+            from agent_core.llm.task_store import TaskStore
+            store = TaskStore()
+            task_id = store.create_task(
+                task_text=task, backend="codex",
+                source="telegram_codex", timeout_s=300,
+            )
             try:
                 from agent_core.llm.codex_client import CodexClient
-                codex = CodexClient(timeout_s=180)
+                codex = CodexClient(timeout_s=300)
                 if not codex.is_available():
+                    store.mark_failed(task_id, "Codex CLI niedostepny")
                     bridge.bot.send_message("[Code] Codex CLI niedostepny.")
                     return
 
@@ -1721,10 +1767,22 @@ def _register_telegram_commands(bridge, ctx):
                     f"Zadanie od operatora: {task}"
                 )
 
-                bridge.bot.send_message(f"[Code] Pracuje nad: {task[:80]}...")
+                store.mark_running(task_id)
+                bridge.bot.send_message(
+                    f"[Code] Pracuje nad: {task[:80]}...\n"
+                    f"(task: {task_id}, timeout: 5min)"
+                )
 
                 result = codex.ask(prompt, source="telegram_code", context={"task": task})
                 if result:
+                    store.mark_completed(task_id, result[:500])
+                    # Send full result as PDF
+                    task_rec = store.get_task(task_id)
+                    _send_result_pdf(
+                        task_id, "codex", task, result,
+                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
+                        timestamp=task_rec.get("created_at") if task_rec else None,
+                    )
                     # Trim for Telegram (4096 char limit)
                     if len(result) > 3800:
                         result = result[:3800] + "\n...(obciete)"
@@ -1740,13 +1798,19 @@ def _register_telegram_commands(bridge, ctx):
                                 topic=task[:100],
                                 content=result[:500],
                                 source="telegram_code",
-                                metadata={"full_result_length": len(result)},
+                                metadata={"full_result_length": len(result), "task_id": task_id},
                             )
                         except Exception:
                             pass
                 else:
-                    bridge.bot.send_message("[Code] Codex nie zwrocil odpowiedzi.")
+                    # Check if it was a timeout (codex returns None on timeout)
+                    store.mark_timeout(task_id, 300)
+                    bridge.bot.send_message(
+                        f"[Code] Brak odpowiedzi (timeout 5min).\n"
+                        f"Task {task_id} zapisany - mozesz ponowic."
+                    )
             except Exception as e:
+                store.mark_failed(task_id, str(e)[:300])
                 bridge.bot.send_message(f"[Code] Blad: {e}")
 
         t = threading.Thread(target=_run_codex_task, daemon=True)
@@ -1876,10 +1940,18 @@ def _register_telegram_commands(bridge, ctx):
         import threading
 
         def _run_analysis():
+            from agent_core.llm.task_store import TaskStore
+            store = TaskStore()
+            task_id = store.create_task(
+                task_text=f"analyze: {module_path}", backend="codex",
+                source="telegram_analyze", timeout_s=300,
+                metadata={"module": module_path},
+            )
             try:
                 from agent_core.llm.codex_client import CodexClient
-                codex = CodexClient(timeout_s=180)
+                codex = CodexClient(timeout_s=300)
                 if not codex.is_available():
+                    store.mark_failed(task_id, "Codex CLI niedostepny")
                     bridge.bot.send_message("[Analyze] Codex CLI niedostepny.")
                     return
 
@@ -1891,10 +1963,21 @@ def _register_telegram_commands(bridge, ctx):
                     f"Odpowiedz zwiezle po polsku."
                 )
 
-                bridge.bot.send_message(f"[Analyze] Analizuje: {module_path}...")
+                store.mark_running(task_id)
+                bridge.bot.send_message(
+                    f"[Analyze] Analizuje: {module_path}...\n"
+                    f"(task: {task_id}, timeout: 5min)"
+                )
 
                 result = codex.ask(prompt, source="telegram_analyze", context={"module": module_path})
                 if result:
+                    store.mark_completed(task_id, result[:500])
+                    task_rec = store.get_task(task_id)
+                    _send_result_pdf(
+                        task_id, "codex", f"analyze: {module_path}", result,
+                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
+                        timestamp=task_rec.get("created_at") if task_rec else None,
+                    )
                     if len(result) > 3800:
                         result = result[:3800] + "\n...(obciete)"
                     bridge.bot.send_message(f"[Analyze] {module_path}:\n\n{result}")
@@ -1909,13 +1992,18 @@ def _register_telegram_commands(bridge, ctx):
                                 topic=f"Analiza: {module_path}",
                                 content=result[:500],
                                 source="telegram_analyze",
-                                metadata={"module": module_path},
+                                metadata={"module": module_path, "task_id": task_id},
                             )
                         except Exception:
                             pass
                 else:
-                    bridge.bot.send_message("[Analyze] Codex nie zwrocil odpowiedzi.")
+                    store.mark_timeout(task_id, 300)
+                    bridge.bot.send_message(
+                        f"[Analyze] Brak odpowiedzi (timeout 5min).\n"
+                        f"Task {task_id} zapisany - mozesz ponowic."
+                    )
             except Exception as e:
+                store.mark_failed(task_id, str(e)[:300])
                 bridge.bot.send_message(f"[Analyze] Blad: {e}")
 
         t = threading.Thread(target=_run_analysis, daemon=True)
@@ -1936,15 +2024,23 @@ def _register_telegram_commands(bridge, ctx):
         import threading
 
         def _run_claude_task():
+            from agent_core.llm.task_store import TaskStore
+            store = TaskStore()
+            task_id = store.create_task(
+                task_text=task, backend="claude",
+                source="telegram_claude", timeout_s=300,
+            )
             try:
                 from agent_core.llm.claude_client import ClaudeClient
-                client = ClaudeClient()
+                client = ClaudeClient(timeout_s=300)
                 if not client.is_available():
+                    store.mark_failed(task_id, "Claude CLI niedostepny")
                     bridge.bot.send_message("[Claude] CLI niedostepny.")
                     return
 
                 stats = client.get_stats()
                 if stats["remaining_hour"] <= 0:
+                    store.mark_failed(task_id, "rate_limited")
                     bridge.bot.send_message(
                         f"[Claude] Limit godzinowy wyczerpany "
                         f"({stats['calls_this_hour']}/{stats['max_per_hour']}). "
@@ -1952,9 +2048,11 @@ def _register_telegram_commands(bridge, ctx):
                     )
                     return
 
+                store.mark_running(task_id)
                 bridge.bot.send_message(
                     f"[Claude] Pracuje nad: {task[:80]}...\n"
-                    f"(zostalo {stats['remaining_hour']}/{stats['max_per_hour']} na te godzine)"
+                    f"(task: {task_id}, timeout: 5min, "
+                    f"zostalo {stats['remaining_hour']}/{stats['max_per_hour']})"
                 )
 
                 result = client.ask(
@@ -1963,6 +2061,13 @@ def _register_telegram_commands(bridge, ctx):
                     context={"task": task},
                 )
                 if result:
+                    store.mark_completed(task_id, result[:500])
+                    task_rec = store.get_task(task_id)
+                    _send_result_pdf(
+                        task_id, "claude", task, result,
+                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
+                        timestamp=task_rec.get("created_at") if task_rec else None,
+                    )
                     if len(result) > 3800:
                         result = result[:3800] + "\n...(obciete)"
                     bridge.bot.send_message(f"[Claude] Wynik:\n\n{result}")
@@ -1976,19 +2081,82 @@ def _register_telegram_commands(bridge, ctx):
                                 topic=task[:100],
                                 content=result[:500],
                                 source="telegram_claude",
-                                metadata={"backend": "claude"},
+                                metadata={"backend": "claude", "task_id": task_id},
                             )
                         except Exception:
                             pass
                 else:
-                    bridge.bot.send_message("[Claude] Brak odpowiedzi.")
+                    store.mark_timeout(task_id, 300)
+                    bridge.bot.send_message(
+                        f"[Claude] Brak odpowiedzi (timeout 5min).\n"
+                        f"Task {task_id} zapisany - mozesz ponowic."
+                    )
             except Exception as e:
+                store.mark_failed(task_id, str(e)[:300])
                 bridge.bot.send_message(f"[Claude] Blad: {e}")
 
         t = threading.Thread(target=_run_claude_task, daemon=True)
         t.start()
         return f"Przyjeto (Claude): '{task[:60]}'. Wynik za chwile..."
 
+    def _cmd_tasks(args):
+        """Show recent tasks: /tasks [N]"""
+        from agent_core.llm.task_store import TaskStore
+        store = TaskStore()
+        limit = 5
+        if args and args.strip().isdigit():
+            limit = min(int(args.strip()), 20)
+        tasks = store.get_recent(limit)
+        if not tasks:
+            return "Brak zapisanych taskow."
+        lines = [f"*Ostatnie {len(tasks)} taskow:*"]
+        for t in reversed(tasks):
+            tid = t.get("task_id", "?")
+            status = t.get("status", "?")
+            backend = t.get("backend", "?")
+            text = t.get("task_text", "?")[:50]
+            dur = t.get("duration_ms")
+            dur_str = f" {dur/1000:.0f}s" if dur else ""
+            err = t.get("error", "")
+            err_str = f" | {err[:40]}" if err else ""
+            lines.append(f"  `{tid}` [{backend}] {status}{dur_str}{err_str}\n  {text}")
+        return "\n".join(lines)
+
+    def _cmd_pdf(args):
+        """Re-export a past task as PDF: /pdf <task_id>"""
+        if not args or not args.strip():
+            return (
+                "Uzycie: /pdf <task_id>\n"
+                "Uzyj /tasks aby zobaczyc dostepne taski."
+            )
+        task_id = args.strip()
+        from agent_core.llm.task_store import TaskStore
+        store = TaskStore()
+        # Support prefix matching
+        task = store.get_task(task_id)
+        if not task:
+            # Try prefix match
+            for t in reversed(store.get_recent(50)):
+                if t.get("task_id", "").startswith(task_id):
+                    task = t
+                    break
+        if not task:
+            return f"Task '{task_id}' nie znaleziony. Uzyj /tasks."
+        if task.get("status") != "COMPLETED":
+            return f"Task {task['task_id']} status: {task.get('status')} (PDF tylko dla COMPLETED)."
+        summary = task.get("result_summary", "")
+        if not summary:
+            return f"Task {task['task_id']} nie ma zapisanego wyniku."
+        _send_result_pdf(
+            task["task_id"], task.get("backend", "?"),
+            task.get("task_text", "?"), summary,
+            duration_ms=task.get("duration_ms"),
+            timestamp=task.get("created_at"),
+        )
+        return f"PDF wygenerowany dla task {task['task_id']}."
+
+    bridge.register_command("pdf", _cmd_pdf)
+    bridge.register_command("tasks", _cmd_tasks)
     bridge.register_command("claude", _cmd_claude)
     bridge.register_command("code", _cmd_code)
     bridge.register_command("codex", _cmd_codex)

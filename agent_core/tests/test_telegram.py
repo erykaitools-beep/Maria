@@ -167,6 +167,12 @@ class TestTelegramNotifier:
 
     def test_notify_startup(self):
         notifier, bot = self._make_notifier()
+        # Clear file-based cooldown to ensure test passes
+        from agent_core.telegram.notifier import _STARTUP_NOTIFY_FILE
+        try:
+            _STARTUP_NOTIFY_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
         assert notifier.notify_startup() is True
         bot.send_message.assert_called_once()
         msg = bot.send_message.call_args[0][0]

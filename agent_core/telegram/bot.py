@@ -132,6 +132,52 @@ class TelegramBot:
             logger.warning(f"TelegramBot: request error: {e}")
             return False
 
+    def send_document(
+        self,
+        file_path: str,
+        caption: Optional[str] = None,
+        chat_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Send a document (file) to the operator.
+
+        Args:
+            file_path: Local path to the file to send
+            caption: Optional caption (max 1024 chars)
+            chat_id: Override default chat_id
+
+        Returns:
+            True if sent successfully, False otherwise.
+        """
+        if not self.configured:
+            return False
+
+        target = chat_id or self._chat_id
+
+        try:
+            with open(file_path, "rb") as f:
+                data = {"chat_id": target}
+                if caption:
+                    data["caption"] = caption[:1024]
+                resp = requests.post(
+                    self._api_url("sendDocument"),
+                    data=data,
+                    files={"document": f},
+                    timeout=(5, 30),
+                )
+            result = resp.json()
+            if result.get("ok"):
+                logger.debug("TelegramBot: document sent: %s", file_path)
+                return True
+            logger.warning(
+                "TelegramBot: sendDocument failed: %s",
+                result.get("description"),
+            )
+            return False
+        except Exception as e:
+            logger.warning("TelegramBot: sendDocument error: %s", e)
+            return False
+
     def get_updates(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Poll for new messages from operator.

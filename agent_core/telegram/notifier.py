@@ -14,11 +14,17 @@ Sources:
 
 import logging
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent_core.telegram.bot import TelegramBot
 
 logger = logging.getLogger(__name__)
+
+# File-based startup dedup (survives restarts)
+_META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
+_STARTUP_NOTIFY_FILE = _META_DIR / "last_startup_notify.txt"
+_STARTUP_COOLDOWN_SEC = 21600  # 6h - prevents spam on restarts
 
 # Cooldowns per alert category (seconds)
 # Prevents spamming operator with same type of alert
@@ -69,7 +75,21 @@ class TelegramNotifier:
     # -- Public notification methods (called by subsystems) --
 
     def notify_startup(self) -> bool:
-        """Send startup notification."""
+        """Send startup notification (file-based dedup survives restarts)."""
+        # Check file-based cooldown to prevent spam on rapid restarts
+        try:
+            if _STARTUP_NOTIFY_FILE.exists():
+                last_ts = float(_STARTUP_NOTIFY_FILE.read_text().strip())
+                if (time.time() - last_ts) < _STARTUP_COOLDOWN_SEC:
+                    logger.info(
+                        "[Telegram] Startup notification suppressed "
+                        "(last sent %.0fs ago, cooldown %ds)",
+                        time.time() - last_ts, _STARTUP_COOLDOWN_SEC,
+                    )
+                    return False
+        except (ValueError, OSError):
+            pass  # corrupted file or read error - proceed with send
+
         text = (
             "*M.A.R.I.A. uruchomiona*\n\n"
             "Homeostasis aktywna. Czekam na polecenia."
@@ -77,6 +97,12 @@ class TelegramNotifier:
         ok = self._bot.send_message(text)
         if ok:
             self._mark_sent("startup")
+            # Persist to file for cross-restart dedup
+            try:
+                _STARTUP_NOTIFY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _STARTUP_NOTIFY_FILE.write_text(str(time.time()))
+            except OSError:
+                pass
         return ok
 
     def notify_creative_tensions(
