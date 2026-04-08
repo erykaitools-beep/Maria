@@ -234,10 +234,16 @@ class ActionExecutor:
             max_iterations=1, filter_file_ids=filter_ids,
         )
         stats = status.get("stats", {})
+        # Success = any productive work: new chunks OR review/exam executed
+        learned = stats.get("chunks_learned", 0)
+        exams = stats.get("exams_run", 0)
+        strategies = stats.get("strategies_executed", 0)
         result = {
-            "success": stats.get("chunks_learned", 0) > 0,
-            "chunks_learned": stats.get("chunks_learned", 0),
-            "strategies_executed": stats.get("strategies_executed", 0),
+            "success": learned > 0 or exams > 0 or strategies > 0,
+            "chunks_learned": learned,
+            "exams_run": exams,
+            "exams_passed": stats.get("exams_passed", 0),
+            "strategies_executed": strategies,
         }
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
@@ -517,8 +523,15 @@ class ActionExecutor:
                     resp = self._expert_bridge.ask_about_topic(topic, goal_desc)
 
                 if not resp.success:
+                    # Logical skips (dedup, already covered) are not failures
+                    skip_reasons = {
+                        "expert_material_already_exists",
+                        "topic_well_covered",
+                    }
+                    is_skip = resp.reason in skip_reasons
                     return {
-                        "success": False, "error": resp.reason,
+                        "success": is_skip, "skipped": is_skip,
+                        "reason": resp.reason,
                         "topic": topic, "gap_action": resp.gap_action,
                     }
 
