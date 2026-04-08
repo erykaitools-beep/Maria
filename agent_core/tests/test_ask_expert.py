@@ -265,8 +265,8 @@ class TestExecAskExpertWithBridge:
         assert result["success"] is True
         bridge.ask_with_context.assert_called_once()
 
-    def test_expert_bridge_failure_falls_to_legacy(self):
-        """If bridge returns failure, falls through to legacy encyclopedia."""
+    def test_expert_bridge_skip_returns_success(self):
+        """If bridge returns topic_well_covered, treated as skip (success)."""
         from agent_core.bulletin.expert_bridge import ExpertBridge, ExpertResponse
 
         bridge = ExpertBridge()
@@ -280,7 +280,25 @@ class TestExecAskExpertWithBridge:
         plan = self._make_plan(topic="fizyka")
         result = executor.execute(plan)
 
-        # Bridge returned failure, no legacy router -> failure
+        # topic_well_covered is a skip reason -> success=True, skipped=True
+        assert result["success"] is True
+        assert result["skipped"] is True
+
+    def test_expert_bridge_real_failure(self):
+        """If bridge returns a non-skip failure, result is failure."""
+        from agent_core.bulletin.expert_bridge import ExpertBridge, ExpertResponse
+
+        bridge = ExpertBridge()
+        resp = ExpertResponse(
+            success=False, topic="fizyka", reason="llm_error",
+        )
+        bridge.ask_about_topic = MagicMock(return_value=resp)
+
+        executor = ActionExecutor()
+        executor.set_expert_bridge(bridge)
+        plan = self._make_plan(topic="fizyka")
+        result = executor.execute(plan)
+
         assert result["success"] is False
 
     def test_bulletin_resolved_after_success(self):

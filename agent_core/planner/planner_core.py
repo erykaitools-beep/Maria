@@ -48,6 +48,11 @@ HIGH_PRIORITY_EVENTS = {
 # Max in-memory plan history
 MAX_HISTORY_SIZE = 100
 
+# Stuck detection
+STUCK_THRESHOLD = 3              # consecutive identical failures -> stuck
+STUCK_COOLDOWN_SEC = 1800        # 30 min cooldown for stuck goal
+STUCK_HISTORY_SIZE = 10          # track last N failure fingerprints
+
 # Auto-learning goal limits
 MAX_AUTO_LEARNING_GOALS = 3
 AUTO_GOAL_COOLDOWN_SEC = 3600  # 1 hour
@@ -239,10 +244,17 @@ class PlannerCore:
         - Every ROUTINE_INTERVAL_TICKS (60 ticks)
         - Immediately on high-priority events in PerceptionBuffer
         """
-        # Routine check
+        # Routine check with NOOP backoff:
+        # After consecutive NOOPs, extend interval (60s -> 120s -> 300s -> 600s max)
+        noop_count = self._state.consecutive_noop_count
+        if noop_count >= 3:
+            backoff_multiplier = min(noop_count - 1, 10)  # cap at 10x
+            interval = ROUTINE_INTERVAL_TICKS * backoff_multiplier
+        else:
+            interval = ROUTINE_INTERVAL_TICKS
         ticks_since = tick_count - self._state.last_cycle_tick
         # Handle tick discontinuity after daemon restart (tick resets to 0)
-        if ticks_since < 0 or ticks_since >= ROUTINE_INTERVAL_TICKS:
+        if ticks_since < 0 or ticks_since >= interval:
             return True
 
         # Event-driven check: high-priority events since last cycle
@@ -411,7 +423,11 @@ class PlannerCore:
             return self._finalize_plan(noop_plan)
 
         # Nothing to do
-        logger.debug("Planner: no feasible goal and no evaluation needed")
+        self._state.consecutive_noop_count += 1
+        logger.debug(
+            "Planner: no feasible goal and no evaluation needed "
+            "(noop streak: %d)", self._state.consecutive_noop_count,
+        )
         if trace:
             trace.add_step("planner", "no_goals", "idle")
             trace.finalize(success=True, result_summary="no_goals")
@@ -829,6 +845,17 @@ class PlannerCore:
             if feasible:
                 scored.append((score, goal))
         scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Filter out stuck-cooled goals
+        now = time.time()
+        expired = [gid for gid, until_ts in self._state.stuck_cooldowns.items()
+                   if until_ts <= now]
+        for gid in expired:
+            del self._state.stuck_cooldowns[gid]
+
+        scored = [(s, g) for s, g in scored
+                  if self._state.stuck_cooldowns.get(g.id, 0) <= now]
+
         return [g for _, g in scored]
 
     # -- Internal: plan creation ----------------------------
@@ -1562,6 +1589,39 @@ class PlannerCore:
             )
             self._save_trace(trace)
 
+        # Track consecutive NOOPs for backoff
+        if plan.action_type == ActionType.NOOP:
+            self._state.consecutive_noop_count += 1
+        else:
+            self._state.consecutive_noop_count = 0
+
+        # Stuck detection: track repeated failures on the same goal+action
+        if plan.status == PlanStatus.FAILED and plan.goal_id:
+            error_reason = (
+                (plan.result or {}).get("error", "")
+                or (plan.result or {}).get("reason", "")
+            )
+            fingerprint = {
+                "action": plan.action_type.value,
+                "goal_id": plan.goal_id,
+                "reason": str(error_reason)[:100],
+            }
+            self._state.stuck_history.append(fingerprint)
+            if len(self._state.stuck_history) > STUCK_HISTORY_SIZE:
+                self._state.stuck_history = self._state.stuck_history[-STUCK_HISTORY_SIZE:]
+
+            recent = self._state.stuck_history[-STUCK_THRESHOLD:]
+            if len(recent) == STUCK_THRESHOLD and all(
+                r["action"] == fingerprint["action"]
+                and r["goal_id"] == fingerprint["goal_id"]
+                and r["reason"] == fingerprint["reason"]
+                for r in recent
+            ):
+                self._handle_stuck(plan, fingerprint, STUCK_THRESHOLD)
+        elif plan.status == PlanStatus.COMPLETED:
+            # Success clears stuck history (cycle is working)
+            self._state.stuck_history.clear()
+
         # Persist (with message)
         self._log_decision(plan)
         self._save_state()
@@ -1918,6 +1978,38 @@ class PlannerCore:
         self._save_state()
         clear_episode_id()
         return plan
+
+    def _handle_stuck(self, plan: Plan, fingerprint: dict, count: int) -> None:
+        """Handle detected stuck loop: cooldown goal + warn + notify."""
+        goal_id = fingerprint["goal_id"]
+        action = fingerprint["action"]
+        reason = fingerprint["reason"]
+
+        cooldown_until = time.time() + STUCK_COOLDOWN_SEC
+        self._state.stuck_cooldowns[goal_id] = cooldown_until
+
+        logger.warning(
+            "[STUCK] %s on goal %s failed %d times (reason: %s). "
+            "Cooldown %d min.",
+            action, goal_id, count, reason, STUCK_COOLDOWN_SEC // 60,
+        )
+
+        # Telegram alert (Level 3)
+        if self._telegram_notifier:
+            try:
+                self._telegram_notifier.notify_stuck_planner(
+                    action=action,
+                    goal_id=goal_id,
+                    goal_description=plan.goal_description or "",
+                    count=count,
+                    reason=reason,
+                    cooldown_minutes=STUCK_COOLDOWN_SEC // 60,
+                )
+            except Exception:
+                pass
+
+        # Clear history to avoid re-triggering immediately
+        self._state.stuck_history.clear()
 
     def _format_message(self, plan: Plan) -> str:
         """Generate human-readable message for a plan decision."""

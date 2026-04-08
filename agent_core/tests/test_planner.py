@@ -471,11 +471,20 @@ class TestActionExecutor:
         assert result["success"] is True
         assert result["chunks_learned"] == 2
 
-    def test_learn_no_chunks(self):
-        self.executor.set_teacher_agent(_make_mock_teacher(chunks=0))
+    def test_learn_idle_session(self):
+        """Truly idle session (no chunks, no exams, no strategies) -> failure."""
+        self.executor.set_teacher_agent(_make_mock_teacher(chunks=0, strategies=0))
         plan = create_plan("g1", "learn", ActionType.LEARN)
         result = self.executor.execute(plan)
         assert result["success"] is False
+
+    def test_learn_review_with_exam_is_success(self):
+        """Teacher did review (exam) instead of learning new chunk -> success."""
+        self.executor.set_teacher_agent(_make_mock_teacher(chunks=0, exams=1, strategies=1))
+        plan = create_plan("g1", "learn", ActionType.LEARN)
+        result = self.executor.execute(plan)
+        assert result["success"] is True
+        assert result["exams_run"] == 1
 
     def test_exam_success(self):
         teacher = _make_mock_teacher()
@@ -2029,3 +2038,307 @@ class TestGoalPivot:
         ranked = planner._select_ranked_goals(context)
         assert len(ranked) == 1
         assert ranked[0].id == "g-ok"
+
+    def test_select_ranked_goals_filters_stuck_cooled(self, planner_env):
+        """Goals in stuck cooldown should be filtered out."""
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+
+        goal1 = _make_goal(goal_id="g-stuck", priority=1.0, goal_type="learning")
+        goal2 = _make_goal(goal_id="g-ok", priority=0.5, goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal1, goal2]))
+
+        # Put goal1 in stuck cooldown
+        planner._state.stuck_cooldowns["g-stuck"] = time.time() + 1800
+
+        context = planner._gather_context()
+        ranked = planner._select_ranked_goals(context)
+        assert len(ranked) == 1
+        assert ranked[0].id == "g-ok"
+
+    def test_stuck_cooldown_expires(self, planner_env):
+        """Expired stuck cooldown should no longer filter goals."""
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+
+        goal = _make_goal(goal_id="g-was-stuck", priority=1.0, goal_type="learning")
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        # Expired cooldown
+        planner._state.stuck_cooldowns["g-was-stuck"] = time.time() - 1
+
+        context = planner._gather_context()
+        ranked = planner._select_ranked_goals(context)
+        assert len(ranked) == 1
+        assert ranked[0].id == "g-was-stuck"
+        # Expired entry should be cleaned up
+        assert "g-was-stuck" not in planner._state.stuck_cooldowns
+
+
+class TestStuckDetection:
+    """Stuck loop detection in planner (Level 2)."""
+
+    def test_stuck_detected_after_threshold(self, planner_env):
+        """3 consecutive identical failures should trigger stuck cooldown."""
+        planner, _ = planner_env
+        from agent_core.planner.planner_core import STUCK_THRESHOLD
+
+        # Simulate 3 identical failures
+        for _ in range(STUCK_THRESHOLD):
+            planner._state.stuck_history.append({
+                "action": "ask_expert",
+                "goal_id": "g-test",
+                "reason": "expert_material_already_exists",
+            })
+
+        # Create a plan that triggers _handle_stuck check
+        plan = create_plan(
+            goal_id="g-test",
+            goal_description="Test goal",
+            action_type=ActionType.ASK_EXPERT,
+        )
+        plan.status = PlanStatus.FAILED
+        plan.result = {"error": "expert_material_already_exists"}
+
+        # Manually trigger _handle_stuck
+        fingerprint = {
+            "action": "ask_expert",
+            "goal_id": "g-test",
+            "reason": "expert_material_already_exists",
+        }
+        planner._handle_stuck(plan, fingerprint, STUCK_THRESHOLD)
+
+        assert "g-test" in planner._state.stuck_cooldowns
+        assert planner._state.stuck_cooldowns["g-test"] > time.time()
+        # History should be cleared after stuck
+        assert len(planner._state.stuck_history) == 0
+
+    def test_no_stuck_below_threshold(self, planner_env):
+        """Fewer than threshold failures should not trigger stuck."""
+        planner, _ = planner_env
+
+        # Only 2 failures (threshold is 3)
+        planner._state.stuck_history = [
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "err"},
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "err"},
+        ]
+        assert "g-test" not in planner._state.stuck_cooldowns
+
+    def test_different_errors_no_stuck(self, planner_env):
+        """Different error reasons should not trigger stuck."""
+        planner, _ = planner_env
+
+        planner._state.stuck_history = [
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "error_a"},
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "error_b"},
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "error_c"},
+        ]
+        # No cooldown should exist
+        assert "g-test" not in planner._state.stuck_cooldowns
+
+    def test_success_clears_stuck_history(self, planner_env):
+        """A successful plan should clear stuck history."""
+        planner, _ = planner_env
+
+        planner._state.stuck_history = [
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "err"},
+            {"action": "ask_expert", "goal_id": "g-test", "reason": "err"},
+        ]
+        assert len(planner._state.stuck_history) == 2
+
+        # Simulate the success path (from _finalize_plan)
+        planner._state.stuck_history.clear()
+        assert len(planner._state.stuck_history) == 0
+
+    def test_stuck_sends_telegram(self, planner_env):
+        """Stuck detection should call Telegram notifier."""
+        planner, _ = planner_env
+        from agent_core.planner.planner_core import STUCK_THRESHOLD, STUCK_COOLDOWN_SEC
+
+        mock_notifier = MagicMock()
+        planner._telegram_notifier = mock_notifier
+
+        plan = create_plan(
+            goal_id="g-test",
+            goal_description="Nauka logiki",
+            action_type=ActionType.ASK_EXPERT,
+        )
+        fingerprint = {
+            "action": "ask_expert",
+            "goal_id": "g-test",
+            "reason": "expert_material_already_exists",
+        }
+
+        planner._handle_stuck(plan, fingerprint, STUCK_THRESHOLD)
+
+        mock_notifier.notify_stuck_planner.assert_called_once_with(
+            action="ask_expert",
+            goal_id="g-test",
+            goal_description="Nauka logiki",
+            count=STUCK_THRESHOLD,
+            reason="expert_material_already_exists",
+            cooldown_minutes=STUCK_COOLDOWN_SEC // 60,
+        )
+
+    def test_stuck_state_persists(self):
+        """Stuck fields should survive to_dict/from_dict round-trip."""
+        state = PlannerState()
+        state.stuck_history = [
+            {"action": "learn", "goal_id": "g-1", "reason": "err"},
+        ]
+        state.stuck_cooldowns = {"g-1": time.time() + 1800}
+
+        d = state.to_dict()
+        restored = PlannerState.from_dict(d)
+
+        assert restored.stuck_history == state.stuck_history
+        assert restored.stuck_cooldowns == state.stuck_cooldowns
+
+    def test_stuck_state_defaults_on_old_json(self):
+        """Old planner_state.json without stuck fields should load cleanly."""
+        old_dict = {
+            "last_cycle_tick": 100,
+            "total_cycles": 50,
+        }
+        state = PlannerState.from_dict(old_dict)
+        assert state.stuck_history == []
+        assert state.stuck_cooldowns == {}
+
+
+class TestHandlerSkipLogic:
+    """Level 1: CapabilityRouter handler skip logic for ask_expert."""
+
+    def test_expert_already_exists_returns_success(self):
+        """expert_material_already_exists should return success=True, skipped=True."""
+        from agent_core.routing.handlers import make_ask_expert_handler
+
+        mock_bridge = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.success = False
+        mock_resp.reason = "expert_material_already_exists"
+        mock_resp.gap_action = ""
+        mock_bridge.ask_about_topic.return_value = mock_resp
+
+        handler = make_ask_expert_handler(
+            llm_router=MagicMock(),
+            expert_bridge=mock_bridge,
+        )
+
+        plan = create_plan(
+            goal_id="g-test",
+            goal_description="Test",
+            action_type=ActionType.ASK_EXPERT,
+            action_params={"topic": "logika formalna"},
+        )
+
+        result = handler(plan)
+        assert result["success"] is True
+        assert result["skipped"] is True
+        assert result.get("error") is None
+
+    def test_topic_well_covered_returns_success(self):
+        """topic_well_covered should also be a skip (success=True)."""
+        from agent_core.routing.handlers import make_ask_expert_handler
+
+        mock_bridge = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.success = False
+        mock_resp.reason = "topic_well_covered"
+        mock_resp.gap_action = ""
+        mock_bridge.ask_about_topic.return_value = mock_resp
+
+        handler = make_ask_expert_handler(
+            llm_router=MagicMock(),
+            expert_bridge=mock_bridge,
+        )
+
+        plan = create_plan(
+            goal_id="g-test",
+            goal_description="Test",
+            action_type=ActionType.ASK_EXPERT,
+            action_params={"topic": "fizyka"},
+        )
+
+        result = handler(plan)
+        assert result["success"] is True
+        assert result["skipped"] is True
+
+    def test_real_failure_returns_failure(self):
+        """Non-skip reasons should still return success=False."""
+        from agent_core.routing.handlers import make_ask_expert_handler
+
+        mock_bridge = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.success = False
+        mock_resp.reason = "llm_error"
+        mock_resp.gap_action = ""
+        mock_bridge.ask_about_topic.return_value = mock_resp
+
+        handler = make_ask_expert_handler(
+            llm_router=MagicMock(),
+            expert_bridge=mock_bridge,
+        )
+
+        plan = create_plan(
+            goal_id="g-test",
+            goal_description="Test",
+            action_type=ActionType.ASK_EXPERT,
+            action_params={"topic": "chemia"},
+        )
+
+        result = handler(plan)
+        assert result["success"] is False
+        assert result["error"] == "llm_error"
+
+
+class TestTelegramStuckNotification:
+    """Level 3: Telegram stuck planner notification."""
+
+    def test_notify_stuck_sends_message(self):
+        """notify_stuck_planner should send formatted message."""
+        from agent_core.telegram.notifier import TelegramNotifier
+
+        mock_bot = MagicMock()
+        mock_bot.configured = True
+        mock_bot.send_message.return_value = True
+        notifier = TelegramNotifier(bot=mock_bot)
+
+        ok = notifier.notify_stuck_planner(
+            action="ask_expert",
+            goal_id="g-test",
+            goal_description="Nauka logiki",
+            count=3,
+            reason="expert_material_already_exists",
+            cooldown_minutes=30,
+        )
+
+        assert ok is True
+        mock_bot.send_message.assert_called_once()
+        msg = mock_bot.send_message.call_args[0][0]
+        assert "Utknelam" in msg
+        assert "ask_expert" in msg
+        assert "30 min" in msg
+
+    def test_notify_stuck_respects_cooldown(self):
+        """Second call within 2h should be suppressed."""
+        from agent_core.telegram.notifier import TelegramNotifier
+
+        mock_bot = MagicMock()
+        mock_bot.configured = True
+        mock_bot.send_message.return_value = True
+        notifier = TelegramNotifier(bot=mock_bot)
+
+        # First call - should send
+        ok1 = notifier.notify_stuck_planner(
+            action="ask_expert", goal_id="g-1", count=3, reason="err",
+        )
+        assert ok1 is True
+
+        # Second call - should be suppressed (cooldown 2h)
+        ok2 = notifier.notify_stuck_planner(
+            action="ask_expert", goal_id="g-1", count=3, reason="err",
+        )
+        assert ok2 is False
+        assert mock_bot.send_message.call_count == 1

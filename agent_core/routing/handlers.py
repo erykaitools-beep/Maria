@@ -563,10 +563,17 @@ def make_ask_expert_handler(
                     resp = expert_bridge.ask_about_topic(topic, goal_desc)
 
                 if not resp.success:
-                    # Bridge decided no action needed or LLM failed
+                    # Logical skips (dedup, already covered) are not failures
+                    skip_reasons = {
+                        "expert_material_already_exists",
+                        "topic_well_covered",
+                    }
+                    is_skip = resp.reason in skip_reasons
                     return {
-                        "success": False,
-                        "error": resp.reason,
+                        "success": is_skip,
+                        "skipped": is_skip,
+                        "error": resp.reason if not is_skip else None,
+                        "reason": resp.reason,
                         "topic": topic,
                         "gap_action": resp.gap_action,
                     }

@@ -36,6 +36,7 @@ ALERT_COOLDOWNS: Dict[str, float] = {
     "health_drop": 1800,          # 30min - urgent
     "mode_change": 600,           # 10min - mode transitions
     "consecutive_failure": 3600,  # 1h - K7 blocks
+    "stuck_planner": 7200,        # 2h - stuck loop detection
     "learning_progress": 1800,    # 30min - CDL progress updates
     "learning_complete": 0,       # always send - operator requested this
     "startup": 0,                 # always send
@@ -277,6 +278,31 @@ class TelegramNotifier:
         ok = self._bot.send_message(text)
         if ok:
             self._mark_sent("consecutive_failure")
+        return ok
+
+    def notify_stuck_planner(
+        self,
+        action: str,
+        goal_id: str,
+        goal_description: str = "",
+        count: int = 0,
+        reason: str = "",
+        cooldown_minutes: int = 30,
+    ) -> bool:
+        """Send stuck planner loop alert to operator."""
+        if not self._can_send("stuck_planner"):
+            return False
+
+        desc = goal_description[:80] if goal_description else goal_id
+        text = (
+            f"*Utknelam: {action} na '{desc}'*\n\n"
+            f"Failuje {count}x z rzedu.\n"
+            f"Powod: {reason[:200]}\n"
+            f"Pomijam cel na {cooldown_minutes} min."
+        )
+        ok = self._bot.send_message(text)
+        if ok:
+            self._mark_sent("stuck_planner")
         return ok
 
     def notify_effector_request(

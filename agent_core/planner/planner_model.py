@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class PlanStatus(Enum):
@@ -132,7 +132,11 @@ class PlannerState:
     last_experiment_scan_ts: float = 0.0  # K11: Last experiment proposal scan
     total_cycles: int = 0
     total_plans_executed: int = 0
+    consecutive_noop_count: int = 0         # Backoff: NOOPs in a row
     current_plan_id: Optional[str] = None
+    # Stuck detection: track recent failure fingerprints
+    stuck_history: List[Dict[str, str]] = field(default_factory=list)
+    stuck_cooldowns: Dict[str, float] = field(default_factory=dict)  # goal_id -> until_ts
 
     def to_dict(self) -> dict:
         return {
@@ -145,7 +149,10 @@ class PlannerState:
             "last_experiment_scan_ts": self.last_experiment_scan_ts,
             "total_cycles": self.total_cycles,
             "total_plans_executed": self.total_plans_executed,
+            "consecutive_noop_count": self.consecutive_noop_count,
             "current_plan_id": self.current_plan_id,
+            "stuck_history": self.stuck_history,
+            "stuck_cooldowns": self.stuck_cooldowns,
         }
 
     @staticmethod
@@ -160,5 +167,8 @@ class PlannerState:
             last_experiment_scan_ts=d.get("last_experiment_scan_ts", 0.0),
             total_cycles=d.get("total_cycles", 0),
             total_plans_executed=d.get("total_plans_executed", 0),
+            consecutive_noop_count=d.get("consecutive_noop_count", 0),
             current_plan_id=d.get("current_plan_id"),
+            stuck_history=d.get("stuck_history", []),
+            stuck_cooldowns=d.get("stuck_cooldowns", {}),
         )
