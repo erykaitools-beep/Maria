@@ -305,6 +305,15 @@ class TelegramNotifier:
             self._mark_sent("stuck_planner")
         return ok
 
+    def notify_stuck(self, message: str) -> bool:
+        """Send pre-formatted stuck diagnosis message (Level 6)."""
+        if not self._can_send("stuck_planner"):
+            return False
+        ok = self._bot.send_message(message)
+        if ok:
+            self._mark_sent("stuck_planner")
+        return ok
+
     def notify_effector_request(
         self,
         tool_name: str,

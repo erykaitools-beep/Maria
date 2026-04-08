@@ -2153,9 +2153,8 @@ class TestStuckDetection:
         assert len(planner._state.stuck_history) == 0
 
     def test_stuck_sends_telegram(self, planner_env):
-        """Stuck detection should call Telegram notifier."""
+        """Stuck detection should call Telegram notifier with diagnosis."""
         planner, _ = planner_env
-        from agent_core.planner.planner_core import STUCK_THRESHOLD, STUCK_COOLDOWN_SEC
 
         mock_notifier = MagicMock()
         planner._telegram_notifier = mock_notifier
@@ -2165,22 +2164,20 @@ class TestStuckDetection:
             goal_description="Nauka logiki",
             action_type=ActionType.ASK_EXPERT,
         )
+        plan.result = {"topic": "logika", "error": "expert_material_already_exists"}
         fingerprint = {
             "action": "ask_expert",
             "goal_id": "g-test",
             "reason": "expert_material_already_exists",
         }
 
-        planner._handle_stuck(plan, fingerprint, STUCK_THRESHOLD)
+        planner._handle_stuck(plan, fingerprint, 3)
 
-        mock_notifier.notify_stuck_planner.assert_called_once_with(
-            action="ask_expert",
-            goal_id="g-test",
-            goal_description="Nauka logiki",
-            count=STUCK_THRESHOLD,
-            reason="expert_material_already_exists",
-            cooldown_minutes=STUCK_COOLDOWN_SEC // 60,
-        )
+        # Should call notify_stuck with formatted diagnosis message
+        mock_notifier.notify_stuck.assert_called_once()
+        msg = mock_notifier.notify_stuck.call_args[0][0]
+        assert "Utknelam" in msg
+        assert "Diagnoza:" in msg
 
     def test_stuck_state_persists(self):
         """Stuck fields should survive to_dict/from_dict round-trip."""

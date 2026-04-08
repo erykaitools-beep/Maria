@@ -20,6 +20,7 @@ from agent_core.planner.planner_model import (
 from agent_core.planner.planner_guard import PlannerGuard
 from agent_core.planner.goal_selector import GoalSelector
 from agent_core.planner.action_executor import ActionExecutor
+from agent_core.planner.stuck_handler import StuckHandler
 from agent_core.tracing.episode import (
     generate_episode_id, current_episode_id, clear_episode_id,
     set_current_trace,
@@ -112,6 +113,7 @@ class PlannerCore:
         self._approval_queue = None
         self._telegram_notifier = None
         self._current_trace: Optional[DecisionTrace] = None
+        self._stuck_handler = StuckHandler()
 
         # Load persisted state
         self._load_state()
@@ -128,6 +130,7 @@ class PlannerCore:
     def set_goal_store(self, store) -> None:
         self._goal_store = store
         self.executor.set_goal_store(store)
+        self._stuck_handler.set_goal_store(store)
 
     def set_evaluation_observer(self, observer) -> None:
         self._evaluation_observer = observer
@@ -140,6 +143,7 @@ class PlannerCore:
     def set_knowledge_analyzer(self, analyzer) -> None:
         self._knowledge_analyzer = analyzer
         self.executor.set_knowledge_analyzer(analyzer)
+        self._stuck_handler.set_knowledge_analyzer(analyzer)
 
     def set_sandbox_manager(self, manager) -> None:
         self._sandbox_manager = manager
@@ -150,6 +154,7 @@ class PlannerCore:
 
     def set_autonomy_policy(self, policy) -> None:
         self._autonomy_policy = policy
+        self._stuck_handler.set_autonomy_policy(policy)
 
     def set_deliberation(self, deliberation) -> None:
         self._deliberation = deliberation
@@ -1980,31 +1985,42 @@ class PlannerCore:
         return plan
 
     def _handle_stuck(self, plan: Plan, fingerprint: dict, count: int) -> None:
-        """Handle detected stuck loop: cooldown goal + warn + notify."""
+        """Handle detected stuck loop: diagnose -> repair -> escalate."""
         goal_id = fingerprint["goal_id"]
         action = fingerprint["action"]
         reason = fingerprint["reason"]
 
+        # Level 4: Diagnose
+        fingerprint_with_goal = {**fingerprint, "goal_id": goal_id}
+        diagnosis = self._stuck_handler.diagnose(
+            fingerprint_with_goal, plan.result or {},
+        )
+
+        # Level 5: Try self-repair
+        diagnosis = self._stuck_handler.try_repair(diagnosis)
+
+        logger.warning(
+            "[STUCK] %s on goal %s failed %d times. "
+            "Cause: %s. Repair: %s (%s). Cooldown %d min.",
+            action, goal_id, count,
+            diagnosis.cause.value,
+            diagnosis.repair_action.value,
+            "OK" if diagnosis.repair_succeeded else "FAILED",
+            STUCK_COOLDOWN_SEC // 60,
+        )
+
+        # Cooldown goal (even if repair succeeded - give system breathing room)
         cooldown_until = time.time() + STUCK_COOLDOWN_SEC
         self._state.stuck_cooldowns[goal_id] = cooldown_until
 
-        logger.warning(
-            "[STUCK] %s on goal %s failed %d times (reason: %s). "
-            "Cooldown %d min.",
-            action, goal_id, count, reason, STUCK_COOLDOWN_SEC // 60,
-        )
-
-        # Telegram alert (Level 3)
+        # Level 6: Telegram alert with diagnosis context
         if self._telegram_notifier:
             try:
-                self._telegram_notifier.notify_stuck_planner(
-                    action=action,
-                    goal_id=goal_id,
-                    goal_description=plan.goal_description or "",
-                    count=count,
-                    reason=reason,
+                message = self._stuck_handler.format_escalation(
+                    diagnosis, fingerprint, count,
                     cooldown_minutes=STUCK_COOLDOWN_SEC // 60,
                 )
+                self._telegram_notifier.notify_stuck(message)
             except Exception:
                 pass
 
