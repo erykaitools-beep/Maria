@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Badania: odstawienie nowej generacji leków na cukrzycę wywołuje szkodliwy dla serca „wstrząs metaboliczny”
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112192%2Cbadania-odstawienie-nowej-generacji-lekow-na-cukrzyce-wywoluje-szkodliwy
+# Pobrano: 2026-03-23
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Badania: odstawienie nowej generacji leków na cukrzycę wywołuje szkodliwy dla serca „wstrząs metaboliczny”</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-23T11:15:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-23T12:15:00+01:00" title="poniedziałek, Marzec 23, 2026 - 12:15" class="datetime">pon., 03/23/2026 - 12:15</time>
+</span>
+
+
+2 minuty

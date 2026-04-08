@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Naukowcy sprawdzili, skąd się biorą błędne lub agresywne odpowiedzi chatbotów
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112094%2Cnaukowcy-sprawdzili-skad-sie-biora-bledne-lub-agresywne-odpowiedzi
+# Pobrano: 2026-03-19
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Naukowcy sprawdzili, skąd się biorą błędne lub agresywne odpowiedzi chatbotów</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-19T06:30:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-19T07:30:00+01:00" title="czwartek, Marzec 19, 2026 - 07:30" class="datetime">czw., 03/19/2026 - 07:30</time>
+</span>
+
+
+3 minuty

@@ -1,0 +1,57 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Homeostaza
+# URL: https://pl.wikipedia.org/wiki/Homeostaza
+# Pobrano: 2026-03-22
+# ---
+
+Homeostaza (gr. homoíos – podobny, równy; stásis – stanie, trwanie, postawa) – zdolność utrzymywania względnie stałych parametrów wewnętrznych w systemie (zamkniętym lub otwartym). Pojęcie to zwykle odnosi się do samoregulacji procesów biologicznych. Zasadniczo sprowadza się to do utrzymania stanu stacjonarnego płynów wewnątrz- i (w organizmach wielokomórkowych) zewnątrzkomórkowych. Pojęcie homeostazy wprowadził Walter Cannon w 1939 roku na podstawie założeń Claude Bernarda z 1857 r. dotyczących stabilności środowiska wewnętrznego. Homeostaza jest podstawowym pojęciem w fizjologii. Pojęcie to jest także stosowane w psychologii zdrowia dla określenia mechanizmu adaptacyjnego oraz cybernetyce społecznej, gdzie jest podstawowym elementem systemu autonomicznego.
+
+
+Sposoby kontroli składu płynów wewnątrz- i zewnątrzkomórkowych
+Utrzymanie wewnętrznej stabilności warunków wymaga regulowania lub kontrolowania wartości najważniejszych parametrów wewnętrznego środowiska organizmu. Należą do nich głównie:
+
+temperatura ciała (u organizmów stałocieplnych),
+pH krwi i płynów ustrojowych,
+ciśnienie osmotyczne,
+objętość płynów ustrojowych,
+stężenie związków chemicznych w płynach ustrojowych,
+ciśnienie tętnicze krwi,
+ciśnienie parcjalne tlenu i dwutlenku węgla we krwi.
+Kontrola wymienionych parametrów odbywa się poprzez receptory (głównie chemoreceptory), które informacje o wartości określonego parametru przekazują do interpretatora (np. w przypadku temperatury ciała ssaków do podwzgórza), gdzie dokonuje się porównanie wartości wykrytej ze stałą wartością prawidłową (tzw. punktem nastawczym) lub, co zdarza się częściej, z jej przedziałami akceptowalnymi. Jeśli aktualny stan parametru jest zbyt wysoki lub zbyt niski, centrum integrujące wymusza na efektorach odpowiedź odpowiednią do sytuacji.
+
+
+Mechanizmy utrzymania homeostazy
+Mechanizmy wytwarzania odpowiedzi i tym samym regulacji wartości parametru można podzielić na dwie grupy:
+
+fizjologiczne (np. zwiększenie częstotliwości skurczów mięśni w celu podwyższenia temperatury) oraz
+behawioralne (np. wyjście z cienia, w tym samym celu).
+Fizjologiczne mechanizmy opierają się na sprzężeniu zwrotnym (ang. feedback):
+
+ujemnym
+W wyniku tego sprzężenia zwrotnego następuje zmiana wartości parametru na zbliżoną do punktu stałego. Zasadniczo osiągnięcie wartości punktu nastawczego jest niemożliwie, toteż wartości zawsze wymagają regulacji (tzw. ang. hunting about the norm). Możliwe jest modyfikowanie wartości punktu stałego w wyniku adaptacji.
+wyprzedzającym (wczesnym)
+W wyniku tego sprzężenia zwrotnego występuje reakcja na zmiany parametru kontrolowanego, pomimo że w chwili odpowiedzi wartość parametru pozostaje jeszcze w zakresie wartości akceptowalnych (np. picie wody w czasie jedzenia przez szczury). Wymaga działania celowego – przewidywania.
+dodatnim
+W wyniku tego sprzężenia zwrotnego występuje reakcja na bodziec, poprzez pogłębienie wartości nieprawidłowej dla innego celu (np. odczuwanie bólu na poziomie neurotransmiterów). W tym sprzężeniu pewne parametry są regulowane, podczas gdy inne mogą przyjmować wartości różne od akceptowalnych i nie podlegają regulacji (ale pozostają pod kontrolą).
+
+
+Homeostaza – warunek zdrowia
+Homeostaza jest niezbędnym warunkiem zdrowia (prawidłowego funkcjonowania) organizmu, a co za tym idzie, choroby u swego podłoża mają zaburzenia mechanizmów utrzymania homeostazy.
+Obecnie zastępuje się pojęcie homeostazy, nowym – homeodynamiką.
+Homeostaza może być utrzymywana w organizmach żywych lub układach technicznych. W latach 50. XX wieku elektryczny model homeostatu opracował William Ross Ashby, nad którym pracował od końca lat 40.. W teorii systemów autonomicznych zadaniem jednego z podsystemów funkcjonalnych (nie należy go mylić z odrębnym organem) zwanego homeostatem, jest utrzymywanie równowagi funkcjonalnej systemu przez przeciwdziałanie przepływom informacji i energii zmniejszającym możliwość oddziaływania systemu na otoczenie.
+
+
+Zobacz też
+homeorheza
+Walter Cannon
+Claude Bernard
+Milieu interieur
+Apoptoza
+termostat
+negentropia
+reguła przekory (chemia)
+system
+oś podwzgórze-przysadka-nadnercza
+
+
+Przypisy

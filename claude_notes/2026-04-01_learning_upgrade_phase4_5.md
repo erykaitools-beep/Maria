@@ -51,3 +51,18 @@ All 5 phases from ChatGPT plan (plan_upgrade_nauki_maria.pdf) are now done:
 - 2730 testow passing (was 2635)
 - 95 nowych testow w tej i poprzedniej sesji
 - 0 failures
+
+## Dodatkowe prace w sesji
+- Naprawiony garbage CDL goal (goal-b345ef81f98c) - "jaka funkcja modul nie dziala" - cancelled
+- Zdeduplikowane 9 maintenance goals (seed goals tworzily duplikaty przy restartach)
+- **Kompletna dokumentacja architektury** - docs/MARIA_ARCHITECTURE_2026-04-01.md + .pdf
+  - 27 modulow szczegolowo opisanych
+  - 5 diagramow data flow
+  - Wszystkie JSONL z readers/writers
+  - 11 faz ticka homeostasis
+  - Kontrakty K1-K13 + Faza F/G
+  - 268KB PDF do czytania offline
+
+## Obserwacja
+- Maintenance goals duplikuja sie przy restartach - seed goals w GoalStore nie sprawdzaja czy juz istnieja
+- CDL (Conversation-Driven Learning) czasem lapie pytania debugging jako tematy nauki - mozna dodac filtr

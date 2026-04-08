@@ -1,0 +1,7 @@
+# Zrodlo: RSS Feed
+# Tytul: Kabel, który ma okiełznać Słońce. Testują nadprzewodnik, jakiego nie ma nawet ITER
+# URL: https://www.focus.pl/artykul/rosja-przewod-dla-tokamaka-trt-synteza-jadrowa
+# Pobrano: 2026-03-18
+# ---
+
+<img width="1643" height="1095" src="https://konto.focus.pl/wp-content/uploads/2026/01/rosja-przewod-dla-tokamaka-trt-synteza-jadrowa.jpg" alt="" style="margin-bottom:10px;" /><p>Wyobraźmy sobie kabel o przekroju nieco większym niż przewód od zasilacza laptopa, który zamiast kilkunastu amperów przenosi dziesiątki tysięcy i robi to w polu magnetycznym kilkaset tysięcy razy silniejszym niż ziemskie. Taki właśnie element Rosjanie przygotowują dla swojego tokamaka z reaktorowymi technologiami TRT. W zaciszu rosyjskich laboratoriów trwają prace, które mogą przybliżyć nas do realizacji [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/rosja-przewod-dla-tokamaka-trt-synteza-jadrowa">Kabel, który ma okiełznać Słońce. Testują nadprzewodnik, jakiego nie ma nawet ITER</a></p>

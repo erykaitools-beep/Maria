@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Podkarpackie/ Naukowcy badają rywalizację sów na Pogórzu Przemyskim
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112219%2Cpodkarpackie-naukowcy-badaja-rywalizacje-sow-na-pogorzu-przemyskim.html
+# Pobrano: 2026-03-23
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Podkarpackie/ Naukowcy badają rywalizację sów na Pogórzu Przemyskim</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-23T07:43:28+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-23T08:43:28+01:00" title="poniedziałek, Marzec 23, 2026 - 08:43" class="datetime">pon., 03/23/2026 - 08:43</time>
+</span>
+
+
+2 minuty

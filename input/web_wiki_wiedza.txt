@@ -1,0 +1,105 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Wiedza
+# URL: https://pl.wikipedia.org/wiki/Wiedza
+# Pobrano: 2026-03-21
+# ---
+
+Wiedza – termin używany powszechnie, istnieje wiele definicji tego pojęcia. Nowa Encyklopedia Powszechna definiuje wiedzę jako „ogół wiarygodnych informacji o rzeczywistości wraz z umiejętnością ich wykorzystywania”.
+
+
+Definicja klasyczna
+
+Klasyczną definicję wiedzy podał Platon w dialogu Teajtet, gdzie Sokrates w rozmowie z Teajtetem dochodzi do wniosku, że wiedza to prawdziwe, uzasadnione przekonanie. Wyróżnia się w tym ujęciu następujące trzy elementy wiedzy:
+
+przekonania, sądy w sensie logicznym
+uzasadnienie, przekonanie jest uzasadnione
+prawdziwość, przekonanie jest prawdziwe
+
+
+Podział wiedzy
+Arystoteles wprowadza podział na wiedzę teoretyczną i praktyczną. Jeśli przeczytaliśmy w książce, że najszybszym stylem pływackim jest kraul i zgadzamy się z przytoczoną argumentacją, to jest to przykład potocznie rozumianej nabytej wiedzy teoretycznej (lub zaakceptowanej informacji). Z posiadania tej wiedzy/informacji nie wynika jednak, że potrafimy sami pływać tym stylem. Aby się tego nauczyć, czyli posiąść praktyczną wiedzę polegającą na umiejętności pływania kraulem musimy się najpierw dowiedzieć, jakie należy wykonywać ruchy w trakcie pływania, a następnie przejść dość żmudną, praktyczną lekcję wykonywania tych ruchów w wodzie własnymi kończynami.
+
+
+Kryterium doświadczenia empirycznego
+wiedza (a priori) jest niezależna od zmysłów i dotyczy prawd „absolutnych” lub uniwersalnych jakimi są prawa logiki, prawa matematyki.
+wiedza (a posteriori) jest wiedzą nabytą poprzez zmysły i jej prawdziwość może być obalona poprzez następne obserwacje.
+
+
+Kryterium charakteru wiedzy
+propozycjonalna – wiedza że np. wiem, że słońce świeci
+habitualna – wiedza jak, umiejętność np. wiem jak ugotować obiad
+
+
+Pojęcie wiedzy w filozofii
+
+W filozofii zagadnienie wiedzy rozważa epistemologia. Dwa główne problemy filozoficznej teorii wiedzy to sformułowanie definicji i kryterium wiedzy. Podstawową intuicją dotyczącą pojęcia wiedzy jest, że wiedza powinna być weryfikowalna (szuka się więc kryterium weryfikacji przekonań) i komunikowalna (dowodzi się więc możliwości komunikacji między osobami i szuka się kryteriów komunikowalności). Filozofowie nie są jednak jednomyślni co do tego, jak poprawnie weryfikować zgodność zawartości umysłu (spostrzeżenia, teorie, przekonania, sądy) z zewnętrzną rzeczywistością. Niektórzy podważają nawet taką możliwość. Za wzór wiedzy wielu filozofów uznaje dedukcję i aksjomatyczne systemy matematyki. Indukcja jest bardziej podejrzana (por. krytyka Hume’a, Poppera).Tzw. tradycyjną definicję wiedzy (której sformułowanie przypisuje się Platonowi), zgodnie z którą jest ona prawdziwym i uzasadnionym mniemaniem, podważał E. Gettier. Przykłady podważające adekwatność definicji wiedzy określane są mianem problemu Gettiera.
+
+
+Pojęcie wiedzy w psychologii
+
+W psychologii wiedza to np.
+
+ogół treści utrwalonych w umyśle ludzkim w wyniku kumulowania doświadczenia oraz uczenia się. (...) W węższym znaczeniu wiedza stanowi osobisty stan poznania człowieka w wyniku oddziaływania na niego obiektywnej rzeczywistości.
+Pojęcie „wiedzy” funkcjonuje w psychologii w dwóch znaczeniach – ogólnym i ścisłym.
+W znaczeniu ogólnym wiedza to informacje, jakie człowiek przyswaja poprzez narządy zmysłów, które tworzy samodzielnie itd. W psychologii poznawczej umysł jest definiowany jako system poznawczy, który tworzy wiedzę (w znaczeniu ogólnym) o otoczeniu i wykorzystuje tę wiedzę do sterowania zachowaniem. Wiedza funkcjonuje w umyśle w postaci struktur poznawczych (reprezentacje umysłowe, zob. submodalności), które mogą być i są w różny sposób modyfikowane przez procesy poznawcze. Struktury poznawcze nie są jednak jednorodne. Pojęcie to określa zarówno abstrakcyjne, symboliczne reprezentowanie obiektów w umyśle, jak i wiedzę w znaczeniu ścisłym. Struktury mogą być ulotne, tworzone na potrzeby chwili, odnoszące się do rzeczywistości bądź fantazji, mogą być kompleksowe bądź elementarne. Istnieją różne formalne terminy określające różne postaci struktur poznawczych.
+Wiedza w znaczeniu ścisłym jest natomiast określeniem pewnej kategorii struktur poznawczych, które są zawarte w umyśle trwale i w sposób uporządkowany zapisane w systemie pamięci długotrwałej. Wiedza w znaczeniu zawartości pamięci długotrwałej może być podzielona na następujące kategorie:
+
+wiedza deklaratywna – to taka zawartość pamięci, jaka może być w różnym czasie uświadomiona i zwerbalizowana, a więc wyrażona za pomocą słów. To mogą być wspomnienia, fakty przyswojone w trakcie nauki szkolnej, czy nawet informacje, jakie można sobie wyobrazić wizualnie, przy czym wyobrażenie takie również można opisać w mniej, czy bardziej dokładny sposób za pomocą słów.
+wiedza proceduralna – taka zawartość pamięci, jaka raczej nie może zostać zwerbalizowana, jaką trudno jest sobie uświadomić, a która ujawnia się poprzez zachowanie. Przykładowo, trudno jest opisać za pomocą słów, w jaki sposób jeździ się na rowerze. Taki opis zaprezentowany osobie, która nigdy nie jeździła, nie przyczyni się do nabycia przez nią takiej wiedzy (ewentualnie nabędzie ona wiedzę będącą wspomnieniem wysłuchania opisu werbalnego jazdy na rowerze, czy też nabędzie pojęcia utworzone poprzez nazwy czynności, prezentowanych w takim opisie, jak np. „trzymanie kierownicy”, „pedałowanie”, co nie jest równoznaczne z wiedzą pozwalającą jeździć na rowerze).
+metawiedza – wiedza o wiedzy, określenie to odnosi się do zdawania sobie sprawy przez człowieka z tego, co wie, a czego nie wie.
+wiedza utajona, niejawna – wiedza, z jakiej posiadania człowiek nie zdaje sobie sprawy.
+Problematyka tworzenia i modyfikowania wiedzy jest opisywana przez zagadnienia pamięci i uczenia się. Szczególnym rodzajem zagadnień jest natomiast organizacja wiedzy w zakresie pamięci semantycznej, która jest systemem podrzędnym pamięci deklaratywnej, związanym z wiedzą, jaka nie ma charakteru wspomnień i nie jest uporządkowana w czasie i miejscu. Psychologia poznawcza przedstawia organizację takiej pamięci w postaci sieci semantycznej, gdzie pojedynczymi jednostkami funkcjonalnymi są struktury poznawcze nazywane pojęciami. Niektóre koncepcje przyjmują, że sieć taka jest zbudowana hierarchicznie i opisuje relacje między pojęciami w postaci połączeń między pojęciami o różnej długości.
+
+
+Pojęcie w informatologii
+W informatologii wiedza to układ opisany wyrażeniem w: = < I, C, D >, gdzie:
+
+w – wiedza,
+I – informacja,
+C – kontekst,
+D – doświadczenie.
+Zatem źródłem wiedzy odbiorcy jest tu informacja, na której odbiór ma wpływ kontekst sytuacyjny oraz posiadane przez odbiorcę doświadczenie.
+Na gruncie informatologii wiedza może być również wyrażona jako zbiór zdań, które z informacji I pozwalają wyciągać wnioski V. Można zatem zapisać, że „w: = {„jeżeli I (K, U, Q), to V”}, gdzie V oznacza wniosek, jaki doświadczony człowiek U jest gotów sformułować na podstawie informacji I (K) rozpatrywanej w kontekście (K) problemu Q”.
+
+
+Metawiedza
+W podejściu systemowym, systemów socjo-kognitywnych, definicja wiedzy została uściślona, odseparowana od pojęcia informacji i preferencji, i sformułowana na gruncie kognitywistyki oraz podejścia systemowego w metateorii TOGA. Taka perspektywa daje potencjalnie szerokie możliwości operacji na wiedzy i umożliwia budowę nowych naukowych podstaw metawiedzy i inżynierii wiedzy. Tu, każda wiedza odnosi się zawsze i wyłącznie do określonego źródła informacji, np. do Układu Słonecznego, lub jakiejś dziedziny ludzkiego działania. Na przykład:
+
+x=yz nie jest wiedzą, ale jeśli dostaniemy informację że: x to F (siła), y to m (masa) i z to a (przyspieszenie), to wyrażenie to staje się wiedzą bo w ten sposób rozpoznaliśmy fizykę jako dziedzinę jego zastosowania.
+Syntetycznie mówiąc,
+
+wiedza jest tym co przekształca informację w nową informację lub w nową wiedzę, czy nowe preferencje, a preferencje są tym co wskazuje jaką wiedzę użyć.
+Relatywizm tak zdefiniowanej wiedzy polega na tym, że to co jest wiedzą w dziedzinie D1 może nie być wiedzą w dziedzinie D2, i co za tym idzie, to co jest wiedzą dla pewnej osoby (lub grupy ludzi lub robota) nie jest wiedzą dla innej. Wymagane warunki na wiedzę spełniają np. prawdziwe w określonej dziedzinie: reguły, procedury, instrukcje, modele i teorie. W ten sposób informacje (z dziedziny D) są danymi dla wiedzy (określonej na dziedzinie D). Według Gadomskiego, ten rzeczywisty wzajemny relatywizm informacji i wiedzy powoduje systematyczne mylenie tych abstrakcyjnych pojęć.
+
+
+Formy wiedzy
+proceduralna lub operacyjna – wskazuje jak osiągnąć zamierzone cele, czyli stanowi zastaw procedur, funkcji lub czynności, pozwalających osiągnąć zamierzone rezultaty.
+deklaratywna lub opisowa – może być formalna i nieformalna. Dotyczy opisu stanu/sytuacji obiektów/działań oraz pojęć i związków między nimi, i wskazuje czego dotyczy dany problem, i co ma być celem rozwiązania, a nie jakie kroki przedsięwziąć aby uzyskać to rozwiązanie. Przykładem takiej wiedzy są modele i teorie.
+
+
+Zarządzanie wiedzą
+
+W latach 80. XX wieku zaczęła się rozpowszechniać koncepcja zarządcza traktująca wiedzę jako punkt wyjścia przy analizie funkcjonowania organizacji (zarządzanie wiedzą). Pojawiły się nawet koncepcje przedsiębiorstwa jako przechowalni wiedzy, czy przedsiębiorstwa jako zbioru procesów transferu wiedzy.
+
+
+Pojęcie wiedzy w ekonomii
+W ujęciu ekonomicznym traktowana jest dwojako: jako informacja oraz jako aktywa (assets). W pierwszym ujęciu wiedza jest traktowana jako informacje, które mogą być przetwarzane i wykorzystywane do podejmowania racjonalnych decyzji ekonomicznych. W drugim ujęciu stanowi ona dobro ekonomiczne, które może być prywatną własnością i jako towar może być przedmiotem obrotu rynkowego.
+W ekonomii przedstawia się stwierdzenie, że dotychczas ekonomiści traktowali wiedzę jako zasób przedsiębiorstw potrzebny do wytwarzania zysku. Według tego poglądu każde przedsiębiorstwo działa na podstawie posiadanej wiedzy – „firma jako przechowalnia wiedzy”.
+
+
+Pojęcie wiedzy w badaniach nad sztuczną inteligencją
+
+W badaniach nad sztuczną inteligencją wiedzę traktuje się jako materiał wejściowy albo efekt działania algorytmów sztucznej inteligencji. Inaczej rzecz ujmując, część metod sztucznej inteligencji zajmuje się próbami formalizacji ludzkiej wiedzy celem automatycznego wnioskowania (np. systemy ekspertowe). Znane jest też odwrotne podejście. Dzięki zastosowaniu tych metod w dużych zbiorach danych można odnaleźć wiedzę o ich naturze (np. sieci neuronowe, algorytmy genetyczne, ekstrakcja wiedzy z danych).
+
+
+Zobacz też
+
+obskurantyzm
+
+
+Przypisy
+
+
+Linki zewnętrzne
+ Łukasz Lamża, Wiedza, Centrum Kopernika Badań Interdyscyplinarnych – Uniwersytet Jagielloński (CKBI UJ), kanał „Copernicus” na YouTube, 15 marca 2020 [dostęp 2024-10-08].
+DuncanD. Pritchard DuncanD., JohnJ. Turri JohnJ., J. AdamJ.A. Carter J. AdamJ.A., The Value of Knowledge, [w:] Stanford Encyclopedia of Philosophy, CSLI, Stanford University, 7 marca 2018, ISSN 1095-5054 [dostęp 2018-08-10]  (ang.). (Wartość wiedzy)

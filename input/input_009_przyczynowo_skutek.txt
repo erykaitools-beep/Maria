@@ -1,0 +1,123 @@
+# CAUSE-AND-EFFECT RELATIONSHIPS — Cognitive Learning Material
+# Topic: przyczynowo-skutek, causality, causal reasoning, counterfactuals
+# Confidence target: 0.2 → 0.7+
+
+## DEFINITION
+A causal relationship exists when one event (cause) produces or contributes to another event (effect).
+Causal reasoning is the capacity to identify, trace, and predict these relationships.
+
+## PART 1: TYPES OF CAUSATION
+
+### 1. Direct Causation
+Cause directly produces effect with no intermediate steps.
+  Example: RAM at 99.6% → OOM kill triggered
+
+### 2. Indirect / Mediated Causation
+Cause produces an intermediate state, which then produces the effect.
+  Example: Memory leak → RAM accumulation → RAM at 99% → OOM kill
+  Chain: A → B → C → D
+
+### 3. Contributory Causation
+Cause is one of several factors that together produce the effect (INUS condition).
+  INUS = Insufficient but Necessary part of an Unnecessary but Sufficient condition
+  Example: High load + memory leak + no MemoryMax → system crash
+  Each factor alone insufficient; together they are sufficient.
+
+### 4. Proximate vs Distal Cause
+- Proximate: the immediate trigger ("the spark")
+- Distal: the underlying root cause ("the dry forest")
+  Example: Proximate: intelligent_chunk_text() called before LLM invocation
+           Distal: missing lifecycle management in session handler
+
+## PART 2: CORRELATION vs CAUSATION
+
+### Critical Distinction
+Correlation: A and B occur together frequently.
+Causation: A produces B.
+
+Correlation does NOT imply causation. Common traps:
+1. Confounding variable: C causes both A and B (they correlate, but neither causes the other)
+2. Reverse causation: B actually causes A, not A→B
+3. Coincidence: purely random co-occurrence
+
+### Test for Causation: Counterfactual Definition
+A causes B if and only if: IF A had not occurred, THEN B would not have occurred.
+  Example: IF the memory leak had not existed, THEN RAM would not have hit 99.6%.
+  Counterfactual holds → memory leak is a genuine cause.
+
+## PART 3: CAUSAL CHAINS AND GRAPHS
+
+### Causal Graph (DAG — Directed Acyclic Graph)
+Nodes = events/states, Edges = causal relationships (directed)
+  
+  Example graph for M.A.R.I.A. incident:
+  [Session opened] → [intelligent_chunk_text() called] → [Memory allocated] → [RAM++]
+  [RAM > 90%] → [Homeostasis alert] → [K11 applies RAM guard]
+  [RAM > 99%] (if guard fails) → [OOM kill] → [Session lost]
+
+### Reading Causal Graphs
+- Direct path: immediate cause-effect
+- Indirect path: mediated by intermediate nodes
+- Fork: one cause produces multiple effects (A → B, A → C)
+- Collider: multiple causes converge on one effect (A → C, B → C)
+
+## PART 4: CAUSAL INFERENCE IN PRACTICE
+
+### Forward Reasoning (Prediction)
+Given cause, predict effect.
+  IF memory_leak_active AND session_duration > 2h THEN RAM_critical = LIKELY
+
+### Backward Reasoning (Diagnosis)
+Given effect, identify cause.
+  OOM_kill observed → search causal graph backward → identify memory_leak as root cause
+
+### Intervention (Do-calculus concept)
+Predict effect of actively changing a variable (not just observing it).
+  "IF we add MemoryMax=24GB (intervention), THEN OOM_kill probability drops by ~80%"
+  Observation: "systems with MemoryMax rarely OOM" → may just be confounding
+  Intervention: actually SET MemoryMax → true causal test
+
+## PART 5: TEMPORAL CAUSATION
+
+### Rules
+1. Cause must precede effect in time (temporal precedence)
+2. There must be a plausible mechanism linking cause to effect
+3. Eliminating alternative explanations strengthens causal claim
+
+### Time Delays in Causal Chains
+Effect may appear long after cause.
+  Example: Memory leak starts at session open → effect (OOM) appears after 2–3 hours
+  Delayed causation requires tracking state over time, not just snapshots.
+
+## PART 6: CAUSAL REASONING IN COGNITIVE SYSTEMS
+
+### Why It Matters for M.A.R.I.A.
+A system that only correlates cannot:
+- Diagnose its own failures accurately
+- Predict consequences of its own actions
+- Generate effective recommendations (K12 output)
+- Distinguish "this module is slow because of its input" from "this module is slow because of its design"
+
+### Causal Model for Self-Analysis (K12 use case)
+StateCollector gathers: RAM%, CPU%, confidence scores, session count, module response times
+ExternalAnalyzer must determine: which metrics CAUSE which outcomes
+  WRONG: "Low confidence correlates with long deliberation time"
+  RIGHT: "Low confidence CAUSES longer deliberation because K8 runs more simulations"
+
+### Recommendation Quality depends on Causal Accuracy
+If K12 misidentifies correlation as causation:
+  → It may recommend fixing a symptom instead of the root cause
+  → System appears to improve but degrades again after delay
+Correct causal reasoning → recommendations target root causes → stable improvement
+
+## INFERENCE PATTERNS
+- Forward: cause(X) → effect(Y) → predict(Y) given observed(X)
+- Backward: observed(Y) → candidate_causes({X1, X2, X3}) → rank by counterfactual strength
+- Intervention: do(X=x) → effect(Y) differs from P(Y|X=x) when confounders present
+- Chaining: A→B→C means A is distal cause of C; removing A prevents C even if B is present
+
+## SUMMARY
+Cause-and-effect reasoning is essential for self-diagnosis, prediction, and improvement.
+Without it, a cognitive system is limited to pattern matching.
+With it, M.A.R.I.A. can identify WHY something failed, WHAT will happen next,
+and WHICH intervention will actually fix the problem at its root.

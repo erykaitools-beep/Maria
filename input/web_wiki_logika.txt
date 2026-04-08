@@ -1,0 +1,66 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Logika
+# URL: https://pl.wikipedia.org/wiki/Logika
+# Pobrano: 2026-03-21
+# ---
+
+Logika (gr. λόγος, logos – rozum, słowo, myśl) – nauka formalna o jasnym i ścisłym formułowaniu myśli, o regułach poprawnego rozumowania i uzasadniania twierdzeń. Historycznie była uznawana za dział filozofii bliski retoryce, jednak narodziny rachunku zdań w XIX wieku zapoczątkowały logikę matematyczną.
+W tradycji zachodniej prekursorem systematycznej logiki był Arystoteles. Współczesna logika, wykorzystując metodę formalną, znacznie rozszerzyła pole badań, włączając w to badania nad matematyką (metamatematyka), konstruowanie nowych systemów logicznych (np. logiki wielowartościowe), czysto teoretyczne badania o matematycznym charakterze (np. teoria modeli), zastosowania logiki w informatyce i sztucznej inteligencji (logic for computer science).
+
+
+Logika klasyczna
+Formalny system logiczny złożony z klasycznego rachunku zdań i rachunku kwantyfikatorów, zwany też logiką elementarną lub klasycznym rachunkiem logicznym. Przedmiotem tego rachunku są zdania logiczne, to znaczy takie zdania oznajmujące, którym można przypisać jedną z dwu wartości logicznych: prawda lub fałsz. Logika klasyczna jest w tym sensie dwuwartościowa, w odróżnieniu od sformułowanych w XX wieku systemów logik wielowartościowych.
+W rachunku zdań zdania reprezentowane są przez zmienne zdaniowe (zwyczajowo są to litery: p, q, r, ...). Przy użyciu spójników logicznych, jak „i”, „lub”, „nieprawda, że” (zapisywanych symbolicznie znakami: ∧, ∨, ¬ lub ~) konstruuje się zdania złożone. Jednym z głównych celów rachunku zdań jest wypracowanie metod wyznaczania wartości logicznej zdania złożonego na podstawie wartości logicznych zdań składowych. Szczególnym celem jest opisanie takich schematów zdań złożonych, które są prawdziwe przy każdym podstawieniu dowolnych zdań logicznych za zmienne. Schematy takie nazywane są prawami rachunku zdań.
+W rachunku kwantyfikatorów zdania złożone budowane są przy użyciu symboli predykatów, zmiennych i kwantyfikatorów – dlatego używa się też nazwy rachunek predykatów. Głównym celem jest opisanie wszystkich schematów zdań z kwantyfikatorami zawsze prawdziwych, czyli praw rachunku kwantyfikatorów. Razem z prawami rachunku zdań tworzą one prawa logiki klasycznej. Każdemu prawu logiki odpowiada schemat niezawodnego wnioskowania dedukcyjnego. Mówi się więc również, że głównym celem logiki klasycznej jest opisanie wszystkich schematów niezawodnego wnioskowania.
+Klasyczny rachunek logiczny obejmuje wszystkie podstawowe prawa odkryte przez logików starożytnych oraz bardziej współczesne prawa dotyczące kwantyfikatorów. Rachunek ten wystarcza do opisu wszystkich wnioskowań stosowanych w matematyce oraz wszelkich wnioskowań dedukcyjnych, i w tym sensie stanowi zamknięty dział logiki. Logika klasyczna jest podstawą wykładu logiki w podręcznikach szkolnych i akademickich.
+
+
+Logika filozoficzna
+Logika filozoficzna to nauka normatywna, analizująca źródła poznania pod względem prawomocności czynności poznawczych z nimi związanych. Zajmuje się badaniem ogólnych praw, według których przebiegają wszelkie poprawne rozumowania, w szczególności wnioskowania. Logika, jako dyscyplina normatywna, nie tylko opisuje jak faktycznie przebiegają rozumowania, ale także formułuje twierdzenia normatywne, mówiące o tym, jak rozumowania powinny przebiegać.
+Pod nazwą logika filozoficzna rozumie się dział filozofii zajmujący się:
+
+filozoficznymi problemami logiki (filozofią logiki)
+zastosowaniem logiki do zagadnień filozoficznych (logiką filozofii)
+zagadnieniami filozofii języka
+
+
+Logika matematyczna
+Logika matematyczna (zwana też metamatematyką) to dział matematyki, który wyodrębnił się jako samodzielna dziedzina na przełomie XIX i XX wieku, wraz z dążeniem do dogłębnego zbadania podstaw matematyki. Jej przedmiotem są formalne teorie matematyczne i ich modele, dowody oraz zasięg matematycznych rozumowań. W badaniach stosuje się wyłącznie ścisłe i formalne metody matematyki.
+Do największych osiągnięć logiki matematycznej należą prace wielu logików i matematyków mające na celu pełną formalizację matematyki, zwieńczone słynnym twierdzeniem Gödla o niezupełności. Twórcami logiki matematycznej byli m.in. George Boole, Gottlob Frege, David Hilbert i Bertrand Russell, a do jej rozwoju przyczynili się między innymi: Jan Łukasiewicz, Alonzo Church, Kurt Gödel i Alfred Tarski.
+
+
+Logika w informatyce
+Formalny charakter logiki współczesnej sprawił, że nie tylko przyczyniła się ona w znacznym stopniu do rozwoju techniki komputerowej, ale też pewne jej działy rozwijają się obecnie w ramach informatyki teoretycznej. Do zagadnień informatycznych o logicznym charakterze należą: systemy przepisywania (rewriting systems), teoria typów, weryfikacja programów (logiki dynamiczne), różne aspekty złożoności obliczeniowej, sieci przełączające (funkcje boolowskie), formalna semantyka języków programowania, programowanie logiczne.
+Szczególny charakter ma próba zastosowania osiągnięć logiki formalnej w sztucznej inteligencji. Próba ta nie zakończyła się jeszcze wyraźnym sukcesem. Do częściowych sukcesów można zaliczyć praktyczne osiągnięcia w zakresie automatycznego dowodzenia twierdzeń oraz systemów ekspertowych.
+
+
+Zobacz też
+historia logiki
+logika intuicjonistyczna
+logika modalna
+logika prawnicza
+logika rozmyta
+logika wielowartościowa
+logika wolna
+analiza logiczna
+logizowanie
+
+
+Uwagi
+
+
+Przypisy
+
+
+Literatura uzupełniająca
+
+Kazimierz Ajdukiewicz: „Logika pragmatyczna”, PWN, Warszawa 1965
+Witold Marciszewski (red.): „Mała encyklopedia logiki”, Ossolineum, Wrocław 1970
+Alfred Tarski: „Wprowadzenie do logiki i do metodologii nauk dedukcyjnych” „ALEPH”, 1994
+Obszerny zbiór zasobów zebrany przez pracowników Zakładu Logiki Stosowanej UAM
+
+
+Linki zewnętrzne
+ Stanisław Kiczuk, Logika, Powszechna Encyklopedia Filozofii, Polskie Towarzystwo Tomasza z Akwinu, ptta.pl [dostęp 2024-05-05].
+ Wojciech Golonka, Czym jest logika, Instytut Dziedzictwa Europejskiego Andegavenum, YouTube, 15 grudnia 2024 [dostęp 2025-01-13].
+ Polskie Towarzystwo Logiki i Filozofii Nauki, logika.net.pl [dostęp 2024-05-05].

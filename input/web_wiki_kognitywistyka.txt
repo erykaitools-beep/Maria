@@ -1,0 +1,65 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Kognitywistyka
+# URL: https://pl.wikipedia.org/wiki/Kognitywistyka
+# Pobrano: 2026-03-21
+# ---
+
+Kognitywistyka – dziedzina nauki zajmująca się obserwacją i analizą działania zmysłów, mózgu i umysłu, w szczególności ich modelowaniem. Na jej określenie używane są też pojęcia: nauki kognitywne (ang. Cognitive Sciences)  bądź nauki o poznaniu.
+Kognitywistyka jest nauką interdyscyplinarną, znajduje się na pograniczu wielu dziedzin: psychologii poznawczej, neurobiologii, filozofii umysłu, sztucznej inteligencji, lingwistyki oraz logiki i fizyki.
+Główne obszary badawcze w obrębie tej dziedziny to reprezentacja wiedzy, język, uczenie się, myślenie, percepcja, świadomość, podejmowanie decyzji oraz inteligencja (tzw. inteligencja kognitywna).
+
+
+Historia
+Konferencja MIT – 11 września 1956 roku (m.in. Claude E. Shannon, Allen Newell, Herbert A. Simon, Noam Chomsky, George Miller): „dzień, w którym kognitywistyka wyskoczyła z łona cybernetyki i stała się szanowanym, interdyscyplinarnym przedsięwzięciem realizowanym na swój własny rachunek” (George Miller, 1979).
+Kognitywistyka jako samodzielna dziedzina nauki wyodrębniła się w 1975 roku w Stanach Zjednoczonych. W 1976 roku zaczęto wydawać kwartalnik „Cognitive Science”. Program badaczy kognitywistyki został przedstawiony w tym samym roku przez Allena Newella oraz Herberta Simona w artykule Informatyka jako badania empiryczne.
+
+Pierwsza rewolucja wiedzy o poznaniu i powstanie psychologii empirycznej
+Thomas Hobbes – umysł jako kalkulator
+David Hume – próba stworzenia mechaniki umysłu (na wzór Newtonowskiej mechaniki klasycznej)
+powstanie psychofizyki (Wilhelm Wundt, Ernst Heinrich Weber, Gustav Fechner, Hermann von Helmholtz)
+behawioryzm (John Watson)
+Druga rewolucja wiedzy o poznaniu i powstanie kognitywistyki
+powstanie dyscyplin obliczeniowych (lata 40. i 50. XX w.)
+powstanie i rozwój psychologii poznawczej (1956)
+dalszy rozwój neurobiologii i narodziny neuronauki
+rewolucja poznawcza w językoznawstwie (Noam Chomsky)
+
+
+Cele
+Celami kognitywistyki są:
+
+wyjaśnienie procesów myślowych i modelowanie inteligencji,
+ich symulacja komputerowa,
+rozwój różnych mniej i bardziej „inteligentnych” urządzeń.
+
+
+Działy kognitywistyki
+
+
+Kognitywistyka symboliczna
+Kognitywistyka symboliczna nie jest dobrze zdefiniowana w naukowej literaturze światowej i koncentruje się na
+symbolicznym modelowaniu uświadamianych abstrakcyjnych funkcji myślowych uznawanych za takie same u wszystkich ludzi i dotyczy: samoświadomości (metakognitywistyka, ang. metacognition), kognitywnego podejmowania decyzji
+(cognitive decision-making) i inteligencji socjo-kognitywistycznej/kognitywnej jako uniwersalnych własności jednostki, grupy, organizacji ludzkich i robotów.
+Tego typu działalność naukowa prowadzi do rozwoju nowego podejścia integrującego paradygmaty teorii systemów, inżynierii, nauk społecznych i kognitywistyki, tzw. inżynierii socjokognitywistycznej (lub socio-kognitywistycznej) rozwijanej przez Adama Marię Gadomskiego w ramach meta-teorii TOGA.
+Od strony zastosowanych technologii kognitywistyka symboliczna koncentruje się na rozbudowie tzw. baz wiedzy (KB – knowledge base) i budowie skomplikowanych Systemów Bazujących na Wiedzy (Knowledge Base System), które to realizują różne funkcje uważane za charakterystyczne dla systemów inteligentnych.
+Jednym z ważnych, a nierozwiązanych jeszcze wystarczająco problemów kognitywistyki jest definicja świadomości, czyli zdolności syntezy i myślenia o własnym myśleniu.
+
+
+Kognitywistyka subsymboliczna
+Kognitywistyka subsymboliczna bazuje głównie na wyjaśnianiu procesów myślowych w mózgu ludzkim opartych na własnościach sieci neuronowych. Coraz popularniejszym paradygmatem kognitywistyki subsymbolicznej staje się nauka, w której łączy się wzorce i modele pochodzące z tradycyjnych nauk o poznawaniu, psychologii, neurobiologii i wielu innych subdyscyplin nauk przyrodniczych.
+Jednym z najbardziej znanych specjalistów w tej dziedzinie w Polsce jest Włodzisław Duch.
+
+
+Przypisy
+
+
+Bibliografia
+PaulP. Thagard PaulP., Cognitive Science, Edward N.E.N. Zalta (red.), [w:] Stanford Encyclopedia of Philosophy, Winter 2017 Edition, Metaphysics Research Lab, Stanford University, 11 lipca 2014, ISSN 1095-5054 [dostęp 2017-12-31] [zarchiwizowane z adresu 2017-12-21]  (ang.). typ?
+
+
+Linki zewnętrzne
+
+Polskie Towarzystwo Kognitywistyczne – kognitywistyka w Polsce
+Rocznik Kognitywistyczny – czasopismo poświęcone kognitywistyce
+Wstęp do kognitywistyki, wykład prof. Włodzisława Ducha z UMK
+Wstęp do kognitywistyki, wykłady dr hab. Marcina Miłkowskiego w serwisie YouTube

@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Prof. Krauze-Gryz: wiewiórki potrafią oszukiwać rywali i zjadać pisklęta
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112127%2Cprof-krauze-gryz-wiewiorki-potrafia-oszukiwac-rywali-i-zjadac-piskleta.html
+# Pobrano: 2026-03-18
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Prof. Krauze-Gryz: wiewiórki potrafią oszukiwać rywali i zjadać pisklęta </span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-18T11:10:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-18T12:10:00+01:00" title="środa, Marzec 18, 2026 - 12:10" class="datetime">śr., 03/18/2026 - 12:10</time>
+</span>
+
+
+6 minut

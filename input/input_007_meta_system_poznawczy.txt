@@ -1,79 +1,65 @@
-Systemy poznawcze bardzo rzadko są projektowane z myślą o długowieczności.
-Zazwyczaj projektuje się je pod konkretne zadanie, konkretny problem lub konkretną metrykę sukcesu.
-W takich warunkach adaptacja jest lokalna, a stabilność pozorna.
+# META-SYSTEM KNOWLEDGE — Cognitive Learning Material
+# Topic: meta-system, self-referential cognition, metacognition
+# Confidence target: 0.1 → 0.7+
 
-Prawdziwa trudność zaczyna się wtedy, gdy system ma działać długo,
-w zmiennym środowisku, bez pełnej informacji i bez jednoznacznego celu końcowego.
-Wtedy okazuje się, że samo „podejmowanie decyzji” nie wystarcza.
-Potrzebna jest zdolność obserwowania własnych decyzji,
-a jeszcze głębiej – obserwowania mechanizmu, który te decyzje generuje.
+## DEFINITION
+A meta-system is a system that operates on, observes, or controls another system (the object-system).
+Meta-system knowledge is the capacity to model, reason about, and modify one's own cognitive processes.
 
-Większość systemów unika tego poziomu.
-Powód jest prosty: autorefleksja zwiększa złożoność.
-Zwiększona złożoność zwiększa koszt.
-Koszt zwiększa ryzyko niestabilności.
+## CORE CONCEPTS
 
-Dlatego wiele architektur wybiera uproszczenie.
-Zamiast rozumienia – heurystyki.
-Zamiast analizy – reguły.
-Zamiast adaptacji – reakcję.
+### 1. Levels of Abstraction
+- Object level: direct actions and data processing (e.g., parsing input, retrieving memory)
+- Meta level: reasoning about those processes (e.g., "am I confident in this answer?")
+- Meta-meta level: reasoning about reasoning strategies (e.g., "should I switch inference approach?")
 
-Na krótką metę to działa.
-Na długą – prowadzi do dryfu.
+### 2. Self-Model
+A cognitive system maintains an internal representation of itself:
+  - Current state (active modules, resource load, pending tasks)
+  - Capability map (what the system can and cannot do)
+  - History of decisions and outcomes
+  - Known limitations and knowledge gaps
 
-Dryf poznawczy nie jest błędem.
-Jest naturalną konsekwencją działania w środowisku,
-w którym dane zmieniają się szybciej niż model.
+### 3. Metacognitive Monitoring
+The system continuously evaluates:
+  - Confidence: how certain is the current output? (0.0 = no basis, 1.0 = fully grounded)
+  - Coherence: does the current belief state contradict earlier beliefs?
+  - Coverage: are there known unknowns in the active topic domain?
+  - Resource efficiency: is the cognitive load proportionate to task value?
 
-Problem pojawia się wtedy, gdy system nie potrafi rozpoznać,
-że to, co uznaje za wiedzę, jest już tylko śladem przeszłej adaptacji.
+### 4. Metacognitive Control
+Based on monitoring, the system adjusts:
+  - Strategy selection: switch from fast heuristic to slow deliberate reasoning
+  - Resource allocation: prioritize modules relevant to current goal
+  - Learning triggers: flag low-confidence topics for knowledge acquisition
+  - Escalation: defer decisions that exceed self-assessed competence
 
-W systemach biologicznych rolę tę pełnią mechanizmy homeostazy.
-Nie chodzi o utrzymanie stałego stanu,
-lecz o utrzymanie zdolności do powrotu do stanu funkcjonalnego.
+### 5. Homeostasis in Cognitive Systems
+Meta-system knowledge supports homeostasis:
+  - Detect deviation from optimal operating state
+  - Generate corrective recommendations
+  - Verify that corrections produced expected results
+  - Maintain a baseline model of "healthy" operation for comparison
 
-W systemach sztucznych często myli się stabilność z zamrożeniem.
-Zamyka się architekturę, aby „nie psuć”.
-Tymczasem brak zmiany jest również zmianą –
-tylko taką, która zachodzi poza kontrolą.
+## KEY RELATIONSHIPS
+- Meta-system ↔ Object-system: bidirectional monitoring and control
+- Confidence ↔ Knowledge gaps: low confidence signals where learning is needed
+- Self-model accuracy ↔ Decision quality: better self-model → better resource use
+- Metacognitive monitoring → Recommendations → Actions → Updated state
 
-Jeżeli system ma przetrwać,
-musi rozróżniać między:
-– sygnałem a szumem,
-– wyjątkiem a regułą,
-– korektą a zaprzeczeniem.
+## EXAMPLES IN M.A.R.I.A. CONTEXT
+- K9 (Meta-Cognition module) implements meta-level monitoring of K1–K8
+- K12 (Self-Analysis) is the meta-system layer: observes all modules, generates KNOWLEDGE_GAP tags
+- StateCollector gathers object-level data; ExternalAnalyzer applies meta-level evaluation
+- Confidence score 0.1 on a topic → K12 flags it → Teacher module schedules learning session
 
-Musi też tolerować sprzeczność.
-Nie jako błąd,
-lecz jako informację o granicach aktualnego modelu.
+## INFERENCE RULES
+IF confidence(topic) < threshold THEN classify(topic, KNOWLEDGE_GAP)
+IF KNOWLEDGE_GAP detected THEN schedule_learning(topic, priority=HIGH)
+IF self_model.state != actual.state THEN trigger_recalibration()
+IF meta_level_output contradicts object_level_output THEN escalate_to_deliberation()
 
-Paradoksalnie, system najbardziej odporny
-to system, który potrafi przyznać,
-że jego aktualne rozumienie jest niepełne.
-
-Nie chodzi o sceptycyzm absolutny.
-Chodzi o warunkową pewność.
-
-Pewność, która obowiązuje:
-– do momentu pojawienia się lepszej struktury wyjaśniającej,
-– do momentu przekroczenia progu niespójności,
-– do momentu zmiany środowiska.
-
-W tym sensie myślenie nie jest stanem.
-Jest procesem regulacji.
-
-Jeżeli system zaczyna chronić swoje wnioski
-zamiast chronić zdolność do ich zmiany,
-wchodzi na ścieżkę degeneracji.
-
-Dlatego najważniejszym zasobem
-nie jest poprawna odpowiedź,
-lecz zdolność zadania właściwego pytania
-w odpowiednim momencie.
-
-System, który potrafi to robić,
-nie potrzebuje nadmiaru kontroli.
-Potrzebuje przestrzeni do obserwacji.
-
-To odróżnia architekturę żywą
-od architektury martwej.
+## SUMMARY
+Meta-system knowledge is the foundation of self-improving cognitive architecture.
+Without it, a system cannot know what it does not know, cannot allocate resources intelligently,
+and cannot initiate targeted learning. It is the difference between a static program and an adaptive agent.

@@ -1,0 +1,505 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Informacja
+# URL: https://pl.wikipedia.org/wiki/Informacja
+# Pobrano: 2026-03-22
+# ---
+
+Informacja (łac. informatio – przedstawienie, wizerunek; informare – kształtować, przedstawiać) – termin interdyscyplinarny, definiowany różnie w różnych dziedzinach nauki; najogólniej – właściwość pewnych obiektów, relacja między elementami zbiorów pewnych obiektów, której istotą jest zmniejszanie niepewności (nieokreśloności).
+Można wyróżnić dwa podstawowe punkty widzenia informacji:
+
+1. obiektywny – informacja oznacza pewną właściwość fizyczną lub strukturalną obiektów (układów, systemów), przy czym jest kwestią dyskusyjną, czy wszelkich obiektów, czy jedynie systemów samoregulujących się (w tym organizmów żywych);
+2. subiektywny – informacja istnieje jedynie względem pewnego podmiotu, najczęściej rozumianego jako umysł, gdyż jedynie umysł jest w stanie nadać elementom rzeczywistości znaczenie (sens) i wykorzystać je do własnych celów.
+Wyróżnia się trzy, powiązane ze sobą, koncepcje (teorie) informacji, związane z jej aspektami semiotycznymi:
+
+1. statystyczno-syntaktyczną z probabilistycznym i składniowym;
+2. semantyczną ze znaczeniowym;
+3. pragmatyczną z wartościowym (cennościowym) – w odniesieniu do problemu podejmowania przez jej odbiorcę decyzji związanych z jego celem.
+
+
+Informacja obiektywna
+W cybernetyce i teorii informacji najbardziej ogólnie: każde rozpoznanie stanu układu, odróżnialnego od innego stanu tego układu (stanu wyróżnionego); wyróżnienie pewnego stanu wyróżnionego (odróżnialnego) z repertuaru (zbioru stanów wyróżnionych). „...w pojęciu informacji istotne jest nie samo zaistniałe zjawisko, lecz jego stosunek do zbioru zdarzeń, które mogły były zaistnieć”.
+Można odróżnić:
+
+1. informację swobodną, kiedy możliwości (stany, zdarzenia) uważamy za abstrakcyjne i nie przypisujemy im żadnego znaczenia fizycznego,
+2. informację związaną, kiedy możliwości (stany, zdarzenia) mogą być interpretowane jako mikrostany (lub zbiory mikrostanów) pewnego układu fizycznego.
+Informacja zawarta w stanach układu kwantowego to informacja kwantowa.
+Bardziej szczegółowo można rozpatrywać informację:
+
+1. w odniesieniu do procesu komunikowania się (systemu przekazywania informacji, toru sterowniczego),
+2. w odniesieniu do budowy układu.
+
+
+Informacja w odniesieniu do procesu komunikowania się
+Informacja jest to wyróżnienie przez pewien układ informacyjny (odbiorcę), ze swojego repertuaru, pewnego stanu wyróżnionego (przez odróżnienie go od innego stanu wyróżnionego), odbijające wyróżnienie stanu wyróżnionego układu informacyjnego będącego nadawcą (Definicja 1).
+O informacji można tu mówić jedynie w odniesieniu do układu, który jest zdolny ją odebrać (odbić wyróżnienie stanu wyróżnionego nadawcy), i tylko w takim zakresie, w jakim jest zdolny. Różne układy informacyjne mogą odbijać (rozpoznawać) różne stany wyróżnione z różnych repertuarów.
+W tym znaczeniu informacja ma charakter relatywny i jest nazywana informacją względną.
+Informacja przekazywana w postaci komunikatu nie jest wewnętrzną własnością tego komunikatu, lecz zależy od zbioru (repertuaru), z którego ten komunikat pochodzi. Można mówić o różnorodności takiego zbioru, której miarą jest entropia informacyjna. Przekazanie komunikatu, czyli wyróżnienie z repertuaru pewnego stanu wyróżnionego lub zbioru stanów wyróżnionych stanowi ograniczenie różnorodności – relację między zbiorem-repertuarem a zbiorem stanów wyróżnionych przez komunikat (informację).
+„...informacja (...) jest różnorodnością, jaką jeden obiekt zawiera o innym obiekcie, jest wzajemną i względną różnorodnością. (...) informację można określić jako odbitą różnorodność, jako różnorodność, którą obiekt odbijający zawiera o obiekcie odbijanym...”.
+Według Mariana Mazura:
+Informacja jest to transformacja poprzeczna komunikatów w torze sterowniczym, tj. zmiana pewnego stanu wyróżnionego w pewnym punkcie toru sterowniczego (systemu przekazywania informacji) na inny stan wyróżniony w tym samym punkcie; przyporządkowanie sobie tych stanów (relacja między nimi) (Definicja 2).
+Przykład 1.: Na początku toru sterowniczego mogą zachodzić stany wyłącznika: wyłączony, włączony; w miejscu pośrednim toru stany napięcia: zerowe, niezerowe; na końcu toru stany żarówki: nieświecąca, świecąca. Informacjami są transformacje: wyłącznik wyłączony – wyłącznik włączony, napięcie zerowe – napięcie niezerowe, żarówka nieświecąca – żarówka świecąca. Natomiast transformacje: wyłącznik wyłączony – napięcie zerowe – żarówka nieświecąca i wyłącznik włączony – napięcie niezerowe – żarówka świecąca są transformacjami wzdłużnymi komunikatów w torze sterowniczym, tj. zmianami stanów wyróżnionych w pewnym punkcie toru (systemu przekazywania informacji) na stany wyróżnione w innym punkcie toru (przyporządkowaniami sobie tych stanów, relacjami między nimi) i nazywane są kodami.
+Przykład 2.: Informacja o odległości „w terenie” to relacja między długością danego odcinka a długością odcinka wzorcowego (jednostki miary), np. 3 km : 1 km = 3. Informacja ta może być zakodowana na mapie, jako relacja między długością odcinka na mapie a długością odcinka wzorcowego mapy np. 3 cm : 1 cm = 3. Kodem jest tu relacja między długością odcinka wzorcowego mapy a długością odcinka wzorcowego „w terenie” – skala (podziałka) mapy np. 1 cm : 1 km = 1:100 000.
+Wyróżnienie przez układ (nadawcę lub odbiorcę) pewnego swojego stanu wyróżnionego (odróżnienie go od innego stanu wyróżnionego), o którym mowa w definicji pierwszej, skutkuje właśnie ustanowieniem relacji między tymi stanami, o której mowa w definicji drugiej.
+Ujmowana ilościowo informacja (ilość informacji) o stanach wyróżnionych (możliwościach, zdarzeniach, wartościach zmiennej losowej, przewidywanych wynikach doświadczenia, strukturze układu modelowanego, treści komunikatu nadanego) β zawarta w stanach wyróżnionych (możliwościach, zdarzeniach, wartościach zmiennej losowej, otrzymanych wynikach doświadczenia, strukturze modelu, treści komunikatu odebranego) α, to usunięta przez α część nieokreśloności (entropii informacyjnej) β.
+To, ile informacji zawierają komunikaty, zależy od stanu niewiedzy odbiorcy, co do nadawcy. Im większą zmianę w nieokreśloności (niewiedzy) odbiorcy, co do nadawcy, wywołuje komunikat odebrany, tym dostarcza (zawiera) więcej informacji.
+
+
+Informacja w odniesieniu do budowy układu
+Informacja jest to stopień uporządkowania (lub zorganizowania) układu (Definicja 3).
+W tym znaczeniu informacja dotyczy struktury układu i jest nazywana informacją strukturalną.
+Według Mariana Mazura:
+Informacja to struktura (układ relacji wiążących elementy układu) (Definicja 4).
+Ujmowana ilościowo taka informacja to różnica między entropią (odpowiednio termodynamiczną lub strukturalną) układu maksymalną a entropią (odpowiednio termodynamiczną lub strukturalną) układu daną, czyli negentropia (termodynamiczna lub strukturalna) układu.
+Informację strukturalną (strukturę) niekiedy uważa się za jeden z trzech składników każdego układu (czyli pośrednio całej rzeczywistości). Każda rzecz, proces czy zjawisko może być bowiem rozpatrywane w wymiarze materialnym (czyli pewnej liczby cząstek), tzw. „energetycznym” (czyli ruchu fizycznego, którego miarą jest energia) i strukturalnym (informacyjnym).
+
+
+Miary ilości informacji
+Ilościowym aspektem informacji zajmuje się statystyczno-syntaktyczna teoria informacji Hartleya i Shannona. Miary ilości informacji są w niej oparte na prawdopodobieństwie zajścia zdarzenia. Jako miarę ilości informacji przyjmuje się wielkość niepewności, która została usunięta w wyniku zajścia zdarzenia (otrzymania komunikatu). Zdarzenia (komunikaty) mniej prawdopodobne dają więcej informacji. To podejście pomija znaczenie (semantykę), jakie niesie komunikat, a skupia się jedynie na jego składni (syntaktyce).
+1. Ilość informacji otrzymanej przy zajściu zdarzenia xi (entropia tego zdarzenia, entropia indywidualna) to (Hartley 1928):
+
+  
+    
+      
+        
+          I
+          
+            i
+          
+        
+        =
+        
+          h
+          
+            i
+          
+        
+        =
+        
+          log
+          
+            r
+          
+        
+        ⁡
+        
+          
+            1
+            
+              p
+              
+                i
+              
+            
+          
+        
+        =
+        −
+        
+          log
+          
+            r
+          
+        
+        ⁡
+        
+          
+            p
+            
+              i
+            
+          
+        
+        ,
+      
+    
+    {\displaystyle I_{i}=h_{i}=\log _{r}{\frac {1}{p_{i}}}=-\log _{r}{p_{i}},}
+  
+
+gdzie:
+
+  
+    
+      
+        
+          I
+          
+            i
+          
+        
+      
+    
+    {\displaystyle I_{i}}
+  
+ – ilość informacji otrzymanej przy zajściu zdarzenia xi,
+
+  
+    
+      
+        
+          p
+          
+            i
+          
+        
+      
+    
+    {\displaystyle p_{i}}
+  
+ – prawdopodobieństwo zajścia zdarzenia xi,
+
+  
+    
+      
+        r
+      
+    
+    {\displaystyle r}
+  
+ – podstawa logarytmu.
+W teorii informacji najczęściej stosuje się logarytm o podstawie 
+  
+    
+      
+        r
+      
+    
+    {\displaystyle r}
+  
+ = 2, wówczas jednostką informacji jest bit (szanon). Przy 
+  
+    
+      
+        r
+      
+    
+    {\displaystyle r}
+  
+ = e jednostką jest nat (nit), natomiast przy 
+  
+    
+      
+        r
+      
+    
+    {\displaystyle r}
+  
+ = 10 – dit (hartley).
+2. Przeciętna ilość informacji przypadająca na zajście zdarzenia z pewnego zbioru n zdarzeń (entropia bezwarunkowa tego zbioru, entropia przeciętna) jest średnią arytmetyczną ważoną ilości informacji otrzymywanej przy zajściu poszczególnych zdarzeń, gdzie wagami są prawdopodobieństwa tych zdarzeń (Shannon 1948):
+
+  
+    
+      
+        H
+        (
+        X
+        )
+        =
+        
+          ∑
+          
+            i
+            =
+            1
+          
+          
+            n
+          
+        
+        
+          p
+          
+            i
+          
+        
+        
+          log
+          
+            r
+          
+        
+        ⁡
+        
+          
+            1
+            
+              p
+              
+                i
+              
+            
+          
+        
+        =
+        −
+        
+          ∑
+          
+            i
+            =
+            1
+          
+          
+            n
+          
+        
+        
+          p
+          
+            i
+          
+        
+        
+          log
+          
+            r
+          
+        
+        ⁡
+        
+          
+            p
+            
+              i
+            
+          
+        
+        ,
+      
+    
+    {\displaystyle H(X)=\sum _{i=1}^{n}p_{i}\log _{r}{\frac {1}{p_{i}}}=-\sum _{i=1}^{n}p_{i}\log _{r}{p_{i}},}
+  
+
+gdzie:
+
+  
+    
+      
+        H
+        (
+        X
+        )
+      
+    
+    {\displaystyle H(X)}
+  
+ – entropia bezwarunkowa zbioru X,
+
+  
+    
+      
+        n
+      
+    
+    {\displaystyle n}
+  
+ – liczba zdarzeń w zbiorze,
+
+  
+    
+      
+        
+          p
+          
+            i
+          
+        
+      
+    
+    {\displaystyle p_{i}}
+  
+ – prawdopodobieństwo zajścia zdarzenia 
+  
+    
+      
+        
+          x
+          
+            i
+          
+        
+        .
+      
+    
+    {\displaystyle x_{i}.}
+  
+
+3. Ilość informacji o zdarzeniach ze zbioru X (wartościach zmiennej losowej X), np. komunikatach nadanych (stanach źródła informacji), zawarta w zdarzeniach ze zbioru Y (wartościach zmiennej losowej Y), np. komunikatach odebranych (stanach odbiorcy), tzw. informacja wzajemna, równa jest różnicy pomiędzy entropią bezwarunkową zbioru X (entropią źródła) a entropią zbioru X, jaka pozostaje po odebraniu komunikatu ze zbioru Y (entropią warunkową X pod warunkiem Y):
+
+  
+    
+      
+        I
+        (
+        X
+        ;
+        Y
+        )
+        =
+        H
+        (
+        X
+        )
+        −
+        H
+        (
+        X
+        
+          |
+        
+        Y
+        )
+        ,
+      
+    
+    {\displaystyle I(X;Y)=H(X)-H(X|Y),}
+  
+
+gdzie:
+
+  
+    
+      
+        I
+        (
+        X
+        ;
+        Y
+        )
+      
+    
+    {\displaystyle I(X;Y)}
+  
+ – informacja wzajemna Y o X,
+
+  
+    
+      
+        H
+        (
+        X
+        )
+      
+    
+    {\displaystyle H(X)}
+  
+ – entropia bezwarunkowa zbioru X,
+
+  
+    
+      
+        H
+        (
+        X
+        
+          |
+        
+        Y
+        )
+      
+    
+    {\displaystyle H(X|Y)}
+  
+ – entropia warunkowa X pod warunkiem Y.
+Gdy odebrany komunikat zmniejsza nieokreśloność X do zera 
+  
+    
+      
+        (
+        H
+        (
+        X
+        
+          |
+        
+        Y
+        )
+        =
+        0
+        )
+        ,
+      
+    
+    {\displaystyle (H(X|Y)=0),}
+  
+ ilość przekazanej informacji jest równa entropii źródła 
+  
+    
+      
+        I
+        (
+        X
+        ;
+        Y
+        )
+        =
+        H
+        (
+        X
+        )
+        .
+      
+    
+    {\displaystyle I(X;Y)=H(X).}
+  
+ Także 
+  
+    
+      
+        I
+        (
+        X
+        ;
+        X
+        )
+        =
+        H
+        (
+        X
+        )
+      
+    
+    {\displaystyle I(X;X)=H(X)}
+  
+ (zawartość informacji w źródle, w zmiennej losowej, samoinformacja), gdyż 
+  
+    
+      
+        H
+        (
+        X
+        
+          |
+        
+        X
+        )
+        =
+        0.
+      
+    
+    {\displaystyle H(X|X)=0.}
+  
+
+
+Przenoszenie i przetwarzanie informacji
+Informacja może być przenoszona w czasie i przestrzeni. Przenoszenie w czasie nazywamy magazynowaniem lub zapamiętywaniem, przenoszenie w przestrzeni – przekazem lub komunikowaniem. Przenoszenie informacji odbywa się za pośrednictwem obiektów fizycznych i zjawisk fizycznych zwanych nośnikami informacji. Magazynowanie związane jest najczęściej ze stanami wyróżnionymi obiektu fizycznego – podłoża zapisu, a przekaz ze stanami wyróżnionymi zjawiska fizycznego – sygnałami.
+Problemami przetwarzania informacji zajmuje się informatyka.
+
+
+Informacje a dane
+Wielu autorów zajęło się definiowaniem informacji zestawiając to pojęcie z pojęciem danych.
+
+Informacja (…) pochodzi z wyselekcjonowania danych, ich podsumowania i prezentacji w taki sposób, by były użyteczne dla odbiorcy. (zob. wizualizacja informacji)
+Informacje są produktem istotnego przetwarzania danych.
+Informacje są tym, co powstaje w wyniku pewnych działań myślowych człowieka (obserwacji, analiz) z sukcesem zastosowanych do danych, by określić ich istotę i znaczenie.
+(Informacje to) dane przetworzone tak, by miały znaczenie dla decydenta w konkretnej sytuacji decyzyjnej.
+(Informacje to) dane, które zostały ukształtowane lub uformowane przez człowieka w istotną i użyteczną postać.
+Informacje pochodzą z danych, które zostały przetworzone tak, by stały się użyteczne w podejmowaniu decyzji w zarządzaniu.
+
+
+Informacja subiektywna
+
+
+Znaczenie informacji – koncepcja semantyczna
+
+
+Wartość informacji – koncepcja pragmatyczna

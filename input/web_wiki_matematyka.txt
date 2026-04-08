@@ -1,0 +1,190 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Matematyka
+# URL: https://pl.wikipedia.org/wiki/Matematyka
+# Pobrano: 2026-03-21
+# ---
+
+Matematyka (z łac. mathematicus, od gr. μαθηματικός mathēmatikós, od μαθηματ-, μαθημα mathēmat-, mathēma, „nauka, lekcja, poznanie”, od μανθάνειν manthánein, „uczyć się, dowiedzieć”; prawd. spokr. z goc. mundon, „baczyć, uważać”) – nauka zaliczana do grupy formalnych, inaczej dedukcyjnych lub apriorycznych, a także do nauk ścisłych i definiująca tę grupę – matematyka stanowi ich fundament. Dotyczy ona ścisłych wniosków z przyjętych założeń – prawidłowości rozumowania, podobnie jak logika, jednak matematyka się z nią nie pokrywa. Ścisłe założenia mogą dotyczyć najróżniejszych dziedzin myśli ludzkiej; muszą być czynione w naukach ścisłych, technice i zdarzają się w naukach humanistycznych, przez co zakres matematyki stale się powiększa razem z tymi naukami.
+W pewnym sensie matematyka istnieje od czasów prehistorycznych, ponieważ już ludy paleolityczne posługiwały się pojęciem liczby i podstawami arytmetyki elementarnej. Starożytność to pojawienie się:
+
+właściwych, ściśle rozumianych dyscyplin matematycznych jak teoria liczb, ścisła geometria, zręby algebry oraz podstawy logiki, pierwotnie zaliczanej do filozofii;
+matematycznego przyrodoznawstwa jak ilościowa fizyka i astronomia.
+Średniowiecze i wczesna nowożytność to narodziny nowych dyscyplin jak kombinatoryka, analiza matematyczna i probabilistyka, jednak pozostawała to nauka oparta na pojęciach liczby i przestrzeni rozumianej fizycznie. Pozostaje to prawdą o większości matematyki elementarnej nauczanej w szkołach podstawowych i średnich, ale w XIX wieku matematyka wykroczyła poza te pojęcia, kiedy:
+
+powstały logika matematyczna, teoria mnogości i algebra abstrakcyjna;
+geometrię zdefiniowano na nowo, w oderwaniu od przestrzeni fizycznej.
+Matematyka wyższa bada i klasyczne przedmioty tej nauki, i obiekty bardziej abstrakcyjne, zdefiniowane odrębnie; przykłady to wspomniane trzy działy oraz topologia.
+Prehistoryczne korzenie matematyki dotyczą problemów praktycznych i z czasem matematyka stosowana wytworzyła szereg dyscyplin powiązanych z różnymi obszarami kultury jak nauki empiryczne, technika, sztuka, sport czy polityka. Obecnie standardem w naukach eksperymentalnych jest potwierdzanie istnienia obserwowanych zależności za pomocą metod statystyki, będącej działem matematyki. Pomaga to odróżnić rzeczywiste zależności od przypadkowej zbieżności. Leonardo da Vinci stwierdził w Traktacie o malarstwie: „Żadne ludzkie badania nie mogą być nazywane prawdziwą nauką, jeśli nie mogą być zademonstrowane matematycznie”. Z drugiej strony najpóźniej w starożytnej Grecji zapoczątkowano matematyczne badania podstawowe znane jako matematyka czysta lub teoretyczna. Bywa uważana za formę sztuki; niektóre z jej wyników z czasem znalazły  zastosowanie, kiedy okazało się, że potrzebuje ich fizyka lub informatyka.
+Matematyka wywarła też wpływ na filozofię i religię, np. inspirując ruch pitagorejczyków i platonizm; rozwój logiki i innych podstaw matematyki dostarczył nowych narzędzi ontologii, metafizyce, epistemologii i filozofii języka, zainspirował pewne idee w filozofii umysłu, a matematyka najpóźniej w starożytności się stała przedmiotem refleksji znanej jako filozofia matematyki. Jednym z jej zagadnień jest status osiągnięć matematyków; bywają zaliczane do odkryć przez większość stanowisk realistycznych, według których nauka ta opisuje rzeczywistość obiektywną, niezależną od ludzkiego umysłu. Przedstawiciele innych doktryn klasyfikują te prace raczej jako wynalazki. Innym przedmiotem sporu jest związek matematyki z logiką, choć badania z XIX i XX wieku przekreśliły tradycyjny logicyzm próbujący redukować założenia matematyki do praw logicznych.
+Matematyka bywa nazywana królową nauk; na ich tle wyróżnia się:
+
+samodzielnością i niezależnością od innych badań, choć korzysta z osiągnięć techniki;
+wyjątkowo rozległym wpływem;
+pewnością rezultatów, rzadko podlegających rewizji.
+
+
+Definicje i wizje
+Paul Dirac stwierdził: „Matematyka jest narzędziem stworzonym specjalnie do wszelkich abstrakcyjnych koncepcji i nie ma ograniczeń dla jej potęgi w tym zakresie”.
+Benjamin Peirce nazwał ją „nauką, która wyciąga właściwe wnioski”.
+Henri Poincaré określił matematykę jako „sztukę nadawania takich samych nazw różnym rzeczom”.
+David Hilbert uznał, że „sztuka uprawiania matematyki zawiera się w znajdowaniu szczególnych przypadków, które zawierają w sobie zalążki uogólnień”.
+Poeta William Wordsworth stwierdził: „Matematyka jest niezależnym światem stworzonym przez czystą inteligencję”.
+Nikołaj Łobaczewski uznał, że „Nie ma gałęzi matematyki, choćby nie wiem jak abstrakcyjnej, która pewnego dnia nie zostałaby zastosowana do zjawisk realnego świata”.
+Immanuel Kant stwierdził: „Matematyka jest najjaskrawszym przykładem, jak czysty rozum może skutecznie rozszerzać swoją domenę bez jakiejkolwiek pomocy doświadczenia”.
+
+
+Główne działy
+
+Matematyka jest dynamiczną symbiozą dziedzin, działów czy teorii, które przenikają się oraz zależą jedne od drugich. Powstają wciąż nowe teorie, stare obumierają, a czasem znowu wracają do życia. Matematyka wymyka się klasyfikacji lub zmusza do tworzenia klasyfikacji wciąż na nowo.
+Amerykańskie Towarzystwo Matematyczne prowadzi klasyfikację gałęzi matematyki, w których prowadzone są aktywne badania naukowe. Ta klasyfikacja jest uaktualniana co pewien czas, aby odzwierciedlić zmiany w zainteresowaniach matematyków – od stycznia 2020 obowiązuje wersja określana jako MSC 2020 (Mathematics Subject Classification 2020). MSC jest używane przez wiele czasopism matematycznych oraz baz danych w rodzaju Mathematical Reviews. Klasyfikacja ta obejmuje opisane poniżej główne gałęzie matematyki, z których każda jest dalej dzielona. Łącznie zawiera ona ponad 5000 szczegółowych dziedzin matematyki i dziedzin z matematyką związanych. Każda dziedzina ma przypisany pięcioznakowy kod.
+
+
+Logika i podstawy
+Podstawy matematyki definiują język matematyki, sposoby przeprowadzania dowodów matematycznych, metody budowania jej struktur i teorii oraz określają własności jej podstawowych obiektów, takich jak zbiór.
+
+03Bxx Logika ogólna
+03Cxx Teoria modeli
+03Dxx Teoria obliczeń i teoria rekursji
+03Exx Teoria mnogości
+03Fxx Teoria dowodu, matematyka konstruktywna, metamatematyka
+03Gxx Logika algebraiczna
+03Hxx Niestandardowe modele
+
+
+Algebra
+Algebra to dział matematyki zajmujący się strukturami algebraicznymi, porządkowymi, relacjami i uogólniający rozmaite własności działań wspólne dla różnych zbiorów, w których działania takie mogą być przeprowadzane.
+
+05-xx Kombinatoryka i teoria grafów
+06-xx Porządki, kraty, algebry Boole’a, uporządkowane struktury algebraiczne. Często zaliczane są one do teorii mnogości, jednak MSC inaczej je klasyfikuje.
+08-xx Ogólne systemy algebraiczne
+11-xx Teoria liczb
+12-xx Teoria ciał i wielomianów
+13-xx Pierścienie i algebry przemienne
+14-xx Geometria algebraiczna
+15-xx Algebra liniowa i n-liniowa; teoria macierzy
+16-xx Pierścienie i algebry łączne
+17-xx Niełączne pierścienie i algebry
+18-xx Teoria kategorii, algebra homologiczna
+19-xx K-teoria
+20-xx Teoria grup i jej uogólnienia
+22-xx Grupy topologiczne, grupy Liego
+
+
+Analiza
+Analiza matematyczna bada pochodne, całki, miary, sumy szeregów, równania różniczkowe i inne pojęcia związane najogólniej mówiąc z przechodzeniem do granicy.
+
+26-xx Teoria funkcji rzeczywistych
+28-xx Teoria miary i całki
+30-xx Funkcje zmiennej zespolonej
+31-xx Teoria potencjału
+32-xx Funkcje wielu zmiennych zespolonych i przestrzenie analityczne
+33-xx Funkcje specjalne
+34-xx Równania różniczkowe zwyczajne
+35-xx Równania różniczkowe cząstkowe
+37-xx Teoria układów dynamicznych i ergodyczności
+39-xx Równania różnicowe i równania funkcyjne
+40-xx Ciągi, szeregi
+41-xx Aproksymacja
+42-xx Analiza Fouriera
+43-xx Abstrakcyjna analiza harmoniczna
+44-xx Transformacje całkowe, rachunek operatorów
+45-xx Równania całkowe
+46-xx Analiza funkcjonalna
+47-xx Teoria operatorów
+49-xx Rachunek wariacyjny i optymalizacja
+49-xx Analiza zespolona i twierdzenie podstawowe Cauchy’ego
+
+
+Geometria
+Geometria zajmowała się kolejno przestrzeniami euklidesowymi, sferycznymi, afinicznymi i rzutowymi, hiperbolicznymi, ogólniej rozmaitościami Riemanna i w końcu stała się dziedziną badającą dla wybranych przekształceń ich niezmienniki, od najprostszych, takich jak odległość, pole powierzchni, miara kąta, przez bardziej zaawansowane, jak krzywizna, punkt stały, czy wymiar.
+
+51-xx Geometria
+52-xx Geometryczne pojęcie wypukłości, wielotopy, geometria dyskretna
+53-xx Geometria różniczkowa
+
+
+Topologia
+Topologia (zwana początkowo geometria situs, „geometrią położenia” lub analysis situs, „analizą położenia”) w oryginalnym sformułowaniu jest nauką badającą te właściwości przestrzeni, które nie zmieniają się przy przekształceniach takich jak rozciąganie, skręcanie albo obroty. Do własności takich należy na przykład liczba otworów, jakie znajdują się w danej bryle geometrycznej.
+
+54-xx Topologia ogólna
+55-xx Topologia algebraiczna, teoria homologii, teoria homotopii
+57-xx Rozmaitości topologiczne i kompleksy komórkowe, teoria węzłów
+58-xx Analiza globalna, analiza na rozmaitościach
+
+
+Matematyka dyskretna
+Często (choć nie w MSC) wyróżnia się oddzielnie grupę dziedzin, które badają struktury nieciągłe, sprowadzające się do zbiorów przeliczalnych. Do matematyki dyskretnej zalicza się m.in. (wymienione także w odpowiednich miejscach klasyfikacji MSC)
+
+kombinatoryka
+kryptologia
+logika matematyczna
+programowanie liniowe
+teoria gier (pewne działy)
+teoria grafów
+teoria informacji (elementarna jej część)
+teoria liczb (po części)
+teoria matroidów
+teoria węzłów (częściowo)
+teoria konfiguracji
+geometria skończona
+algorytmika
+teoria złożoności
+
+
+Statystyka i rachunek prawdopodobieństwa
+Statystyka zajmuje się wnioskowaniem o całej populacji nieco różniących się obiektów (np. ludzi) na podstawie obserwacji części tej populacji (tzw. próby statystycznej).
+
+60-xx Rachunek prawdopodobieństwa i procesy stochastyczne
+62-07 Analiza danych
+62-09 Metody graficzne statystyki
+62Cxx Teoria decyzji
+62D05 Teoria próbkowania
+62Exx Rozkłady prawdopodobieństwa
+62Fxx Teoria estymacji
+62Gxx Statystyka nieparametryczna
+62Hxx Analiza danych wielowymiarowych
+62Jxx Metody liniowe statystyki
+62Kxx Projektowanie eksperymentów
+62Lxx Metody sekwencyjne statystyki
+62Mxx Wnioskowanie z procesów stochastycznych
+62Nxx Analiza przeżycia
+62Pxx Zastosowania statystyki
+
+
+Matematyka stosowana
+Matematyka stosowana jest nauką rozwijającą aparat matematyczny na potrzeby innych nauk i techniki.
+
+65-xx Analiza numeryczna
+68-xx Informatyka matematyczna, teoria obliczeń, algorytmy, teoria złożoności
+70-xx Mechanika cząstek i układów
+74-xx Mechanika ciał deformowalnych
+76-xx Zastosowania matematyki w mechanice płynów
+78-xx Zastosowania matematyki w optyce i elektromagnetyzmie
+80-xx Zastosowania matematyki w termodynamice klasycznej
+81-xx Mechanika kwantowa
+82-xx Mechanika statystyczna, budowa materii
+83-xx Teoria względności
+85-xx Zastosowania matematyki w astronomii i astrofizyce
+86-xx Zastosowania matematyki w geofizyce
+90-xx Badania operacyjne, programowanie matematyczne
+91-xx Teoria gier, ekonomia, nauki społeczne
+92-xx Biomatematyka i matematyka w innych naukach przyrodniczych
+93-xx Teoria systemów, teoria sterowania
+94-xx Teoria informacji, teoria sygnałów, korekcja błędów, teoria obwodów, zbiory rozmyte
+97-xx Edukacja matematyczna
+98-xx Geometria wykreślna
+99-xx Rachunek wyrównawczy
+
+
+Badania okołomatematyczne
+MSC wyróżnia także dziedziny, które zajmują się samą matematyką jako przedmiotem swojego zainteresowania.
+
+00-xx Badania ogólne, filozofia matematyki, rozrywka matematyczna
+01-xx Historia matematyki, biografie matematyków
+
+
+Struktura formalna
+
+Matematyka jest sztuką wyciągania wniosków z założeń. Jeśli rozumowanie matematyczne jest poprawne, to przy poprawnych założeniach istnieje pewność otrzymania poprawnych wniosków. Jeśli w rozumowaniu jest jakakolwiek nieścisłość, takiej gwarancji nie ma. Stąd wynika olbrzymi nacisk, kładziony w matematyce na ścisłość rozumowania. W utrzymaniu tej ścisłości pomaga omawiany dalej formalizm logiczny oraz zapis matematyczny.
+Nie znaczy to, że w matematyce wyobraźnia, głębia, czy intuicja nie są ważne. Matematyka nie może sensownie istnieć bez aparatu formalnego, ale formalizm tworzy tylko ramy dla inwencji i twórczego myślenia matematyka, podobnie jak gramatyka języka tworzy ramy dla inwencji pisarza. Formalizm, choćby w praktyce tylko przybliżony, jest metodą obiektywnego porozumiewania się matematyków. Można używać do omawiania pojęć matematycznych zwykłego języka naturalnego, jednak ma to sens tylko tak długo, jak długo da się taki opis jednoznacznie przetłumaczyć na formalizm (nawet jeśli to tłumaczenie nie jest w praktyce wykonane).
+Formalna struktura matematyki wygląda następująco:

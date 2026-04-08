@@ -1,0 +1,145 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Chemia
+# URL: https://pl.wikipedia.org/wiki/Chemia
+# Pobrano: 2026-03-23
+# ---
+
+Chemia (arab. كيمياء kīmijāʾ, الخيمياء al-chīmijāʾ prawdopodobnie od stgr. χημ(ε)ία chēm(e)ía, χυμεία chymeía „rozpuszczanie, stapianie”) – nauka przyrodnicza badająca naturę i właściwości substancji, a zwłaszcza przemiany zachodzące pomiędzy nimi. Współcześnie wiadomo, że przemiany substancji wynikają z praw, według których atomy łączą się poprzez wiązania chemiczne w mniej lub bardziej trwałe związki chemiczne, a także praw, według których wiązania tworzą się i ulegają rozrywaniu, prowadząc do przemian jednych substancji chemicznych w inne, co jest nazywane reakcjami chemicznymi. Chemia zajmuje się także rozmaitymi właściwościami substancji wynikającymi bezpośrednio z ich budowy atomowej.
+Naturę i właściwości substancji bada również fizyka. Chemia i fizyka nawzajem się przenikają i często trudno jest precyzyjnie ustalić, gdzie kończy się jedna dziedzina, a zaczyna druga. Chemia, podobnie jak fizyka, jest centralną nauką przyrodniczą. Obie te nauki stanowią podstawę wszystkich pozostałych nauk przyrodniczych – biologii, geografii, metalurgii i wielu innych.
+
+
+Opis ogólny
+Podstawowym zagadnieniem chemii jest badanie substancji oraz ich przemian jakościowych, powodujących, że np. z jednej substancji powstają dwie albo z dwóch – jedna. Współczesna chemia stara się wyjaśniać mechanizm tych przemian na poziomie cząsteczkowym. Szuka też zależności między właściwościami substancji a ich składem i strukturą atomową.
+Struktura świata, której się na co dzień doświadcza, jest determinowana chemicznymi i fizycznymi własnościami substancji. Np: stal jest twardsza od czystego żeliwa, gdyż atomy żelaza tworzą w stali bardziej zwartą strukturę krystaliczną niż w żeliwie.
+Drewno pali się po podgrzaniu do odpowiednio wysokiej temperatury, gdyż zawarta w nim celuloza jest polimerem, który ulega spontanicznej reakcji utleniania. Cukier to kryształy organicznego związku chemicznego – sacharozy, która posiada zdolność rozpuszczania się w wodzie, a następnie przenikania do kubków smakowych w języku, gdzie jego obecność jest wykrywana poprzez ciąg skomplikowanych reakcji biochemicznych.
+Współczesne badania dowiodły, że za wszystkie te efekty, w ten czy inny sposób, odpowiada chmura elektronów otaczająca jądra atomowe. Stąd chemia jest w istocie nauką zajmującą się zjawiskami elektronowymi i nie wnika w funkcjonowanie jąder. Wyjątkiem jest tylko chemia jądrowa, nauka na pograniczu fizyki jądrowej i chemii.
+Współczesna chemia jest przede wszystkim nauką eksperymentalną, całkowicie pozbawioną magiczno-mistycznej otoczki typowej dla alchemii. Jej podstawę faktograficzną stanowią reakcje chemiczne przeprowadzane w kontrolowanych warunkach w laboratoriach z użyciem specjalnej aparatury oraz wyniki dokładnych badań produktów tych reakcji. Do 17 lipca 2007 roku w bazie danych Chemical Abstracts zarejestrowano ponad 31 milionów związków chemicznych, a na dobę jest rejestrowanych średnio 4000 nowych. Fakty te byłyby jednak bezużyteczne bez aparatu poznawczego, który stanowią podstawowe pojęcia stosowane w tej nauce, takie jak mol, pierwiastek chemiczny, związek chemiczny i inne.
+
+
+Historia
+
+Początki chemii sięgają starożytności, kiedy to z ogólnych rozważań filozoficznych wyłoniła się alchemia, której przedstawiciele działali jeszcze na początku XIX wieku.
+Za „ojców” współczesnej chemii uważa się zwykle Roberta Boyle’a (1661 r.), Antoine Lavoisiera (1787 r.) i Johna Daltona (1808 r.), którzy radykalnie rozgraniczyli badania z użyciem metody naukowej od dawnych poszukiwań kamienia filozoficznego.
+Kamieniami milowymi odkryć chemicznych do początków XX wieku były:
+
+Stworzenie jasnej koncepcji pierwiastka chemicznego, jako substancji, której nie można rozłożyć metodami chemicznymi, wprowadzonej przez Roberta Boyle’a (1689 r.).
+Rozpowszechnienie prawa zachowania masy i obalenie teorii flogistonu przez Antoine'a Lavoisiera.
+Stworzenie współczesnej koncepcji atomowej przez Johna Daltona (1808 r.).
+Odkrycie prawa okresowości i skonstruowanie układu okresowego pierwiastków przez Dmitrija Mendelejewa (ok. 1869 roku).
+Porzucenie koncepcji siły życiowej po otrzymaniu mocznika przez Friedricha Wöhlera (1828 r.).
+Odkrycie subtelnej budowy atomu przez Ernesta Rutherforda w latach 1911–1920.
+Stworzenie podstaw chemii kwantowej przez Heisenberga, Schrödingera i Pauliego w latach 20. XX w.
+
+
+Podstawowe pojęcia
+
+
+Atom, cząsteczka, wiązanie chemiczne
+
+Atom jest współcześnie podstawowym pojęciem w chemii. Składa się on z jądra atomowego i chmury elektronów. O ile jądro jest domeną fizyki jądrowej, o tyle zachowanie i natura chmury elektronowej jest domeną chemii, gdyż decyduje o zdolności atomów do łączenia się w większe obiekty, zwane cząsteczkami. Cząsteczka bowiem to grupa atomów, które są trwale powiązane przez wymianę elektronów z powłoki walencyjnej, czyli najbardziej odległej od jądra. Na skutek tej wymiany powstają trwałe wiązania chemiczne.
+
+
+Pierwiastek, indywiduum chemiczne, mieszaniny
+Według klasycznej definicji pierwiastek chemiczny to jest substancja, której metodami chemicznymi nie da się dalej rozłożyć. Koncepcja pierwiastka wywodzi się wprost z alchemii. Podstawowym dokonaniem Roberta Boyle’a było jednak zerwanie z alchemiczną tradycją, w ramach której wierzono, że tych pierwiastków jest od 3 do 7, przy czym ich lista powstawała z rozważań teoretycznych, a nie na podstawie danych eksperymentalnych. Współcześnie wiadomo, że pierwiastków jest ponad 100 i że poszczególne pierwiastki są tworzone przez atomy, które mają w jądrze jednakową liczbę protonów.
+Indywiduum chemiczne to z kolei substancja, w której występuje jeden rodzaj molekuł. Jeśli molekuły te są nienaładowanymi cząsteczkami, nieposiadającymi niesparowanych elektronów, to wówczas indywidua te nazywa się związkami chemicznymi. Związek chemiczny to zatem substancja, która składa się z jednego rodzaju cząsteczek.
+Inne indywidua chemiczne to:
+
+jony – czyli atomy i cząsteczki mające niezerowy wypadkowy ładunek elektryczny,
+rodniki – czyli atomy i cząsteczki mające przynajmniej jeden niesparowany elektron (a zatem niezerowy spin).
+Oprócz czystych pierwiastków i związków chemicznych w naturze występują ich różnorakie mieszaniny. W zależności od tego, czy mieszaniny te można rozdzielić mechanicznie, czy też wymaga to bardziej złożonych operacji fizyczno-chemicznych, rozróżnia się:
+
+roztwory,
+mieszaniny niejednorodne, takie jak koloidy, zole, żele, pasty, piany, zawiesiny i inne.
+
+
+Reakcje chemiczne
+
+Reakcja chemiczna to proces powstawania lub zrywania wiązań chemicznych, na skutek których powstają lub rozpadają się cząsteczki. Zwykle reakcje chemiczne mają dość złożony przebieg, tzn. są sumą wielu następujących po sobie lub odbywających się jednocześnie aktów zrywania i powstawania wiązań. Opisy sumarycznego przebiegu reakcji nazywają się równaniami, natomiast pełny opis wszystkich aktów zrywania i powstawania wiązań chemicznych jest nazywany jej mechanizmem.
+
+
+Wzory chemiczne
+
+Strukturę cząsteczek i innych indywiduów chemicznych zapisuje się w postaci specjalnych wzorów, które tworzy się stosując specjalną symbolikę. W znacznym uproszczeniu na symbolikę tę składają się:
+
+symbole pierwiastków – przyjmujące postać jedno-, dwu- lub trzyliterowych skrótów ich nazw – reprezentujące atomy występujące w cząsteczkach,
+symbole wiązań chemicznych – przyjmujące postać kresek, łączących symbole pierwiastków – pojedyncza kreska oznacza uwspólnioną parę elektronową.
+Wzory poszczególnych cząsteczek chemicznych można zestawiać w równania, które w poglądowy sposób przedstawiają przebieg reakcji chemicznych. Konwencja pisania równań polega na umieszczaniu substratów po lewej, produktów po prawej stronie równania i łączenie ich różnego rodzaju strzałkami symbolizującymi rodzaj danej reakcji.
+
+
+Mole, stężenia i stechiometria
+
+Podstawową jednostką stosowaną w chemii jest mol. Jest to jednostka liczności materii, czyli stosunku liczby cząstek znajdujących się w określonej masie lub objętości danej substancji chemicznej przyrównanej do liczby wynoszącej 6,02214076×1023
+Mol razem z równaniami reakcji chemicznych stanowi podstawę obliczeń stechiometrycznych, których zasady umożliwiają dokładne ustalenie, jaka masa lub objętość jednego związku może przereagować z drugim związkiem. Teoretyczną podstawą tych obliczeń jest prawo działania mas oraz koncepcja współczynnika stechiometrycznego.
+Koncepcja stężenia, rozumianego jako molowy lub procentowy udział związków chemicznych w mieszaninie, umożliwia z kolei dokonywanie analogicznych obliczeń ilości reagujących substancji, nawet gdy nie są one jednorodne.
+
+
+Energia
+
+Energia odgrywa istotną rolę, zarówno w trwałości związków chemicznych jak i w przebiegu reakcji. Zagadnieniami energetycznymi związanymi ze zjawiskami badanymi przez chemię zajmuje się chemia fizyczna. W ramach tej nauki, wywodzącej się z termodynamiki i kinetyki, stworzono szereg pojęć i wielkości służących opisowi zagadnień energetycznych, odnoszących się do związków i reakcji chemicznych.
+Są to m.in.:
+
+energia wiązania chemicznego – czyli najmniejsza energia potrzebna do jego rozerwania,
+entalpia reakcji chemicznej – będąca miarą efektu cieplnego reakcji chemicznej, zachodzącej pod stałym ciśnieniem,
+energia swobodna reakcji chemicznej – będąca miarą „skłonności” do zajścia reakcji w danych warunkach,
+energia aktywacji – czyli minimalna energia potrzebna do zajścia danej reakcji.
+
+
+Tradycyjne dyscypliny chemii
+Chemia jest tradycyjnie dzielona na kilka dyscyplin. Współcześnie uważa się, że podział ten jest nieco sztuczny, ale utrzymuje się on ze względów praktycznych i edukacyjnych.
+W podręcznikach chemii, zarówno akademickich jak i szkolnych, chemię dzieli się zwykle na:
+
+nieorganiczną – zajmującą się wszystkimi związkami występującymi w tzw. materii nieożywionej,
+organiczną – zajmującą się związkami zawierającymi w swojej strukturze atom węgla (z kilkoma wyjątkami),
+analityczną – zajmująca się badaniem składu, stężenia i struktury pierwiastków i związków chemicznych,
+fizyczną – obejmująca wszystkie zjawiska na pograniczu chemii i fizyki.
+
+
+Nowe dyscypliny i badania interdyscyplinarne
+Na pograniczu poszczególnych tradycyjnych dyscyplin nauk chemicznych (dziedzina naukowa), a także chemii i innych nauk przyrodniczych oraz nauk technicznych, powstały w XIX i XX wieku liczne nowe dyscypliny naukowe. Wciąż powstają nowe, interdyscyplinarne kierunki badań. Współcześnie te interdyscyplinarne dziedziny są najbardziej żywotną i najszybciej rozwijającą się częścią chemii.
+Na pograniczu różnych działów chemii powstały m.in.:
+
+chemia supramolekularna – zajmująca się strukturami „nadcząsteczkowymi”,
+chemia metaloorganiczna – zajmująca się związkami pośrednimi między organicznymi i nieorganicznymi.
+Na pograniczu chemii i innych nauk przyrodniczych powstały:
+
+biochemia i biologia molekularna – stanowiące podstawę współczesnej biologii,
+geochemia i astrochemia – nauki o podstawach chemicznych przemian zachodzących w skorupie ziemskiej i w przestrzeni kosmicznej,
+chemia jądrowa, chemia laserowa i chemia radiacyjna - na pograniczu z fizyką promieniowania i zajmujące się, odpowiednio, problemami chemicznymi związanymi z jądrowymi właściwościami substancji i wykorzystaniem energii jądrowej w chemii; wykorzystaniem laserów w chemii; badaniem wpływu napromieniowania na procesy chemiczne.
+Od czasów rewolucji przemysłowej osiągnięcia tych dyscyplin nauk chemicznych, które mają charakter podstawowy, są wykorzystywane w przemyśle dzięki rozwojowi różnych specjalności technologii chemicznej (należącej do dwóch dziedzin – nauk chemicznych i technicznych). Rozwój przemysłu chemicznego i gałęzi pokrewnych następuje dzięki współdziałaniu technologów ze specjalistami w zakresie, np.:
+
+inżynierii chemicznej i procesowej,
+inżynierii materiałowej,
+inżynierii środowiska.
+
+
+Przemysł chemiczny
+
+Wiedza chemiczna stanowi podstawę jednego z ważniejszych działów gospodarki – przemysłu chemicznego. W 2005 r. przychód tego przemysłu wyniósł 10,2% przychodów całego przemysłu w Polsce.
+Przemysł chemiczny ma trzy oblicza:
+
+tzw. wielką chemię – czyli przemysł surowcowy, do którego zalicza się przemysł petrochemiczny, przemysł tworzyw sztucznych, produkcja kwasu siarkowego, nawozów i tzw. wielka synteza organiczna.
+Chemię małotonażową – która specjalizuje się w produkcji stosunkowo małych ilości, ale za to bardzo kosztownych substancji, takich jak leki, związki zapachowe, detergenty, farby, kleje itp.
+Przetwórstwo chemiczne – które nie produkuje chemikaliów jako takich, lecz tylko je przetwarza w produkty końcowe, poprzez mieszanie, obróbkę termiczną i mechaniczną lub tylko konfekcjonowanie (pakowanie).
+
+
+Zobacz też
+
+
+Uwagi
+
+
+Przypisy
+
+
+Bibliografia
+
+Linus Pauling, Peter Pauling, Chemia, PWN, 1997, ISBN 83-01-12267-6.
+LechL. Pajdowski LechL., Chemia ogólna, Warszawa: PWN, 1981, ISBN 83-01-00555-6, OCLC 749329599 .
+AdamA. Bielański AdamA., Podstawy chemii nieorganicznej, Warszawa: PWN, 1994, ISBN 83-01-06542-7, OCLC 830052490 .
+Chemia. Encyklopedia dla wszystkich, MałgorzataM. Wiśniewska (red.), Warszawa: WNT, 2001, ISBN 83-204-2590-5, OCLC 749346360 .
+Chemia. Encyklopedia szkolna, KrystynaK. Dudek, Kraków: Zielona Sowa, 2005, ISBN 83-7389-995-2, OCLC 749753839 .
+Chemia. Kompendium, HaraldH. Gärtner, PiotrP. Dryjański (tłum.), Warszawa: Świat Książki, 2006, ISBN 83-7391-970-8, OCLC 69299788 .
+
+
+Linki zewnętrzne
+ Bartosz Grysakowski, Halina Krawiec, Alicja Łukaszczyk, Edyta Proniewicz, Maria Starowicz, Zbigniew Szklarz i Dominika Święch, Chemia ogólna, Open AGH – Akademia Górniczo-Hutnicza im. Stanisława Staszica w Krakowie, epodreczniki.open.agh.edu.pl [dostęp 2025-10-12].

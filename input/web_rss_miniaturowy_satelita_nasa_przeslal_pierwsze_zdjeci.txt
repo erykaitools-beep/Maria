@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Miniaturowy satelita NASA przesłał pierwsze zdjęcia
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112139%2Cminiaturowy-satelita-nasa-przeslal-pierwsze-zdjecia.html
+# Pobrano: 2026-03-19
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Miniaturowy satelita NASA przesłał pierwsze zdjęcia</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-19T07:02:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-19T08:02:00+01:00" title="czwartek, Marzec 19, 2026 - 08:02" class="datetime">czw., 03/19/2026 - 08:02</time>
+</span>
+
+
+2 minuty

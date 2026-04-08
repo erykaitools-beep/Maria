@@ -1,0 +1,82 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Badania naukowe
+# URL: https://pl.wikipedia.org/wiki/Badania_naukowe
+# Pobrano: 2026-03-21
+# ---
+
+Badania naukowe – działalność naukowa podejmowana przez badacza lub zespół badaczy w celu osiągnięcia postępu wiedzy naukowej, ustalenia nowych twierdzeń naukowych, tez, aksjomatów, uogólnień i definicji. Badania te mogą być podejmowane w 4 zasadniczych przypadkach:
+
+dąży się do odkrycia dotąd nieustalonych nowych zależności, których nikt wcześniej nie badał
+podważa się istniejący materiał i jego twierdzenia oraz chce się na to miejsce udowodnić funkcjonowanie innych zależności
+podejmuje się próbę poszerzenia istniejących już badań, które zostały opublikowane i częściowo lub w znacznym stopniu wymagają rozszerzenia
+chce się zaktualizować (lub potwierdzić, że funkcjonują nadal) istniejące badania i ich wyniki ze względu na znaczny upływ czasu i możliwość ich dezaktualizacji
+
+
+Rozumienie badań naukowych
+Badania naukowe to:
+
+w szerokim znaczeniu – ogół czynności w obrębie działalności naukowej od powzięcia i ustalenia problemu do opracowania materiałów naukowych, jednak bez czynności pisania pracy, jej poprawiania i oceny; wyróżnia się tu dwa rodzaje czynności: przygotowawcze i wykonawcze;
+w pośrednim znaczeniu – czynności wykonawcze badań naukowych w znaczeniu szerokim; jest to stosowanie praktyczne metod roboczych, gromadzenie materiału naukowego i opracowywanie go;
+w wąskim znaczeniu – badania właściwe, posługiwanie się metodami badawczymi i zdobywanie w ten sposób materiału naukowego; jego opracowywanie jest już działaniem osobnym i uważa się je niekiedy za etap pisania dzieła naukowego;
+Józef Pieter przedstawił badania naukowe w szerokim znaczeniu, kładąc nacisk na trzy czynności :
+
+poszukiwanie i krytykę literatury przedmiotu
+prowadzenie badań przez zastosowanie metod roboczych
+opracowanie materiału naukowego ustalając wyniki badań.
+
+
+Typologia badań naukowych
+We współczesnej organizacji nauki przeprowadza się typologię badań naukowych ze względu na cel, do którego zmierzają:
+
+podstawowe – podejmuje się je bez celu praktycznego, dla wyjaśnienia zjawisk jeszcze nie zbadanych i odkrycia nowych praw naukowych; stąd też badania naukowe podstawowe nazywa się również teoretycznymi, bądź czystymi;
+stosowane – są zazwyczaj rozumiane jako zmierzające do wykorzystania w praktyce wyników badań podstawowych; ich rezultatem są nowe związki chemiczne, prototypy, modele itp., które powstają i są sprawdzane w laboratoriach i instytutach doświadczalnych pod względem efektywności, walorów technicznych i użyteczności;
+wdrożeniowe – polegają na opracowaniu metod i technik zastosowania wyników badań w produkcji; są końcowym etapem cyklu badawczego od odkrycia wynalazku do praktycznego jego zastosowania; obejmują one przeniesienie wyników badań naukowych stosowanych z laboratoriów do przemysłu, z fazy modeli i prototypów do fazy produkcji masowej; rezultaty tych badań nazywa się innowacjami; badania naukowe wdrożeniowe wiążą się ściśle z pracami rozwojowymi, polegającymi na adaptacji metod i osiągnięć badań wdrożeniowych do warunków produkcji w danym kraju i w danym zakładzie oraz na dostosowaniu produktu do wymogów odbiorcy tego kraju i jego rynku.
+W obszarze medycyny, istotne (ze względu na stopień ochrony pacjenta) jest rozróżnienie między dwiema grupami badań klinicznych:
+
+badania obserwacyjne (opisowe lub analityczne)
+badania eksperymentalne (związane z interwencją badacza w grupie badanej i badaniem skutków tej interwencji w porównaniu z grupą kontrolną)
+
+
+Ustalenie tematu jako problemu
+Badanie naukowe rozpoczyna się od ustalenia tematu jako problemu naukowego. Na tym etapie ustalany jest problem naukowy i formułowany jako temat badania.
+Problem naukowy nie musi być w każdym przypadku sprecyzowany dokładnie i niewzruszony. Zmiany są możliwe szczególnie wtedy, gdy badanie dotyczy spraw mniej czy bardziej nowych. Wtedy wiadomy może być tylko ogólny kierunek badań. Problem w trakcie badań jest wciąż na nowo uściślany, a nawet może być dość znacznie przekształcony.
+Badania powinny być również umiejscowione w całokształcie działań całego zakładu naukowego, a więc uzasadnione ze względu na „…miejsce logiczne w planie danego zakładu, na luki w badaniach dotychczasowych”.
+Często dopiero należyte opanowanie literatury przedmiotu stanowi grunt do ustalenia i sprecyzowania problemu. Następnie dobiera się odpowiednią metodę lub metody robocze.
+
+
+Prowadzenie badań
+Przed przystąpieniem do badań, a już po zapoznaniu się z literaturą przedmiotu, można jeszcze sprecyzować problem badawczy czy zmienić go. To samo dotyczy wybranych metod roboczych.
+Prowadzenie badań naukowych to wykonywanie szeregu czynności podobnych do siebie, których celem jest zdobycie materiału naukowego, materiału do dalszego opracowania. Poprzedza je ostateczne ustalenie tematu pracy, problematyki i metody roboczej.
+Podczas badań poznaje się nowe fakty lub podstawę do ustalenia nowych faktów. Ważne jest, by uczony wykonał badania rzetelnie i dokładnie.
+Konieczne jest protokołowanie przebiegu badań – stwierdzenie pisemne na bieżąco tego, co się dzieje; stwierdzenie przebiegu badanego zjawiska.
+Wykonana praca naukowa stanowi całość pod względem metodologicznym i logicznym; można racjonalnie określić jej początek i zakończenie, a w tym rozmiar badania właściwego. Badacz może określić koniec badań na podstawie tego, że nowe informacje, które uzyskuje, nie wnoszą nic nowego; gdy wyniki podobne powtarzają się. Pewne spostrzeżenia w toku eksperymentu, obserwacji lub częściowych opracowań statystycznych powtarzają się. Wtedy nadchodzi czas zakończenia badań właściwych.
+Po zakończeniu badań uczony opracowuje materiały naukowe – materiały zebrane w trakcie badań właściwych. Przechodzi przez etapy opracowania materiałów naukowych, określenia wyników częściowych i pojawienia się z nich wyników końcowych .
+
+
+Prawdziwość wyników
+Z artykułu Johna Ioannidisa, opublikowanego w czasopiśmie „PLoS Medicine” w 2005 roku wynika, że na przykładzie medycyny większość opublikowanych badań naukowych daje fałszywe wyniki. Tym mniejsze szanse są na prawdziwość wyników danego badania, im:
+
+mniejsze jego rozmiary,
+wielkość efektu jest mniejsza,
+większa liczba testowanych hipotez i mniejsza ich selekcja,
+większa elastyczność w projektowaniu, definicjach, rezultatach i modelach analizy,
+większy konflikt interesów,
+bardziej popularna jest dana dziedzina.
+Steven Goodman i Sander Greenland skrytykowali obliczenia Ioannidisa. Autor odpowiedział na ich zarzuty, stwierdzając, że jego metody i rezultaty są praktycznie takie same, jak Goodmana i Greenlanda.
+Artykuł, który ukazał się w „PLoS Medicine” w 2007 roku wskazuje na to, że replikacja wyników badań zwiększa szanse na ich prawdziwość. Autorzy artykułu zgodzili się z wnioskiem, że większość wyników badań naukowych jest fałszywa.
+W 2011 John Ioannidis na łamach „Scientific American” napisał, że w ostatnich latach liczba fałszywie dodatnich i wyolbrzymionych wyników badań, które przeszły przez proces recenzji naukowej, przybrała wręcz rozmiary epidemii. Problem ma dotyczyć głównie ekonomii, nauk społecznych i przyrodniczych, a w największym stopniu biomedycyny. Okazuje się, że wyniki wielu badań potwierdzających skuteczność jakiegoś leku czy terapii były nieprawdziwe. Jak zauważył Ioannidis, wystarczy porównać sprzeczne wyniki badań dotyczące beta-karotenu, witaminy E, terapii hormonalnej i leków, takich jak Vioxx (rofekoksyb) czy Avandia (rozyglitazon). Nawet wtedy, gdy efekt działania farmaceutyków został udowodniony, okazują się o wiele mniej skuteczne niż pierwotnie twierdzono. Rywalizacja między naukowcami i konflikt interesów wpływają na taki stan rzeczy. Badania są fragmentaryczne, jest ich coraz więcej, są często zlecane przez przedsiębiorstwa, które są zainteresowane rezultatami ze względu na korzyści finansowe, konkurencja jest ostra, a brakuje odpowiednich mechanizmów zapewniających obiektywizm.
+
+
+Rola państwa
+Państwo wywiera wpływ na pracę i działalność naukową na drodze ekonomicznej, ideologicznej, organizacyjnej i prawnej. Finansuje badania naukowe i publikowanie wyników tych badań. Wywiera wpływ na dobór badań naukowych, kierując się względami ideologicznymi i ekonomicznymi. Ponadto normami prawnymi – ustawami i rozporządzeniami – reguluje sposób prowadzenia pracy naukowej i jej normy organizacyjne.
+„...Z powyższych względów i potrzeb państwowych wynikają problemy ramowe i kierunki badań, a z nich planowanie, finansowanie, organizowanie i kontrolowanie nauki. Są to działania w obecnym jej stanie niezbędne...”.
+
+
+Uwagi
+
+
+Przypisy
+
+
+Bibliografia
+JózefJ. Pieter JózefJ., Ogólna metodologia pracy naukowej, Wrocław: Ossolineum, 1967 .

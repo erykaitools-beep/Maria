@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Psycholog o zmianie czasu: nie tak łatwo przestawić zegar biologiczny
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112213%2Cpsycholog-o-zmianie-czasu-nie-tak-latwo-przestawic-zegar-biologiczny.html
+# Pobrano: 2026-03-23
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Psycholog o zmianie czasu: nie tak łatwo przestawić zegar biologiczny</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-23T07:30:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-23T08:30:00+01:00" title="poniedziałek, Marzec 23, 2026 - 08:30" class="datetime">pon., 03/23/2026 - 08:30</time>
+</span>
+
+
+4 minuty

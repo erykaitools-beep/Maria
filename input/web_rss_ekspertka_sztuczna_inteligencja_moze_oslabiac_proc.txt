@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Ekspertka: sztuczna inteligencja może osłabiać proces uczenia się, jeśli zastępuje myślenie
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112183%2Cekspertka-sztuczna-inteligencja-moze-oslabiac-proces-uczenia-sie-jesli
+# Pobrano: 2026-03-20
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Ekspertka: sztuczna inteligencja może osłabiać proces uczenia się, jeśli zastępuje myślenie</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-20T07:20:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-20T08:20:00+01:00" title="piątek, Marzec 20, 2026 - 08:20" class="datetime">pt., 03/20/2026 - 08:20</time>
+</span>
+
+
+5 minut

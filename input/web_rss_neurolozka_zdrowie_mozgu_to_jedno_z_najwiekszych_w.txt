@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Neurolożka: zdrowie mózgu to jedno z największych wyzwań współczesnej medycyny
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112168%2Cneurolozka-zdrowie-mozgu-jedno-z-najwiekszych-wyzwan-wspolczesnej-medycyny
+# Pobrano: 2026-03-18
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Neurolożka: zdrowie mózgu to jedno z największych wyzwań współczesnej medycyny</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-18T15:10:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-18T16:10:00+01:00" title="środa, Marzec 18, 2026 - 16:10" class="datetime">śr., 03/18/2026 - 16:10</time>
+</span>
+
+
+5 minut

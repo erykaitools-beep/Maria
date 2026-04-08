@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Gdańsk/ Uczelnie i Stocznia Wojenna będą wspólnie pracować nad podwodnymi dronami
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112185%2Cgdansk-uczelnie-i-stocznia-wojenna-beda-wspolnie-pracowac-nad-podwodnymi
+# Pobrano: 2026-03-19
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Gdańsk/ Uczelnie i Stocznia Wojenna będą wspólnie pracować nad podwodnymi dronami</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-19T16:10:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-19T17:10:00+01:00" title="czwartek, Marzec 19, 2026 - 17:10" class="datetime">czw., 03/19/2026 - 17:10</time>
+</span>
+
+
+2 minuty

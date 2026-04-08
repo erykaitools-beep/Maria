@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Naukowcy z Politechniki Wrocławskiej pracują nad technologią druku 3D z metalu w warunkach kosmicznych
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112234%2Cnaukowcy-z-politechniki-wroclawskiej-pracuja-nad-technologia-druku-3d-z
+# Pobrano: 2026-03-25
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Naukowcy z Politechniki Wrocławskiej pracują nad technologią druku 3D z metalu w warunkach kosmicznych</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-25T08:50:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-25T09:50:00+01:00" title="środa, Marzec 25, 2026 - 09:50" class="datetime">śr., 03/25/2026 - 09:50</time>
+</span>
+
+
+3 minuty

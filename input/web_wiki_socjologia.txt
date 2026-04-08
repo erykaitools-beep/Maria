@@ -1,0 +1,143 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Socjologia
+# URL: https://pl.wikipedia.org/wiki/Socjologia
+# Pobrano: 2026-03-22
+# ---
+
+Socjologia – nauka badająca w systematyczny sposób funkcjonowanie i zmiany społeczeństwa.
+Socjologowie badają społeczne reguły (normy), procesy i struktury, które łączą i dzielą ludzi, tworzą lub są przejawem więzi między ludźmi, a także proces ich zmian. Badają zarówno jednostki uwikłane w grupy społeczne, jak i międzyludzkie relacje (na przykład rodzinę, wspólnoty, stowarzyszenia, zrzeszenia). Relacje międzyludzkie ujęte w społecznej dynamice mogą ludzi łączyć, tworząc grupy społeczne, instytucje czy całe społeczeństwa, lub dzielić przez społeczne podziały.
+Już w starożytności istniała na wysokim poziomie ogólnie pojęta myśl społeczna. Socjologia jako nauka o społeczeństwie miała trzech ojców. Pierwszym (w europejskim kręgu kulturowym) był Platon, następnie Giambattista Vico oraz, powszechnie uznawany za jedynego, Auguste Comte. Przedmiotem badań nauki o społeczeństwie jest grupa społeczna ujęta w kategoriach stanu i zmiany.
+Socjologowie badają jednostki o tyle, o ile są one w pewnych wewnętrznych relacjach między sobą. Jednostka jako indywiduum nie jest przedmiotem badań socjologii, a zajmuje się nią psychologia.
+Pod koniec XIX wieku następowały gwałtowne przemiany w łonie europejskich społeczeństw preindustrialnych. Doprowadziły do powstania społeczeństwa industrialnego. Obecnie mówi się o początkach ery społeczeństw postindustrialnych. Narodziny socjologii wiążą się z tymi gwałtownymi zmianami społecznymi, stąd wielu teoretyków uważa, że głównym przedmiotem badań socjologii są nowoczesność i społeczeństwo przemysłowe.
+Efekty zastosowań socjologii i badań socjologicznych można zaliczyć do trzech kategorii:
+
+budzenie, ujawnianie uprzednio niedostrzeganej problematyki;
+wskazywanie na możliwości wywoływania skutków długofalowych;
+wskazywanie bezpośrednich, a dotąd nieznanych możliwości zastosowawczych.
+Socjologia jest wykładana jako przedmiot akademicki na wielu kierunkach studiów oraz funkcjonuje jako oddzielny kierunek studiów na wielu uczelniach w Polsce. W 2018 roku dyscyplina socjologia została przemianowana na "nauki socjologiczne" w klasyfikacji dziedzin i dyscyplin naukowych w Polsce.
+
+
+Definicje socjologii
+Jan Szczepański tak definiuje pojęcie socjologii: „socjologia poszukuje praw zjawisk zachodzących między ludźmi, zajmuje się badaniem struktur, czyli wzajemnego przyporządkowania sobie ludzi w zbiorowościach”.
+Ludwik Gumplowicz pojmuje ją następująco: „socjologia to nauka o grupach społecznych”.
+Georg Simmel pisze o socjologii, jako „nauce o stale powtarzających się formach życia społecznego”.
+Według Zygmunta Baumana „socjologia to zazwyczaj spoglądanie na ludzkie czynności, jak na fragmenty większych całości. Owymi całościami są nieprzypadkowe grupy ludzi, które są powiązane siecią wzajemnych zależności”.
+Piotr Sztompka wyjaśnia, że „socjologia zrodziła się, jako naukowe badanie historii”.
+Zdaniem Emile Durkheima i uczniów jego szkoły, socjologia jest nauką o faktach społecznych. Faktem społecznym jest wszelki sposób działania, zdolny do wywierania na jednostkę przymusu zewnętrznego. Może to być na przykład moralność, prawo, moda...
+Georg Lunberg definiuje socjologię jako naukę o „przewidywanych sekwencjach zachowań ludzkich w sytuacjach dostatecznie sprecyzowanych”. Z kolei Robert Merton traktuje socjologię jako naukę o systemie wzajemnie powiązanych ze sobą elementów (klasy, warstwy, organizacje, grupy)”.
+
+
+Funkcje socjologii
+Adam Podgórecki wyróżnia pięć podstawowych funkcji socjologii, rozumianej przez niego jako nauka o ogólnych prawach zbiorowego, skoordynowanego działania ludzkiego:
+
+Diagnostyka społeczna (socjografia) dąży do zebrania danych o rozmaitych dziedzinach życia społecznego w sposób intersubiektywnie sprawdzalny i systematyczny, a przy tym subiektywnie rozumiany. Początek jej dały badania Fryderyka Engelsa dotyczące położenia klasy robotniczej w Anglii. Bada ją socjologia diagnostyczna.
+Funkcja apologetyczna ujawnia się wtedy, gdy dzięki zebranym w wiedzę socjologiczną danym dla celów pozanaukowych chwali się pewne sytuacje społeczne, instytucje, koncepcje. Tak wykorzystywana była między innymi w III Rzeszy, ale w wersji subtelniejszej jest używana także w innych państwach i okresach historycznych. Dzieje się tak dlatego, że w naukach społecznych można dobierać dla z góry przyjętej tezy dogodną argumentację.
+Funkcja demaskatorska może być rozumiana na dwa sposoby: metodologiczny i oceniający. W rozumieniu metodologicznym demaskowanie to ukazywanie pewnych cech, które nie są łatwo uchwytne na pierwszy rzut oka lub wskazywanie na zmienne niezależne, które tkwią u podstaw pewnych zjawisk, a są przesłonięte przez pozorne zmienne niezależne. W rozumieniu emocjonalnym albo oceniającym chodzi o wskazywanie pewnych rzeczywistych motywacji, które są celowo lub nieświadomie ukrywane. Demaskatorstwo emocjonalne polega na ujawnianiu motywów, które chciałoby się starannie ukryć. Przykładem może być faktyczna i normatywna skuteczność przepisu prawnego.
+Funkcja teoretyczna to zarówno przygotowanie modelu teoretycznego dla uporządkowania zbioru zgromadzonych wcześniej danych empirycznych, jak i wyjaśnienie opisywanych zależności, rozumienie wielości możliwych sytuacji międzyludzkich. Uzyskiwane dane mogą jednak wspierać rozmaicie sformułowane hipotezy ogólne. Jest obok funkcji diagnostycznej główną funkcją nauki socjologii.
+Funkcja socjotechniczna rozumiana jest jako zespół pewnych zleceń dotyczących tego, jak przy uwzględnieniu istniejących ocen społecznych dokonywać świadomych przekształceń po to, by osiągnąć zamierzone cele. Może obsługiwać zarówno oceny społecznie wartościowe, jak i naganne. Jej zadaniem jest zarówno dawanie zaleceń w poszczególnych dziedzinach życia społecznego, jak i przede wszystkim proponowanie ogólnych założeń praktycznego działania.
+Adam Podgórecki nie rozstrzyga, czy socjotechnika (znana również jako inżynieria społeczna) jest odrębną dyscypliną czy jedną z możliwych funkcji nauki socjologii.
+Funkcja naukowa i funkcja teoretyczna pozostają neutralne, natomiast funkcja apologetyczna, funkcja demaskatorska i funkcja socjotechniczna mogą być społecznie zaangażowane. Powiązanie funkcji demaskatorskiej z socjotechniczną znamionuje pozytywne zaangażowanie społeczne socjologii. Powiązanie funkcji diagonostycznej i socjotechnicznej z funkcją apologetyczną znamionuje negatywne zaangażowanie społeczne socjologii.
+
+
+Historia socjologii
+
+Termin „socjologia” (od łac. socius – zbiorowość, społeczeństwo i gr. logos mądrość, wiedza) wprowadził w 1837 roku Auguste Comte. Jako samodzielna dyscyplina naukowa socjologia wyodrębniła się pod koniec XIX wieku. Pierwszy wydział socjologii powstał w 1892 roku na Uniwersytecie w Chicago, trzy lata później ustanowiono pierwszą europejską katedrę socjologii, na Uniwersytecie w Bordeaux.
+W Polsce pierwsza katedra socjologii powstała na Wydziale Prawa i Nauk Politycznych Uniwersytetu Warszawskiego w 1919 roku (kierował nią Leon Petrażycki). Rok później, z inicjatywy Floriana Znanieckiego, uruchomiono Katedrę Socjologii i Filozofii Kultury na Uniwersytecie Poznańskim, wtedy też socjologia zaistniała w Polsce jako samodzielny kierunek studiów.
+
+
+Socjologia a inne dziedziny wiedzy
+Określenie precyzyjnych granic między socjologią a innymi naukami społecznymi takimi jak ekonomia czy nauki polityczne nie jest łatwe. Zdaniem części socjologów, tym co wyróżnia socjologię jest holistyczne podejście do analizy zjawisk społecznych. Trudne jest też odróżnienie socjologii od starszych dyscyplin naukowych jak historia czy filozofia, które często poszukiwały odpowiedzi na pytania podobne do tych, które stawia socjologia. Istnieją też młodsze od socjologii, pokrewne dziedziny wiedzy: antropologia i socjobiologia.
+Socjologowie posługują się zróżnicowanymi metodami i technikami badań, zarówno o charakterze ilościowym, jak i jakościowym. Na przełomie XIX i XX wieku udało się przezwyciężyć pozytywistyczną i naturalistyczną wizję uprawiania socjologii, postulującą naśladowanie metod nauk przyrodniczych w badaniu zjawisk społecznych, w czym duże zasługi miał Max Weber – twórca socjologii rozumiejącej i Florian Znaniecki – autor koncepcji współczynnika humanistycznego. Odtąd socjologia jest traktowana jako jedna z nauk humanistycznych, chociaż spór o sposób uprawiania socjologii jako nauki trwa do dziś.
+
+
+Subdyscypliny
+
+
+Teoria socjologiczna
+
+Zdefiniowanie socjologii jako nauki utrudnia także to, że brak jest jednej zintegrowanej teorii socjologicznej; jest ona nauką wieloparadygmatyczną – składa się z konkurujących ze sobą tradycji i szkół myślenia, z których najważniejsze to funkcjonalizm, teoria konfliktu, teoria wymiany, szkoła chicagowska, fenomenologia (socjologia), teoria ewolucyjna, strukturalizm, etnometodologia, teoria krytyczna i symboliczny interakcjonizm.
+
+
+Makro- i mikrosocjologia
+Często spotyka się podział dziedzin socjologii ze względu na skalę zjawisk społecznych, na:
+
+makrosocjologię (socjologię dużych struktur społecznych), która bada zjawiska społeczne dużej skali (na przykład dotyczące państw, ponadpaństwowe, globalne, dotyczące ras, klas społecznych czy warstw społecznych);
+mikrosocjologię (socjologię małych struktur społecznych), która bada zjawiska społeczne małej skali (na przykład interakcje międzyludzkie czy małe grupy społeczne).
+Pole badawcze mikrosocjologii pokrywa się najczęściej z polem badawczym psychologii społecznej.
+
+
+Orientacje badawcze
+Ze względu na orientację badawczą można wyodrębnić:
+
+socjologię fenomenologiczną
+socjologię historyczną
+socjologię krytyczną
+socjologię matematyczną
+
+
+Specjalizacje socjologii
+Najważniejszym podziałem jest podział na specjalizacje. Część z nich uzyskała dużą autonomię w ramach socjologii. W Polskim Towarzystwie Socjologicznym w 2009 r. miały swoje sekcje następujące specjalizacje:
+
+antropologia społeczna,
+metodologii badań społecznych,
+praca socjalna,
+socjologia jakościowa i symbolicznego interakcjonizmu,
+socjologia dewiacji i kontroli społecznej,
+socjologia medycyny,
+socjologia młodzieży i edukacji,
+socjologia miasta,
+socjologia nauki,
+socjologia pracy,
+socjologia prawa,
+socjologia religii,
+socjologia wsi i rolnictwa,
+socjologicznych problemów bezpieczeństwa narodowego,
+socjotechnika
+W 2022 roku istniały sekcję:
+
+Sekcja Socjologii Jakościowej i SI (symbolicznego interakcjonizmu)
+Sekcja Socjologii Pracy
+Sekcja Socjologii Wsi i Rolnictwa
+Sekcja Socjologii Religii
+Sekcja Socjologii Młodzieży i Edukacji
+Sekcja Antropologii Społecznej
+Sekcja Socjologii Prawa
+Sekcja Socj. Dewiacji i Kontroli Społecznej
+Sekcja Pracy Socjalnej
+Sekcja Socjologii Nauki
+Sekcja Socjologii Ekonomicznej
+Sekcja Metodologii Badań Społecznych
+Sekcja Socjologii Zdrowia i Medycyny
+Sekcja Socjologii Etniczności
+Sekcja Socjologii Życia Rodzinnego i Intymności
+Sekcja Socjologicznych Problemów Bezpieczeństwa Narodowego
+Sekcja Studentów i Doktorantów
+Sekcja Socjologii Sztuki
+Sekcja Socjologii Miasta
+Sekcja Socjologii Sportu
+Sekcja Socjologii Środowiska
+Sekcja Historii Socjologii
+Sekcja Badań Biograficznych
+Sekcja Społeczeństwa Obywatelskiego
+Sekcja Socjologii Płci
+Sekcja Socjologii Niepełnosprawności
+Sekcja Socjologii Ciała
+Wyróżnia się także socjologię polityki, która bada podobne zjawiska jak politologia. Do stosunkowo nowych subdyscyplin należy socjologia Internetu.
+
+
+Zobacz też
+
+socjologia jakościowa (qualitative sociology)
+socjolingwistyka
+
+
+Przypisy
+
+
+Bibliografia
+Jan Szczepański, Elementarne pojęcia socjologii, PWN, Warszawa 1972.
+Stanisław Kosiński, Socjologia ogólna. Zagadnienia podstawowe, PWN, Warszawa 1987.
+Zygmunt Bauman, Socjologia, Wyd. Zysk i S-ka, Poznań 1996.
+Anthony Giddens, Socjologia, Wyd. Zysk i S-ka, Poznań 1998.
+Norman Goodman, Wstęp do socjologii, Wyd. Zysk i Sk-a, Poznań 2001, ISBN 83-7150-143-9.
+Piotr Sztompka, Socjologia zmian społecznych, Wydawnictwo Znak, Kraków 2003.

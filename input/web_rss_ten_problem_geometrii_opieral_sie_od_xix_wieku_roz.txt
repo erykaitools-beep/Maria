@@ -1,0 +1,7 @@
+# Zrodlo: RSS Feed
+# Tytul: Ten problem geometrii opierał się od XIX wieku. Rozwiązały go dwa torusy
+# URL: https://www.focus.pl/artykul/ten-problem-geometrii-opieral-sie-od-xix-wieku-rozwiazaly-go-dwa-torusy
+# Pobrano: 2026-03-20
+# ---
+
+<img width="1920" height="1080" src="https://konto.focus.pl/wp-content/uploads/2026/03/Z1_dd10bb.jpeg" alt="" style="margin-bottom:10px;" /><p>Przez około 150 lat obowiązywała intuicja, że jeśli znamy na powierzchni dwie rzeczy &#8211; odległości mierzone po niej oraz średnią krzywiznę &#8211; to powinniśmy umieć odtworzyć jej kształt. Nowy wynik pokazuje, że to nie zawsze działa. Naukowcy skonstruowali dwie różne, zwarte powierzchnie w kształcie torusów, które mają dokładnie tę samą metrykę i tę samą średnią [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/ten-problem-geometrii-opieral-sie-od-xix-wieku-rozwiazaly-go-dwa-torusy">Ten problem geometrii opierał się od XIX wieku. Rozwiązały go dwa torusy</a></p>

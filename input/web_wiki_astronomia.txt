@@ -1,0 +1,83 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Astronomia
+# URL: https://pl.wikipedia.org/wiki/Astronomia
+# Pobrano: 2026-03-21
+# ---
+
+Astronomia (gr. ἀστρονομία astronomía od άστρον ástron + νομός nomos, „prawo rządzące gwiazdami”) – nauka przyrodnicza zajmująca się badaniem ciał niebieskich (np. gwiazd, planet, komet, mgławic, gromad i galaktyk) oraz zjawisk, które zachodzą poza Ziemią, jak również tych, które oddziałują w jej atmosferze, wnętrzu lub na powierzchni, a są pochodzenia pozaplanetarnego (np. neutrina, wtórne promieniowanie kosmiczne). Skoncentrowana jest na fizyce, chemii, meteorologii i ruchu ciał niebieskich, zajmuje się także powstaniem i rozwojem (ewolucją) Wszechświata.
+Astronomia jest jedną z najstarszych nauk. Kultury prehistoryczne pozostawiły astronomiczne artefakty, takie jak Stonehenge. Cywilizacje, takie jak Babilończycy, Grecy, Chińczycy, Hindusi i Majowie wykonywali metodyczne obserwacje nocnego nieba. Jednakże dopiero wynalezienie teleskopu sprawiło, że astronomia była w stanie przekształcić się w nowoczesną naukę. Historycznie w astronomię włączano tak różne dyscypliny, jak astrometria, astronawigacja, astronomia obserwacyjna, tworzenie kalendarzy, a nawet astrologia. Obecnie pojęcie profesjonalnej astronomii jest niemal tożsame z pojęciem astrofizyki.
+W XX wieku w dziedzinie astronomii nastąpił podział na dwie części obserwacyjną i teoretyczną. Astronomia obserwacyjna koncentruje się na pozyskiwaniu danych z obserwacji ciał niebieskich, które są następnie analizowane przy użyciu podstawowych zasad fizyki. Astronomia teoretyczna jest zorientowana na rozwój przy pomocy komputerów i modeli analitycznych do opisu zjawisk i obiektów astronomicznych. Te dwie dziedziny wzajemnie się uzupełniają, astronomia teoretyczna stara się wyjaśnić wyniki obserwacji, a dane obserwacyjne służą do weryfikacji modeli teoretycznych.
+Astronomowie amatorzy przyczynili się do wielu ważnych odkryć astronomicznych, a astronomia jest jedną z niewielu nauk, gdzie amatorzy mogą nadal odgrywać aktywną rolę, zwłaszcza w dziedzinie odkrywania i obserwacji zjawisk przejściowych.
+Astronomii nie należy mylić z astrologią, która jest pseudonaukowym systemem przekonań utrzymującym, że sprawy ludzkie są skorelowane z pozycjami ciał niebieskich. Mimo że obie dziedziny mają wspólne pochodzenie i część metod (np. wykorzystywanie efemeryd), są to odrębne pojęcia.
+
+
+Nazewnictwo
+
+
+Etymologia
+Astronomia (z greckich słów: ἄστρον ástron ‘gwiazda’ i νόμος nómos ‘prawo’ lub ‘kultura’) to termin, oznaczający dosłownie „prawa gwiazd” lub „kulturę z gwiazd”, w zależności od tłumaczenia.
+
+
+Astronomia a astrofizyka
+Określenia „astronomia” i „astrofizyka” (z gr. φύσις 'przyroda') mogą być używane w odniesieniu do tego tematu wymiennie. Na podstawie ścisłych definicji słownikowych termin astronomia odnosi się do badania ciał niebieskich, ich położenia, właściwości fizycznych i chemicznych, a astrofizyka do działu astronomii związanego z badaniem procesów fizycznych, budową i prawami rządzącymi obiektami astronomicznymi oraz ich dynamiką i oddziaływaniem. Rozróżnienie tych dwóch podejść z powodów historycznych uwidocznione jest, na przykład, w nazwach czasopism. Jeden z wiodących periodyków naukowych w tej dziedzinie to czasopismo europejskie „Astronomy & Astrophysics”, w USA wydawane są osobno czasopisma „Astronomical Journal” i „Astrophysical Journal”. Odkąd większość współczesnych badań astronomicznych mocno związana jest z fizyką te pojęcia stosowane są wymiennie.
+Astrofizyka bywa jednak uznawana za dział astronomii; jest to też termin młodszy o stulecia – powstał prawdopodobnie w XIX wieku; najwcześniejsze poświadczone użycie pochodzi z 1865 roku, kiedy użył go Johann Karl Friedrich Zöllner.
+
+
+Historia
+
+W dawnych czasach astronomia obejmowała jedynie obserwacje i przewidywania zachowań obiektów widocznych gołym okiem. Istnieją przypuszczenia, że już w paleolicie, kiedy powstawały malowidła jaskiniowe, część z nich mogła dotyczyć obiektów astronomicznych, np. Plejad czy prezentacji 29-dniowego cyklu faz Księżyca. W niektórych miejscach, takich jak Stonehenge, wczesne kultury budowały ogromne artefakty, które prawdopodobnie miały astronomiczny cel. Oprócz zastosowań rytualnych były to obserwatoria pomagające m.in. wyznaczyć długość roku, co umożliwiało zwiększenie wydajności upraw.
+
+Przed wynalezieniem narzędzi, takich jak teleskop, badania gwiazd musiały być prowadzone jedynie przy pomocy gołego oka. W rozwiniętych cywilizacjach, zwłaszcza w Mezopotamii, Chinach, Egipcie, Grecji, Indiach i Ameryce Środkowej, budowano pierwsze obserwatoria i badano poglądy na temat natury Wszechświata. Większość wczesnych obserwacji astronomicznych faktycznie służyła sporządzaniu katalogów gwiazd i planet, co obecnie jest przedmiotem zainteresowań astrometrii. Z tych obserwacji wywnioskowano ruch planet i sformułowano pierwsze filozoficzne wnioski. Ziemia była uważana za centrum Wszechświata, a wokół niej krążyć miały: Księżyc, Słońce i planety otoczone sferą gwiazd. Teoria ta znana jest jako geocentryczny model Wszechświata.
+Szczególnie ważnym dla wczesnego rozwoju był początek astronomii matematycznej i naukowej (zapoczątkowanych przez Babilończyków), które stały się podstawą dla wielu innych cywilizacji. Babilończycy odkryli również cykliczność zaćmień księżycowych zwaną saros.
+
+Po Babilończykach znaczne postępy w astronomii poczyniono w starożytnej Grecji i świecie helleńskim. Grecka astronomia od początku charakteryzowała się dążeniem do racjonalnego fizycznego wyjaśnienia zjawisk niebieskich. W III wieku p.n.e., Arystarch z Samos posługując się metodą geometryczną, wyliczył względne rozmiary i wzajemne odległości Słońca, Ziemi i Księżyca. Był także pierwszym, który zaproponował heliocentryczny model Układu Słonecznego. W II wieku p.n.e. Hipparchos z Nikei odkrył precesję, obliczając wielkość i odległość Księżyca oraz skonstruował pierwsze znane astronomiczne urządzenie – astrolabium. Hipparch stworzył również kompleksowy katalog 1020 gwiazd zawierający ich pozycje i oceny blasku. Większość nazw konstelacji północnej półkuli zaczerpnięto z greckiej astronomii. Mechanizm z Antykithiry (ok. 150–80 p.n.e.) był jednym z pierwszych narzędzi przeznaczonych do obliczania położenia pozycji Słońca, Księżyca i planet na dany dzień. Urządzenia o podobnym stopniu skomplikowania nie pojawiły się aż do XIV wieku, gdy w Europie skonstruowano zegar astronomiczny.
+W średniowiecznej Europie rozwój astronomii uległ zastojowi co najmniej do XIII wieku. W tym okresie nastąpił jednak jej rozkwit w świecie islamu i innych częściach świata. Pierwsze obserwatoria astronomiczne na obszarze muzułmańskim powstały na początku IX wieku. W roku 964 została odkryta przez perskiego astronoma Al Sufiego i po raz pierwszy opisana w jego Księdze gwiazd stałych Galaktyka Andromedy. SN 1006 – najjaśniejsza zarejestrowana w historii supernowa została zaobserwowana przez egipsko-arabskiego astronoma Alego ibn Ridwana w roku 1006. Wzmianki o niej znajdują się również w kronikach chińskich z tego okresu. Astronomowie wprowadzili wiele do dziś stosowanych arabskich słów do nazewnictwa gwiazd. Uważa się, że obserwatoria astronomiczne mieściły się również w ruinach Wielkiego Zimbabwe i w Timbuktu. Według Europejczyków w przedkolonialnej Czarnej Afryce nie prowadzono obserwacji astronomicznych, ale nowoczesne odkrycia dowodzą inaczej.
+W starożytności nie występowało rozróżnienie pomiędzy astronomią a astrologią. Astrologia była wówczas wyżej ceniona jako nauka, astronomia była jedynie jej nauką pomocniczą. Dopiero usunięcie w XVIII wieku katedr astrologii na uniwersytetach zepchnęło ją do roli gazetowej pseudonauki.
+
+
+Rewolucja naukowa
+
+W okresie renesansu Mikołaj Kopernik zaproponował heliocentryczny model Układu Słonecznego (choć stworzył go już w starożytności Arystarch z Samos). Jego teoria została później obroniona, rozszerzona i poprawiona przez Galileusza i Johannesa Keplera. Ten pierwszy zrewolucjonizował obserwacje: używał teleskopu i systematycznie stosował metodę doświadczalną w badaniu zjawisk przyrody, a swoje obserwacje astronomiczne skrupulatnie szkicował i opisywał. Kepler natomiast jako pierwszy w prawidłowy sposób opisał ruch ciał niebieskich wokół Słońca. Stwierdził, że planety poruszają się po eliptycznych orbitach, a nie kołowych, jak dotąd sądzono. Nie udało mu się jednak sformułować właściwej teorii na podstawie swoich zapisków. Dopiero Isaac Newton przedstawił prawo powszechnego ciążenia oraz prawa ruchu pozwalające ostatecznie wyjaśnić ruchy ciał niebieskich. Skonstruował również teleskop zwierciadlany.
+Dalsze odkrycia szły w parze z poprawą jakości i wielkości teleskopów. Bardziej obszerne katalogi gwiazd były sporządzane przez Nicolasa-Louisa de Lacaille. Z kolei William Herschel sporządził szczegółowy katalog mgławic i gromad, a w roku 1781 odkrył Urana, pierwszą nową planetę. W 1838 Bessel po raz pierwszy zmierzył odległość do innej gwiazdy – 61 Cygni, przy pomocy paralaksy.
+W XVIII–XIX wieku zwrócenie uwagi przez Eulera, Clairauta i D’Alemberta na problem trzech ciał pozwoliło dokładniej prognozować ruch Księżyca i planet. Ich praca rozwijana później przez Lagrange’a i Laplace’a pozwoliła również szacować masę tych obiektów na podstawie ich perturbacji.
+Znaczący postęp w astronomii nastąpił wraz z wprowadzeniem nowych technologii, w tym spektroskopu i fotografii. W latach 1814–1815 Fraunhofer odkrył około 600 linii absorpcyjnych Słońca, nazwanych później na jego cześć. Inne gwiazdy okazały się podobne do Słońca, różniły się rozmiarami, temperaturami i masą.
+Istnienie Drogi Mlecznej jako oddzielnej grupy gwiazd stwierdzono w XX wieku wraz z odkryciem innych galaktyk. Wkrótce po tym dowiedziono, że Wszechświat się rozszerza, a większość galaktyk oddala się od Drogi Mlecznej. Odkryto również wiele egzotycznych obiektów, takich jak: kwazary, pulsary, blazary i galaktyki radiowe. Obserwacje tych obiektów wykorzystano do opracowania teorii fizycznych oraz opisów innych zjawisk takich jak czarne dziury czy gwiazdy neutronowe. Dużego postępu w XX wieku dokonała kosmologia fizyczna. Powszechnie przyjęto Teorię Wielkiego Wybuchu silnie wspieraną przez dowody dostarczane przez astronomów i fizyków, takie jak kosmiczne mikrofalowe promieniowanie tła czy prawo Hubble’a.
+
+
+W Polsce
+
+Największym osiągnięciem polskiej astronomii była działalność Mikołaja Kopernika (1473-1543), jednak historia astronomii w Polsce sięga czasów przedkopernikańskich. Obecnie znajduje się w Polsce kilka akademickich ośrodków astronomicznych. Najbardziej znanym, obecnie działającym polskim astronomem jest Aleksander Wolszczan.
+
+
+Obserwacje astronomiczne
+
+W astronomii głównym źródłem informacji o ciałach niebieskich i innych obiektach są obserwacje promieniowania elektromagnetycznego. Można je skategoryzować według obserwowanego zakresu długości fal. Niektóre widma mogą być obserwowane z powierzchni Ziemi, podczas gdy inne są widoczne jedynie na bardzo dużej wysokości lub z przestrzeni kosmicznej.
+
+
+Radioastronomia
+
+Radioastronomia zajmuje się badaniem kosmosu z użyciem fal od poniżej 1 mm do setek metrów. Radioastronomia różni się od większości innych form obserwacji tym, że obserwowane fale radiowe mogą być traktowane jako fale, a nie jako oddzielne fotony. Jest więc stosunkowo łatwo zmierzyć amplitudy i fazy, co nie jest takie proste na mniejszych długościach fal.
+Choć część fal radiowych wytwarzana jest przez ciała niebieskie w wyniku emisji cieplnej, większość emisji radiowej obserwowanej z Ziemi jest widoczna w postaci promieniowania synchrotronowego, które jest wytwarzane, gdy elektrony oscylują w polu magnetycznym. Dodatkowo liczne linie spektralne wytwarzane przez środek międzygwiazdowy (w szczególności wodór) są obserwowalne w paśmie radiowym.
+Istnieje szeroki wybór obiektów obserwacji w zakresie fal radiowych, w tym: supernowe, gaz międzygwiazdowy, pulsary i galaktyki aktywne.
+
+
+Astronomia podczerwona
+
+Astronomia podczerwona zajmuje się rejestrowaniem i analizą promieniowania podczerwonego (długości fal dłuższych niż światło czerwone). Oprócz fal o długości bliskiej długości fal światła widzialnego promieniowanie podczerwone jest silnie pochłaniane przez atmosferę, która także emituje fale w podczerwieni. W związku z tym obserwatoria muszą znajdować się w wysokich suchych miejscach lub całkowicie poza atmosferą – w kosmosie. Widmo w podczerwieni jest przydatne do badania obiektów (takich jak planety, czy dyski protoplanetarne), które są zbyt zimne, aby emitować światło widzialne. Dłuższe fale podczerwieni przenikają przez chmury pyłu, który pochłania światło widzialne, pozwalając na obserwowanie w podczerwieni młode gwiazdy w obłokach molekularnych i jądrach galaktyk. Niektóre cząsteczki silnie promieniują w podczerwieni, co może być wykorzystane w badaniach chemicznych przestrzeni. Badanie promieniowania podczerwonego okazuje się w szczególności przydatne do wykrywania wody w kometach.
+
+
+Astronomia optyczna
+
+Astronomia optyczna jest najstarszą formą obserwacji. Obrazy pierwotnie były sporządzane ręcznie. Na przełomie XIX i XX wieku zaczęto wykorzystywać sprzęt fotograficzny. Współczesne obserwacje rejestrowane są przez detektory elektroniczne a zapisywane cyfrowo, np. kamery z czujnikami CCD. Mimo że światło widzialne rozciąga się od około 4000 do 7000 A (400 nm–700 nm), ten sam sprzęt stosuje się także do obserwacji bliskiego ultrafioletu i bliskiej podczerwieni.
+
+
+Astronomia ultrafioletowa
+Termin ten używany jest w odniesieniu do obserwacji w paśmie ultrafioletu: od 100 do 3200 Å (10–320 nm). Światło na tych długościach fal jest pochłaniane przez atmosferę Ziemi, więc obserwacje muszą być wykonywane z górnych warstw atmosfery lub z kosmosu. Technika ta najczęściej wykorzystywana jest do badania promieniowania cieplnego i linii widmowych z gorących niebieskich gwiazd (gwiazdy OB), które są szczególnie aktywne w tym zakresie. Włączając w to niebieskie gwiazdy w innych galaktykach, które były celami wielu badań promieniowania ultrafioletowego. Innymi obiektami często obserwowanymi w świetle ultrafioletowym są: mgławice planetarne, pozostałości po supernowych oraz galaktyki aktywne. Ponieważ światło ultrafioletowe jest łatwo wchłaniane przez pył międzygwiazdowy, konieczna jest niezbędna korekcja aparatury.
+
+
+Astronomia rentgenowska
+
+Astronomia rentgenowska zajmuje się rejestracją promieniowania rentgenowskiego pochodzącego z kosmosu. Zazwyczaj odbierane są sygnały emitowane przez promieniowanie synchrotronowe, cieplne oraz promieniowanie hamowania. Ponieważ promieniowanie rentgenowskie jest pochłaniane przez atmosferę Ziemi, wszystkie obserwacje rentgenowskie muszą być wykonane z dużej wysokości przy użyciu balonów, rakiet lub statków kosmicznych. Znaczącymi źródłami promieniowania są: rentgenowskie układy podwójne, pulsary, pozostałości po supernowych, galaktyki ekliptyczne, gromady galaktyk i galaktyki aktywne.
+
+
+Astronomia promieniowania gamma

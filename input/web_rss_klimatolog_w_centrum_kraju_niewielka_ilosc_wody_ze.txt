@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Klimatolog: w centrum kraju niewielka ilość wody ze stopionego śniegu wsiąkła głębiej w grunt
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112220%2Cklimatolog-w-centrum-kraju-niewielka-ilosc-wody-ze-stopionego-sniegu
+# Pobrano: 2026-03-23
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Klimatolog: w centrum kraju niewielka ilość wody ze stopionego śniegu wsiąkła głębiej w grunt</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-23T07:11:02+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-23T08:11:02+01:00" title="poniedziałek, Marzec 23, 2026 - 08:11" class="datetime">pon., 03/23/2026 - 08:11</time>
+</span>
+
+
+3 minuty

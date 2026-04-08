@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: Badania: dieta zbliżona do wegetariańskiej opóźnia starzenie się mózgu o ponad dwa lata
+# URL: https://scienceinpoland.pl/aktualnosci/news%2C112173%2Cbadania-dieta-zblizona-do-wegetarianskiej-opoznia-starzenie-sie-mozgu-o
+# Pobrano: 2026-03-20
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">Badania: dieta zbliżona do wegetariańskiej opóźnia starzenie się mózgu o ponad dwa lata</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://scienceinpoland.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-20T11:10:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-20T12:10:00+01:00" title="piątek, Marzec 20, 2026 - 12:10" class="datetime">pt., 03/20/2026 - 12:10</time>
+</span>
+
+
+3 minuty

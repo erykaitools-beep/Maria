@@ -1,0 +1,7 @@
+# Zrodlo: RSS Feed
+# Tytul: Sztuczna inteligencja przestała bredzić. Teraz zacznie respektować nawet prawa fizyki
+# URL: https://www.focus.pl/artykul/sztuczna-inteligencja-respektujaca-prawa-fizyki
+# Pobrano: 2026-03-18
+# ---
+
+<img width="1280" height="1024" src="https://konto.focus.pl/wp-content/uploads/media/default/0001/60/sztuczna-inteligencja.jpeg" alt="" style="margin-bottom:10px;" /><p>Modele sztucznej inteligencji potrafią wyczarować zdumiewająco realistyczne grafiki, ale mają pewien zasadniczy problem &#8211; kompletnie lekceważą podstawowe reguły rządzące przyrodą. Zespół naukowców z Los Alamos National Laboratory postanowił zaprowadzić w tym chaosie porządek. Szum wprowadzany do generowanych grafik przez sztuczną inteligencję stanowi poważną przeszkodę dla specjalistów, którzy chcieliby wykorzystać te narzędzia do symulowania rzeczywistych zjawisk [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/sztuczna-inteligencja-respektujaca-prawa-fizyki">Sztuczna inteligencja przestała bredzić. Teraz zacznie respektować nawet prawa fizyki</a></p>

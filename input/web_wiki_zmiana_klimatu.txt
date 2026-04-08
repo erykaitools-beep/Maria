@@ -1,0 +1,97 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Zmiana klimatu
+# URL: https://pl.wikipedia.org/wiki/Zmiana_klimatu
+# Pobrano: 2026-03-18
+# ---
+
+Zmiana klimatu – zmiana stanu systemu klimatycznego, opisywana w kategoriach zmiany średniej lub zmienności jakiegoś parametru, a która utrzymuje się przez dłuższy czas. Pod pojęciem klimatu rozumie się średni stan atmosfery i oceanu w skalach od kilku lat do milionów lat, a precyzyjniej, statystyczny opis stanu systemu klimatycznego przy pomocy takich miar statystycznych jak średnia czy wariancja odnoszących się do parametrów meteorologicznych. Zmiany klimatu wynikać mogą z działania wymuszeń klimatycznych, zarówno naturalnych (takich jak ilość dochodzącego promieniowania słonecznego), jak i działalności człowieka (jak emisja gazów cieplarnianych); mogą być również skutkiem wewnętrznej zmienności klimatycznej. Na przełomie XX i XXI wieku termin „globalna zmiana klimatu” zaczął być używany w kontekście globalnego ocieplenia (wzrostu średniej temperatury powierzchni Ziemi w odpowiedzi na wzrost koncentracji gazów cieplarnianych w atmosferze) oraz towarzyszących mu zjawisk (np. zmiany w występowaniu opadów, ekstremalnych zjawisk pogodowych).
+
+
+Metody badań zmian klimatu
+Przyczyny zmian klimatu są badane za pomocą:
+
+badań paleoklimatycznych,
+pomiarów bezpośrednich w atmosferze i prac polowych,
+reanalizy istniejących danych,
+numerycznych modeli ogólnej cyrkulacji Ziemi (ang. General Circulation Models, w skrócie GCM).
+Każda z tych metod ma zalety i wady.
+
+
+Badania paleoklimatyczne
+Jedną z metod wnioskowania o obecnych zmianach klimatu jest zrozumienie zjawisk powodujących zmiany klimatu w przeszłości. Te metody noszą ogólną nazwę badań paleoklimatycznych. 
+
+
+Badania polowe
+Inną metodą badania zmian klimatu jest prowadzenie badań eksperymentalnych w atmosferze. Podczas gdy zmiany klimatu mierzone są w kategoriach lat, intensywne pomiary polowe prowadzone są zazwyczaj przez kilka tygodni. W badaniach polowych wybiera się zazwyczaj pewien proces fizyczny. Przykładowo, w czasie zimowego monsunu indyjskiego na półkuli północnej jest dużo zanieczyszczeń przywiewanych z Indii nad Ocean Indyjski. W tym samym czasie na półkuli południowej nie ma zanieczyszczeń. Tę różnicę można wykorzystać do zrozumienia roli pyłów zawieszonych na zmianę klimatu. W ostatniej dekadzie przeprowadzono kilka eksperymentów klimatycznych badających różne aspekty zmian klimatu: CEPEX, INDOEX, FIRE-Cirrus, ARESE, SUCCESS, MINOS, ACE-Asia, ACE-2 i inne.
+
+
+Ponowna analiza istniejących danych
+Ciągi pomiarowe nawet najbardziej podstawowych wielkości atmosferycznych, takich jak temperatura powierzchni Ziemi, są bardzo krótkie. Większość systematycznych pomiarów zaczęto dokonywać dopiero po II wojnie światowej. Jakość tych danych zależy od kraju, w którym robione były pomiary; problemem jest duża odległość pomiędzy stacjami pomiarowymi, zwłaszcza w obszarach oceanicznych. Jednym z największych sukcesów współczesnej meteorologii jest użycie metod teledetekcyjnych z satelitów meteorologicznych i z pomiarów naziemnych. Pozwoliło to na uzyskiwanie globalnych informacji na temat rozkładu temperatury z wysokością, na temat prędkości wiatru na powierzchni oceanu lub na temat ilości chlorofilu w oceanie (kolor oceanu). Dodatkowym problemem w ocenie zmian klimatu jest fakt, że techniki pomiarowe zmieniają się w czasie. Rozwiązaniem było ujednolicenie pomiarów za pomocą technik asymilacji danych i przeprowadzenie dokładnej analizy jakościowej. Metoda ta nazywa się ponowną analizą danych meteorologicznych, które dostępne są na szczegółowym poziomie dla atmosfery i powierzchni Ziemi od lat 60.–70. XX
+
+
+Numeryczne modele ogólnej zmiany klimatu
+Zebrane dane klimatyczne służą za bazodanową podstawę do komputerowych programów modeli klimatycznych. Do modelowania klimatu używa się superkomputerów, których moc obliczeniowa ciągle rośnie, pozwalając na coraz dokładniejsze prognozy.
+Modele numeryczne globalnej cyrkulacji (GCM) Ziemi opierają się na modelach podobnych do modeli numerycznych używanych w prognozie pogody. Innymi słowy, z pierwszych zasad fizycznych opisuje się przepływ powietrza w atmosferze, a wiele procesów fizycznych, takich jak pokrywa chmur, oddziaływanie powietrza w swobodnej atmosferze z górami, transport aerozoli atmosferycznych, ilość energii słonecznej absorbowanej i odbijanej w atmosferze, jest parametryzowanych na podstawie równań fizyki. Np. wymiana promieniowania słonecznego w modelach GCM jest opisana najczęściej za pomocą dwustrumieniowego przybliżenia równania transportu. Zaletą modeli GCM jest możliwość studiowania różnych scenariuszy. Np. można zadać pytanie, jaki jest wpływ na średnią temperaturę na powierzchni Ziemi dwukrotnego zwiększenia ilości dwutlenku węgla. Można też zrekonstruować, jakie są czynniki wpływające na zmiany temperatury. Wadą modeli numerycznych GCM jest to, że parametryzacje (przybliżenia) stosowane do opisu zjawisk fizycznych mogą być kwestionowane oraz fakt, że rozdzielczość modeli GCM (jak blisko oddalone są od siebie kolejne punkty na siatce opisującej wyniki symulacji) jest ograniczona. Można w przybliżeniu powiedzieć, że modele numeryczne GCM badają scenariusze lub hipotezy sprzężeń zwrotnych (ang. feedback) pomiędzy różnymi elementami klimatu.
+
+
+Naturalne czynniki zmiany klimatu
+Wpływające na klimat czynniki naturalne można podzielić na dwie kategorie. Pierwszą jest niewymuszona zmienność klimatyczna, będąca głównie konsekwencją wewnętrznych interakcji i przepływu energii pomiędzy atmosferą a oceanami. Najlepiej poznanym przykładem takiego rodzaju zmienności jest zjawisko El Niño. Drugą kategorię stanowią różne rodzaje naturalnych wymuszeń klimatycznych, które działają poprzez zmianę ilości energii krążącej w systemie klimatycznym. W skalach czasowych lat, dekad i stuleci najważniejszymi z tych naturalnych wymuszeń są zmiany aktywności słonecznej i erupcje wulkaniczne.
+
+
+Teoria cykli Milankovicia
+
+Milutin Milanković pomiędzy 1911 a 1941 rokiem opracował teorię rekonstrukcji warunków klimatycznych panujących dawniej na Ziemi w zależności od cykli astronomicznych (cykl ekscentryczny, cykl skośny i cykl precesyjny). Ta ogólnie przyjęta teoria jest przykładem zewnętrznego wpływu na warunki klimatyczne Ziemi.
+
+
+Zmiany stałej słonecznej
+
+‘Zmienną’ o podstawowym znaczeniu dla klimatu na Ziemi jest Słońce. Zmiana ilości energii dochodzącej do Ziemi ulega zmianie niezależnej od cykli Milankovicia. Istnieje wiele prac naukowych łączących zmianę stałej słonecznej ze zmianami klimatu, m.in. przed rewolucją przemysłową. Nawiązują one m.in. do wystąpienia średniowiecznego optimum klimatycznego i tzw. małej epoki lodowej.
+
+
+Wpływ erupcji wulkanów
+
+Erupcja wulkanu Tambora (VEI=7), od 5 kwietnia do 15 kwietnia 1815 w Indonezji wprowadziła 70 Gt popiołu wulkanicznego do atmosfery, sięgając warstw ponad 40 km i powodując największy egzystencjalny kryzys w czasach nowożytnych. Mróz w maju 1815 w Ameryce Północnej zniszczył większość plonów, a w czerwcu dwie wielkie burze śnieżne we wschodniej Kanadzie i w Nowej Anglii doprowadziły do wielu ofiar śmiertelnych. Na początku czerwca w mieście Quebec leżało prawie 30 cm śniegu, co dodatkowo w konsekwencji doprowadziło do wymrożenia ziemi i zniszczenia upraw.
+Erupcja pogłębiła efekt Minimum Daltona, małej aktywności słonecznej w latach 1790–1830 oraz erupcji innych wulkanów: Mayon w 1814 roku, Soufrière (Saint Vincent) w 1812 oraz być może nieznanego wulkanu około 1810 r.
+Erupcję wulkanu ‘napędzały’ gazy wulkaniczne SO2 i głównie CO2, których wyrzut przyspieszył koniec małej epoki lodowej. Poziom CO2 tej epoki osiągnął minimum 275 ppm około 1800.
+
+
+Gazy cieplarniane i pyły zawieszone
+
+Wiele gazów cieplarnianych, takich jak dwutlenek siarki czy dwutlenek węgla, jest produkowanych w naturalnych procesach biologicznych. Dla przykładu wiele typów fitoplanktonu produkuje sulfoniopropionian dimetylu (DMSP, z ang. dimethyl sulfoniopropionate), który jest przekształcany w siarczek dimetylu (DMS, z ang. dimethyl sulfide). Obecność DMS w atmosferze prowadzi do zwiększonej ilości aerozoli siarczanowych. Podobnie aerozol soli morskiej jest związany z prędkością wiatru, czyli jest pochodzenia naturalnego, z wyjątkiem sytuacji gdy prędkość wiatru jest modulowana poprzez antropogeniczne zmiany temperatury na Ziemi.
+
+
+Antropogeniczne czynniki zmiany klimatu
+
+
+Gazy cieplarniane
+Najpowszechniejszym gazem cieplarnianym jest para wodna. Stężenie innego gazu cieplarnianego – dwutlenku węgla – wynosi obecnie ponad 400ppm. Dwukrotny wzrost dwutlenku węgla spowoduje, na podstawie rekonstrukcji modeli numerycznych, zmianę temperatury na ziemi o około +3 °C. Zmiana ta jest tylko w małym stopniu spowodowana bezpośrednim wpływem absorpcji promieniowania słonecznego przez dwutlenek węgla, a w dużym stopniu poprzez sprzężenie zwrotne temperatury z ilością chmur i pary wodnej w atmosferze.
+
+
+Aerozole atmosferyczne (pyły zawieszone)
+Aerozole atmosferyczne (pyły zawieszone) dzielą się na cztery podstawowe grupy: (a) cząstki siarczanów (b) pyły mineralne (c) aerozol soli morskiej oraz (d) pyły węglowo-grafitowe (sadza lub związki organiczne węgla). Część z aerozoli atmosferycznych tworzy się na prekursorach gazowych powodowanych działalnością człowieka. Tylko dwa typy pyłów zawieszonych są absorbujące: sadza i tlenki żelaza w drobinach piasku (pyły mineralne). Ostatnio absorbujące własności sadzy i pyłów mineralnych są bardzo intensywnie badane, ponieważ ich efekt jest podobny do efektu gazów cieplarnianych.
+
+
+Chmury i efekty pośrednie
+Pomimo że bezpośrednie czynniki zmian klimatu są powszechnie dyskutowane (takie jak gazy cieplarniane czy sadze), to efekty pośrednie związane z tymi czynnikami mają często znacznie większe znaczenie klimatyczne. Dla przykładu, dwutlenek węgla pochłania około 2 watów na metr kwadratowy, podczas gdy chmury odbijają około 50% przychodzącego promieniowania słonecznego (czyli w tropikach w środku dnia około 500 watów na metr kwadratowy). Innymi słowy efekt chmur na zmianę klimatu może być kilkaset razy większy niż efekt cieplarniany dwutlenku węgla. Jednak nie należy z tego wyciągać wniosku, że gazy cieplarniane nie są istotne. Oddziałują one z atmosferą w sposób ciągły i mogą powodować zmianę pokrywy chmur. Innym przykładem efektu pośredniego jest zmiana wielkości i ilości kropli w chmurach w sytuacji, gdy w atmosferze jest dużo małych pyłów zawieszonych (aerozoli). Ten efekt powoduje zmianę odbijalności chmur. To właśnie efekty pośrednie są jednymi z najważniejszych antropogenicznych czynników zmiany klimatu.
+
+
+Przyczyny zmian klimatu
+Powody zmian klimatu można podzielić na dwie grupy: zmiany wywołane (a) czynnikami naturalnymi (b) efektami antropogenicznymi (działalność człowieka). Wiele scenariuszy ogólnych zmian klimatu jest formułowanych w postaci prostych hipotez sprzężeń zwrotnych (zob. punkty krytyczne w ziemskim systemie klimatycznym), w których zmiana jednego parametru powoduje zmianę innych parametrów. Przykładowe powody zmian klimatu są opisane poniżej. Istnieje wiele innych hipotez.
+
+
+Gazy cieplarniane
+Efekt cieplarniany to proces, w którym absorpcja i emisja promieniowania podczerwonego przez gazy atmosferyczne ogrzewa dolną atmosferę (troposferę) i doprowadza do wzrostu temperatury powierzchni planety.
+Naturalnie występujące gazy cieplarniane podnoszą przeciętną temperaturę Ziemi o około 33 °C, dzięki czemu jest ona zamieszkiwalna. Główne gazy cieplarniane na Ziemi to para wodna, odpowiedzialna za 50% efektu cieplarnianego (razem z chmurami 75%); oraz dwutlenek węgla, powodujący 19% efektu; metan, ozon, podtlenek azotu, inne gazy odpowiedzialne są za mniej niż 7% efektu cieplarnianego. Ze względu na nieliniowość wpływu na transport promieniowania poszczególnych gazów cieplarnianych udziały poszczególnych gazów są określone z pewnym przybliżeniem. Związane to jest z tym, że widma absorpcyjne poszczególnych gazów cieplarnianych nie są rozłączne, a ilość pary wodnej w atmosferze zależy silnie od temperatury.
+Bezpośredni efekt absorpcji promieniowania ziemskiego przez dwutlenek węgla jest mały. Jednak efekty wtórne związane ze zwiększoną ilością pary wodnej w atmosferze (ze względu na większą temperaturę troposfery) mogą spowodować zmianę w pokrywie chmur i w efekcie znacznie większe zmiany klimatyczne.
+
+
+Teoria CLAW
+W 1987 Charlson, Lovelock, Andreae oraz Warren zaproponowali, że wzrastająca temperatura Ziemi doprowadzi do rozwoju większej ilości fitoplanktonu. Wiele typów fitoplanktonu produkuje dimetylosulfoniopropionian (DMSP (CH3)2S+CH2CH2COO−), który jest przekształcany na siarczek dimetylu (DMS (CH3)2S). Obecność DMS w atmosferze prowadzi do zwiększonej ilości aerozoli siarczanowych. Autorzy zakładają, że aerozole siarczanowe nad oceanami służą jako jądra kondensacji chmur. Chmury zwiększają ilość promieniowania słonecznego odbitego, co powoduje zmniejszenie temperatury powierzchni Ziemi. Hipoteza CLAW jest przykładem (ujemnego) sprzężenia zwrotnego zjawisk klimatycznych. Modele ogólnej cyrkulacji atmosfery mogą być używane do testów hipotezy CLAW. Obecnie coraz większą uwagę zwraca się na sprzężenia zwrotne pomiędzy zmiennymi atmosferycznymi i innymi parametrami otoczenia (np. biologia morza, jak w przypadku hipotezy CLAW).
+
+
+Teoria termostatu tropikalnego
+Jedną z hipotez ogólnych zmian klimatu jest oddziaływanie chmur lodowych typu cirrostratus i ich wpływ na regulację temperatury oceanu w atmosferze tropikalnej. Obserwuje się, że w tropikach temperatura oceanu prawie nigdy nie przekracza pewnej granicznej temperatury. Teoria kontroli temperatury oceanu w tropikach zakłada, że zwiększona temperatura oceanu powoduje powstawanie najpierw wypiętrzonych chmur cumulus, a potem rozległych chmur cirrus. Chmury te odbijają promieniowanie słoneczne dochodzące do Ziemi i zmniejszają jej temperaturę. Jest to przykład ujemnego sprzężenia zwrotnego. Hipotezę tę opublikował w 1993 Ramanathan i Collins, i była ona następnie badana w eksperymencie CEPEX.
+
+
+Aerozole
+Hipoteza oziębiającego wpływu aerozoli atmosferycznych (pyłów zawieszonych) związana jest z ich własnościami odbijania promieniowania słonecznego z powrotem w przestrzeń kosmiczną. Przez wiele lat myślano o aerozolach (czyli cząstkach siarczanów, pyłach mineralnych, aerozolu soli morskiej) jako o cząstkach głównie odbijających. Obecnie coraz częściej bada się rolę aerozoli związków węglowo-grafitowych (sadza), które są w stanie absorbować promieniowanie atmosferyczne. Żeby rozważyć ten scenariusz sprzężenia zwrotnego, ogólne numeryczne modele cyrkulacji atmosfery muszą uwzględniać procesy zmian chemicznych atmosfery i emisję (powstawanie) i transport pyłów zawieszonych.

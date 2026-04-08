@@ -64,8 +64,37 @@ evaluate -> validate -> **critique** -> self_analyze -> creative -> noop
 - Nowe: 11 model, 6 contradiction, 5 overconfident, 3 underconfident, 4 shallow,
   4 disputes, 5 coverage, 4 stale, 4 integration, 8 applier, 10 facade, 5 integration
 
-## Nastepna sesja
-- Obserwowac logi - czy critique triggeruje sie co 8h
-- Ewentualnie REPL /critique command (nie zrobilismy - do dodania)
-- Web UI /critique page (opcjonalnie)
-- CLAUDE.md update (zrobione w tej sesji)
+## Dodatkowe fixy w tej sesji
+
+### Priority fix (b90c466)
+- Conversation goals mialy priority=0.8, seed goal-meta-learn ma 1.0
+- Z aging cap 4.0: user max = 0.8*5 = 4.0 vs meta 1.0*5 = 5.0 -> user NIGDY nie wygrywa
+- Fix: conversation_learning.py priority 0.8 -> 1.1
+- Reczna naprawa celu Eryka: goal-cbcb2f0d5a47 (system kognitywny, AGI) pri=1.1, status=active
+
+### FETCH topics fix (8a28e75)
+- Gdy conversation goal triggeruje FETCH (brak plikow), tematy usera byly ignorowane
+- TopicSuggester bral wlasne tematy z istniejacvej wiedzy zamiast szukac tego co user poprosil
+- Fix: run_fetch_session() dostaje override_topics z plan.action_params["topics"]
+- Tematy usera prepended przed auto-sugestiami
+
+## Nastepna sesja - Upgrade pipelinu nauki
+
+**Problem:** Wikipedia to slabe zrodlo. Maria ma ASK_EXPERT (NIM/Codex) ale nie uzywa go
+w kontekscie celow nauki od usera.
+
+**Nowy flow:**
+```
+user topic -> sprawdz co Maria juz wie (MemoryQuery/beliefs)
+           -> opcjonalnie test z istniejacej wiedzy
+           -> zaplanuj luki (co brakuje)
+           -> ASK_EXPERT (NIM/Codex - najsilniejszy model)
+              z precyzyjnym promptem: "Maria wie X, potrzebuje Y"
+           -> material do input/ -> standardowy learn pipeline
+```
+
+**Kluczowe:**
+- Wikipedia zastapiona przez encyklopedie (ASK_EXPERT) z kontekstem
+- Najsilniejszy model generuje material celowany w luki
+- Maria wie co juz umie i czego nie wie -> prompt jest precyzyjny
+- Reszta (chunking, learning, exam) zostaje bez zmian

@@ -1,0 +1,253 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Transkrypcja Hepburna
+# URL: https://pl.wikipedia.org/wiki/Transkrypcja_Hepburna
+# Pobrano: 2026-03-22
+# ---
+
+Transkrypcja Hepburna (jap. ヘボン式ローマ字 Hebon-shiki rōmaji; dosł. „znaki rzymskie (łacińskie) metodą Hepburna”) – nosząca nazwisko Jamesa Curtisa Hepburna transkrypcja pisma i dźwięków języka japońskiego na alfabet łaciński, którą wykorzystał w trzecim wydaniu swojego słownika japońsko-angielskiego z 1886 roku. System ten został opracowany w 1885 roku przez Stowarzyszenie Latynizacji (jap. 羅馬字会 Rōmajikai), które proponowało zastąpienie nim znaków kanji i kany. Nazywany jest także „metodą standardową” (jap. 標準式 hyōjun-shiki). Współcześnie jego najbardziej rozpowszechnioną wersją jest „wersja zmodyfikowana” zaproponowana w trzecim wydaniu słownika New Japanese-English Dictionary (1954) wydawnictwa Kenkyūsha.
+
+
+Wprowadzenie
+Obecny system Hepburna jest najszerzej stosowaną i najprostszą metodą transkrypcji języka japońskiego. Wystarczy jedynie poznać i zapamiętać stosunkowo proste w tym przypadku zasady zmienionej wymowy angielskiej, ale oddającej prawidłową wymowę w języku japońskim.
+Ze względu na to, że niektóre słowa japońskie, jak np. 芸者 geisha, czy 将軍 shōgun dotarły do Polski zanim rozpowszechniła się transkrypcja Hepburna, były one i nadal są często w zapisie: gejsza i szogun. Stało się tak w wyniku bezpośredniego przeniesienia wymowy angielskiej, odmiennej od wymowy w języku japońskim. Zapis w języku polskim, zgodny z wymową w języku japońskim, to odpowiednio: gejsia/geisia i siogun.
+
+
+Warianty
+Istnieje wiele wariantów latynizacji Hepburna. Dwoma najpopularniejszymi są:
+
+Wersja tradycyjna (ang. traditional Hepburn), zmieniana w kolejnych wydaniach słownika Hepburna (wyd. I – 1867, wyd. II – 1872, wyd. III – 1886), z których wydanie trzecie jest uważane za autorytatywne. Hepburn w pierwszym wydaniu zawsze stosował makrony do zapisu długich samogłosek (ā, ī, ū, ō), jednak w kolejnych wydaniach zastąpił ā i ī przez aa i ii. Zrezygnował również z używania ō w niektórych sytuacjach (np. czasownik 思う（おもう） w pierwszym wydaniu był zapisany jako omō, a w kolejnych jako omou). Ten wariant charakteryzuje się zapisywaniem zgłoskotwórczego n jako m przed spółgłoskami b, m i p, np. Shimbashi dla 新橋. Wykorzystywany jest na znakach kolei Japan Railways.
+Wersja zmodyfikowana (jap. 修正ヘボン式 shūsei Hebon-shiki; ang. modified Hepburn), znana też jako wersja poprawiona, w której zapis zgłoskotwórczego n jako m przed pewnymi spółgłoskami nie jest już używany, np. Shinbashi dla 新橋. Wersja ta została wprowadzona w trzecim wydaniu New Japanese-English Dictionary (1954) wydawnictwa Kenkyūsha, a później zaadaptowana przez Bibliotekę Kongresu Stanów Zjednoczonych. Jest to najpopularniejszy system transkrypcji języka japońskiego w obcojęzycznych słownikach i publikacjach.
+W samej Japonii w użyciu istnieją także inne warianty:
+
+Standard Ministerstwa Ziemi, Infrastruktury, Transportu i Turystyki, który wykorzystuje wersję zmodyfikowaną, długie ō zapisując jednak jako o, np. Otacho dla 太田町. Wariant ten wykorzystywany jest na znakach drogowych.
+Standard paszportowy Ministerstwa Spraw Zagranicznych, który zezwala na używanie „znaków spoza transkrypcji Hepburna” (jap. 非ヘボン式ローマ字 hi-Hebon-shiki rōmaji) w latynizacji japońskich nazwisk, zwłaszcza w paszportach. W szczególności zapisuje zgłoskotwórcze n jako m przed spółgłoskami b, m i p oraz pozwala na zapis długiego ō jako o, ou/oo lub oh (np. nazwisko 佐藤（さとう） może zostać zapisane jako Sato, Satou lub Satoh).
+Szczegóły tych wariantów znajdują się niżej.
+
+
+Cechy
+Główną cechą latynizacji Hepburna jest to, iż jej pisownia opiera się na fonologii języka angielskiego. Tam, gdzie sylaby konstruowane w sposób regularny według sylabariusza języka japońskiego zawierają „niestabilną” spółgłoskę dla współczesnego języka mówionego, ortografia zmieniana jest na lepiej oddającą, dla władających angielszczyzną, właściwy dźwięk; przykładowo し zapisywane jest jako shi, nie zaś * si.
+Część językoznawców jest niechętna latynizacji Hepburna, ponieważ pisownia oparta na wymowie może przesłaniać regularne pochodzenie struktur fonetycznych, fleksji i koniugacji języka japońskiego. Zwolennicy twierdzą z kolei, że latynizacja ta nie jest przeznaczona do bycia narzędziem językoznawczym. Korzysta z niej w swojej Gramatyce japońskiej autorytet polskiej japonistyki Romuald Huszcza.
+
+
+Wymowa
+Zapis transkrypcji Hepburna znajduje dość dobre przybliżenie w polskich głoskach. Wszystkie głoski z wyjątkiem poniższych wymawia się tak samo jak w języku polskim:
+
+ch wymawia się jak ć;
+j wymawia się jak dź;
+sh wymawia się jak ś;
+ts wymawia się jak c;
+w wymawia się jak u̯ (u niezgłoskotwórcze);
+y wymawia się jak j;
+z wymawia się jak dz.
+Następujące głoski są raczej obce dla użytkowników języka polskiego:
+
+u wymawia się z rozluźnionymi ustami;
+f nie jest spółgłoską wargowo-zębową, a dwuwargową, co upodabnia ją do dmuchnięcia; przez co jest zgodna z szeregiem h
+r wymawiane różnie: od l do r, zwykle w pozycji dziąsłowo-zębowej języka, zawsze przy jego pojedynczym ruchu.
+n wymawia się zależnie od pozycji:
+jak n nosowe i dźwięczne (potencjalnie dowolnie przedłużalne), jeśli zapisane jest jako n' bądź n na końcu wyrazu, jeśli nie zachodzi jedna z poniższych sytuacji,
+jak zwykłe n przed następującymi literami latynizacji: t, d, z, ch i j (geminizowane przed n),
+jak n wymawiane w polskich wyrazach bank czy tango przed k i g,
+jak m przed p i b (geminizowane przed m).
+
+
+Długie samogłoski
+
+
+A + A
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie a + a zapisywane jest jako aa, jeżeli występuje na granicy między morfemami.
+邪悪（じゃあく）: {ji + ya} + {a + ku} = jaaku – zło
+Tradycyjna latynizacja Hepburna:
+
+Długa samogłoska a zawsze zapisywana jest jako aa.
+お婆さん（おばあさん）: {o} + {ba + a} + {sa + n} = obaa-san – babcia
+Zmodyfikowana latynizacja Hepburna:
+
+W pozostałych przypadkach długa samogłoska a oznaczana jest makronem.
+お婆さん（おばあさん）: {o} + {ba + a} + {sa + n} = obāsan – babcia
+
+
+I + I
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie i + i zawsze zapisywane jest jako ii
+お兄さん（おにいさん）: o + ni + i + sa + n = oniisan – starszy brat
+お爺さん（おじいさん）: o + ji + i + sa + n = ojiisan – dziadek
+美味しい（おいしい）: o + i + shi + i = oishii – smaczny
+新潟（にいがた）: ni + i + ga + ta = Niigata
+灰色（はいいろ）: ha + i + i + ro = haiiro – popielaty
+
+
+U + U
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie u + u zapisywane jest jako uu, jeżeli występuje na granicy między morfemami lub na końcu słownikowej formy czasownika.
+食う（くう）: {ku} + {-u} = kuu – jeść
+縫う（ぬう）: {nu} + {-u} = nuu – szyć
+湖（みずうみ）: {mi + zu} + {u + mi} = mizuumi – jezioro
+W pozostałych przypadkach długa samogłoska u oznaczana jest makronem.
+数学（すうがく）: {su + u} + {ga + ku} = sūgaku – matematyka
+注意（ちゅうい）: {chu + u} + {i} = chūi – uwaga
+ぐうたら: {gu + u + ta + ra} = gūtara – próżniak
+
+
+E + E
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie e + e zapisywane jest jako ee, jeżeli występuje na granicy między morfemami.
+濡れ縁（ぬれえん）: {nu + re} + {e + n} = nureen – niezadaszona weranda
+Tradycyjna latynizacja Hepburna:
+
+Długa samogłoska e zawsze zapisywana jest jako ee.
+お姉さん（おねえさん）: {o} + {ne + e} + {sa + n} = oneesan – starsza siostra
+Zmodyfikowana latynizacja Hepburna:
+
+W pozostałych przypadkach długa samogłoska e oznaczana jest makronem.
+お姉さん（おねえさん）: {o} + {ne + e} + {sa + n} = onēsan – starsza siostra
+
+
+O + O
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie o + o zapisywane jest jako oo, jeżeli występuje na granicy między morfemami.
+小躍り（こおどり）: {ko} + {o + do + ri} = koodori – taniec
+W pozostałych przypadkach długa samogłoska o oznaczana jest makronem.
+氷（こおり）: {ko + o + ri} = kōri – lód
+遠回り（とおまわり）: {to + o} + {ma + wa + ri} = tōmawari – okrężna droga
+大阪（おおさか）: {o + o} + {sa + ka} = Ōsaka – Osaka
+
+
+O + U
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie o + u zapisywane jest jako ou, jeżeli występuje na granicy między morfemami lub na końcu słownikowej formy czasownika.
+追う（おう）: {o} + {-u} = ou – gonić
+迷う（まよう）: {ma + yo} + {-u} = mayou – zgubić się
+子馬（こうま）: {ko} + {u + ma} = kouma – źrebię
+仔牛（こうし）: {ko} + {u + shi} = koushi – cielę
+W pozostałych przypadkach długa samogłoska o oznaczana jest makronem.
+学校（がっこう）: {ga + (sokuon)} + {ko + u} = gakkō – szkoła
+東京（とうきょう）: {to + u} + {kyo + u} = Tōkyō – Tokio
+勉強（べんきょう）: {be + n} + {kyo + u} = benkyō – nauka
+電報（でんぽう）: {de + n} + {po + u} = dempō lub denpō – telegram
+金曜日（きんようび）: {ki + n} + {yo + u} + {bi} = kinyōbi lub kin’yōbi – piątek
+格子（こうし）: {ko + u} + {shi} = kōshi – krata
+
+
+E + I
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Połączenie e + i zawsze zapisywane jest jako ei.
+学生（がくせい）: ga + ku + se + i = gakusei – student
+経験（けいけん）: ke + i + ke + n = keiken – doświadczenie
+制服（せいふく）: se + i + fu + ku = seifuku – mundurek
+姪（めい）: me + i = mei – bratanica, siostrzenica
+
+
+Pozostałe połączenia samogłosek
+Wszystkie pozostałe połączenia samogłosek zapisywane są oddzielnie.
+
+軽い（かるい）: ka + ru + i = karui – lekki
+鴬（うぐいす）: u + gu + i + su = uguisu – wierzbownik japoński
+甥（おい）: o + i = oi – bratanek, siostrzeniec
+
+
+Zapożyczenia językowe
+Długie samogłoski w wyrazach zapożyczonych oznaczone znakiem chōonpu (ー) zapisywane są z makronami (ā, ī, ū, ē, ō).
+
+セーラー: se + (chōonpu) + ra + (chōonpu) = sērā – marynarz
+パーティー: pa + (chōonpu) + ti + (chōonpu) = pātī – impreza
+ヒーター: hi + (chōonpu) + ta + (chōonpu) = hītā – grzejnik
+タクシー: ta + ku + shi + (chōonpu) = takushī – taksówka
+スーパーマン: su + (chōonpu) + pa + (chōonpu) + ma + n = Sūpāman – Superman
+バレーボール: ba + re + (chōonpu) + bo + (chōonpu) + ru = barēbōru – siatkówka
+ソール: so + (chōonpu) + ru = sōru – podeszwa
+Połączenia samogłosek w wyrazach zapożyczonych zawsze zapisywane są oddzielnie.
+
+バレエ: ba + re + e = baree – balet
+ソウル: so + u + ru = souru – dusza, Seul
+ミイラ: mi + i + ra = miira – mumia
+
+
+Inne odmiany
+Istnieje również różne odmiany transkrypcji Hepburna do oznaczania długich samogłosek. Na przykład 東京（とうきょう） może zostać zapisane jako:
+
+Tōkyō: oznaczane makronami. Zgodne z zasadami wersji tradycyjnej oraz zmodyfikowanej systemów, uważane za standard;
+Tokyo: nieoznaczane. Jest to zgodne z wyrazami japońskimi, które weszły do angielszczyzny lub polszczyzny (np. Osaka, gdzie pierwsza samogłoska jest długa). Jest to również niepisana konwencja używana w systemie przyjętym de facto i używanym w znakach i innych anglojęzycznych informacjach w Japonii;
+Tôkyô: oznaczane akcentami przeciągłymi (cyrkumfleksami lub popularnie: daszkami). Cyrkumfleksy wykorzystywane są w alternatywnych latynizacjach Nihon-shiki oraz Kunrei-shiki i używane, jeżeli procesor tekstu nie umożliwia użycia makronów.
+Tohkyoh: oznaczane za pomocą h (jedynie po o). Niekiedy znane pod nazwą „wersji paszportowej”, jako że japońskie Ministerstwo Spraw Zagranicznych zezwoliło (jednak nie wymaga) na wykorzystanie w paszportach;
+Toukyou: zapisywane za pomocą pisowni kany: ō jako ou lub oo (zależnie od kany) oraz ū jako uu. Sposób ten jest czasami nazywany wāpuro rōmaji, ponieważ służy on do tworzenia tekstu japońskiego przy użyciu procesora tekstu (jap. wādo purosessā z ang. word processor) wyposażonego w klawiaturę z alfabetem łacińskim i sylabariuszem japońskim. Metoda ta pozwala na dokonywanie zapisu wyrazu w kanie, rozróżniając między おう (jak np. w とうきょう (jap. 東京) zapisywanym Toukyou) oraz おお (jak w とおい (jap. 遠い) zapisywanym tooi). Słowo wāpuro oznacza urządzenie do sporządzania tekstów w języku japońskim, przypominające wyglądem maszynę do pisania z niewielkim ekranem. Program do niej nazywa się wāpuro-sofuto (sofuto pochodzi od software). Metoda i maszyny te były w powszechnym użyciu w Japonii w latach 70. i 80. XX w., przed erą komputerów. Obecnie w podobny sposób sporządza się teksty przy pomocy klawiatury komputera;
+Tookyoo: zapisywane przez podwajanie samogłosek. Zgodne z zasadami transkrypcji JSL, ale popularne również podczas zapisywania wyrazów obcego pochodzenia bez odwołania do konkretnego systemu, np. paatii dla パーティー (z ang. party, przyjęcie) zamiast pātī.
+
+
+Partykuły
+Tradycyjna i zmodyfikowana latynizacja Hepburna:
+
+Partykułę ha は zapisuje się wa.
+Tradycyjna latynizacja Hepburna:
+
+Partykułę he へ zapisuje się ye (e po reformie ortografii w 1946 roku).
+Partykułę wo を zapisuje się wo.
+Zmodyfikowana latynizacja Hepburna:
+
+Partykułę he へ zapisuje się e.
+Partykułę wo を zapisuje się o.
+
+
+Zgłoskotwórcze n
+Tradycyjna latynizacja Hepburna:
+
+Zgłoskotwórcze n (ん) zapisywane jest jako n przed spółgłoskami, ale jako m przed spółgłoskami wargowymi, t.j. b, m i p. Przed samogłoskami i y zapisywane jest jako n- (z myślnikiem; aby uniknąć niejasności pomiędzy na przykład んあ n + a i な na lub んや n + ya i にゃ nya).
+案内（あんない）: annai – oprowadzanie
+群馬（ぐんま）: Gumma – Gunma
+簡易（かんい）: kan-i – prostota
+信用（しんよう）: shin-yō – zaufanie
+Zmodyfikowana latynizacja Hepburna:
+
+Zapis m przed spółgłoskami wargowymi został zastąpiony zapisem n. Przed samogłoskami i y stosuje się zapis n’ (z apostrofem).
+案内（あんない）: annai – oprowadzanie
+群馬（ぐんま）: Gunma – Gunma
+簡易（かんい）: kan’i – prostota
+信用（しんよう）: shin’yō – zaufanie
+
+
+Podwójne spółgłoski
+Podwójne lub geminizowane spółgłoski oznaczane są poprzez podwojenie spółgłoski po sokuonie, っ, z wyjątkiem ch, które geminizowane przechodzi w tch.
+
+結果（けっか）: kekka – wynik
+さっさと: sassato – szybko
+ずっと: zutto – cały czas
+切符（きっぷ）: kippu – bilet
+雑誌（ざっし）: zasshi – magazyn
+一緒に（いっしょに）: isshoni – razem
+こっち: kotchi (nie kocchi) – tędy
+抹茶（まっちゃ）: matcha (nie maccha) – matcha
+三つ（みっつ）: mittsu – trzy
+
+
+Tabele latynizacji Hepburna
+
+† – Znaki oznaczone na czerwono to znaki historyczne, które są przestarzałe we współczesnej japońszczyźnie.
+‡ – We współczesnej japońszczyźnie znak ヲ wo powinien być zapisywany fonetycznie jako o w przypadku użycia jako partykuły i tylko czasami wymawia się go wo w niektórych zapożyczeniach (np. niestandardowe ヲッカ wokka dla wyrazu „wódka”).
+
+
+Dla rozszerzonej katakany
+Połączenia tych znaków wykorzystywane są głównie do reprezentowania dźwięków w wyrazach obcojęzycznych.
+Digrafy na pomarańczowym tle używane są do zapisu zapożyczeń i zagranicznych nazw, na niebieskim tle – do dokładniejszej transliteracji obcych dźwięków (zgodnie z zaleceniami japońskiego Ministerstwa Oświaty, Kultury, Sportu, Nauki i Technologii). Digrafy katakany na beżowym tle sugerowane są przez American National Standards Institute i British Standards Institution jako możliwe do stosowania. Natomiast znaki z fioletowym tłem pojawiły się w standardzie stowarzyszenia Romaji Hiromekai z 1974.
+
+* – Wykorzystanie ウゥ do reprezentowania wu jest rzadkością we współczesnym japońskim, poza slangiem internetowym i transkrypcją łacińskiego digrafu VV w katakanie.
+⁑ – Znak ヴ ma rzadko stosowany odpowiednik w hiraganie ゔ, który również oznacza vu w latynizacji Hepburna.
+⁂ – Znaki oznaczone na zielono są przestarzałe we współczesnej japońszczyźnie i stosowane bardzo rzadko.
+
+
+Uwagi
+
+
+Przypisy
+
+
+Linki zewnętrzne
+Wstęp do pierwszego wydania oryginalnego słownika Hepburna tłumaczący zasady latynizacji (ang.)
+Wstęp do trzeciego wydania oryginalnego słownika Hepburna tłumaczący zasady latynizacji (ang.)

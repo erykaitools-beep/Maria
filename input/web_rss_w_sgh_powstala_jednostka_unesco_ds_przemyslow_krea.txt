@@ -1,0 +1,13 @@
+# Zrodlo: RSS Feed
+# Tytul: W SGH powstała jednostka UNESCO ds. przemysłów kreatywnych i różnorodności kulturowej
+# URL: https://naukawpolsce.pl/aktualnosci/news%2C112174%2Cw-sgh-powstala-jednostka-unesco-ds-przemyslow-kreatywnych-i-roznorodnosci
+# Pobrano: 2026-03-18
+# ---
+
+<span property="schema:name" class="field field--name-title field--type-string field--label-hidden">W SGH powstała jednostka UNESCO ds. przemysłów kreatywnych i różnorodności kulturowej</span>
+<span rel="schema:author" class="field field--name-uid field--type-entity-reference field--label-hidden"><span lang about="https://naukawpolsce.pl/user/5" typeof="schema:Person" property="schema:name" datatype>tryton</span></span>
+<span property="schema:dateCreated" content="2026-03-18T12:34:00+00:00" class="field field--name-created field--type-created field--label-hidden"><time datetime="2026-03-18T13:34:00+01:00" title="środa, Marzec 18, 2026 - 13:34" class="datetime">śr., 03/18/2026 - 13:34</time>
+</span>
+
+
+2 minuty

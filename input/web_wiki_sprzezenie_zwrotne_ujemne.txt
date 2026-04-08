@@ -1,0 +1,18 @@
+# Zrodlo: Wikipedia (pl)
+# Tytul: Sprzężenie zwrotne ujemne
+# URL: https://pl.wikipedia.org/wiki/Sprz%C4%99%C5%BCenie_zwrotne_ujemne
+# Pobrano: 2026-03-23
+# ---
+
+Sprzężenie zwrotne ujemne – z cybernetycznego punktu widzenia stanowi fundamentalny mechanizm samoregulacyjny, zachodzi, gdy informacja o rozbieżności pomiędzy wartością faktyczną i referencyjną parametru układu wykorzystywana jest do zniwelowania tej różnicy. Ogólny wysoki poziom ujemnego sprzężenia zwrotnego sprzyja stabilności układu.
+Rozważając zadanie utrzymania wartości określonego parametru na zadanym poziomie, zachodzi ono wtedy, gdy jakiekolwiek zaburzenia powodujące odchylenie wartości parametru od wartości referencyjnej, w którąkolwiek stronę, indukują działania prowadzące do zmiany wartości tego parametru w stronę przeciwną (stąd nazwa „ujemne”), a więc do niwelacji (kompensacji) efektu tego odchylenia.
+
+Mówiąc obrazowo: wartość parametru sprzężonego ujemnie zachowuje się jak niewielka kulka na dnie półkulistego zagłębienia; każde wytrącenie jej z równowagi powoduje powtórne staczanie się w kierunku najniższego punktu, pośrodku zagłębienia. W przypadku sprzężenia zwrotnego ujemnego wartość parametru oscyluje więc wokół wartości referencyjnej. Jest to więc model równowagi trwałej.
+Sprzężenia zwrotne ujemne występują powszechnie w organizmach żywych i urządzeniach technicznych, jako mechanizmy samoregulacji. W szczególności sprzężenie zwrotne jest niezbędnym elementem układu regulacji.
+
+
+Zobacz też
+
+układ zamknięty
+sprzężenie zwrotne
+sprzężenie zwrotne dodatnie
