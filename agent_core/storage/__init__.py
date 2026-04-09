@@ -216,6 +216,26 @@ class LogArchiver:
             "ts_field": "timestamp",
             "min_age_days": 3,
         },
+        "decision_traces.jsonl": {
+            "summarizer": "generic",
+            "ts_field": "started_at",
+            "min_age_days": 7,
+        },
+        "critique_reports.jsonl": {
+            "summarizer": "generic",
+            "ts_field": "timestamp",
+            "min_age_days": 7,
+        },
+        "creative_events.jsonl": {
+            "summarizer": "generic",
+            "ts_field": "timestamp",
+            "min_age_days": 7,
+        },
+        "dream_log.jsonl": {
+            "summarizer": "generic",
+            "ts_field": "timestamp",
+            "min_age_days": 7,
+        },
     }
 
     SUMMARIZERS = {

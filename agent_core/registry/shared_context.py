@@ -54,6 +54,20 @@ class SharedContext:
     vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
     code_agent: Any = None             # CodeAgent (autonomous coding)
 
+    # Faza F/G + Learning Upgrade
+    cross_validator: Any = None        # CrossValidator (multi-source validation)
+    dispute_log: Any = None            # DisputeLog (Faza F disputes)
+    critic_agent: Any = None           # CriticAgent (Faza G knowledge quality)
+    bulletin_store: Any = None         # BulletinStore (cognitive bulletin board)
+    knowledge_auditor: Any = None      # KnowledgeAuditor (gap detection)
+    gap_planner: Any = None            # GapPlanner (learning gap strategies)
+    expert_bridge: Any = None          # ExpertBridge (audit-aware expert queries)
+
+    # Phase 5 Effector Safety
+    authority_manager: Any = None      # AuthorityManager (5-level authority)
+    approval_queue: Any = None         # ApprovalQueue (HITL approval workflow)
+    tool_budget: Any = None            # ToolBudgetManager (per-tool rate limits)
+
     # V3 Orchestrator (Phase A)
     capability_router: Any = None      # CapabilityRouter (registry-based dispatch)
     context_builder: Any = None        # ContextBuilder (self-awareness aggregator)

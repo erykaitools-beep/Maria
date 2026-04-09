@@ -856,6 +856,18 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"Code Agent not initialized: {e}")
 
+        # Start introspection scheduler (daily code self-model refresh)
+        try:
+            from agent_core.introspection.scheduler import IntrospectionScheduler
+            intro_sched = IntrospectionScheduler(
+                project_root=str(Path(ctx.config.BASE_DIR)),
+                interval_sec=86400,  # 24h (AST scan is heavy)
+            )
+            intro_sched.start()
+            print("[Homeostasis] [OK] Introspection scheduler started (24h)")
+        except Exception as e:
+            logger.debug(f"Introspection scheduler not started: {e}")
+
         # Wire state-grounded operator response pipeline (Phase 2)
         try:
             from agent_core.introspection.query_router import OperationalQueryRouter

@@ -211,8 +211,8 @@ class TelegramNotifier:
             return False
 
         text = (
-            "*K9 Meta-Cognition: potrzebuje pomocy*\n\n"
-            f"{reason[:300]}" if reason else
+            f"*K9 Meta-Cognition: potrzebuje pomocy*\n\n{reason[:300]}"
+            if reason else
             "*K9 Meta-Cognition: potrzebuje pomocy*\n\n"
             "Spadek pewnosci ponizej progu. Sprawdz stan systemu."
         )

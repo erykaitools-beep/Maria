@@ -822,6 +822,9 @@ class PlannerCore:
         if self._goal_store is None:
             return None
 
+        # Auto-abandon stale goals: PENDING > 7 days with no progress
+        self._cleanup_stale_goals()
+
         active_goals = self._goal_store.get_active()
         return self.selector.select_goal(
             active_goals=active_goals,
@@ -1638,6 +1641,39 @@ class PlannerCore:
 
         clear_episode_id()
         return plan
+
+    # -- Internal: stale goal cleanup -------------------------
+
+    def _cleanup_stale_goals(self) -> None:
+        """Auto-abandon goals that are PENDING > 7 days with no progress.
+
+        Safety net against goals that can never be fulfilled (e.g. camera
+        commands parsed as learning goals, or actions without completion logic).
+        Runs once per cycle - lightweight (iterates active goals only).
+        """
+        if self._goal_store is None:
+            return
+
+        now = time.time()
+        stale_threshold_sec = 7 * 24 * 3600  # 7 days
+
+        from agent_core.goals.goal_model import GoalStatus
+
+        for goal in self._goal_store.get_active():
+            age_sec = now - goal.created_at
+            if (age_sec > stale_threshold_sec
+                    and goal.progress <= 0.0
+                    and goal.status == GoalStatus.PENDING):
+                logger.warning(
+                    f"Planner: auto-abandoning stale goal {goal.id} "
+                    f"({goal.description[:50]}) - pending {age_sec / 3600:.0f}h "
+                    f"with no progress"
+                )
+                self._goal_store.update_status(
+                    goal.id, GoalStatus.ABANDONED,
+                    reason=f"stale: pending {age_sec / 3600:.0f}h with no progress",
+                    actor="planner_stale_cleanup",
+                )
 
     # -- Internal: auto-create learning goals -----------------
 

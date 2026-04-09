@@ -435,6 +435,11 @@ class HomeostasisCore:
                 logger.debug(f"ModelScheduler tick error: {e}")
 
         # ──────────────────────────────────────
+        # PHASE 9.7: LOG ARCHIVAL (daily, even in ACTIVE mode)
+        # ──────────────────────────────────────
+        self._maybe_archive_logs()
+
+        # ──────────────────────────────────────
         # PHASE 10: PLANNER (or teacher fallback)
         # ──────────────────────────────────────
         self._check_planner_trigger()
@@ -728,6 +733,41 @@ class HomeostasisCore:
             )
         except Exception as e:
             logger.warning(f"Sleep cycle failed: {e}")
+
+    # -- Phase 9.7: Log Archival ----------------------------------
+
+    _last_archival_ts: float = 0.0
+    _ARCHIVAL_INTERVAL_SEC: int = 86400  # 24h
+
+    def _maybe_archive_logs(self) -> None:
+        """Run log archival once per day, even in ACTIVE mode.
+
+        Prevents unbounded JSONL growth (~4.7 MB/day -> ~22 GB/year).
+        Archives records older than min_age_days per file to /mnt/storage/.
+        """
+        import time as _time
+        now = _time.time()
+        if now - self._last_archival_ts < self._ARCHIVAL_INTERVAL_SEC:
+            return
+
+        try:
+            from pathlib import Path
+            archive_path = Path("/mnt/storage/data")
+            if not archive_path.parent.exists():
+                return
+
+            from agent_core.storage import LogArchiver
+            archiver = LogArchiver()
+            result = archiver.run_archival()
+            self._last_archival_ts = now
+            total = result.get("total_archived", 0)
+            if total > 0:
+                logger.info(
+                    f"Phase 9.7: Archived {total} log records "
+                    f"({result.get('total_kept', 0)} kept active)"
+                )
+        except Exception as e:
+            logger.debug(f"Phase 9.7 archival error: {e}")
 
     def _check_telegram(self) -> None:
         """

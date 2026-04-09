@@ -473,13 +473,18 @@ class ActionExecutor:
                 except Exception:
                     pass
 
-            return {
+            result = {
                 "success": True,
                 "report_id": report.report_id,
                 "recommendations": len(report.recommendations),
                 "goals_created": report.goals_created,
                 "duration_ms": report.duration_ms,
             }
+
+            # Complete the goal - self-analysis is a one-shot action
+            self._complete_oneshot_goal(plan, result)
+
+            return result
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -503,6 +508,10 @@ class ActionExecutor:
                         self._telegram_notifier.notify_creative_meta_goals(meta_goals)
                 except Exception:
                     pass
+
+            # Complete the goal - creative reflection is a one-shot action
+            if result.get("success"):
+                self._complete_oneshot_goal(plan, result)
 
             return result
         except Exception as e:
@@ -879,10 +888,38 @@ class ActionExecutor:
         except Exception as e:
             logger.debug(f"Learning goal update skipped: {e}")
 
-    # -- Faza G: Knowledge critique (deprecated legacy path) ---------
+    # -- One-shot goal completion helper --------------------------------
+
+    def _complete_oneshot_goal(self, plan: Plan, outcome: dict) -> None:
+        """Mark a one-shot goal (critique, self_analyze, creative) as ACHIEVED.
+
+        These actions complete in a single execution. Without this,
+        the goal stays PENDING forever and GoalSelector keeps re-selecting it.
+        """
+        if not self._goal_store or not plan.goal_id:
+            return
+        try:
+            from agent_core.goals.goal_model import GoalStatus
+            goal = self._goal_store.get(plan.goal_id)
+            if goal and goal.status.value in ("pending", "active"):
+                self._goal_store.update_progress(plan.goal_id, 1.0)
+                # update_progress auto-transitions to ACHIEVED at >= 1.0
+                # but only for ACTIVE goals, so also set status explicitly
+                goal_refreshed = self._goal_store.get(plan.goal_id)
+                if goal_refreshed and goal_refreshed.status.value != "achieved":
+                    self._goal_store.update_status(
+                        plan.goal_id, GoalStatus.ACHIEVED,
+                        reason="one-shot action completed",
+                        actor="action_executor",
+                    )
+                self._goal_store.set_outcome(plan.goal_id, outcome)
+        except Exception as e:
+            logger.debug(f"One-shot goal completion failed: {e}")
+
+    # -- Faza G: Knowledge critique ------------------------------------
 
     def _exec_critique(self, plan: Plan) -> Dict[str, Any]:
-        """Knowledge quality critique (Faza G). Legacy fallback."""
+        """Knowledge quality critique (Faza G)."""
         if self._critic_agent is None:
             return {"success": False, "error": "No CriticAgent configured"}
 
@@ -897,13 +934,18 @@ class ActionExecutor:
                     "report_id": report.report_id,
                 }
 
-            return {
+            result = {
                 "success": True,
                 "report_id": report.report_id,
                 "findings": len(report.findings),
                 "goals_created": report.goals_created,
                 "duration_ms": report.duration_ms,
             }
+
+            # Complete the goal - critique is a one-shot action
+            self._complete_oneshot_goal(plan, result)
+
+            return result
         except Exception as e:
             return {"success": False, "error": str(e)}
 
