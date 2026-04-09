@@ -1152,13 +1152,19 @@ class PlannerCore:
         return None
 
     def _pick_expert_topic(self) -> Optional[str]:
-        """Pick a topic to ask the expert about, based on knowledge gaps."""
+        """Pick a topic to ask the expert about, based on knowledge gaps.
+
+        Skips topics that already have expert material in input/
+        to avoid ask_expert loops on the same topic.
+        """
         # K6: Use world model gaps
         if self._world_model:
             try:
                 gaps = self._world_model.query.get_knowledge_gaps()
-                if gaps:
-                    return gaps[0].get("topic", "")
+                for gap in gaps:
+                    topic = gap.get("topic", "")
+                    if topic and not self._has_expert_material(topic):
+                        return topic
             except Exception:
                 pass
 
@@ -1166,13 +1172,35 @@ class PlannerCore:
         if self._knowledge_analyzer:
             try:
                 topic_map = self._knowledge_analyzer.get_topic_file_map()
-                if topic_map:
-                    # Pick first topic (most files = most explored)
-                    return next(iter(topic_map))
+                for topic in topic_map:
+                    if not self._has_expert_material(topic):
+                        return topic
             except Exception:
                 pass
 
         return None
+
+    def _has_expert_material(self, topic: str) -> bool:
+        """Check if expert material already exists for a topic in input/.
+
+        Uses same path resolution as ExpertBridge (project root, not CWD)
+        and same size threshold (>5000 bytes = substantial content).
+        """
+        import re
+        slug = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_")
+        project_root = Path(__file__).resolve().parents[2]
+        input_dir = project_root / "input"
+        if not input_dir.exists():
+            return False
+        # Check both expert_<slug>.txt and web_wiki_<slug>.txt
+        for name in (f"expert_{slug}.txt", f"web_wiki_{slug}.txt"):
+            fpath = input_dir / name
+            try:
+                if fpath.exists() and fpath.stat().st_size > 5000:
+                    return True
+            except OSError:
+                pass
+        return False
 
     def _post_need_material_if_missing(self) -> None:
         """Audit topic, plan gaps, post targeted needs to bulletin board."""

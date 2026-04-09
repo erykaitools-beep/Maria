@@ -198,8 +198,10 @@ class TestPlannerAskExpertTrigger:
         analyzer.get_topic_file_map.return_value = {"chemia": ["f1", "f2"]}
         planner._knowledge_analyzer = analyzer
 
-        topic = planner._pick_expert_topic()
-        assert topic == "chemia"
+        # Mock _has_expert_material so test doesn't depend on real input/ files
+        with patch.object(PlannerCore, "_has_expert_material", return_value=False):
+            topic = planner._pick_expert_topic()
+            assert topic == "chemia"
 
     def test_pick_expert_topic_none(self):
         from agent_core.planner.planner_core import PlannerCore
