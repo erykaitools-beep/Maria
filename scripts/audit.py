@@ -97,8 +97,16 @@ def check_planner_loops(decisions: list, window_hours: int = 96) -> list:
             key = f"{action}+{topic}" if topic else action
         counter[key] += 1
 
+    # Actions that are naturally repetitive (not loops)
+    # fetch/learn/review/exam run many times per day by design
+    repetitive_actions = {"fetch", "learn", "review", "exam", "evaluate", "creative", "maintenance"}
+
     issues = []
     for key, count in counter.most_common():
+        action_name = key.split("+")[0]
+        # Skip naturally repetitive actions unless SKIPPED (which indicates a loop)
+        if action_name in repetitive_actions and "SKIPPED" not in key:
+            continue
         if count > 10:
             issues.append({
                 "type": "planner_loop",
