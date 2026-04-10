@@ -125,6 +125,14 @@ class OperationalQueryRouter:
         if len(lower) < 3:
             return ResponseMode.NORMAL
 
+        # Personal queries about the user -> NORMAL (user profile in system prompt)
+        _USER_MARKERS = ("o mnie", "about me", "moje dane", "moj profil",
+                         "mój profil", "co pamietasz o mnie", "znasz mnie",
+                         "kim jestem", "ile mam lat")
+        for marker in _USER_MARKERS:
+            if marker in lower:
+                return ResponseMode.NORMAL
+
         # Check each mode's keywords (most specific first)
         for mode, keywords in _MODE_PATTERNS.items():
             for kw in keywords:
