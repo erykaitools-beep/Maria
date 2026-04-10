@@ -83,6 +83,16 @@ def init_brain():
     except Exception as e:
         print(f"[INIT] Conversation memory disabled: {e}")
 
+    # Attach user profile for personalized responses
+    user_profile = None
+    try:
+        from agent_core.consciousness.user_profile import UserProfile
+        user_profile = UserProfile()
+        brain.set_user_profile(user_profile)
+        print(f"[INIT] User profile: active (operator: {user_profile.get_name()})")
+    except Exception as e:
+        print(f"[INIT] User profile disabled: {e}")
+
     # Wrap with LLM Router if NIM API available
     router = _create_router(brain)
     active_brain = router if router else brain

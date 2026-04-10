@@ -39,6 +39,7 @@ class OllamaBrain:
         self.log_fn = log_fn or print
         self._identity_store = identity_store
         self._conversation_memory = None
+        self._user_profile = None
 
         # Base system prompt (static part)
         self._base_system_prompt = system_prompt or (
@@ -137,6 +138,10 @@ class OllamaBrain:
                 for msg in restored:
                     self.history.append(msg)
 
+    def set_user_profile(self, profile) -> None:
+        """Attach user profile for context injection."""
+        self._user_profile = profile
+
     def set_llm_tape(self, tape) -> None:
         """Attach LLM Tape for recording chat interactions."""
         self._llm_tape = tape
@@ -224,9 +229,19 @@ class OllamaBrain:
         work_ctx = self._get_work_context()
         awareness_ctx = self._get_awareness_context()
 
+        # User profile context
+        user_ctx = ""
+        if self._user_profile:
+            try:
+                user_ctx = self._user_profile.get_context_for_prompt()
+            except Exception:
+                pass
+
         prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
         if identity_ctx:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
+        if user_ctx:
+            prompt += f"\n{user_ctx}"
         if work_ctx:
             prompt += f"\n[Aktualna praca: {work_ctx}]"
         if conversation_ctx:
@@ -348,6 +363,12 @@ class OllamaBrain:
         self.history.append({"role": "user", "content": prompt})
         if self._conversation_memory:
             self._conversation_memory.save_turn("user", prompt)
+        if self._user_profile:
+            try:
+                self._user_profile.learn_from_message(prompt)
+                self._user_profile.record_interaction()
+            except Exception:
+                pass
 
         try:
             content = self._chat(self.history, temperature=temperature, **kwargs)

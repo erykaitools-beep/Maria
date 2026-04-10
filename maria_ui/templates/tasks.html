@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Tasks - M.A.R.I.A.{% endblock %}
+{% block page_class %}mo-page--tasks{% endblock %}
+
+{% block content %}
+<div class="mo-tasks">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Task Pipeline</h2>
+    <div>
+      <button class="mo-btn mo-btn--sm" onclick="loadTasks()">Odswiez</button>
+      <span id="task-count" class="mo-badge mo-badge--off">---</span>
+    </div>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-submit">Nowy task</button>
+    <button class="mo-tab" data-tab="tab-list">Lista</button>
+    <button class="mo-tab" data-tab="tab-detail">Szczegoly</button>
+  </div>
+
+  <!-- Submit tab -->
+  <div class="mo-tab-content mo-tab-content--active" id="tab-submit">
+    <div class="mo-card mo-mb-3">
+      <h3 class="mo-text-lg mo-mb-2">Zlec zadanie</h3>
+      <textarea id="task-input" class="mo-textarea" rows="4"
+        placeholder="Opisz zadanie dla Claude lub Codex..."></textarea>
+      <div class="mo-flex mo-flex-between mo-flex-center mo-mt-2">
+        <div class="mo-flex" style="gap: 8px">
+          <button class="mo-btn" id="btn-claude" onclick="submitTask('claude')">Claude</button>
+          <button class="mo-btn mo-btn--secondary" id="btn-codex" onclick="submitTask('codex')">Codex</button>
+        </div>
+        <span id="submit-status" class="mo-text-sm mo-text-muted"></span>
+      </div>
+    </div>
+
+    <!-- Running tasks indicator -->
+    <div id="running-tasks" style="display:none">
+      <h3 class="mo-text-lg mo-mb-2">W trakcie</h3>
+      <div id="running-list"></div>
+    </div>
+  </div>
+
+  <!-- Task list tab -->
+  <div class="mo-tab-content" id="tab-list">
+    <div class="mo-flex mo-mb-2" style="gap: 8px">
+      <button class="mo-btn mo-btn--sm mo-btn--active" onclick="filterTasks('')" data-filter="">Wszystkie</button>
+      <button class="mo-btn mo-btn--sm" onclick="filterTasks('COMPLETED')" data-filter="COMPLETED">Ukonczone</button>
+      <button class="mo-btn mo-btn--sm" onclick="filterTasks('FAILED')" data-filter="FAILED">Bledy</button>
+      <button class="mo-btn mo-btn--sm" onclick="filterTasks('RUNNING')" data-filter="RUNNING">W trakcie</button>
+    </div>
+    <div id="tasks-list">
+      <div class="mo-empty-state">Ladowanie...</div>
+    </div>
+  </div>
+
+  <!-- Detail tab -->
+  <div class="mo-tab-content" id="tab-detail">
+    <div id="task-detail">
+      <div class="mo-empty-state">Wybierz task z listy</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/tasks.js') }}"></script>
+{% endblock %}

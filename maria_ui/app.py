@@ -357,6 +357,15 @@ def get_maria_brain():
                             print("[UI] [OK] Conversation memory wired")
                         except Exception as e:
                             print(f"[UI] [WARN] Conversation memory not available: {e}")
+                    # Wire user profile for personalized responses
+                    try:
+                        from agent_core.consciousness.user_profile import UserProfile
+                        _up = UserProfile()
+                        brain.set_user_profile(_up)
+                        print("[UI] [OK] User profile wired")
+                    except Exception as e:
+                        print(f"[UI] [WARN] User profile not available: {e}")
+
                     # Wire state-grounded operator response pipeline
                     try:
                         from agent_core.introspection.query_router import OperationalQueryRouter
@@ -3322,6 +3331,245 @@ def api_vision_snap():
         "summary": percept.get("summary", ""),
         "quality": percept.get("quality", 0),
     })
+
+
+# ====== USER PROFILE ======
+
+def _get_user_profile():
+    """Lazy-init UserProfile for Web UI."""
+    try:
+        from agent_core.consciousness.user_profile import UserProfile
+        return UserProfile()
+    except ImportError:
+        return None
+
+
+@app.route('/api/user/profile')
+@require_auth
+def api_user_profile():
+    """Get full user profile."""
+    profile = _get_user_profile()
+    if not profile:
+        return jsonify({"error": "UserProfile not available"}), 503
+    return jsonify(profile.get_full_profile())
+
+
+@app.route('/api/user/profile', methods=['POST'])
+@require_auth
+def api_user_profile_update():
+    """Update user profile fields."""
+    profile = _get_user_profile()
+    if not profile:
+        return jsonify({"error": "UserProfile not available"}), 503
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    updated = []
+
+    # Update name
+    if "name" in data:
+        profile.set_name(str(data["name"]))
+        updated.append("name")
+
+    # Update preferences
+    for key in ("response_style", "autonomy_level", "notify_channel"):
+        if key in data:
+            profile.set_preference(key, str(data[key]))
+            updated.append(key)
+
+    # Add interests
+    if "add_interest" in data:
+        profile.add_interest(str(data["add_interest"]))
+        updated.append("interest")
+
+    # Remove interest
+    if "remove_interest" in data:
+        profile.remove_interest(str(data["remove_interest"]))
+        updated.append("interest")
+
+    # Add fact
+    if "add_fact" in data:
+        profile.add_fact(str(data["add_fact"]))
+        updated.append("fact")
+
+    # Add schedule note
+    if "add_schedule" in data:
+        profile.add_schedule_note(str(data["add_schedule"]))
+        updated.append("schedule")
+
+    return jsonify({"updated": updated, "profile": profile.get_full_profile()})
+
+
+@app.route('/api/user/summary')
+@require_auth
+def api_user_summary():
+    """Get human-readable user profile summary."""
+    profile = _get_user_profile()
+    if not profile:
+        return jsonify({"error": "UserProfile not available"}), 503
+    return jsonify({"summary": profile.get_summary()})
+
+
+# ====== TASK PIPELINE (Claude/Codex) ======
+
+def _get_task_store():
+    """Lazy-init TaskStore for Web UI."""
+    try:
+        from agent_core.llm.task_store import TaskStore
+        return TaskStore()
+    except ImportError:
+        return None
+
+
+@app.route('/tasks')
+@require_auth
+def page_tasks():
+    return render_template('tasks.html', active_page='tasks')
+
+
+@app.route('/api/tasks')
+@require_auth
+def api_tasks():
+    """List recent tasks with optional status filter."""
+    store = _get_task_store()
+    if not store:
+        return jsonify({"error": "TaskStore not available"}), 503
+    limit = request.args.get('limit', 20, type=int)
+    status_filter = request.args.get('status', '').upper()
+    tasks = store.get_recent(min(limit, 50))
+    if status_filter:
+        tasks = [t for t in tasks if t.get("status") == status_filter]
+    # Return newest first
+    tasks.reverse()
+    return jsonify({"tasks": tasks, "count": len(tasks)})
+
+
+@app.route('/api/tasks/<task_id>')
+@require_auth
+def api_task_detail(task_id):
+    """Get full task details by ID."""
+    store = _get_task_store()
+    if not store:
+        return jsonify({"error": "TaskStore not available"}), 503
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(task)
+
+
+@app.route('/api/tasks', methods=['POST'])
+@require_auth
+def api_tasks_submit():
+    """Submit a new task from Web UI."""
+    store = _get_task_store()
+    if not store:
+        return jsonify({"error": "TaskStore not available"}), 503
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    task_text = (data.get("task_text") or "").strip()
+    backend = (data.get("backend") or "").lower()
+
+    if not task_text or len(task_text) < 5:
+        return jsonify({"error": "Task text too short (min 5 chars)"}), 400
+    if len(task_text) > 2000:
+        return jsonify({"error": "Task text too long (max 2000 chars)"}), 400
+    if backend not in ("claude", "codex"):
+        return jsonify({"error": "Backend must be 'claude' or 'codex'"}), 400
+
+    # Sanitize
+    task_text = html.escape(task_text)
+
+    # Create task and run in background thread
+    task_id = store.create_task(
+        task_text=task_text,
+        backend=backend,
+        source=f"webui_{backend}",
+        timeout_s=300,
+    )
+
+    def _run_task():
+        try:
+            if backend == "claude":
+                from agent_core.llm.claude_client import ClaudeClient
+                client = ClaudeClient(timeout_s=300)
+            else:
+                from agent_core.llm.codex_client import CodexClient
+                client = CodexClient(timeout_s=300)
+
+            if not client.is_available():
+                store.mark_failed(task_id, f"{backend} CLI niedostepny")
+                return
+
+            store.mark_running(task_id)
+            prompt = f"Projekt M.A.R.I.A. (Python, agent_core/). Zadanie: {task_text}"
+            result = client.ask(prompt, source=f"webui_{backend}", context={"task": task_text})
+
+            if result:
+                store.mark_completed(task_id, result[:500])
+                # Generate PDF for download
+                try:
+                    from agent_core.telegram.pdf_export import generate_task_pdf
+                    task_rec = store.get_task(task_id)
+                    generate_task_pdf(
+                        task_id, backend, task_text, result,
+                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
+                        timestamp=task_rec.get("created_at") if task_rec else None,
+                    )
+                except Exception:
+                    pass
+            else:
+                store.mark_timeout(task_id, 300)
+        except Exception as e:
+            store.mark_failed(task_id, str(e)[:300])
+
+    t = threading.Thread(target=_run_task, daemon=True)
+    t.start()
+
+    return jsonify({"task_id": task_id, "status": "PENDING"}), 201
+
+
+@app.route('/api/tasks/<task_id>/pdf')
+@require_auth
+def api_task_pdf(task_id):
+    """Download PDF for a completed task."""
+    store = _get_task_store()
+    if not store:
+        return jsonify({"error": "TaskStore not available"}), 503
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+    if task.get("status") != "COMPLETED":
+        return jsonify({"error": "PDF only for completed tasks"}), 400
+
+    # Check if PDF already exists
+    import tempfile
+    backend = task.get("backend", "claude")
+    pdf_path = Path(tempfile.gettempdir()) / "maria_pdf" / f"maria_{backend}_{task_id}.pdf"
+    if pdf_path.exists():
+        return send_file(str(pdf_path), mimetype='application/pdf',
+                         as_attachment=True, download_name=f"maria_{backend}_{task_id}.pdf")
+
+    # Generate on the fly
+    try:
+        from agent_core.telegram.pdf_export import generate_task_pdf
+        result = task.get("result_summary", "")
+        path = generate_task_pdf(
+            task_id, backend, task.get("task_text", ""),
+            result,
+            duration_ms=task.get("duration_ms"),
+            timestamp=task.get("created_at"),
+        )
+        if path:
+            return send_file(path, mimetype='application/pdf',
+                             as_attachment=True, download_name=f"maria_{backend}_{task_id}.pdf")
+    except Exception:
+        pass
+    return jsonify({"error": "PDF generation failed"}), 500
 
 
 if __name__ == '__main__':

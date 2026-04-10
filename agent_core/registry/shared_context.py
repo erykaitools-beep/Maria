@@ -76,6 +76,9 @@ class SharedContext:
     task_orchestrator: Any = None      # TaskOrchestrator (V3 Module 4)
     product_shell: Any = None          # ProductShell (V3 Module 14)
 
+    # User profile
+    user_profile: Any = None             # UserProfile (operator knowledge)
+
     # REPL state
     last_result: Any = None
 

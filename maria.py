@@ -203,6 +203,15 @@ def graceful_shutdown(ctx, registry):
             if condensed:
                 ctx.conversation_memory.save_summary(condensed)
                 summary = condensed.get("summary", summary)
+                # Feed user_facts to UserProfile
+                user_facts = condensed.get("user_facts", [])
+                if user_facts and ctx.user_profile:
+                    try:
+                        added = ctx.user_profile.learn_from_user_facts(user_facts)
+                        if added:
+                            logger.info(f"UserProfile learned {added} new facts from session")
+                    except Exception:
+                        pass
         except Exception as e:
             logger.warning(f"Condensation failed: {e}")
 

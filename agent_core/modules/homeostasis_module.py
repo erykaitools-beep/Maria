@@ -115,6 +115,19 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"LLM Tape not initialized: {e}")
 
+        # Initialize UserProfile (operator knowledge)
+        try:
+            from agent_core.consciousness.user_profile import UserProfile
+            user_profile = UserProfile()
+            ctx.user_profile = user_profile
+            # Wire to brain for system prompt injection
+            _brain = getattr(ctx.brain, 'ollama', ctx.brain)
+            if _brain and hasattr(_brain, 'set_user_profile'):
+                _brain.set_user_profile(user_profile)
+            print(f"[Homeostasis] [OK] UserProfile initialized (operator: {user_profile.get_name()})")
+        except Exception as e:
+            logger.debug(f"UserProfile not initialized: {e}")
+
         # Initialize PerceptionBuffer (Warstwa 1)
         if core:
             try:
@@ -2167,6 +2180,42 @@ def _register_telegram_commands(bridge, ctx):
         )
         return f"PDF wygenerowany dla task {task['task_id']}."
 
+    def _cmd_profile(args):
+        """User profile: /profile [add_interest|add_fact|add_schedule|remove_interest] <text>"""
+        up = getattr(ctx, 'user_profile', None)
+        if not up:
+            return "UserProfile niedostepny."
+
+        if not args or not args.strip():
+            return up.get_summary()
+
+        parts = args.strip().split(None, 1)
+        subcmd = parts[0].lower()
+        text = parts[1] if len(parts) > 1 else ""
+
+        if subcmd == "add_interest" and text:
+            ok = up.add_interest(text)
+            return f"Dodano zainteresowanie: {text}" if ok else f"Juz znane: {text}"
+        elif subcmd == "add_fact" and text:
+            ok = up.add_fact(text)
+            return f"Dodano fakt: {text}" if ok else f"Juz znane: {text}"
+        elif subcmd == "add_schedule" and text:
+            up.add_schedule_note(text)
+            return f"Dodano do harmonogramu: {text}"
+        elif subcmd == "remove_interest" and text:
+            ok = up.remove_interest(text)
+            return f"Usunieto: {text}" if ok else f"Nie znaleziono: {text}"
+        else:
+            return (
+                "*Profil uzytkownika:*\n"
+                "/profile - pokaz profil\n"
+                "/profile add\\_interest <temat>\n"
+                "/profile add\\_fact <fakt>\n"
+                "/profile add\\_schedule <notatka>\n"
+                "/profile remove\\_interest <temat>"
+            )
+
+    bridge.register_command("profile", _cmd_profile)
     bridge.register_command("pdf", _cmd_pdf)
     bridge.register_command("tasks", _cmd_tasks)
     bridge.register_command("claude", _cmd_claude)

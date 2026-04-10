@@ -33,6 +33,7 @@ from agent_core.consciousness.core import ConsciousnessCore
 from agent_core.consciousness.conversation_memory import ConversationMemory
 from agent_core.consciousness.sleep_processor import SleepProcessor
 from agent_core.consciousness.dream_generator import DreamGenerator
+from agent_core.consciousness.user_profile import UserProfile
 
 __all__ = [
     "IdentityStore",
@@ -44,4 +45,5 @@ __all__ = [
     "ConversationMemory",
     "SleepProcessor",
     "DreamGenerator",
+    "UserProfile",
 ]
