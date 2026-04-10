@@ -222,6 +222,12 @@ def register_modules(registry):
 
     registry.try_register(make_code, "code")
 
+    def make_reminders():
+        from agent_core.modules.reminder_module import ReminderModule
+        return ReminderModule()
+
+    registry.try_register(make_reminders, "reminders")
+
 
 # ====== POMOC ======
 

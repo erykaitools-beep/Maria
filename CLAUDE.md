@@ -114,6 +114,9 @@
 | **2026-04-07** | Timeout fix: 3min -> 5min, explicit error messages, startup cooldown 1h -> 6h |
 | **2026-04-07** | **V3 Migration** - maria.py full mode (daemon+UI), maria-ui.service disabled |
 | **2026-04-07** | Critic bugfix: max() empty sequence + timestamp type coercion |
+| **2026-04-10** | Task Pipeline Web UI + UserProfile (operator memory) |
+| **2026-04-10** | **Master Prompt** - single source of truth for all LLM paths (OllamaBrain, NIM, WebUI, Claude, Codex) |
+| **2026-04-10** | **Reminders & Todos** - time-triggered notifications, PL/EN time parser, REPL + Telegram + tick scheduler (83 testow) |
 
 ## Aktualny stan projektu
 
@@ -121,7 +124,7 @@
 |--------|---------|
 | **Branch** | `refactor/homeostasis` |
 | **Etap** | K1-K13 Phase 2 + Vision + **V3 DEPLOYED** (maria.py full mode) |
-| **Testy** | 3352 passing |
+| **Testy** | ~3435 passing |
 | **Faza** | Stabilization + Faza F/G + Learning Upgrade + CDL v3 + V3 + Task Pipeline + PDF Export |
 | **Runtime** | `maria.py` (daemon + Web UI, one process, systemd) |
 | **Event Log** | `meta_data/homeostasis_events.jsonl` |
@@ -166,7 +169,7 @@ project/
 │   ├── web_source/      # Web Content Fetcher: Wikipedia PL + RSS (podlaczony do planner)
 │   ├── introspection/   # Code self-awareness (READ-ONLY) + Architecture Map data source
 │   ├── memory/          # MemoryManager interface
-│   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry
+│   ├── llm/             # LLMManager + NIM routing + ModelScheduler + model_registry + master_prompt
 │   ├── self_analysis/   # K12 Self-Analysis: state collector, analyzer, recommendation applier
 │   ├── creative/        # K13 Creative Module Phase 2: tensions, insights, meta-goals, LLM engines (NIM)
 │   ├── telegram/        # Telegram Bridge (ClawBot): operator notifications + commands
@@ -174,6 +177,7 @@ project/
 │   ├── semantic/        # Semantic Memory: nomic-embed-text, vector store, auto-indexer
 │   ├── bulletin/        # Learning Upgrade: BulletinStore, KnowledgeAuditor, GapPlanner, ExpertBridge
 │   ├── critic/          # Faza G: Agent Krytyk - knowledge quality gate (7 dimensions)
+│   ├── reminders/       # Reminders & Todos: time-triggered notifications, task tracking
 │   ├── routing/         # Capability/Task Router: registry-based dispatch, handler factories
 │   ├── tracing/         # Phase 1 Tracing: episode_id, DecisionTrace, TraceStore (ADR-022)
 │   ├── vision/          # Vision: sensor abstraction, preprocessing, motion, scene, cortex

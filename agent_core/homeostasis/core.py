@@ -155,6 +155,9 @@ class HomeostasisCore:
         self._telegram_poll_interval = 30  # seconds
         self._telegram_last_poll = 0.0
 
+        # Reminder scheduler (Phase 12)
+        self._reminder_scheduler = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -199,6 +202,10 @@ class HomeostasisCore:
         Called from HomeostasisModule after init.
         """
         self._planner_core = planner_core
+
+    def set_reminder_scheduler(self, scheduler) -> None:
+        """Set reminder scheduler for Phase 12 tick check."""
+        self._reminder_scheduler = scheduler
 
     def set_telegram_bridge(self, bridge) -> None:
         """
@@ -448,6 +455,15 @@ class HomeostasisCore:
         # PHASE 11: TELEGRAM (poll + notify)
         # ──────────────────────────────────────
         self._check_telegram()
+
+        # ──────────────────────────────────────
+        # PHASE 12: REMINDERS (check due)
+        # ──────────────────────────────────────
+        if self._reminder_scheduler:
+            try:
+                self._reminder_scheduler.tick()
+            except Exception as e:
+                logger.debug(f"Phase 12 reminder error: {e}")
 
     def _aggregate_perception(
         self,

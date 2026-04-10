@@ -15,6 +15,12 @@ import time
 import requests
 from typing import Dict, Any, Optional, List, Callable
 
+try:
+    from agent_core.llm.master_prompt import build_compact_prompt, build_base_prompt
+    _MASTER_PROMPT_AVAILABLE = True
+except ImportError:
+    _MASTER_PROMPT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,11 +74,16 @@ class NIMClient:
         self.timeout = timeout
         self.log_fn = log_fn or print
 
-        self.system_prompt = system_prompt or (
-            "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
-            "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
-            "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
-        )
+        if system_prompt:
+            self.system_prompt = system_prompt
+        elif _MASTER_PROMPT_AVAILABLE:
+            self.system_prompt = build_base_prompt()
+        else:
+            self.system_prompt = (
+                "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
+                "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
+                "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
+            )
 
         # Conversation history (for think())
         self.history: List[Dict[str, str]] = [

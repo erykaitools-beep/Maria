@@ -79,6 +79,11 @@ class SharedContext:
     # User profile
     user_profile: Any = None             # UserProfile (operator knowledge)
 
+    # Reminders & Todos
+    reminder_store: Any = None           # ReminderStore (time-triggered notifications)
+    todo_store: Any = None               # TodoStore (task tracking)
+    reminder_scheduler: Any = None       # ReminderScheduler (tick-based firing)
+
     # REPL state
     last_result: Any = None
 

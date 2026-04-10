@@ -23,6 +23,12 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    from agent_core.llm.master_prompt import build_context_brief
+    _CONTEXT_BRIEF = build_context_brief()
+except ImportError:
+    _CONTEXT_BRIEF = ""
+
 logger = logging.getLogger(__name__)
 
 # Rate limit: max calls per hour
@@ -126,13 +132,15 @@ class CodexClient:
     def _invoke(self, prompt: str) -> Optional[str]:
         """Execute Codex CLI as subprocess (non-interactive exec mode)."""
         try:
+            # Prepend context brief so Codex knows it's helping M.A.R.I.A.
+            full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
             out_file = self._log_path.parent / ".codex_last_response.txt"
             cmd = [
                 self._codex_bin,
                 "exec",                   # non-interactive mode
                 "--skip-git-repo-check",  # Maria's context, not a repo question
                 "-o", str(out_file),      # write response to file
-                prompt,
+                full_prompt,
             ]
 
             result = subprocess.run(

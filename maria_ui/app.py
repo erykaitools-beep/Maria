@@ -17,6 +17,13 @@ from pathlib import Path
 from datetime import datetime
 from functools import wraps
 
+# Master prompt - single source of truth
+try:
+    from agent_core.llm.master_prompt import build_base_prompt, build_compact_prompt
+    _MASTER_PROMPT_AVAILABLE = True
+except ImportError:
+    _MASTER_PROMPT_AVAILABLE = False
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -290,13 +297,13 @@ def _create_ui_router(brain):
         # When NIM handles chat, pass Maria's personality as system prompt
         nim_system_prompt = None
         if nim_chat_enabled:
-            nim_system_prompt = (
-                "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture. "
-                "Jestes przyjazna, pomocna asystentka AI. Rozmawiasz po polsku. "
-                "Masz wlasna osobowosc - jestes ciekawa swiata, lubisz sie uczyc. "
-                "Odpowiadasz zwiezle ale cieplo. Pamietasz kontekst rozmowy. "
-                "Jesli nie znasz odpowiedzi, mowisz o tym szczerze."
-            )
+            if _MASTER_PROMPT_AVAILABLE:
+                nim_system_prompt = build_base_prompt()
+            else:
+                nim_system_prompt = (
+                    "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture. "
+                    "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
+                )
 
         nim = NIMClient(
             api_key=NVIDIA_NIM_API_KEY,
@@ -334,13 +341,6 @@ def get_maria_brain():
 
                     brain = OllamaBrain(
                         model="llama3.1:8b",
-                        system_prompt=(
-                            "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture. "
-                            "Jestes przyjazna, pomocna asystentka AI. Rozmawiasz po polsku. "
-                            "Masz wlasna osobowosc - jestes ciekawa swiata, lubisz sie uczyc. "
-                            "Odpowiadasz zwiezle ale cieplo. Pamietasz kontekst rozmowy. "
-                            "Jesli nie znasz odpowiedzi, mowisz o tym szczerze."
-                        ),
                         identity_store=_id_store,
                         verify_model=False
                     )

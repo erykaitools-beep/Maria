@@ -25,6 +25,13 @@ except Exception:
     _AWARENESS_BUILDER = None
     AWARENESS_AVAILABLE = False
 
+# Master prompt - single source of truth
+try:
+    from agent_core.llm.master_prompt import build_full_prompt, build_base_prompt
+    MASTER_PROMPT_AVAILABLE = True
+except ImportError:
+    MASTER_PROMPT_AVAILABLE = False
+
 
 class OllamaBrain:
     def __init__(
@@ -41,13 +48,17 @@ class OllamaBrain:
         self._conversation_memory = None
         self._user_profile = None
 
-        # Base system prompt (static part)
-        self._base_system_prompt = system_prompt or (
-            "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
-            "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
-            "Masz oko (kamere USB) - widzisz otoczenie i wiesz co sie wokol Ciebie dzieje.\n"
-            "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
-        )
+        # Base system prompt (from master_prompt.py or fallback)
+        if system_prompt:
+            self._base_system_prompt = system_prompt
+        elif MASTER_PROMPT_AVAILABLE:
+            self._base_system_prompt = build_base_prompt()
+        else:
+            self._base_system_prompt = (
+                "Jestes M.A.R.I.A. - Meta Analysis Recalibration Intelligence Architecture.\n"
+                "Dzialasz precyzyjnie. Twoim celem jest strukturyzacja wiedzy.\n"
+                "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
+            )
 
         # Work context provider (set via set_work_context_provider)
         self._work_context_provider = None
@@ -237,6 +248,27 @@ class OllamaBrain:
             except Exception:
                 pass
 
+        # Operational summary (replaces awareness if available)
+        op_summary = ""
+        if self._evidence_collector:
+            try:
+                op_summary = self._evidence_collector.build_compact_summary()
+            except Exception:
+                pass
+
+        if MASTER_PROMPT_AVAILABLE:
+            return build_full_prompt(
+                time_context=time_ctx,
+                identity_context=identity_ctx,
+                user_context=user_ctx,
+                work_context=work_ctx,
+                conversation_context=conversation_ctx,
+                awareness_context=awareness_ctx,
+                operational_summary=op_summary,
+                grounding_active=bool(self._query_router),
+            )
+
+        # Fallback: inline assembly (same logic as master_prompt.build_full_prompt)
         prompt = f"{self._base_system_prompt}\n\n[Kontekst czasowy: {time_ctx}]"
         if identity_ctx:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
@@ -246,20 +278,10 @@ class OllamaBrain:
             prompt += f"\n[Aktualna praca: {work_ctx}]"
         if conversation_ctx:
             prompt += f"\n{conversation_ctx}"
-
-        # Compact operational summary (replaces/supplements awareness context)
-        op_summary = ""
-        if self._evidence_collector:
-            try:
-                op_summary = self._evidence_collector.build_compact_summary()
-            except Exception:
-                pass
         if op_summary:
             prompt += f"\n{op_summary}"
         elif awareness_ctx:
             prompt += f"\n{awareness_ctx}"
-
-        # Grounding instruction
         if self._query_router:
             prompt += (
                 "\nGdy operator pyta o Twoj stan, logi lub bledy, "
@@ -267,7 +289,6 @@ class OllamaBrain:
                 "Mow 'Widze w logach...', 'Zrodlo danych: ...'. "
                 "Nigdy nie wymyslaj informacji o wlasnym stanie."
             )
-
         return prompt
 
     def refresh_time_context(self) -> None:

@@ -20,6 +20,12 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    from agent_core.llm.master_prompt import build_context_brief
+    _CONTEXT_BRIEF = build_context_brief()
+except ImportError:
+    _CONTEXT_BRIEF = ""
+
 logger = logging.getLogger(__name__)
 
 # Rate limit: strict to avoid overuse
@@ -128,10 +134,12 @@ class ClaudeClient:
     def _invoke(self, prompt: str) -> Optional[str]:
         """Execute Claude CLI as subprocess."""
         try:
+            # Prepend context brief so Claude knows it's helping M.A.R.I.A.
+            full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
             cmd = [
                 self._claude_bin,
                 "--dangerously-skip-permissions",
-                "-p", prompt,
+                "-p", full_prompt,
                 "--output-format", "text",
             ]
 

@@ -924,6 +924,30 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"Grounding pipeline not wired: {e}")
 
+        # Initialize Reminders & Todos (Phase 12)
+        try:
+            from agent_core.reminders import ReminderStore, TodoStore, ReminderScheduler
+            reminder_store = ReminderStore()
+            todo_store = TodoStore()
+            scheduler = ReminderScheduler(reminder_store, todo_store)
+
+            # Wire Telegram notifications
+            if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'bot'):
+                scheduler.set_notify_fn(ctx.telegram_bridge.bot.send_message)
+
+            ctx.reminder_store = reminder_store
+            ctx.todo_store = todo_store
+            ctx.reminder_scheduler = scheduler
+
+            if core:
+                core.set_reminder_scheduler(scheduler)
+
+            r_count = reminder_store.count()
+            t_count = todo_store.count()
+            print(f"[Homeostasis] [OK] Reminders ({r_count['pending']} pending) + Todos ({t_count['pending']} pending)")
+        except Exception as e:
+            logger.debug(f"Reminders not initialized: {e}")
+
         return True
 
     def get_commands(self):
@@ -1682,6 +1706,13 @@ def _register_telegram_commands(bridge, ctx):
             "/claude <zadanie> - Claude (3/h)\n"
             "/codex <zadanie> - Codex/ChatGPT\n"
             "/analyze <modul> - analiza kodu\n"
+            "\n*Przypomnienia i zadania:*\n"
+            "/remind <tekst> <czas> - przypomnienie\n"
+            "/remind list - lista przypomnien\n"
+            "/remind dismiss <id> - usun\n"
+            "/todo <tekst> - nowe zadanie\n"
+            "/todo list - lista zadan\n"
+            "/todo done <id> - oznacz zrobione\n"
             "\n*Diagnostyka:*\n"
             "/tasks [N] - historia taskow Claude/Codex\n"
             "/pdf <task_id> - wyslij wynik jako PDF\n"
@@ -2215,6 +2246,134 @@ def _register_telegram_commands(bridge, ctx):
                 "/profile remove\\_interest <temat>"
             )
 
+    def _cmd_remind(args):
+        """Telegram: /remind <text> <time> | /remind list | /remind dismiss <id>"""
+        rs = getattr(ctx, 'reminder_store', None)
+        if not rs:
+            return "Przypomnienia nie zainicjalizowane"
+        if not args:
+            return "Uzycie: /remind <tekst> <czas>\nNp: /remind spotkanie za 30min\n/remind list\n/remind dismiss <id>"
+
+        parts = args.split(None, 1) if isinstance(args, str) else [args]
+        sub = parts[0].lower() if parts else ""
+
+        if sub == "list":
+            pending = rs.get_pending()
+            if not pending:
+                return "Brak aktywnych przypomnien"
+            from agent_core.reminders import format_scheduled_time
+            lines = [f"*Przypomnienia ({len(pending)}):*"]
+            for r in sorted(pending, key=lambda x: x.scheduled_at):
+                when = format_scheduled_time(r.scheduled_at)
+                recur = f" [{r.recurrence.value}]" if r.recurrence.value != "ONCE" else ""
+                lines.append(f"  {r.id}: {r.text} - {when}{recur}")
+            return "\n".join(lines)
+
+        if sub == "dismiss" and len(parts) > 1:
+            rest = parts[1].strip()
+            rem = _find_by_prefix(rs.get_pending(), rest)
+            if not rem:
+                return f"Nie znaleziono: {rest}"
+            rs.dismiss(rem.id)
+            return f"Usunieto: {rem.id}"
+
+        if sub == "snooze" and len(parts) > 1:
+            rest = parts[1].strip().split()
+            id_pref = rest[0]
+            minutes = int(rest[1]) if len(rest) > 1 else 15
+            rem = _find_by_prefix(rs.get_pending(), id_pref)
+            if not rem:
+                return f"Nie znaleziono: {id_pref}"
+            rs.snooze(rem.id, minutes)
+            return f"Odlozono o {minutes}min: {rem.id}"
+
+        # Create reminder: /remind <text> <time>
+        from agent_core.reminders import Reminder, parse_time, format_scheduled_time
+        text = args if isinstance(args, str) else " ".join(args)
+        tokens = text.split()
+        scheduled = None
+        reminder_text = text
+
+        # Try last 2 tokens as time, then last 1
+        for n in (2, 1):
+            if len(tokens) >= n + 1:
+                candidate = " ".join(tokens[-n:])
+                ts = parse_time(candidate)
+                if ts is not None:
+                    scheduled = ts
+                    reminder_text = " ".join(tokens[:-n])
+                    break
+
+        if scheduled is None:
+            scheduled = time.time() + 1800  # default 30min
+
+        rem = Reminder(text=reminder_text, scheduled_at=scheduled)
+        rs.add(rem)
+        when = format_scheduled_time(scheduled)
+        return f"Przypomnienie: {rem.id}\n\"{reminder_text}\" - {when}"
+
+    def _cmd_todo(args):
+        """Telegram: /todo <text> | /todo list | /todo done <id>"""
+        ts = getattr(ctx, 'todo_store', None)
+        if not ts:
+            return "Zadania nie zainicjalizowane"
+        if not args:
+            # Show pending by default
+            pending = ts.get_pending()
+            if not pending:
+                return "Brak aktywnych zadan"
+            lines = [f"*Zadania ({len(pending)}):*"]
+            for t in pending:
+                prio = f" [{t.priority.value}]" if t.priority.value != "NORMAL" else ""
+                lines.append(f"  {t.id}: {t.text}{prio}")
+            return "\n".join(lines)
+
+        parts = args.split(None, 1) if isinstance(args, str) else [args]
+        sub = parts[0].lower() if parts else ""
+
+        if sub == "list":
+            pending = ts.get_pending()
+            if not pending:
+                return "Brak aktywnych zadan"
+            lines = [f"*Zadania ({len(pending)}):*"]
+            for t in pending:
+                prio = f" [{t.priority.value}]" if t.priority.value != "NORMAL" else ""
+                lines.append(f"  {t.id}: {t.text}{prio}")
+            return "\n".join(lines)
+
+        if sub == "done" and len(parts) > 1:
+            id_pref = parts[1].strip()
+            todo = _find_by_prefix(ts.get_pending(), id_pref)
+            if not todo:
+                return f"Nie znaleziono: {id_pref}"
+            ts.complete(todo.id)
+            return f"Zrobione: {todo.id} \"{todo.text}\""
+
+        if sub == "cancel" and len(parts) > 1:
+            id_pref = parts[1].strip()
+            todo = _find_by_prefix(ts.get_pending(), id_pref)
+            if not todo:
+                return f"Nie znaleziono: {id_pref}"
+            ts.cancel(todo.id)
+            return f"Anulowano: {todo.id}"
+
+        # Create: /todo <text>
+        from agent_core.reminders import Todo
+        text = args if isinstance(args, str) else " ".join(args)
+        todo = Todo(text=text)
+        ts.add(todo)
+        return f"Zadanie: {todo.id}\n\"{text}\""
+
+    def _find_by_prefix(items, prefix):
+        """Find item by ID or ID prefix."""
+        prefix = prefix.strip()
+        for item in items:
+            if item.id == prefix or item.id.startswith(prefix):
+                return item
+        return None
+
+    bridge.register_command("remind", _cmd_remind)
+    bridge.register_command("todo", _cmd_todo)
     bridge.register_command("profile", _cmd_profile)
     bridge.register_command("pdf", _cmd_pdf)
     bridge.register_command("tasks", _cmd_tasks)
