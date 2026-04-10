@@ -11,6 +11,7 @@ Every NIM call updates token budget automatically.
 """
 
 import logging
+import re
 import time
 from typing import Dict, Any, Optional
 
@@ -98,6 +99,10 @@ class LLMRouter:
         # Grounded queries MUST go through Ollama (camera, logs, evidence)
         needs_grounding = self._is_grounded_query(prompt)
 
+        # Personal/user queries need Ollama (user profile in system prompt)
+        if not needs_grounding:
+            needs_grounding = self._is_personal_query(prompt)
+
         # NIM chat path (with Ollama fallback) - only for regular chat
         if (self.use_nim_for_chat and self._should_use_nim()
                 and not needs_grounding):
@@ -138,6 +143,25 @@ class LLMRouter:
             return self.ollama._query_router.is_grounded(mode)
         except Exception:
             return False
+
+    _PERSONAL_PATTERNS = re.compile(
+        r"co\s+wiesz\s+o\s+mnie|"
+        r"znasz\s+mnie|"
+        r"kim\s+jestem|"
+        r"co\s+o\s+mnie\s+wiesz|"
+        r"co\s+pamietasz|"
+        r"co\s+pami.tasz|"
+        r"moje\s+(?:zainteresowania|preferencje|dane|profil|harmonogram)|"
+        r"what\s+do\s+you\s+know\s+about\s+me",
+        re.IGNORECASE,
+    )
+
+    def _is_personal_query(self, prompt: str) -> bool:
+        """Check if prompt asks about the user/operator.
+
+        These need Ollama because user profile is in system prompt.
+        """
+        return bool(self._PERSONAL_PATTERNS.search(prompt))
 
     def _ask_once(
         self, prompt: str, temperature: float = 0.3, **kwargs

@@ -55,19 +55,29 @@ class UserProfile:
     # ------------------------------------------------------------------
 
     def _load_or_create(self) -> Dict[str, Any]:
-        """Load existing profile or create default."""
-        if self._path.exists():
-            try:
-                with open(self._path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return self._ensure_schema(data)
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning("[UserProfile] Load failed: %s", e)
+        """Load existing profile or create default.
+
+        Never overwrites existing data - if file exists and has content,
+        always load it (even if schema is outdated, _ensure_schema fixes that).
+        """
+        if self._path.exists() and self._path.stat().st_size > 2:
+            # Retry up to 2 times (file might be mid-write by another process)
+            for attempt in range(2):
+                try:
+                    with open(self._path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    logger.info("[UserProfile] Loaded from %s", self._path)
+                    return self._ensure_schema(data)
+                except (json.JSONDecodeError, IOError) as e:
+                    if attempt == 0:
+                        time.sleep(0.1)  # brief wait, maybe mid-write
+                    else:
+                        logger.warning("[UserProfile] Load failed after retry: %s", e)
 
         return self._create_default()
 
     def _create_default(self) -> Dict[str, Any]:
-        """Default profile for first run."""
+        """Default profile for first run. Only writes if file doesn't exist."""
         data = {
             "version": 1,
             "identity": {
@@ -98,7 +108,9 @@ class UserProfile:
             },
             "updated_at": datetime.now().isoformat(),
         }
-        self._save(data)
+        # Only write default if file truly doesn't exist (avoid race with other process)
+        if not self._path.exists():
+            self._save(data)
         return data
 
     def _ensure_schema(self, data: Dict[str, Any]) -> Dict[str, Any]:
