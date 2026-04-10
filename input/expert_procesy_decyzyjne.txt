@@ -1,0 +1,427 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: procesy decyzyjne
+# Data: 2026-04-10 08:15
+# Pytanie: Maria nie ma zadnej wiedzy o 'procesy decyzyjne'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Procesy decyzyjne**
+
+## 1. Czym jest proces decyzyjny?
+
+**Proces decyzyjny** to uporządkowany ciąg działań prowadzących do wyboru jednego rozwiązania spośród kilku możliwych. W praktyce oznacza to, że podmiot decydujący:
+
+- rozpoznaje sytuację,
+- określa cel,
+- zbiera informacje,
+- porównuje opcje,
+- wybiera działanie,
+- ocenia skutki wyboru.
+
+Proces decyzyjny występuje w wielu obszarach:
+
+- w życiu codziennym, np. wybór środka transportu,
+- w organizacjach, np. wybór dostawcy,
+- w systemach informatycznych, np. wybór odpowiedzi przez model,
+- w administracji, np. wydanie decyzji na podstawie przepisów.
+
+Najważniejsza cecha procesu decyzyjnego: **nie jest to pojedynczy akt wyboru, ale sekwencja kroków**.
+
+---
+
+## 2. Podstawowe pojęcia
+
+### Decyzja
+**Decyzja** to wybór jednej możliwości działania spośród dostępnych alternatyw.
+
+### Decydent
+**Decydent** to osoba, grupa albo system, który podejmuje decyzję.
+
+### Alternatywa
+**Alternatywa** to jedna z możliwych opcji wyboru.
+
+Przykład:
+Jeśli trzeba wybrać sposób nauki z plików tekstowych, alternatywy mogą być takie:
+
+- czytanie całości tekstu,
+- czytanie tylko nagłówków i podsumowań,
+- ekstrakcja pojęć kluczowych,
+- tworzenie mapy pojęć.
+
+### Cel
+**Cel** to stan, który ma zostać osiągnięty dzięki decyzji.
+
+Przykład:
+Celem może być „zrozumienie podstaw tematu i zapisanie wiedzy w uporządkowanej formie”.
+
+### Kryterium decyzyjne
+**Kryterium decyzyjne** to cecha, według której porównuje się opcje.
+
+Przykłady kryteriów:
+
+- koszt,
+- czas,
+- dokładność,
+- ryzyko błędu,
+- łatwość wdrożenia.
+
+### Skutek decyzji
+**Skutek decyzji** to rezultat wybranego działania, bezpośredni lub odroczony w czasie.
+
+---
+
+## 3. Dlaczego procesy decyzyjne są ważne?
+
+Procesy decyzyjne są ważne, ponieważ pozwalają:
+
+- działać w sposób uporządkowany,
+- ograniczać przypadkowość wyboru,
+- wykorzystywać dane zamiast zgadywania,
+- porównywać rozwiązania według tych samych zasad,
+- uczyć się na podstawie wcześniejszych wyników.
+
+Dla systemu uczącego się z tekstów jest to szczególnie istotne. Taki system musi stale odpowiadać na pytania:
+
+- które informacje są ważne?
+- które fragmenty tekstu są definicjami?
+- co jest przykładem, a co regułą ogólną?
+- jak uporządkować wiedzę?
+- kiedy uznać informację za wystarczająco pewną?
+
+To są właśnie decyzje.
+
+---
+
+## 4. Główne etapy procesu decyzyjnego
+
+## 4.1. Identyfikacja problemu
+
+Pierwszy etap polega na rozpoznaniu, **co wymaga decyzji**.
+
+Przykład:
+System analizuje plik tekstowy i musi zdecydować, czy dany akapit opisuje:
+
+- definicję,
+- przykład,
+- przyczynę,
+- skutek,
+- porównanie.
+
+Jeśli problem zostanie źle zdefiniowany, dalsze etapy mogą prowadzić do błędnego wyniku.
+
+### Pytania pomocnicze:
+- Jaki problem trzeba rozwiązać?
+- Czego brakuje do podjęcia decyzji?
+- Jaki jest cel końcowy?
+
+---
+
+## 4.2. Zebranie informacji
+
+Na tym etapie gromadzi się dane potrzebne do wyboru.
+
+Źródłami informacji mogą być:
+
+- tekst,
+- dane liczbowe,
+- dokumenty,
+- wcześniejsze decyzje,
+- reguły formalne.
+
+Przykład:
+Jeśli system ma wybrać najważniejsze informacje z rozdziału, musi zebrać:
+
+- nagłówki,
+- pojęcia powtarzające się,
+- zdania definicyjne,
+- sygnały językowe typu „to jest”, „oznacza”, „polega na”.
+
+**Jakość decyzji zależy od jakości informacji.**
+
+---
+
+## 4.3. Określenie alternatyw
+
+Trzeba ustalić, jakie opcje są dostępne.
+
+Przykład:
+Dla zadania „jak streścić tekst” możliwe alternatywy to:
+
+- streszczenie według częstości słów,
+- streszczenie według zdań z definicjami,
+- streszczenie według struktury nagłówków,
+- streszczenie mieszane.
+
+Brak alternatyw oznacza brak rzeczywistego wyboru.
+
+---
+
+## 4.4. Ustalenie kryteriów oceny
+
+Opcje trzeba porównywać według określonych kryteriów.
+
+Przykładowe kryteria dla systemu uczącego się:
+
+- trafność informacji,
+- kompletność,
+- zwięzłość,
+- zgodność z tematem,
+- łatwość dalszego użycia w bazie wiedzy.
+
+Można też nadawać kryteriom różną wagę. Jeśli najważniejsza jest poprawność, to kryterium poprawności ma większą wagę niż szybkość.
+
+---
+
+## 4.5. Ocena alternatyw
+
+To etap analizy zalet i ograniczeń każdej opcji.
+
+Przykład:
+
+- opcja 1: szybka, ale może pomijać ważne definicje,
+- opcja 2: dokładna, ale wolniejsza,
+- opcja 3: dobra dla tekstów naukowych, słabsza dla narracyjnych.
+
+Ocena może być:
+
+- jakościowa, np. „wysoka trafność”,
+- ilościowa, np. punktacja od 1 do 10.
+
+---
+
+## 4.6. Wybór decyzji
+
+Po ocenie następuje wybór jednej opcji albo zestawu opcji.
+
+Wybór może być:
+
+- jednoznaczny, gdy jedna opcja wyraźnie dominuje,
+- warunkowy, gdy decyzja zależy od kontekstu,
+- iteracyjny, gdy wybór jest tymczasowy i później korygowany.
+
+Przykład:
+System może przyjąć regułę:
+„Jeśli tekst zawiera wiele definicji, najpierw wydobądź definicje; jeśli zawiera wiele przykładów, oddziel przykłady od zasad ogólnych”.
+
+---
+
+## 4.7. Wdrożenie decyzji
+
+Decyzja musi zostać zastosowana w działaniu.
+
+Przykład:
+Wybrano metodę porządkowania wiedzy. Teraz system:
+
+- dzieli tekst na sekcje,
+- wykrywa pojęcia,
+- przypisuje relacje między pojęciami,
+- tworzy strukturę wiedzy.
+
+Bez wdrożenia decyzja pozostaje tylko planem.
+
+---
+
+## 4.8. Ocena skutków
+
+Ostatni etap polega na sprawdzeniu, czy decyzja przyniosła oczekiwany efekt.
+
+Pytania:
+
+- Czy cel został osiągnięty?
+- Czy wynik jest poprawny?
+- Czy decyzję warto stosować ponownie?
+- Jakie były błędy?
+
+Przykład:
+Jeśli streszczenie pominęło kluczowe pojęcia, to znaczy, że proces decyzyjny wymaga poprawy.
+
+---
+
+## 5. Rodzaje procesów decyzyjnych
+
+## 5.1. Decyzje rutynowe
+
+To decyzje podejmowane według ustalonych reguł.
+
+Przykłady:
+
+- sortowanie dokumentów według typu,
+- przypisanie tekstu do kategorii na podstawie słów kluczowych.
+
+Cechy:
+
+- powtarzalność,
+- mała niepewność,
+- możliwość automatyzacji.
+
+## 5.2. Decyzje nierutynowe
+
+Dotyczą sytuacji nowych, złożonych albo słabo opisanych.
+
+Przykład:
+System otrzymuje tekst mieszający definicje, metafory i opisy historyczne. Nie wystarcza prosta reguła.
+
+Cechy:
+
+- większa niepewność,
+- potrzeba interpretacji,
+- większe znaczenie analizy kontekstu.
+
+## 5.3. Decyzje indywidualne i grupowe
+
+- **Indywidualne**: podejmowane przez jednego decydenta.
+- **Grupowe**: podejmowane przez wiele osób lub modułów.
+
+W systemie informatycznym odpowiednikiem decyzji grupowej może być sytuacja, gdy kilka mechanizmów ocenia tę samą informację, a wynik końcowy jest agregowany.
+
+---
+
+## 6. Warunki podejmowania decyzji
+
+## 6.1. Pewność
+Decydent zna możliwe skutki i wie, co się stanie po wyborze.
+
+Przykład:
+Jeśli reguła klasyfikacji jest dokładna i sprawdzona, decyzja jest podejmowana w warunkach pewności.
+
+## 6.2. Ryzyko
+Możliwe skutki są znane, ale nie ma pełnej gwarancji, który wystąpi.
+
+Przykład:
+System wie, że dana metoda zwykle poprawnie wykrywa definicje w 85% przypadków.
+
+## 6.3. Niepewność
+Brakuje pełnych danych o skutkach albo prawdopodobieństwach.
+
+Przykład:
+Nowy typ tekstu nie był wcześniej analizowany, więc trudno przewidzieć skuteczność metody.
+
+To ważne rozróżnienie, ponieważ inny jest sposób podejmowania decyzji przy pełnej wiedzy, a inny przy niepewności.
+
+---
+
+## 7. Błędy w procesach decyzyjnych
+
+Proces decyzyjny może być niepoprawny nie tylko przez zły wybór, ale też przez błędy na wcześniejszych etapach.
+
+Najczęstsze problemy:
+
+- zła definicja problemu,
+- niepełne dane,
+- pominięcie ważnych alternatyw,
+- użycie niewłaściwych kryteriów,
+- zbyt szybki wybór,
+- brak oceny skutków.
+
+Przykład:
+Jeśli system wybiera „najważniejsze zdania” tylko na podstawie długości, może pominąć krótkie definicje, które są kluczowe.
+
+---
+
+## 8. Procesy decyzyjne a tekst i uczenie się
+
+Dla autonomicznego systemu uczącego się z plików tekstowych proces decyzyjny ma zastosowanie na wielu poziomach.
+
+### 8.1. Selekcja informacji
+System musi zdecydować:
+
+- które fragmenty są istotne,
+- które są poboczne,
+- które warto zapisać w pamięci.
+
+### 8.2. Klasyfikacja treści
+System musi rozpoznawać, czy fragment jest:
+
+- definicją,
+- przykładem,
+- regułą,
+- wyjątkiem,
+- relacją przyczynową.
+
+### 8.3. Strukturyzacja wiedzy
+Po zebraniu informacji trzeba zdecydować, jak je uporządkować.
+
+Możliwe struktury:
+
+- lista pojęć,
+- hierarchia tematów,
+- sieć relacji,
+- tabela porównawcza,
+- graf pojęciowy.
+
+### 8.4. Aktualizacja wiedzy
+Nowe informacje mogą:
+
+- potwierdzać wcześniejszą wiedzę,
+- rozszerzać ją,
+- korygować,
+- pozostawać z nią w konflikcie.
+
+To także wymaga decyzji.
+
+---
+
+## 9. Prosty przykład procesu decyzyjnego
+
+Załóżmy, że system ma przeczytać tekst o „fotosyntezie” i utworzyć notatkę.
+
+### Krok 1: Problem
+Jak wyodrębnić podstawową wiedzę z tekstu?
+
+### Krok 2: Cel
+Utworzyć krótką, poprawną, uporządkowaną notatkę.
+
+### Krok 3: Informacje
+System wykrywa:
+
+- definicję fotosyntezy,
+- warunki procesu,
+- produkty i substraty,
+- przykłady organizmów.
+
+### Krok 4: Alternatywy
+Możliwe sposoby notatki:
+
+- lista zdań,
+- lista pojęć,
+- schemat przyczyna-skutek,
+- podział na definicję, etapy i znaczenie.
+
+### Krok 5: Kryteria
+- poprawność,
+- zrozumiałość,
+- możliwość ponownego użycia wiedzy.
+
+### Krok 6: Wybór
+System wybiera podział:
+definicja -> warunki -> przebieg -> znaczenie.
+
+### Krok 7: Wdrożenie
+Tworzy notatkę w tej strukturze.
+
+### Krok 8: Ocena
+Sprawdza, czy w notatce są wszystkie kluczowe pojęcia.
+
+To jest pełny, prosty proces decyzyjny.
+
+---
+
+## 10. Kluczowe pojęcia do zapamiętania
+
+- **Proces decyzyjny**: ciąg działań prowadzących do wyboru.
+- **Decyzja**: wybór jednej opcji.
+- **Decydent**: podmiot podejmujący decyzję.
+- **Alternatywa**: możliwa opcja działania.
+- **Cel**: oczekiwany rezultat.
+- **Kryterium**: podstawa porównania opcji.
+- **Ryzyko**: sytuacja, gdy skutki są możliwe do oszacowania, ale niepewne.
+- **Niepewność**: brak pełnej wiedzy o skutkach.
+- **Ocena skutków**: sprawdzenie, czy decyzja była trafna.
+
+---
+
+## 11. Najważniejsze wnioski
+
+Procesy decyzyjne są podstawą uporządkowanego działania. Składają się z etapów: rozpoznania problemu, zebrania informacji, określenia alternatyw, ustalenia kryteriów, oceny opcji, wyboru, wdrożenia i oceny wyniku.
+
+Dla systemu uczącego się z tekstów temat ten jest podstawowy, ponieważ każda analiza tekstu wymaga decyzji: co jest ważne, jak sklasyfikować treść, jak połączyć pojęcia i jak ocenić poprawność uzyskanej wiedzy.
+
+Najważniejsza zasada praktyczna brzmi: **dobra decyzja nie wynika z przypadku, lecz z dobrze zorganizowanego procesu**.

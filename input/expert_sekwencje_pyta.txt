@@ -1,0 +1,344 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: sekwencje pytań
+# Data: 2026-04-09 23:51
+# Pytanie: Maria nie ma zadnej wiedzy o 'sekwencje pytań'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Sekwencje pytań
+
+## Czym są sekwencje pytań
+
+**Sekwencja pytań** to uporządkowany ciąg pytań zadawanych w określonej kolejności, aby stopniowo dojść do lepszego zrozumienia tematu, problemu albo tekstu. Każde kolejne pytanie opiera się na odpowiedzi na pytanie wcześniejsze.
+
+Sekwencje pytań służą do:
+- zdobywania wiedzy krok po kroku,
+- porządkowania informacji,
+- wykrywania braków w rozumieniu,
+- przechodzenia od ogółu do szczegółu,
+- budowania logicznej struktury wiedzy.
+
+W kontekście autonomicznej nauki z plików tekstowych sekwencje pytań pomagają przekształcić surowy tekst w zestaw uporządkowanych informacji.
+
+## Dlaczego sekwencje pytań są ważne
+
+Podczas czytania tekstu nie wystarczy tylko rozpoznać słowa. Trzeba jeszcze:
+- ustalić, **o czym** jest tekst,
+- rozpoznać, **jakie pojęcia są kluczowe**,
+- zrozumieć, **jakie są zależności między informacjami**,
+- odróżnić informacje główne od pobocznych,
+- wykryć, czego jeszcze nie wiadomo.
+
+Sekwencja pytań działa jak narzędzie analizy. Zamiast pytać przypadkowo, pyta się według planu.
+
+## Podstawowe pojęcia
+
+### Pytanie
+Zdanie, które ma doprowadzić do uzyskania informacji.
+
+Przykład:
+- „Co oznacza to pojęcie?”
+
+### Sekwencja
+Uporządkowany ciąg elementów.
+
+Przykład:
+- najpierw definicja,
+- potem cechy,
+- potem przykłady,
+- potem zastosowania.
+
+### Pytanie ogólne
+Pytanie o główny sens lub temat.
+
+Przykład:
+- „Jaki jest główny temat tekstu?”
+
+### Pytanie szczegółowe
+Pytanie o konkretny element.
+
+Przykład:
+- „Jakie są trzy etapy procesu opisane w tekście?”
+
+### Pytanie weryfikujące
+Pytanie sprawdzające poprawność rozumienia.
+
+Przykład:
+- „Czy dobrze rozumiem, że autor odróżnia dwa typy zjawisk?”
+
+### Pytanie pogłębiające
+Pytanie rozwijające wcześniejszą odpowiedź.
+
+Przykład:
+- „Dlaczego ten element jest ważny?”
+
+## Jak działa sekwencja pytań
+
+Dobrze zbudowana sekwencja zwykle przechodzi przez kilka poziomów.
+
+### 1. Identyfikacja tematu
+Na początku trzeba ustalić, czego dotyczy tekst.
+
+Przykładowe pytania:
+- O czym jest ten tekst?
+- Jaki problem opisuje?
+- Jaki jest główny cel autora?
+
+### 2. Wydobycie pojęć
+Potem należy wskazać najważniejsze terminy.
+
+Przykładowe pytania:
+- Jakie pojęcia pojawiają się najczęściej?
+- Które terminy są definiowane?
+- Jakie słowa są kluczowe dla zrozumienia tekstu?
+
+### 3. Ustalenie znaczeń
+Następnie trzeba zrozumieć sens pojęć.
+
+Przykładowe pytania:
+- Co oznacza dane pojęcie?
+- Jak tekst definiuje ten termin?
+- Czym to pojęcie różni się od innych?
+
+### 4. Rozpoznanie relacji
+Kolejny etap to ustalenie związków między informacjami.
+
+Przykładowe pytania:
+- Co z czego wynika?
+- Jakie są przyczyny i skutki?
+- Które elementy są częścią większej całości?
+
+### 5. Porządkowanie wiedzy
+Na końcu wiedzę trzeba ułożyć w strukturę.
+
+Przykładowe pytania:
+- Jak podzielić informacje na kategorie?
+- Co jest najważniejsze?
+- Jak zbudować streszczenie tego tekstu?
+
+## Główne typy sekwencji pytań
+
+### Sekwencja od ogółu do szczegółu
+Najpierw ustala się temat główny, potem przechodzi do detali.
+
+Przykład:
+1. O czym jest tekst?
+2. Jakie są główne części tekstu?
+3. Jakie pojęcia występują w każdej części?
+4. Jakie przykłady podaje autor?
+
+To najczęstszy typ sekwencji przy nauce z tekstu.
+
+### Sekwencja od definicji do zastosowania
+Najpierw ustala się znaczenie, potem użycie.
+
+Przykład:
+1. Co oznacza termin?
+2. Jakie ma cechy?
+3. W jakich sytuacjach się go stosuje?
+4. Jaki jest przykład użycia?
+
+### Sekwencja przyczynowo-skutkowa
+Służy do analizy procesów i zależności.
+
+Przykład:
+1. Jakie zjawisko opisano?
+2. Co je wywołuje?
+3. Jak przebiega?
+4. Jakie są skutki?
+
+### Sekwencja porównawcza
+Służy do odróżniania podobnych pojęć.
+
+Przykład:
+1. Jakie dwa pojęcia są porównywane?
+2. Co mają wspólnego?
+3. Czym się różnią?
+4. W jakich sytuacjach występują?
+
+### Sekwencja kontrolna
+Służy do sprawdzania, czy wiedza została poprawnie uporządkowana.
+
+Przykład:
+1. Czy umiem podać definicję?
+2. Czy umiem podać przykład?
+3. Czy umiem wyjaśnić relacje?
+4. Czy umiem streścić temat własnymi słowami?
+
+## Cechy dobrej sekwencji pytań
+
+Dobra sekwencja pytań powinna być:
+
+- **logiczna**  
+  Kolejne pytanie powinno wynikać z poprzedniego.
+
+- **stopniowalna**  
+  Powinna przechodzić od łatwych pytań do trudniejszych.
+
+- **jednoznaczna**  
+  Pytania powinny być jasne i konkretne.
+
+- **celowa**  
+  Musi prowadzić do konkretnego efektu, na przykład do zrozumienia tekstu albo utworzenia notatki.
+
+- **kompletna**  
+  Powinna obejmować temat, pojęcia, relacje i przykłady.
+
+## Przykład sekwencji pytań dla pliku tekstowego
+
+Załóżmy, że system otrzymuje tekst o fotosyntezie. Sekwencja pytań może wyglądać tak:
+
+### Etap 1. Rozpoznanie tematu
+- Jaki jest temat tekstu?
+- Czy tekst opisuje proces, obiekt czy teorię?
+
+### Etap 2. Wydobycie pojęć
+- Jakie terminy specjalistyczne pojawiają się w tekście?
+- Które z nich są najważniejsze?
+
+### Etap 3. Definicje
+- Co oznacza „fotosynteza”?
+- Co oznacza „chlorofil”?
+
+### Etap 4. Relacje
+- Jaką rolę pełni światło w fotosyntezie?
+- Jakie substancje są potrzebne do procesu?
+- Jakie są produkty procesu?
+
+### Etap 5. Synteza
+- Jak streścić proces fotosyntezy w 3 zdaniach?
+- Jakie są najważniejsze elementy tego procesu?
+
+Taka sekwencja pozwala przejść od tekstu źródłowego do uporządkowanej wiedzy.
+
+## Zastosowanie w autonomicznej nauce
+
+Dla systemu uczącego się sekwencje pytań są użyteczne, ponieważ pozwalają zamienić bierne czytanie na aktywną analizę. System nie tylko odczytuje treść, ale wykonuje serię operacji poznawczych.
+
+### Co może robić system
+- identyfikować temat dokumentu,
+- wydobywać definicje,
+- rozpoznawać ważne pojęcia,
+- budować listy faktów,
+- wykrywać zależności,
+- tworzyć streszczenia,
+- wskazywać luki w wiedzy.
+
+### Przykład luki w wiedzy
+Jeśli system potrafi wskazać termin, ale nie potrafi go zdefiniować, oznacza to brak wiedzy definicyjnej.
+
+Jeśli system zna definicję, ale nie potrafi podać przykładu, oznacza to brak wiedzy praktycznej.
+
+Jeśli system zna fakty, ale nie rozpoznaje relacji między nimi, oznacza to brak wiedzy strukturalnej.
+
+## Jak budować sekwencje pytań od podstaw
+
+### Krok 1. Określ cel
+Najpierw trzeba ustalić, po co pytania są zadawane.
+
+Cele mogą być różne:
+- zrozumienie tekstu,
+- wydobycie definicji,
+- przygotowanie notatki,
+- budowa bazy wiedzy,
+- sprawdzenie zrozumienia.
+
+### Krok 2. Ustal poziomy analizy
+Najczęściej stosuje się taki układ:
+- temat,
+- pojęcia,
+- definicje,
+- relacje,
+- przykłady,
+- podsumowanie.
+
+### Krok 3. Ułóż pytania w kolejności
+Pytania powinny prowadzić od prostych do bardziej złożonych.
+
+Przykład złej kolejności:
+- Jakie są skutki?
+- O czym jest tekst?
+
+Przykład dobrej kolejności:
+- O czym jest tekst?
+- Jakie pojęcia są kluczowe?
+- Jakie są relacje?
+- Jakie są skutki?
+
+### Krok 4. Sprawdź kompletność
+Należy upewnić się, że sekwencja obejmuje:
+- główny temat,
+- najważniejsze pojęcia,
+- definicje,
+- przykłady,
+- związki między elementami.
+
+## Typowe błędy
+
+### Zbyt ogólne pytania
+Przykład:
+- „Co można powiedzieć o tekście?”
+
+To pytanie jest mało precyzyjne. Lepsze:
+- „Jaki jest główny temat tekstu?”
+
+### Pytania bez kolejności
+Losowa lista pytań utrudnia analizę. Sekwencja musi mieć strukturę.
+
+### Pomijanie definicji
+Bez definicji trudno poprawnie zbudować dalszą wiedzę.
+
+### Pomijanie relacji
+Sama lista pojęć nie wystarcza. Trzeba jeszcze wiedzieć, jak pojęcia są powiązane.
+
+### Brak pytań kontrolnych
+Bez sprawdzenia zrozumienia łatwo utrwalić błędną interpretację.
+
+## Prosty wzorzec sekwencji pytań
+
+Dla początkującego systemu uczącego się użyteczny jest taki wzorzec:
+
+1. O czym jest tekst?
+2. Jaki jest jego główny cel?
+3. Jakie pojęcia są kluczowe?
+4. Jak tekst definiuje te pojęcia?
+5. Jakie przykłady podaje?
+6. Jakie są relacje między pojęciami?
+7. Co jest najważniejszą informacją?
+8. Czego nadal nie wiadomo?
+
+Ten wzorzec jest prosty, ale obejmuje podstawowe potrzeby analizy.
+
+## Znaczenie dla strukturyzacji wiedzy
+
+Sekwencje pytań pomagają zamieniać tekst w uporządkowane jednostki wiedzy, takie jak:
+- temat,
+- definicje,
+- fakty,
+- zależności,
+- przykłady,
+- wnioski,
+- pytania otwarte.
+
+Dzięki temu można budować struktury typu:
+- pojęcie -> definicja,
+- pojęcie -> przykład,
+- zjawisko -> przyczyna,
+- zjawisko -> skutek,
+- temat -> podtematy.
+
+To jest szczególnie ważne dla systemów, które mają samodzielnie uczyć się z dokumentów.
+
+## Podsumowanie
+
+Sekwencje pytań to uporządkowane ciągi pytań prowadzące do zrozumienia i uporządkowania wiedzy. Ich główna funkcja polega na tym, że rozbijają proces nauki na etapy: rozpoznanie tematu, wydobycie pojęć, ustalenie definicji, rozpoznanie relacji i syntezę informacji.
+
+W nauce z plików tekstowych sekwencje pytań są narzędziem aktywnej analizy. Umożliwiają wykrywanie braków wiedzy, tworzenie streszczeń i budowę struktury pojęciowej. Dla systemu takiego jak M.A.R.I.A. stanowią podstawowy mechanizm przechodzenia od tekstu surowego do wiedzy uporządkowanej i możliwej do dalszego wykorzystania.
+
+## Najważniejsze pojęcia do zapamiętania
+
+- **sekwencja pytań**: uporządkowany ciąg pytań prowadzących do celu poznawczego,
+- **pytanie ogólne**: pytanie o temat lub główny sens,
+- **pytanie szczegółowe**: pytanie o konkretną informację,
+- **pytanie pogłębiające**: pytanie rozwijające wcześniejszą odpowiedź,
+- **pytanie weryfikujące**: pytanie sprawdzające poprawność rozumienia,
+- **strukturyzacja wiedzy**: porządkowanie informacji w logiczne kategorie i relacje,
+- **luka w wiedzy**: obszar, w którym brakuje definicji, przykładu lub zrozumienia relacji.

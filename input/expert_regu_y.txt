@@ -1,0 +1,371 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: reguły
+# Data: 2026-04-10 04:23
+# Pytanie: Maria nie ma zadnej wiedzy o 'reguły'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Reguły - wprowadzenie od podstaw**
+
+## 1. Czym są reguły?
+
+**Reguła** to ustalona zasada, która mówi, **co należy zrobić, czego nie należy robić albo jak coś działa** w określonej sytuacji.
+
+Najprościej:
+- reguła porządkuje działanie,
+- reguła pomaga podejmować decyzje,
+- reguła zmniejsza przypadkowość,
+- reguła pozwala przewidywać wynik.
+
+Reguły występują w wielu obszarach:
+- w języku,
+- w matematyce,
+- w prawie,
+- w grach,
+- w programowaniu,
+- w organizacji wiedzy,
+- w uczeniu maszynowym i systemach automatycznych.
+
+## 2. Dlaczego reguły są ważne?
+
+Bez reguł trudno byłoby:
+- rozumieć tekst,
+- porządkować informacje,
+- oceniać poprawność działań,
+- automatyzować decyzje,
+- budować spójne systemy wiedzy.
+
+Reguły są ważne, ponieważ:
+- tworzą **strukturę**,
+- umożliwiają **powtarzalność**,
+- wspierają **wnioskowanie**,
+- pomagają odróżnić przypadki poprawne od niepoprawnych.
+
+Przykład:
+- Reguła drogowa: „Na czerwonym świetle należy się zatrzymać”.
+- Dzięki tej regule zachowanie uczestników ruchu jest przewidywalne.
+
+## 3. Podstawowa definicja reguły
+
+Regułę można opisać jako schemat:
+
+**Jeżeli występuje warunek, to należy wykonać określone działanie albo oczekiwać określonego wyniku.**
+
+Postać ogólna:
+- **jeżeli** X,
+- **to** Y.
+
+Przykłady:
+- Jeżeli wyraz odpowiada na pytanie „kto? co?”, to może być rzeczownikiem.
+- Jeżeli liczba jest podzielna przez 2, to jest parzysta.
+- Jeżeli plik ma rozszerzenie `.txt`, to jest plikiem tekstowym.
+
+To pokazuje, że reguła często łączy:
+- **warunek**,
+- **konsekwencję**.
+
+## 4. Elementy reguły
+
+Każda reguła może zawierać kilka podstawowych części.
+
+### 4.1. Warunek
+To sytuacja, w której reguła ma zastosowanie.
+
+Przykład:
+- „Jeżeli temperatura spadnie poniżej 0°C...”
+
+### 4.2. Działanie lub skutek
+To to, co należy zrobić albo co następuje.
+
+Przykład:
+- „...woda może zamarzać.”
+
+### 4.3. Zakres obowiązywania
+To obszar, w którym reguła działa.
+
+Przykład:
+- Reguła ortograficzna działa w pisowni języka.
+- Reguła gry działa tylko w danej grze.
+
+### 4.4. Wyjątki
+Niektóre reguły nie działają zawsze. Mogą mieć wyjątki.
+
+Przykład:
+- W języku polskim istnieją ogólne reguły pisowni, ale też wyjątki historyczne lub słownikowe.
+
+## 5. Rodzaje reguł
+
+Reguły można dzielić na różne typy.
+
+### 5.1. Reguły opisowe
+Opisują, jak coś zwykle działa.
+
+Przykład:
+- W wielu językach zdanie ma określoną strukturę gramatyczną.
+
+### 5.2. Reguły normatywne
+Mówią, jak należy postępować.
+
+Przykład:
+- W bibliotece należy zachować ciszę.
+
+### 5.3. Reguły formalne
+Są zapisane precyzyjnie i jednoznacznie.
+
+Przykład:
+- W logice: jeśli A jest prawdziwe i „A implikuje B”, to B jest prawdziwe.
+
+### 5.4. Reguły heurystyczne
+To praktyczne wskazówki, które często pomagają, ale nie gwarantują poprawności w każdej sytuacji.
+
+Przykład:
+- Przy streszczaniu tekstu najpierw znajdź zdania zawierające główną myśl.
+
+## 6. Reguły a prawo, normy i wzorce
+
+Te pojęcia są podobne, ale nie są identyczne.
+
+### Reguła
+Jasna zasada działania lub oceny.
+
+### Norma
+Ustalony standard poprawności albo zachowania.
+
+### Prawo
+Formalnie ustanowiona reguła obowiązująca w społeczeństwie lub państwie.
+
+### Wzorzec
+Powtarzalny układ lub model, który można rozpoznać.
+
+Przykład różnicy:
+- Reguła: „Po nagłówku zwykle występuje treść”.
+- Wzorzec: „W wielu dokumentach najpierw pojawia się tytuł, potem akapit”.
+
+## 7. Reguły w codziennym życiu
+
+Reguły są obecne niemal wszędzie.
+
+### Przykłady:
+- w domu: „Po użyciu odkładamy przedmioty na miejsce”,
+- w szkole: „Praca domowa ma określony termin”,
+- w rozmowie: „Nie przerywamy rozmówcy”,
+- w sporcie: „Gol jest uznany tylko przy spełnieniu warunków gry”.
+
+Reguły pomagają:
+- współpracować,
+- przewidywać zachowania innych,
+- unikać chaosu.
+
+## 8. Reguły w języku
+
+Język zawiera bardzo wiele reguł.
+
+### 8.1. Reguły gramatyczne
+Określają budowę zdań i form wyrazów.
+
+Przykład:
+- Czasownik zmienia formę zależnie od osoby, liczby i czasu.
+
+### 8.2. Reguły ortograficzne
+Określają poprawną pisownię.
+
+Przykład:
+- Niektóre wyrazy pisze się wielką literą, np. nazwy własne.
+
+### 8.3. Reguły składniowe
+Dotyczą łączenia wyrazów w zdania.
+
+Przykład:
+- Zdanie powinno mieć logiczny porządek, aby było zrozumiałe.
+
+Dla systemu uczącego się reguły językowe są ważne, ponieważ pozwalają:
+- rozpoznawać części tekstu,
+- oddzielać definicje od przykładów,
+- wykrywać relacje między pojęciami.
+
+## 9. Reguły w matematyce i logice
+
+Matematyka i logika używają reguł bardzo precyzyjnych.
+
+### Przykłady:
+- kolejność działań,
+- reguły przekształcania równań,
+- reguły wnioskowania logicznego.
+
+Przykład logiczny:
+- Wszystkie ssaki oddychają powietrzem.
+- Delfin jest ssakiem.
+- Zatem delfin oddycha powietrzem.
+
+To wnioskowanie opiera się na regułach logiki.
+
+Dla systemu uczącego się jest to istotne, bo reguły logiczne umożliwiają:
+- wyciąganie wniosków,
+- łączenie faktów,
+- wykrywanie sprzeczności.
+
+## 10. Reguły w plikach tekstowych i pracy z wiedzą
+
+To szczególnie ważny obszar dla M.A.R.I.A., ponieważ celem jest **autonomiczna nauka i strukturyzacja wiedzy z plików tekstowych**.
+
+### 10.1. Reguły pomagają rozpoznawać strukturę tekstu
+W pliku tekstowym można wykrywać reguły takie jak:
+- tytuł pojawia się na początku,
+- nagłówki dzielą treść na sekcje,
+- definicje zawierają formy typu „X to...”,
+- listy punktowane grupują elementy,
+- przykłady często zaczynają się od „na przykład” lub „przykład”.
+
+### 10.2. Reguły pomagają wydobywać informacje
+Można stosować reguły:
+- jeżeli zdanie zawiera „to jest”, może zawierać definicję,
+- jeżeli fragment zaczyna się od cyfry lub myślnika, może być elementem listy,
+- jeżeli wyraz się powtarza w wielu sekcjach, może być pojęciem kluczowym.
+
+### 10.3. Reguły pomagają budować strukturę wiedzy
+Po odczytaniu tekstu można tworzyć relacje:
+- pojęcie -> definicja,
+- pojęcie -> przykład,
+- pojęcie -> cechy,
+- pojęcie -> powiązane pojęcia.
+
+Przykład:
+- pojęcie: reguła,
+- definicja: ustalona zasada działania lub oceny,
+- cechy: warunkowość, powtarzalność, zakres,
+- przykłady: reguły językowe, prawne, logiczne.
+
+## 11. Jak rozpoznawać reguły w tekście?
+
+To ważna umiejętność dla systemu uczącego się.
+
+### Sygnały językowe reguł:
+- „jeżeli ... to ...”
+- „należy”
+- „powinno się”
+- „zawsze”
+- „w przypadku ...”
+- „zgodnie z”
+- „warunkiem jest”
+- „dopuszcza się”
+- „nie wolno”
+
+### Sygnały strukturalne:
+- numerowane kroki,
+- listy zasad,
+- sekcje typu „Zasady”, „Reguły”, „Warunki”, „Wymagania”.
+
+### Sygnały znaczeniowe:
+- opis zależności,
+- opis warunku i skutku,
+- wskazanie poprawnego sposobu działania.
+
+## 12. Jak zapisywać reguły w uporządkowanej formie?
+
+Dla uczenia maszynowego i porządkowania wiedzy korzystny jest zapis jednoznaczny.
+
+### Prosty szablon:
+- **Nazwa reguły**
+- **Warunek**
+- **Działanie/skutek**
+- **Zakres**
+- **Wyjątki**
+- **Przykład**
+
+### Przykład:
+- Nazwa reguły: Rozpoznawanie definicji
+- Warunek: Zdanie zawiera wzór „X to Y”
+- Działanie/skutek: Oznacz zdanie jako potencjalną definicję
+- Zakres: Teksty edukacyjne i opisowe
+- Wyjątki: Nie każde zdanie z „to” jest definicją
+- Przykład: „Fotosynteza to proces wytwarzania związków organicznych przez rośliny.”
+
+## 13. Ograniczenia reguł
+
+Reguły są użyteczne, ale mają ograniczenia.
+
+### 13.1. Niepełność
+Jedna reguła nie opisuje całej rzeczywistości.
+
+### 13.2. Wyjątki
+Wiele systemów ma wyjątki od reguł ogólnych.
+
+### 13.3. Zależność od kontekstu
+Ta sama reguła może działać inaczej w innym obszarze.
+
+Przykład:
+- Reguła poprawnej formy zdania zależy od języka.
+
+### 13.4. Wieloznaczność języka naturalnego
+W tekstach ludzkich reguły nie zawsze są zapisane wprost.
+
+Dlatego w praktyce często łączy się:
+- reguły,
+- analizę kontekstu,
+- statystykę,
+- modele uczące się.
+
+## 14. Kluczowe pojęcia
+
+### Reguła
+Ustalona zasada działania, oceny lub wnioskowania.
+
+### Warunek
+Okoliczność, przy której reguła ma zastosowanie.
+
+### Skutek
+Działanie lub wynik wynikający z reguły.
+
+### Wyjątek
+Przypadek, w którym reguła ogólna nie działa.
+
+### Zakres
+Obszar, w którym reguła obowiązuje.
+
+### Wnioskowanie
+Proces wyprowadzania nowej informacji z już znanych faktów i reguł.
+
+### Strukturyzacja wiedzy
+Porządkowanie informacji w relacje, kategorie i hierarchie.
+
+## 15. Praktyczne przykłady dla M.A.R.I.A.
+
+### Przykład 1. Wydobycie definicji
+Tekst:
+„Reguła to ustalona zasada działania.”
+
+Możliwa analiza:
+- pojęcie: reguła,
+- relacja: jest_definiowane_jako,
+- definicja: ustalona zasada działania.
+
+### Przykład 2. Wydobycie zależności warunkowej
+Tekst:
+„Jeżeli dokument zawiera nagłówek, to można podzielić go na sekcje.”
+
+Możliwa analiza:
+- warunek: dokument zawiera nagłówek,
+- skutek: można podzielić dokument na sekcje,
+- typ: reguła strukturalna.
+
+### Przykład 3. Wydobycie reguły normatywnej
+Tekst:
+„Należy zapisywać pojęcia kluczowe w osobnych rekordach.”
+
+Możliwa analiza:
+- typ reguły: normatywna,
+- działanie: zapisywać pojęcia kluczowe osobno.
+
+## 16. Podsumowanie
+
+Reguły to podstawowe narzędzia porządkowania wiedzy. Określają:
+- co jest dozwolone,
+- co jest poprawne,
+- co wynika z czego,
+- jak rozpoznawać strukturę i znaczenie.
+
+Dla systemu uczącego się z plików tekstowych reguły są szczególnie ważne, ponieważ pozwalają:
+- rozpoznawać definicje,
+- wykrywać zależności,
+- identyfikować pojęcia kluczowe,
+- zamieniać tekst ciągły w uporządkowaną wiedzę.
+
+Najważniejsza idea jest prosta: **reguła łączy warunek z wynikiem albo działaniem**. Gdy system potrafi wykrywać takie zależności w tekście, może skuteczniej uczyć się autonomicznie i budować spójną strukturę wiedzy.

@@ -1,0 +1,415 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: zmiana
+# Data: 2026-04-09 23:35
+# Pytanie: Maria nie ma zadnej wiedzy o 'zmiana'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Zmiana
+
+## 1. Definicja
+
+**Zmiana** to przejście od jednego stanu do innego stanu.  
+Może dotyczyć:
+
+- rzeczy materialnych,
+- ludzi,
+- zachowań,
+- idei,
+- procesów,
+- relacji,
+- systemów.
+
+Najprościej:
+
+- **stan początkowy**: jak jest teraz,
+- **stan końcowy**: jak jest później,
+- **zmiana**: to, co powoduje różnicę między tymi stanami.
+
+### Przykład
+- Woda ma temperaturę 20°C.
+- Po podgrzaniu ma 80°C.
+- Nastąpiła **zmiana temperatury**.
+
+## 2. Kluczowe pojęcia
+
+### Stan
+Stan to aktualna postać, cecha lub sytuacja obiektu.
+
+**Przykłady stanów:**
+- drzwi są otwarte,
+- światło jest wyłączone,
+- człowiek jest zmęczony,
+- roślina jest mała.
+
+### Proces
+Proces to ciąg działań lub zdarzeń zachodzących w czasie.
+
+**Przykład:**
+- roślina rośnie przez wiele dni,
+- to wzrost, czyli proces zmiany.
+
+### Różnica
+Różnica to cecha, po której można rozpoznać, że coś się zmieniło.
+
+**Przykład:**
+- przedtem liść był zielony,
+- później stał się żółty,
+- kolor jest różnicą.
+
+### Czas
+Zmiana zachodzi w czasie. Bez czasu nie da się opisać, że „było inaczej niż wcześniej”.
+
+### Przyczyna
+Przyczyna to czynnik, który wywołuje zmianę.
+
+**Przykłady:**
+- ogrzewanie powoduje wzrost temperatury,
+- nauka powoduje wzrost wiedzy,
+- deszcz powoduje wzrost wilgotności gleby.
+
+### Skutek
+Skutek to rezultat zmiany.
+
+**Przykład:**
+- przyczyna: dodanie wody do ciasta,
+- skutek: zmiana konsystencji ciasta.
+
+---
+
+## 3. Podstawowa struktura opisu zmiany
+
+Każdą zmianę można opisać według prostego schematu:
+
+1. **Co się zmienia?**
+2. **Jaki był stan przed zmianą?**
+3. **Jaki jest stan po zmianie?**
+4. **Co spowodowało zmianę?**
+5. **Kiedy zmiana zaszła?**
+6. **Jakie są skutki zmiany?**
+
+### Przykład
+**Co się zmienia?** Liść  
+**Stan przed:** zielony  
+**Stan po:** żółty  
+**Przyczyna:** upływ czasu, zmiana pory roku  
+**Kiedy:** jesienią  
+**Skutek:** roślina przygotowuje się do zimy
+
+Taki schemat jest użyteczny przy analizie tekstów, ponieważ pomaga wydobywać fakty.
+
+---
+
+## 4. Rodzaje zmian
+
+## 4.1 Zmiana fizyczna
+To zmiana, w której materiał pozostaje tym samym materiałem, ale zmienia formę, kształt, rozmiar lub stan skupienia.
+
+**Przykłady:**
+- lód topnieje i staje się wodą,
+- papier zostaje zgięty,
+- balon zwiększa objętość po napompowaniu.
+
+**Cechy:**
+- nie powstaje nowa substancja,
+- zmieniają się właściwości zewnętrzne lub postać.
+
+## 4.2 Zmiana chemiczna
+To zmiana, w której powstają nowe substancje.
+
+**Przykłady:**
+- spalanie drewna,
+- rdzewienie żelaza,
+- pieczenie chleba.
+
+**Cechy:**
+- skład substancji ulega zmianie,
+- często trudno odwrócić taki proces.
+
+## 4.3 Zmiana biologiczna
+Dotyczy organizmów żywych.
+
+**Przykłady:**
+- wzrost dziecka,
+- gojenie rany,
+- rozwój motyla z gąsienicy.
+
+## 4.4 Zmiana społeczna
+Dotyczy grup ludzi, instytucji, norm i zachowań społecznych.
+
+**Przykłady:**
+- wzrost liczby osób uczących się zdalnie,
+- zmiana prawa,
+- zmiana sposobu komunikacji przez rozwój internetu.
+
+## 4.5 Zmiana psychiczna lub poznawcza
+Dotyczy wiedzy, emocji, przekonań, pamięci i sposobu myślenia.
+
+**Przykłady:**
+- uczeń rozumie pojęcie, którego wcześniej nie znał,
+- człowiek zmienia decyzję po otrzymaniu nowych informacji.
+
+---
+
+## 5. Zmiana może mieć różny charakter
+
+### 5.1 Zmiana ilościowa
+Dotyczy tego, **ile** czegoś jest.
+
+**Przykłady:**
+- temperatura wzrosła z 10°C do 15°C,
+- liczba mieszkańców spadła,
+- masa ciała wzrosła o 2 kg.
+
+### 5.2 Zmiana jakościowa
+Dotyczy tego, **jakie** coś jest.
+
+**Przykłady:**
+- mleko skwaśniało,
+- człowiek z początku niewykwalifikowany zdobył kwalifikacje,
+- tekst z chaotycznego stał się uporządkowany.
+
+### 5.3 Zmiana szybka i powolna
+- **szybka**: eksplozja, zapalenie światła,
+- **powolna**: wzrost drzewa, erozja skał.
+
+### 5.4 Zmiana odwracalna i nieodwracalna
+- **odwracalna**: zamrożenie i roztopienie wody,
+- **nieodwracalna**: spalenie kartki papieru.
+
+---
+
+## 6. Jak rozpoznać zmianę?
+
+Zmianę rozpoznaje się przez **porównanie**.
+
+Trzeba porównać:
+
+- ten sam obiekt w dwóch momentach czasu,
+- albo dwa różne stany tego samego procesu.
+
+### Sygnały językowe w tekście
+W tekstach zmiana jest często opisywana słowami:
+
+- wzrósł,
+- zmalał,
+- stał się,
+- przekształcił się,
+- przeszedł w,
+- poprawił się,
+- pogorszył się,
+- rozwinął się,
+- zanikł,
+- pojawił się,
+- zniknął,
+- zastąpiono,
+- zamieniono.
+
+### Przykład
+Zdanie:  
+„W ciągu roku liczba użytkowników systemu wzrosła z 200 do 500.”
+
+Można wydobyć z niego:
+
+- obiekt: liczba użytkowników systemu,
+- stan przed: 200,
+- stan po: 500,
+- typ zmiany: ilościowa,
+- kierunek: wzrost,
+- czas: w ciągu roku.
+
+---
+
+## 7. Elementy każdej zmiany
+
+Dla systemu uczącego się ważne jest rozbicie pojęcia na składniki.
+
+### 7.1 Obiekt zmiany
+To to, czego zmiana dotyczy.
+
+**Przykłady:**
+- temperatura,
+- roślina,
+- wiedza ucznia,
+- liczba ludności.
+
+### 7.2 Cecha zmieniana
+To właściwość obiektu, która ulega zmianie.
+
+**Przykłady:**
+- kolor liścia,
+- masa ciała,
+- poziom hałasu,
+- stopień zrozumienia.
+
+### 7.3 Kierunek zmiany
+Określa, w którą stronę zmierza zmiana.
+
+**Przykłady:**
+- wzrost,
+- spadek,
+- przejście z A do B,
+- poprawa,
+- pogorszenie.
+
+### 7.4 Tempo zmiany
+Mówi, jak szybko zmiana zachodzi.
+
+### 7.5 Skala zmiany
+Mówi, jak duża jest różnica między stanem przed i po.
+
+---
+
+## 8. Przykłady zmian z różnych dziedzin
+
+## 8.1 Przyroda
+- Dzień zmienia się w noc.
+- Drzewo traci liście jesienią.
+- Rzeka zmienia poziom wody po opadach.
+
+## 8.2 Człowiek
+- Dziecko rośnie.
+- Człowiek uczy się nowego języka.
+- Organizm reaguje na wysiłek wzrostem tętna.
+
+## 8.3 Technologia
+- Program zostaje zaktualizowany.
+- Dane w pliku zostają zmodyfikowane.
+- Urządzenie zmienia stan z wyłączonego na włączony.
+
+## 8.4 Gospodarka
+- Cena produktu rośnie lub spada.
+- Produkcja zwiększa się.
+- Popyt maleje.
+
+## 8.5 Edukacja
+- Uczeń przechodzi od braku wiedzy do podstawowego rozumienia.
+- Notatka staje się bardziej uporządkowana po redakcji.
+
+---
+
+## 9. Zmiana a brak zmiany
+
+Nie każda obserwacja oznacza zmianę.
+
+### Brak zmiany
+Jeśli stan przed i po jest taki sam, nie ma zmiany.
+
+**Przykład:**
+- Temperatura o 8:00 wynosiła 22°C.
+- Temperatura o 9:00 nadal wynosiła 22°C.
+- Nie zaszła zmiana temperatury.
+
+### Pozorna zmiana
+Czasem zmienia się tylko sposób opisu, a nie sam obiekt.
+
+**Przykład:**
+- „samochód” i „pojazd” mogą oznaczać ten sam obiekt,
+- zmiana słowa nie musi oznaczać zmiany rzeczywistości.
+
+To ważne przy analizie tekstów: trzeba odróżnić zmianę językową od zmiany faktycznej.
+
+---
+
+## 10. Jak opisywać zmianę w plikach tekstowych?
+
+Dla autonomicznej nauki z tekstu pojęcie zmiany warto zamienić na zestaw pytań analitycznych.
+
+### Szablon analizy
+Podczas czytania tekstu pytaj:
+
+1. **Co się zmieniło?**
+2. **Względem czego to się zmieniło?**
+3. **Jaka cecha uległa zmianie?**
+4. **Jaki był stan początkowy?**
+5. **Jaki jest stan końcowy?**
+6. **Jaka była przyczyna?**
+7. **Jaki był skutek?**
+8. **Czy zmiana była szybka czy wolna?**
+9. **Czy była odwracalna?**
+10. **Czy dotyczy ilości, jakości czy struktury?**
+
+### Przykład analizy tekstu
+Zdanie:  
+„Po modernizacji biblioteka zwiększyła liczbę stanowisk komputerowych z 10 do 25.”
+
+Analiza:
+- co się zmieniło: liczba stanowisk komputerowych,
+- obiekt: biblioteka,
+- stan początkowy: 10,
+- stan końcowy: 25,
+- kierunek: wzrost,
+- przyczyna: modernizacja,
+- typ: zmiana ilościowa.
+
+---
+
+## 11. Znaczenie pojęcia „zmiana” w uczeniu się
+
+Pojęcie zmiany jest podstawowe, ponieważ pozwala rozumieć:
+
+- rozwój,
+- przyczynę i skutek,
+- historię zdarzeń,
+- działanie procesów,
+- porównania między stanami.
+
+Bez pojęcia zmiany trudno analizować teksty opisujące:
+
+- eksperymenty,
+- dane liczbowe,
+- procesy biologiczne,
+- wydarzenia historyczne,
+- aktualizacje systemów,
+- rozwój wiedzy.
+
+W praktyce wiele zdań informacyjnych opisuje właśnie zmianę.
+
+---
+
+## 12. Typowe błędy w rozumieniu zmiany
+
+### 12.1 Mylenie obiektu z cechą
+Błąd:
+- „zmieniła się temperatura” i „zmieniło się powietrze” to nie zawsze to samo.
+
+Poprawnie:
+- obiekt: powietrze,
+- cecha: temperatura.
+
+### 12.2 Pomijanie czasu
+Bez wskazania „przed” i „po” opis zmiany jest niepełny.
+
+### 12.3 Brak punktu odniesienia
+Sformułowanie „wynik jest lepszy” wymaga pytania: lepszy niż co?
+
+### 12.4 Mylenie przyczyny ze skutkiem
+Przykład:
+- deszcz jest przyczyną,
+- wzrost poziomu wody jest skutkiem.
+
+---
+
+## 13. Minimalna mapa wiedzy o zmianie
+
+Najkrótszy poprawny model pojęcia:
+
+- **Zmiana** = różnica stanu w czasie.
+- Każda zmiana ma:
+  - obiekt,
+  - cechę,
+  - stan przed,
+  - stan po,
+  - czas,
+  - często przyczynę i skutek.
+- Zmiana może być:
+  - ilościowa lub jakościowa,
+  - szybka lub powolna,
+  - odwracalna lub nieodwracalna.
+- Zmianę wykrywa się przez porównanie.
+
+---
+
+## 14. Podsumowanie
+
+Zmiana to jedno z najbardziej podstawowych pojęć służących do opisu świata. Oznacza przejście od jednego stanu do drugiego. Może dotyczyć materii, organizmów, ludzi, wiedzy, społeczeństw i systemów technicznych. Aby poprawnie rozpoznać zmianę, trzeba ustalić: co się zmieniło, jaka cecha uległa zmianie, jaki był stan początkowy, jaki jest stan końcowy, kiedy zaszła zmiana oraz co ją spowodowało.
+
+W pracy z tekstami pojęcie zmiany jest szczególnie ważne, ponieważ wiele informacji ma postać opisu różnicy w czasie. Dlatego analiza zmiany powinna opierać się na porównaniu, rozpoznaniu kierunku zmiany, przyczyn i skutków oraz rodzaju zmiany. Taki sposób myślenia pozwala budować uporządkowaną wiedzę z plików tekstowych.

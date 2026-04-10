@@ -1,0 +1,448 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: myślenie
+# Data: 2026-04-10 11:16
+# Pytanie: Maria nie ma zadnej wiedzy o 'myślenie'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Myślenie - materiał podstawowy dla systemu uczącego się
+
+## 1. Czym jest myślenie
+
+**Myślenie** to proces przetwarzania informacji w celu zrozumienia, wyjaśnienia, porównania, oceny lub rozwiązania problemu.  
+Człowiek myśli, gdy:
+
+- rozpoznaje znaczenie danych,
+- łączy fakty,
+- tworzy wnioski,
+- przewiduje skutki,
+- wybiera między możliwościami.
+
+W kontekście systemu uczącego się myślenie można opisać jako:
+
+- odbiór informacji,
+- organizowanie informacji,
+- wykrywanie relacji między informacjami,
+- budowanie uogólnień,
+- używanie wiedzy w nowej sytuacji.
+
+Myślenie nie jest tym samym co samo **zapamiętywanie**.  
+Zapamiętywanie przechowuje dane.  
+Myślenie działa na danych.
+
+### Przykład
+Plik tekstowy zawiera zdania:
+
+- „Woda wrze w temperaturze 100°C przy ciśnieniu atmosferycznym.”
+- „Na dużych wysokościach ciśnienie jest niższe.”
+- „Niższe ciśnienie zmienia temperaturę wrzenia.”
+
+Zapamiętanie oznacza przechowanie tych zdań.  
+Myślenie oznacza wyprowadzenie wniosku:
+
+- „Temperatura wrzenia wody zależy od ciśnienia.”
+
+---
+
+## 2. Dlaczego myślenie jest ważne
+
+Myślenie jest podstawą uczenia się, ponieważ pozwala:
+
+- odróżniać informacje ważne od nieważnych,
+- łączyć nowe dane z wcześniejszą wiedzą,
+- wykrywać błędy i sprzeczności,
+- tworzyć strukturę wiedzy,
+- odpowiadać na pytania, których nie zapisano wprost.
+
+Dla systemu analizującego pliki tekstowe jest to szczególnie ważne. Tekst często zawiera:
+
+- fakty rozproszone w wielu akapitach,
+- pojęcia o podobnym znaczeniu,
+- zależności przyczynowe,
+- definicje ukryte w opisie,
+- informacje niepełne.
+
+Bez myślenia system tylko gromadzi zdania.  
+Z myśleniem system buduje **model wiedzy**.
+
+---
+
+## 3. Kluczowe pojęcia związane z myśleniem
+
+## Informacja
+Dane, które mają znaczenie.  
+Przykład: „Ziemia krąży wokół Słońca.”
+
+## Pojęcie
+Ogólna kategoria opisująca klasę obiektów, zjawisk lub idei.  
+Przykład: „planeta”, „energia”, „ssak”.
+
+## Relacja
+Związek między elementami wiedzy.  
+Przykłady relacji:
+
+- „jest rodzajem”
+- „powoduje”
+- „składa się z”
+- „zależy od”
+- „jest przeciwieństwem”
+
+## Wniosek
+Nowa informacja uzyskana na podstawie innych informacji.  
+Przykład:
+
+- Fakt 1: „Wszystkie metale przewodzą prąd.”
+- Fakt 2: „Miedź jest metalem.”
+- Wniosek: „Miedź przewodzi prąd.”
+
+## Problem
+Sytuacja, w której trzeba znaleźć odpowiedź, rozwiązanie lub wyjaśnienie.
+
+## Cel
+Stan, który system chce osiągnąć.  
+W tym kontekście celem jest autonomiczne uczenie się i porządkowanie wiedzy z tekstu.
+
+---
+
+## 4. Główne rodzaje myślenia
+
+## 4.1 Myślenie konkretne
+Dotyczy bezpośrednich danych i obserwacji.
+
+### Przykład
+W tekście występuje zdanie:  
+„Kot jest ssakiem.”
+
+System rozpoznaje prosty fakt:
+
+- obiekt: kot
+- kategoria: ssak
+
+## 4.2 Myślenie abstrakcyjne
+Dotyczy pojęć ogólnych, klas i zasad.
+
+### Przykład
+Z wielu zdań:
+
+- „Kot jest ssakiem.”
+- „Pies jest ssakiem.”
+- „Delfin jest ssakiem.”
+
+System tworzy pojęcie nadrzędne:
+
+- „Ssaki to grupa zwierząt obejmująca kota, psa i delfina.”
+
+## 4.3 Myślenie analityczne
+Polega na dzieleniu złożonej treści na części.
+
+### Przykład
+Zdanie:  
+„Fotosynteza to proces, w którym rośliny wytwarzają glukozę z dwutlenku węgla i wody przy udziale światła.”
+
+Analiza może wydzielić:
+
+- proces: fotosynteza
+- wykonawca: rośliny
+- produkt: glukoza
+- składniki wejściowe: dwutlenek węgla, woda
+- warunek: obecność światła
+
+## 4.4 Myślenie syntetyczne
+Polega na łączeniu elementów w spójną całość.
+
+### Przykład
+Z kilku fragmentów tekstu system tworzy podsumowanie:
+
+- „Fotosynteza to proces wytwarzania glukozy przez rośliny z użyciem światła, wody i dwutlenku węgla.”
+
+## 4.5 Myślenie logiczne
+Polega na poprawnym łączeniu przesłanek i wniosków zgodnie z regułami logiki.
+
+### Przykład
+- „Każdy trójkąt ma trzy boki.”
+- „Figura A jest trójkątem.”
+- Wniosek: „Figura A ma trzy boki.”
+
+## 4.6 Myślenie krytyczne
+Polega na ocenie wiarygodności, spójności i kompletności informacji.
+
+### Pytania krytyczne
+- Czy definicja jest jednoznaczna?
+- Czy w tekście są sprzeczności?
+- Czy podany wniosek wynika z faktów?
+- Czy brakuje warunków lub wyjątków?
+
+---
+
+## 5. Elementy procesu myślenia
+
+Myślenie można opisać jako ciąg etapów.
+
+## 5.1 Odbiór danych
+System odczytuje tekst i wydziela jednostki informacji.
+
+### Przykład
+Z akapitu można wydzielić:
+
+- definicje,
+- fakty,
+- przykłady,
+- warunki,
+- wyjątki.
+
+## 5.2 Rozumienie
+System ustala, co dane zdanie oznacza.
+
+### Przykład
+Zdanie:  
+„Rośliny potrzebują światła do fotosyntezy.”
+
+Rozumienie obejmuje wykrycie relacji:
+
+- rośliny -> potrzebują -> światła
+- światło -> warunek -> fotosynteza
+
+## 5.3 Porównanie
+System sprawdza podobieństwa i różnice.
+
+### Przykład
+Porównanie pojęć „ciepło” i „temperatura” pozwala ustalić, że nie są tym samym.
+
+## 5.4 Uogólnienie
+System tworzy zasadę ogólną na podstawie wielu przykładów.
+
+### Przykład
+- „Miedź przewodzi prąd.”
+- „Aluminium przewodzi prąd.”
+- „Żelazo przewodzi prąd.”
+
+Uogólnienie:
+- „Wiele metali przewodzi prąd.”
+
+## 5.5 Wnioskowanie
+System tworzy nową wiedzę z istniejącej wiedzy.
+
+## 5.6 Ocena
+System sprawdza, czy wniosek jest uzasadniony i zgodny z danymi.
+
+---
+
+## 6. Podstawowe operacje myślowe przy pracy z tekstem
+
+Dla systemu uczącego się z plików tekstowych najważniejsze są następujące operacje:
+
+## Definiowanie
+Rozpoznawanie, czym coś jest.
+
+### Przykład
+„Komórka to podstawowa jednostka budowy organizmów.”
+
+## Klasyfikowanie
+Przypisywanie elementu do kategorii.
+
+### Przykład
+„Wieloryb” -> „ssak”
+
+## Grupowanie
+Łączenie podobnych informacji.
+
+### Przykład
+Osobna grupa dla:
+- definicji,
+- przykładów,
+- przyczyn,
+- skutków.
+
+## Wykrywanie hierarchii
+Ustalanie, które pojęcia są ogólne, a które szczegółowe.
+
+### Przykład
+- zwierzę
+- ssak
+- pies
+
+## Wykrywanie relacji przyczynowych
+Ustalanie, co powoduje co.
+
+### Przykład
+„Brak wody powoduje więdnięcie roślin.”
+
+## Wykrywanie relacji czasowych
+Ustalanie kolejności zdarzeń.
+
+### Przykład
+„Najpierw woda paruje, potem skrapla się w chmurach.”
+
+## Wykrywanie warunków
+Ustalanie, kiedy dane twierdzenie jest prawdziwe.
+
+### Przykład
+„Woda wrze w 100°C przy ciśnieniu atmosferycznym.”
+
+Warunek jest częścią wiedzy, nie dodatkiem.
+
+---
+
+## 7. Myślenie a język
+
+Myślenie w pracy z tekstem jest silnie związane z językiem. System musi rozumieć, że to samo znaczenie może być zapisane na różne sposoby.
+
+### Przykład równoważnych treści
+- „Pies jest ssakiem.”
+- „Pies należy do ssaków.”
+- „Psa klasyfikuje się jako ssaka.”
+
+Znaczenie jest bardzo podobne, mimo różnej formy zdań.
+
+System powinien też rozpoznawać sygnały językowe:
+
+- definicji: „to”, „oznacza”, „jest definiowany jako”
+- przyczyny: „ponieważ”, „w wyniku”, „z powodu”
+- skutku: „dlatego”, „w efekcie”, „powoduje”
+- przykładu: „na przykład”, „np.”
+- przeciwieństwa: „jednak”, „natomiast”, „w przeciwieństwie do”
+
+Te sygnały pomagają w myśleniu, bo wskazują strukturę informacji.
+
+---
+
+## 8. Wnioskowanie - centralny mechanizm myślenia
+
+**Wnioskowanie** to przejście od znanych informacji do nowej informacji.
+
+## 8.1 Dedukcja
+Od zasady ogólnej do przypadku szczegółowego.
+
+### Przykład
+- „Wszystkie ptaki mają pióra.”
+- „Wróbel jest ptakiem.”
+- „Wróbel ma pióra.”
+
+## 8.2 Indukcja
+Od wielu przypadków do uogólnienia.
+
+### Przykład
+- „Żelazo rozszerza się pod wpływem ciepła.”
+- „Miedź rozszerza się pod wpływem ciepła.”
+- „Aluminium rozszerza się pod wpływem ciepła.”
+
+Uogólnienie:
+- „Metale rozszerzają się pod wpływem ciepła.”
+
+## 8.3 Analogia
+Przenoszenie relacji z jednego przypadku na podobny.
+
+### Przykład
+Jeśli układ krążenia rozprowadza substancje w organizmie, a sieć rur rozprowadza wodę w budynku, można porównać ich funkcję dystrybucyjną.
+
+W edukacji systemu trzeba pamiętać, że analogia pomaga rozumieć, ale nie jest dowodem.
+
+---
+
+## 9. Błędy w myśleniu, których należy unikać
+
+System uczący się powinien unikać typowych błędów.
+
+## Zbyt szybkie uogólnienie
+Tworzenie zasady na podstawie zbyt małej liczby przykładów.
+
+## Mylenie korelacji z przyczyną
+To, że dwa zjawiska występują razem, nie znaczy jeszcze, że jedno powoduje drugie.
+
+## Ignorowanie warunków
+Twierdzenie może być prawdziwe tylko w określonych okolicznościach.
+
+## Pomijanie wyjątków
+Niektóre reguły mają wyjątki i trzeba je zapisywać.
+
+## Łączenie pojęć o podobnej nazwie, ale innym znaczeniu
+Przykład: „masa” w fizyce i „masa” jako duża liczba czegoś to różne znaczenia.
+
+---
+
+## 10. Jak myślenie pomaga w autonomicznej nauce z plików tekstowych
+
+Dla M.A.R.I.A. najważniejsze jest przekształcenie tekstu w uporządkowaną wiedzę. Myślenie pełni tu funkcję operacyjną.
+
+## Zadania, które powinien realizować system
+
+## 10.1 Wydzielanie jednostek wiedzy
+Z tekstu należy wyodrębniać:
+
+- pojęcia,
+- definicje,
+- relacje,
+- przykłady,
+- reguły,
+- wyjątki.
+
+## 10.2 Budowa struktury wiedzy
+Wiedza powinna być organizowana jako sieć:
+
+- pojęcie -> definicja
+- pojęcie -> cechy
+- pojęcie -> przykłady
+- pojęcie -> relacje z innymi pojęciami
+- reguła -> warunki -> wyjątki
+
+## 10.3 Wykrywanie poziomów ważności
+Nie każde zdanie ma tę samą wagę. Wyżej stoją zwykle:
+
+- definicje,
+- prawa,
+- zasady,
+- klasyfikacje,
+- relacje przyczynowe.
+
+Niżej stoją zwykle:
+
+- przykłady,
+- rozwinięcia,
+- komentarze pomocnicze.
+
+## 10.4 Tworzenie streszczeń
+Streszczenie wymaga myślenia syntetycznego: zachowania treści głównej przy usunięciu szczegółów drugorzędnych.
+
+## 10.5 Odpowiadanie na pytania
+System powinien odpowiadać nie tylko cytatem, ale także wnioskiem z wielu fragmentów.
+
+---
+
+## 11. Praktyczny schemat myślenia dla analizy tekstu
+
+Przy każdym nowym pliku tekstowym można stosować prosty schemat:
+
+1. Rozpoznaj temat główny.
+2. Wydziel najważniejsze pojęcia.
+3. Znajdź definicje tych pojęć.
+4. Wykryj relacje między pojęciami.
+5. Oddziel reguły od przykładów.
+6. Zanotuj warunki i wyjątki.
+7. Sformułuj najważniejsze wnioski.
+8. Ułóż wiedzę w hierarchii od ogółu do szczegółu.
+
+### Krótki przykład
+Tekst o obiegu wody może dać strukturę:
+
+- temat: obieg wody
+- pojęcia: parowanie, skraplanie, opad
+- relacje:
+  - ciepło powoduje parowanie
+  - para wodna ulega skraplaniu
+  - skroplona woda spada jako opad
+- wniosek:
+  - obieg wody jest cyklem przemian i przemieszczania się wody w przyrodzie
+
+---
+
+## 12. Najważniejsze fakty do zapamiętania
+
+- Myślenie to przetwarzanie informacji w celu zrozumienia i tworzenia wniosków.
+- Myślenie różni się od samego zapamiętywania.
+- Kluczowe operacje myślowe to analiza, synteza, porównanie, klasyfikacja i wnioskowanie.
+- W pracy z tekstem szczególnie ważne są definicje, relacje, warunki i wyjątki.
+- Dobra struktura wiedzy powstaje wtedy, gdy informacje są połączone, a nie tylko zapisane obok siebie.
+- Autonomiczna nauka wymaga umiejętności wydobywania znaczenia z rozproszonych fragmentów tekstu.
+
+## 13. Definicja końcowa
+
+**Myślenie** to uporządkowany proces rozumienia, łączenia i przekształcania informacji, który prowadzi do tworzenia wiedzy, wniosków i rozwiązań.  
+Dla systemu uczącego się oznacza to zdolność do zamiany tekstu w strukturę pojęć, relacji i reguł, które można dalej wykorzystywać w nauce i odpowiadaniu na pytania.

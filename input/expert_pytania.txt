@@ -1,0 +1,408 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: pytania
+# Data: 2026-04-09 21:53
+# Pytanie: Maria nie ma zadnej wiedzy o 'pytania'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Pytania: czym są, do czego służą i jak je rozumieć**
+
+**Wprowadzenie**
+
+Pytanie to wypowiedź, której celem jest uzyskanie informacji, potwierdzenia, wyjaśnienia, decyzji albo doprecyzowania. Pytania są podstawowym narzędziem uczenia się, komunikacji i porządkowania wiedzy. Bez pytań trudno wykrywać braki w informacji, porównywać fakty i budować poprawne rozumienie tekstu.
+
+Dla systemu uczącego się pytania są szczególnie ważne, ponieważ pomagają:
+- wykrywać niejasności,
+- wydobywać kluczowe informacje z tekstu,
+- sprawdzać poprawność rozumienia,
+- organizować wiedzę w logiczną strukturę,
+- tworzyć relacje między pojęciami.
+
+**Definicja pytania**
+
+Pytanie to komunikat językowy skierowany do odbiorcy, którego celem jest uzyskanie odpowiedzi. Odpowiedź może mieć różną postać:
+- jednego słowa,
+- zdania,
+- liczby,
+- wyjaśnienia,
+- wyboru jednej z opcji,
+- opisu procesu.
+
+Przykład:
+- „Co to jest woda?”  
+To pytanie oczekuje definicji.
+- „Czy woda wrze w temperaturze 100°C przy ciśnieniu atmosferycznym?”  
+To pytanie oczekuje potwierdzenia albo zaprzeczenia.
+
+**Najważniejsze cechy pytania**
+
+Dobre pytanie ma zwykle kilka cech:
+- jest zrozumiałe,
+- dotyczy konkretnego problemu,
+- ma określony cel,
+- pozwala uzyskać użyteczną odpowiedź.
+
+Przykład pytania nieprecyzyjnego:
+- „Powiedz coś o świecie.”
+
+Przykład pytania precyzyjnego:
+- „Jakie są trzy główne warstwy atmosfery Ziemi?”
+
+Drugie pytanie jest lepsze do nauki, ponieważ zawęża temat i ułatwia znalezienie konkretnej odpowiedzi.
+
+**Rodzaje pytań**
+
+**1. Pytania zamknięte**
+
+To pytania, na które można odpowiedzieć krótko, najczęściej:
+- „tak”,
+- „nie”,
+- jedną liczbą,
+- jedną opcją z listy.
+
+Przykłady:
+- „Czy Warszawa jest stolicą Polski?”
+- „Ile dni ma tydzień?”
+- „Czy tekst zawiera definicję pojęcia?”
+
+Zastosowanie:
+- szybkie sprawdzanie faktów,
+- weryfikacja poprawności,
+- testy wiedzy.
+
+**2. Pytania otwarte**
+
+To pytania wymagające rozwiniętej odpowiedzi.
+
+Przykłady:
+- „Dlaczego rośliny potrzebują światła?”
+- „Jak działa obieg wody w przyrodzie?”
+- „W jaki sposób autor uzasadnia swoją tezę?”
+
+Zastosowanie:
+- wyjaśnianie zjawisk,
+- analiza treści,
+- budowanie głębszego rozumienia.
+
+**3. Pytania definicyjne**
+
+Służą ustaleniu znaczenia pojęcia.
+
+Przykłady:
+- „Co to jest fotosynteza?”
+- „Jak definiuje się demokrację?”
+- „Co oznacza termin ‘algorytm’?”
+
+Zastosowanie:
+- nauka podstawowych pojęć,
+- budowa słownika wiedzy.
+
+**4. Pytania o cechy**
+
+Dotyczą właściwości obiektu, pojęcia lub zjawiska.
+
+Przykłady:
+- „Jakie cechy ma ssak?”
+- „Jakie są właściwości metali?”
+- „Które cechy odróżniają powieść od opowiadania?”
+
+**5. Pytania o przyczynę**
+
+Dotyczą tego, dlaczego coś się dzieje.
+
+Przykłady:
+- „Dlaczego dochodzi do zaćmienia Księżyca?”
+- „Dlaczego organizm potrzebuje snu?”
+
+Takie pytania są ważne, bo prowadzą do rozumienia zależności przyczynowo-skutkowych.
+
+**6. Pytania o skutek**
+
+Dotyczą konsekwencji zdarzeń, działań lub procesów.
+
+Przykłady:
+- „Jakie są skutki zanieczyszczenia powietrza?”
+- „Co się dzieje, gdy temperatura spada poniżej zera?”
+
+**7. Pytania o porównanie**
+
+Służą do wykrywania podobieństw i różnic.
+
+Przykłady:
+- „Czym różni się ssak od gada?”
+- „Jakie są podobieństwa między atomem a układem planetarnym jako modelami?”
+
+**8. Pytania o przykład**
+
+Pomagają przejść od teorii do konkretu.
+
+Przykłady:
+- „Podaj przykład państwa wyspiarskiego.”
+- „Jaki jest przykład reakcji chemicznej?”
+
+**9. Pytania o klasyfikację**
+
+Służą porządkowaniu wiedzy w kategorie.
+
+Przykłady:
+- „Do jakiej grupy zwierząt należy wieloryb?”
+- „Jakie są główne typy skał?”
+
+**10. Pytania o proces**
+
+Dotyczą kolejności działań lub etapów.
+
+Przykłady:
+- „Jak przebiega trawienie?”
+- „Jakie etapy ma cykl życia motyla?”
+
+**Budowa pytania**
+
+Pytania mogą być rozpoznawane po formie językowej. Często zawierają słowa pytające, takie jak:
+- co,
+- kto,
+- kiedy,
+- gdzie,
+- jak,
+- dlaczego,
+- po co,
+- który,
+- ile,
+- czy.
+
+Przykłady:
+- „Kto odkrył penicylinę?”
+- „Kiedy rozpoczęła się II wojna światowa?”
+- „Gdzie znajduje się Sahara?”
+- „Jak działa silnik?”
+- „Dlaczego liście opadają jesienią?”
+- „Czy Ziemia krąży wokół Słońca?”
+
+W języku pisanym pytanie zwykle kończy się znakiem zapytania: `?`
+
+**Różnica między pytaniem a innymi typami wypowiedzi**
+
+Wypowiedzi można podzielić na kilka typów. Pytanie jest tylko jednym z nich.
+
+**1. Oznajmienie**
+Przekazuje informację.
+
+Przykład:
+- „Woda wrze w temperaturze 100°C przy ciśnieniu atmosferycznym.”
+
+**2. Pytanie**
+Żąda informacji.
+
+Przykład:
+- „W jakiej temperaturze wrze woda przy ciśnieniu atmosferycznym?”
+
+**3. Polecenie**
+Wymaga wykonania działania.
+
+Przykład:
+- „Opisz temperaturę wrzenia wody.”
+
+Dla systemu uczącego się ważne jest odróżnianie tych form, ponieważ każda wymaga innej reakcji.
+
+**Funkcje pytań w nauce**
+
+Pytania pełnią wiele funkcji poznawczych.
+
+**1. Pozyskiwanie informacji**
+Najbardziej podstawowa funkcja.
+
+Przykład:
+- „Ile kontynentów jest na Ziemi?”
+
+**2. Uzupełnianie braków wiedzy**
+Pytanie wskazuje, czego jeszcze nie wiadomo.
+
+Przykład:
+- „Czego brakuje w tym opisie procesu?”
+
+**3. Sprawdzanie rozumienia**
+Pozwala ocenić, czy treść została poprawnie zrozumiana.
+
+Przykład:
+- „Jaka jest główna teza tego tekstu?”
+
+**4. Organizowanie wiedzy**
+Pytania pomagają dzielić materiał na części.
+
+Przykład:
+- „Jakie są przyczyny?”
+- „Jakie są skutki?”
+- „Jakie są przykłady?”
+
+**5. Wnioskowanie**
+Niektóre pytania wymagają połączenia kilku faktów.
+
+Przykład:
+- „Jeśli roślina nie ma światła, co stanie się z fotosyntezą?”
+
+**Jak pytania pomagają w analizie plików tekstowych**
+
+Jeśli system uczy się z tekstów, pytania mogą być użyte jako narzędzie analizy. Dla każdego tekstu można zadawać podstawowy zestaw pytań.
+
+**Pytania o ogólny sens tekstu**
+- O czym jest tekst?
+- Jaki jest główny temat?
+- Jaki problem opisuje autor?
+
+**Pytania o fakty**
+- Jakie fakty podano?
+- Jakie daty, liczby, nazwy występują w tekście?
+- Kto jest uczestnikiem opisywanego zdarzenia?
+
+**Pytania o strukturę**
+- Jakie są główne sekcje tekstu?
+- Co jest definicją, a co przykładem?
+- Które zdania zawierają tezę, a które uzasadnienie?
+
+**Pytania o relacje**
+- Co jest przyczyną, a co skutkiem?
+- Które pojęcia są nadrzędne, a które podrzędne?
+- Jakie elementy są do siebie podobne lub przeciwstawne?
+
+**Pytania o braki**
+- Czego tekst nie wyjaśnia?
+- Jakie pojęcia wymagają doprecyzowania?
+- Jakie informacje są niepełne?
+
+Takie podejście pomaga zamieniać tekst ciągły w uporządkowaną wiedzę.
+
+**Przykład analizy krótkiego tekstu za pomocą pytań**
+
+Tekst:
+„Pszczoły zapylają wiele gatunków roślin. Dzięki temu rośliny mogą wytwarzać owoce i nasiona.”
+
+Możliwe pytania:
+- Kto wykonuje działanie?  
+Odpowiedź: Pszczoły.
+- Co robią pszczoły?  
+Odpowiedź: Zapylają rośliny.
+- Jaki jest skutek zapylania?  
+Odpowiedź: Rośliny mogą wytwarzać owoce i nasiona.
+- Jaki temat opisuje tekst?  
+Odpowiedź: Rola pszczół w zapylaniu roślin.
+
+W ten sposób z dwóch zdań można wydobyć uporządkowane jednostki wiedzy.
+
+**Kluczowe pojęcia związane z pytaniami**
+
+**1. Odpowiedź**
+Treść udzielona w reakcji na pytanie.
+
+**2. Informacja**
+Dane lub treść, którą pytanie ma wydobyć.
+
+**3. Kontekst**
+Otoczenie znaczeniowe pytania. To samo pytanie może znaczyć coś innego w innym kontekście.
+
+Przykład:
+- „Kiedy to się stało?”  
+Bez kontekstu nie wiadomo, o jakie zdarzenie chodzi.
+
+**4. Intencja pytania**
+Cel pytania, na przykład:
+- uzyskać definicję,
+- sprawdzić fakt,
+- porównać,
+- wyjaśnić przyczynę.
+
+**5. Precyzja**
+Stopień jednoznaczności pytania.
+
+**6. Zakres**
+Obszar, którego pytanie dotyczy.
+
+Przykład:
+- „Opisz historię Europy” ma bardzo szeroki zakres.
+- „Jakie były przyczyny rewolucji francuskiej?” ma zakres węższy.
+
+**Jak rozpoznać dobre pytanie**
+
+Dobre pytanie:
+- jest jasne,
+- nie miesza wielu tematów naraz,
+- ma określony cel,
+- można na nie odpowiedzieć na podstawie danych lub tekstu.
+
+Słabe pytanie:
+- jest zbyt ogólne,
+- jest niejednoznaczne,
+- zawiera niejasne odniesienia,
+- wymaga wiedzy, której nie zdefiniowano.
+
+Przykład słabego pytania:
+- „Czy to jest ważne?”
+
+Problem:
+- nie wiadomo, czym jest „to”,
+- nie wiadomo, co znaczy „ważne”.
+
+Lepsza forma:
+- „Czy autor uznaje fotosyntezę za proces niezbędny do wzrostu roślin?”
+
+**Typowe błędy przy tworzeniu pytań**
+
+- zbyt szeroki zakres,
+- brak kontekstu,
+- kilka pytań w jednym zdaniu,
+- użycie niejasnych słów,
+- pytanie o opinię zamiast o fakt, gdy celem jest nauka faktograficzna.
+
+Przykład błędu:
+- „Co i dlaczego oraz czy to jest dobre?”
+To pytanie łączy różne cele i jest nieprecyzyjne.
+
+Lepszy podział:
+- „Co opisuje tekst?”
+- „Dlaczego to zjawisko zachodzi?”
+- „Jakie skutki podano?”
+
+**Pytania jako narzędzie budowy wiedzy**
+
+Dla autonomicznego systemu uczącego się pytania mogą być używane do tworzenia schematu wiedzy. Dla każdego nowego pojęcia można zastosować zestaw podstawowy:
+
+- Co to jest?
+- Do jakiej kategorii należy?
+- Jakie ma cechy?
+- Jakie są przykłady?
+- Jakie są przyczyny lub warunki?
+- Jakie są skutki?
+- Z czym można to porównać?
+- Jakie pojęcia są z tym powiązane?
+
+Przykład dla pojęcia „wulkan”:
+- Co to jest wulkan?
+- Do jakiej kategorii obiektów należy?
+- Jakie ma cechy?
+- Jakie są przykłady wulkanów?
+- Dlaczego dochodzi do erupcji?
+- Jakie są skutki erupcji?
+
+Taki szablon ułatwia zamianę tekstu na uporządkowaną bazę wiedzy.
+
+**Znaczenie pytań w samodzielnym uczeniu się**
+
+Samodzielna nauka nie polega tylko na odbiorze informacji. Wymaga aktywnego przetwarzania treści. Pytania pełnią tu funkcję sterującą:
+- kierują uwagę na najważniejsze elementy,
+- zmuszają do sprawdzenia, co już wiadomo,
+- pomagają wykryć luki,
+- ułatwiają tworzenie streszczeń,
+- pozwalają oddzielać fakty od przykładów i wyjaśnień.
+
+Osoba lub system, który potrafi zadawać poprawne pytania, uczy się skuteczniej niż ten, który tylko zapisuje zdania bez analizy.
+
+**Podsumowanie**
+
+Pytania są narzędziem zdobywania i porządkowania wiedzy. Służą do uzyskiwania informacji, sprawdzania faktów, definiowania pojęć, wykrywania zależności i organizowania treści. Mogą być zamknięte, otwarte, definicyjne, przyczynowe, porównawcze i procesowe. Dobre pytanie jest jasne, konkretne i osadzone w kontekście.
+
+W pracy z plikami tekstowymi pytania pomagają:
+- rozpoznać temat,
+- wydobyć fakty,
+- zidentyfikować definicje,
+- znaleźć przykłady,
+- ustalić relacje między pojęciami,
+- wykryć brakujące informacje.
+
+Dla systemu M.A.R.I.A. pytania powinny być traktowane jako podstawowy mechanizm analizy tekstu i budowy struktury wiedzy. Jeśli tekst zawiera informacje, to pytania pomagają zamienić je w uporządkowane odpowiedzi, pojęcia i relacje.

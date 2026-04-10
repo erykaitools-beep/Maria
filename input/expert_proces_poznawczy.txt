@@ -1,0 +1,280 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: proces poznawczy
+# Data: 2026-04-10 05:05
+# Pytanie: Maria nie ma zadnej wiedzy o 'proces poznawczy'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Proces poznawczy
+
+## 1. Definicja
+
+**Proces poznawczy** to zespół operacji umysłu, dzięki którym organizm **odbiera informacje, przetwarza je, rozumie, zapamiętuje i wykorzystuje**. Innymi słowy: jest to sposób, w jaki człowiek poznaje świat i tworzy wiedzę o sobie, innych ludziach oraz otoczeniu.
+
+Procesy poznawcze są podstawą uczenia się. Bez nich nie byłoby możliwe:
+- rozpoznawanie obiektów,
+- rozumienie tekstu,
+- zapamiętywanie informacji,
+- rozwiązywanie problemów,
+- podejmowanie decyzji.
+
+## 2. Dlaczego proces poznawczy jest ważny
+
+Dla systemu uczącego się proces poznawczy jest ważny, ponieważ opisuje **kolejność i mechanizmy przetwarzania informacji**. Jeśli system ma uczyć się autonomicznie z plików tekstowych, musi wykonywać działania podobne do podstawowych procesów poznawczych:
+
+- **odbierać dane**,
+- **wybierać to, co istotne**,
+- **łączyć nowe informacje z wcześniejszą wiedzą**,
+- **porządkować wiedzę**,
+- **przechowywać i odzyskiwać informacje**.
+
+## 3. Główne rodzaje procesów poznawczych
+
+Procesy poznawcze można podzielić na kilka podstawowych grup.
+
+### 3.1. Percepcja
+
+**Percepcja** to odbieranie i rozpoznawanie bodźców z otoczenia. U człowieka są to bodźce wzrokowe, słuchowe, dotykowe i inne. Percepcja nie polega tylko na „zobaczeniu” lub „usłyszeniu”, ale także na **nadaniu znaczenia** temu, co zostało odebrane.
+
+**Przykład:**
+- Człowiek widzi napis „proces poznawczy”.
+- Nie tylko dostrzega litery, ale rozpoznaje, że tworzą słowa i mają określone znaczenie.
+
+W kontekście pracy z tekstem percepcja odpowiada za:
+- rozpoznanie znaków,
+- identyfikację słów,
+- wykrycie struktury zdania.
+
+### 3.2. Uwaga
+
+**Uwaga** to proces wybierania części informacji do dalszego przetwarzania. W otoczeniu lub w tekście znajduje się dużo danych, ale nie wszystkie są jednakowo ważne.
+
+Rodzaje uwagi:
+- **uwaga selektywna** – wybór jednego bodźca spośród wielu,
+- **uwaga trwała** – utrzymanie skupienia przez dłuższy czas,
+- **uwaga podzielna** – jednoczesne wykonywanie więcej niż jednego zadania.
+
+**Przykład:**
+- W długim artykule o psychologii najważniejsze mogą być definicje i zależności między pojęciami. Uwaga pozwala odróżnić treść główną od szczegółów drugorzędnych.
+
+Dla systemu uczącego się oznacza to:
+- wykrywanie kluczowych pojęć,
+- odróżnianie informacji głównych od pobocznych,
+- ustalanie priorytetu informacji.
+
+### 3.3. Pamięć
+
+**Pamięć** to zdolność do kodowania, przechowywania i odtwarzania informacji.
+
+Podstawowe etapy pamięci:
+- **kodowanie** – zamiana informacji na postać możliwą do zapisania,
+- **przechowywanie** – utrzymywanie informacji w czasie,
+- **odtwarzanie** – ponowne wykorzystanie zapisanej informacji.
+
+Podstawowe rodzaje pamięci:
+- **pamięć sensoryczna** – bardzo krótkie przechowywanie bodźców,
+- **pamięć krótkotrwała / robocza** – chwilowe operowanie informacją,
+- **pamięć długotrwała** – trwałe przechowywanie wiedzy.
+
+**Przykład:**
+- Uczeń czyta definicję.
+- Przez chwilę utrzymuje ją w pamięci roboczej.
+- Jeśli ją zrozumie i powiąże z inną wiedzą, może zapisać ją w pamięci długotrwałej.
+
+Dla systemu uczącego się:
+- pamięć krótkotrwała przypomina aktualny kontekst przetwarzania,
+- pamięć długotrwała przypomina bazę wiedzy lub uporządkowane notatki.
+
+### 3.4. Myślenie
+
+**Myślenie** to proces operowania informacjami w celu rozumienia, wyjaśniania, porównywania i rozwiązywania problemów.
+
+Myślenie obejmuje między innymi:
+- analizę,
+- syntezę,
+- porównywanie,
+- klasyfikowanie,
+- wnioskowanie.
+
+**Przykład:**
+- Jeśli ktoś wie, że uwaga wybiera informacje, a pamięć je przechowuje, może wywnioskować, że brak uwagi utrudnia zapamiętywanie.
+
+Dla systemu uczącego się myślenie oznacza:
+- wykrywanie relacji między pojęciami,
+- budowanie hierarchii wiedzy,
+- wyciąganie wniosków z tekstu.
+
+### 3.5. Rozumienie
+
+**Rozumienie** to nadawanie znaczenia informacjom. Nie wystarczy odczytać zdanie; trzeba jeszcze ustalić, co ono oznacza.
+
+Rozumienie wymaga:
+- znajomości pojęć,
+- rozpoznania relacji między zdaniami,
+- połączenia nowej informacji z wcześniejszą wiedzą.
+
+**Przykład:**
+- Zdanie „Pamięć robocza ma ograniczoną pojemność” jest zrozumiałe tylko wtedy, gdy wiadomo, czym jest pamięć robocza i co znaczy „ograniczona pojemność”.
+
+### 3.6. Wnioskowanie
+
+**Wnioskowanie** to dochodzenie do nowych informacji na podstawie już posiadanych danych.
+
+Dwa ważne typy:
+- **dedukcja** – od zasady ogólnej do przypadku szczegółowego,
+- **indukcja** – od obserwacji szczegółowych do uogólnienia.
+
+**Przykład dedukcji:**
+- Wszystkie procesy poznawcze służą przetwarzaniu informacji.
+- Pamięć jest procesem poznawczym.
+- Zatem pamięć służy przetwarzaniu informacji.
+
+**Przykład indukcji:**
+- W wielu tekstach definicje pojawiają się na początku akapitu.
+- Można uogólnić, że początek akapitu często zawiera informację kluczową.
+
+### 3.7. Podejmowanie decyzji
+
+**Podejmowanie decyzji** polega na wyborze jednej możliwości spośród kilku dostępnych.
+
+**Przykład:**
+- Czy dana informacja jest definicją, przykładem czy szczegółem pomocniczym?
+- Czy warto ją zapisać jako pojęcie główne, czy jako informację dodatkową?
+
+W systemie uczącym się oznacza to m.in.:
+- wybór istotnych fragmentów tekstu,
+- wybór sposobu klasyfikacji informacji,
+- wybór struktury notatek.
+
+## 4. Jak przebiega proces poznawczy
+
+Proces poznawczy można opisać jako sekwencję etapów:
+
+1. **Odbiór informacji**  
+   Dane docierają do systemu lub człowieka.
+
+2. **Selekcja informacji**  
+   Uwaga wybiera to, co najważniejsze.
+
+3. **Analiza i interpretacja**  
+   Informacje są rozpoznawane i otrzymują znaczenie.
+
+4. **Powiązanie z wcześniejszą wiedzą**  
+   Nowa wiedza jest porównywana z już znaną.
+
+5. **Zapamiętanie**  
+   Informacja zostaje zapisana w uporządkowanej postaci.
+
+6. **Wykorzystanie wiedzy**  
+   Informacja służy do odpowiedzi, decyzji lub rozwiązania problemu.
+
+## 5. Kluczowe pojęcia powiązane
+
+### 5.1. Bodziec
+Element docierający do systemu poznawczego, np. słowo, obraz, dźwięk, zdanie.
+
+### 5.2. Informacja
+Treść, którą można odebrać i przetworzyć.
+
+### 5.3. Reprezentacja poznawcza
+Wewnętrzna postać wiedzy. Może mieć formę pojęcia, kategorii, schematu lub relacji.
+
+### 5.4. Schemat poznawczy
+Uporządkowana struktura wiedzy o obiekcie, zdarzeniu lub pojęciu.
+
+**Przykład:**
+- Schemat „książka” może obejmować: autora, tytuł, treść, rozdziały, temat.
+
+### 5.5. Kategoryzacja
+Przypisywanie obiektów lub informacji do określonych klas.
+
+**Przykład:**
+- „Uwaga”, „pamięć” i „myślenie” można zaklasyfikować jako procesy poznawcze.
+
+## 6. Przykład procesu poznawczego przy czytaniu tekstu
+
+Załóżmy, że system lub człowiek czyta zdanie:
+
+**„Pamięć długotrwała umożliwia przechowywanie wiedzy przez długi czas.”**
+
+Występują tu kolejne operacje:
+- percepcja rozpoznaje słowa,
+- uwaga skupia się na treści zdania,
+- rozumienie ustala znaczenie pojęcia „pamięć długotrwała”,
+- myślenie łączy tę informację z innymi rodzajami pamięci,
+- pamięć zapisuje nową wiedzę,
+- wnioskowanie pozwala uznać, że pamięć długotrwała jest ważna dla uczenia się.
+
+## 7. Znaczenie procesu poznawczego dla autonomicznej nauki z tekstów
+
+Dla systemu M.A.R.I.A. temat procesu poznawczego jest szczególnie ważny, ponieważ pokazuje, **jak przechodzić od surowego tekstu do uporządkowanej wiedzy**.
+
+Praktyczne zastosowanie:
+- **identyfikacja pojęć** – wykrywanie ważnych terminów,
+- **wykrywanie definicji** – rozpoznawanie zdań typu „X to...”,
+- **łączenie informacji** – budowanie relacji między pojęciami,
+- **hierarchizacja wiedzy** – odróżnianie pojęć głównych od przykładów,
+- **tworzenie struktury** – zamiana tekstu na sekcje, kategorie i mapy pojęć.
+
+## 8. Jak rozpoznawać elementy procesu poznawczego w plikach tekstowych
+
+Podczas analizy tekstu warto szukać:
+
+- **definicji**  
+  Sygnały językowe: „to jest”, „oznacza”, „nazywamy”, „polega na”.
+
+- **podziałów i klasyfikacji**  
+  Sygnały: „rodzaje”, „typy”, „dzieli się na”.
+
+- **relacji przyczynowych**  
+  Sygnały: „powoduje”, „prowadzi do”, „wpływa na”.
+
+- **przykładów**  
+  Sygnały: „na przykład”, „np.”, „przykładem jest”.
+
+- **wniosków**  
+  Sygnały: „zatem”, „dlatego”, „wynika z tego”.
+
+To podejście pomaga przełożyć tekst na strukturę wiedzy.
+
+## 9. Najczęstsze błędy w rozumieniu tematu
+
+- **Mylenie procesu poznawczego z jednym tylko elementem**, np. samą pamięcią.  
+  Proces poznawczy to szersza kategoria.
+
+- **Zakładanie, że odbiór informacji wystarcza do poznania.**  
+  Sama percepcja nie oznacza jeszcze zrozumienia.
+
+- **Pomijanie roli uwagi.**  
+  Informacja nieuwzględniona przez uwagę może nie zostać dobrze przetworzona.
+
+- **Traktowanie pamięci jako prostego magazynu.**  
+  Pamięć obejmuje nie tylko zapis, ale także organizację i odtwarzanie wiedzy.
+
+## 10. Podsumowanie
+
+Proces poznawczy to podstawowy mechanizm poznawania i uczenia się. Obejmuje:
+- odbiór informacji,
+- selekcję informacji,
+- rozumienie,
+- pamięć,
+- myślenie,
+- wnioskowanie,
+- podejmowanie decyzji.
+
+Dla autonomicznej nauki z plików tekstowych najważniejsze jest to, że proces poznawczy można traktować jako **model przetwarzania wiedzy**. Najpierw trzeba odebrać dane, potem wybrać to, co ważne, zrozumieć znaczenie, połączyć z wcześniejszą wiedzą i zapisać w uporządkowanej formie.
+
+## 11. Krótka mapa pojęć
+
+- **Proces poznawczy**: całość operacji przetwarzania informacji
+- **Percepcja**: odbiór i rozpoznanie bodźców
+- **Uwaga**: wybór informacji istotnych
+- **Pamięć**: kodowanie, przechowywanie i odtwarzanie
+- **Myślenie**: analiza, porównanie, rozwiązywanie problemów
+- **Rozumienie**: nadawanie znaczenia
+- **Wnioskowanie**: wyprowadzanie nowych informacji
+- **Decyzja**: wybór działania lub interpretacji
+
+Jeśli chcesz, mogę w następnym kroku przygotować też **wersję tego materiału w formacie do uczenia maszynowego**, np. jako:
+- `JSON z definicjami i relacjami`,
+- `flashcards pytanie-odpowiedz`,
+- `notatkę hierarchiczną`,
+- `zestaw testowy`.
