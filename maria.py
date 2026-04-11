@@ -313,8 +313,9 @@ def main():
         ctx.onboarding_flow = onboarding
 
         if onboarding.should_run() and mode != "daemon":
-            result = onboarding.run()
-            print(result["text"])
+            result = onboarding.run(input_fn=input)
+            if result.get("text"):
+                print(result["text"])
         else:
             logger.debug("Onboarding already completed - skipping")
 

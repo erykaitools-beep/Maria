@@ -307,12 +307,16 @@ class OnboardingFlow:
                 return step.to_dict()
         return None
 
-    def run(self) -> Dict[str, Any]:
+    def run(self, input_fn=None) -> Dict[str, Any]:
         """
         Run the full onboarding flow (text output for REPL).
 
-        Prints each step and returns summary.
-        Does NOT require user interaction - just informational.
+        Displays introduction steps and optionally asks for user name.
+
+        Args:
+            input_fn: Function to get user input. Pass builtin `input`
+                      for interactive mode (REPL). If None, runs non-interactive
+                      (daemon/tests - no user prompts, uses defaults).
 
         Returns:
             Dict with steps shown and completion status.
@@ -334,27 +338,55 @@ class OnboardingFlow:
 
         output_lines.append("")
         output_lines.append("=" * 50)
+
+        # Collect user preferences (interactive only)
+        preferences = {"autonomy_level": "medium"}
+        if input_fn is not None:
+            try:
+                print("\n".join(output_lines))
+                name = input_fn("\n  Jak masz na imie? > ").strip()
+                if name:
+                    preferences["name"] = name
+                    print(f"\n  Milo Cie poznac, {name}!")
+                else:
+                    print("\n  Mozesz podac imie pozniej przez /profile.")
+
+                print("\n  Jaki poziom autonomii preferujesz?")
+                for key, preset in AUTONOMY_PRESETS.items():
+                    print(f"    [{key}] {preset['label']}: {preset['description']}")
+                level = input_fn(
+                    "\n  Wybierz [low/medium/high] (domyslnie: medium) > "
+                ).strip().lower()
+                if level in AUTONOMY_PRESETS:
+                    preferences["autonomy_level"] = level
+                print(f"  Ustawiono: {AUTONOMY_PRESETS[preferences['autonomy_level']]['label']}")
+            except (EOFError, KeyboardInterrupt):
+                pass  # Use defaults
+
         output_lines.append("  Onboarding zakonczony. Milej pracy!")
         output_lines.append("=" * 50)
         output_lines.append("")
 
         text = "\n".join(output_lines)
 
-        # Mark as completed
-        self.mark_completed()
+        # Mark as completed with collected preferences
+        self.mark_completed(preferences)
 
         return {
             "text": text,
             "steps_count": len(steps),
             "completed": True,
+            "preferences": preferences,
         }
 
     def mark_completed(self, preferences: Optional[Dict] = None) -> None:
         """
         Mark onboarding as completed in IdentityStore.
+        Saves user preferences to UserProfile if available.
 
         Args:
             preferences: Optional user preferences from onboarding.
+                Expected keys: name, autonomy_level, language
         """
         identity = self._ctx.identity_store
         if not identity:
@@ -366,11 +398,32 @@ class OnboardingFlow:
         if preferences:
             data[self._PREFERENCES_KEY] = preferences
 
-        # Persist
+        # Persist to IdentityStore
         try:
             identity._save()
         except Exception as e:
             logger.warning(f"Failed to save onboarding state: {e}")
+
+        # Save to UserProfile if available
+        if preferences:
+            self._save_to_user_profile(preferences)
+
+    def _save_to_user_profile(self, preferences: Dict) -> None:
+        """Save onboarding preferences to UserProfile."""
+        profile = getattr(self._ctx, "user_profile", None)
+        if not profile:
+            return
+
+        try:
+            if preferences.get("name"):
+                profile.set_name(preferences["name"])
+            if preferences.get("autonomy_level"):
+                profile.set_preference("autonomy_level", preferences["autonomy_level"])
+            if preferences.get("language"):
+                profile.set_preference("language", preferences["language"])
+            logger.info("Onboarding preferences saved to UserProfile")
+        except Exception as e:
+            logger.debug(f"Failed to save to UserProfile: {e}")
 
     def reset(self) -> None:
         """
