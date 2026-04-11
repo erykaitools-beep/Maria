@@ -1,0 +1,447 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: niepełna informacja
+# Data: 2026-04-11 04:21
+# Pytanie: Maria nie ma zadnej wiedzy o 'niepełna informacja'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Niepełna informacja**
+
+## Definicja
+
+**Niepełna informacja** to sytuacja, w której system, człowiek lub model nie ma dostępu do wszystkich danych potrzebnych do pełnego i pewnego opisu obiektu, zdarzenia lub problemu.
+
+Oznacza to, że:
+- część danych jest brakująca,
+- część danych jest ukryta,
+- część danych nie została jeszcze pozyskana,
+- część danych może być niejednoznaczna lub trudna do potwierdzenia.
+
+Niepełna informacja nie oznacza automatycznie błędu. Oznacza tylko, że stan wiedzy jest **niepełny**.
+
+## Dlaczego to ważne
+
+W systemie uczącym się z plików tekstowych niepełna informacja występuje bardzo często. Tekst:
+- może pomijać istotne fakty,
+- może zakładać wiedzę wcześniejszą,
+- może opisywać tylko fragment zjawiska,
+- może zawierać luki logiczne,
+- może być skrótem większej całości.
+
+Jeśli system nie rozpoznaje niepełnej informacji, może:
+- wyciągać zbyt mocne wnioski,
+- traktować brak danych jako dowód,
+- mieszać fakty z domysłami,
+- budować błędne reprezentacje wiedzy.
+
+Dlatego rozpoznawanie luk w wiedzy jest podstawą bezpiecznej autonomicznej nauki.
+
+## Podstawowe pojęcia
+
+### 1. Dane dostępne
+Informacje obecne bezpośrednio w źródle.
+
+**Przykład:**  
+„Jan kupił samochód w 2022 roku.”  
+Dostępne dane:
+- osoba: Jan,
+- czynność: kupił,
+- obiekt: samochód,
+- czas: 2022 rok.
+
+### 2. Dane brakujące
+Informacje potrzebne do pełniejszego zrozumienia, ale niepodane wprost.
+
+W powyższym przykładzie brakuje:
+- marki samochodu,
+- ceny,
+- miejsca zakupu,
+- powodu zakupu.
+
+### 3. Niewiedza
+Stan, w którym system nie ma podstaw, by ustalić odpowiedź.
+
+Poprawna reakcja na pytanie „Jaki to był samochód?” brzmi:  
+**„Nie wiadomo na podstawie podanego tekstu.”**
+
+### 4. Niepewność
+Stan, w którym istnieją możliwe odpowiedzi, ale brak pewności, która jest prawdziwa.
+
+### 5. Założenie
+Informacja dodana przez interpretujący system mimo braku bezpośredniego potwierdzenia.
+
+**Błędne założenie:**  
+„Jan kupił nowy samochód.”  
+Tekst tego nie mówi.
+
+### 6. Wnioskowanie
+Proces wyprowadzania nowej informacji z danych istniejących.
+
+Wnioskowanie może być:
+- **pewne** – logicznie wynika z tekstu,
+- **prawdopodobne** – możliwe, ale niepewne,
+- **niedozwolone** – nie ma podstaw w danych.
+
+## Niepełna informacja a brak informacji
+
+Te pojęcia są podobne, ale nie identyczne.
+
+- **Brak informacji**: konkretna informacja nie występuje w źródle.
+- **Niepełna informacja**: cały opis jest niewystarczający do pełnego zrozumienia problemu.
+
+**Przykład:**  
+Zdanie: „W eksperymencie uzyskano poprawę wyników.”  
+Brakuje:
+- jaki eksperyment,
+- jaka poprawa,
+- względem czego,
+- na jakiej próbie,
+- jak mierzono wynik.
+
+To nie jest tylko pojedynczy brak. To opis ogólnie niepełny.
+
+## Główne rodzaje niepełnej informacji
+
+## 1. Braki jawne
+
+To luki łatwe do zauważenia, bo tekst wprost nie podaje kluczowego elementu.
+
+**Przykład:**  
+„Pacjent otrzymał lek.”  
+Nie wiadomo:
+- jaki lek,
+- w jakiej dawce,
+- kiedy,
+- z jakiego powodu.
+
+## 2. Braki ukryte
+
+Tekst wydaje się pełny, ale pomija ważny kontekst.
+
+**Przykład:**  
+„Model osiągnął 95% skuteczności.”  
+Brak ukrytego kontekstu:
+- na jakim zbiorze danych,
+- według jakiej metryki,
+- dla jakiego zadania,
+- czy wynik dotyczy testu czy treningu.
+
+## 3. Braki czasowe
+
+Informacja jest częściowa, bo dotyczy tylko jednego momentu.
+
+**Przykład:**  
+„Firma miała 100 pracowników.”  
+Nie wiadomo:
+- kiedy,
+- czy liczba wzrosła,
+- czy spadła,
+- czy to stan chwilowy.
+
+## 4. Braki relacyjne
+
+Nie wiadomo, jak elementy są ze sobą powiązane.
+
+**Przykład:**  
+„Anna rozmawiała z Piotrem po spotkaniu z dyrektorem.”  
+Nie wiadomo:
+- czy Piotr brał udział w spotkaniu,
+- czy dyrektor to przełożony Anny,
+- czego dotyczyła rozmowa.
+
+## 5. Braki definicyjne
+
+Użyte pojęcia nie są dostatecznie zdefiniowane.
+
+**Przykład:**  
+„System działa lepiej.”  
+Nie wiadomo:
+- co znaczy „lepiej”,
+- według jakiego kryterium,
+- w porównaniu z czym.
+
+## Niepełna informacja w tekstach
+
+W nauce z plików tekstowych system często spotyka trzy poziomy treści:
+
+### 1. Treść wyrażona wprost
+To, co jest dosłownie zapisane.
+
+### 2. Treść wynikająca logicznie
+To, co można bezpiecznie wywnioskować.
+
+**Przykład:**  
+„Każdy ssak oddycha powietrzem. Delfin jest ssakiem.”  
+Wniosek logiczny: delfin oddycha powietrzem.
+
+### 3. Treść nieustalona
+To, czego nie da się ustalić na podstawie tekstu.
+
+**Przykład:**  
+Nie można ustalić, gdzie żyje ten delfin, jeśli tekst tego nie podaje.
+
+Dojrzały system uczący się powinien rozdzielać te trzy poziomy.
+
+## Przykłady
+
+## Przykład 1
+
+Tekst:  
+„Katarzyna odwiedziła bibliotekę, ponieważ przygotowywała projekt.”
+
+Co wiadomo:
+- osoba: Katarzyna,
+- czynność: odwiedziła bibliotekę,
+- przyczyna: przygotowywała projekt.
+
+Czego nie wiadomo:
+- jaki projekt,
+- kiedy odbyła się wizyta,
+- co zrobiła w bibliotece,
+- czy wypożyczyła książki.
+
+Bezpieczny wniosek:
+- wizyta miała związek z przygotowaniem projektu.
+
+Niebezpieczny wniosek:
+- „Katarzyna wypożyczyła książki.”  
+To nie wynika z tekstu.
+
+## Przykład 2
+
+Tekst:  
+„W badaniu grupa A osiągnęła lepsze wyniki niż grupa B.”
+
+Co wiadomo:
+- były dwie grupy,
+- grupa A miała lepszy wynik niż grupa B.
+
+Czego nie wiadomo:
+- liczebność grup,
+- rodzaj badania,
+- miara wyniku,
+- wielkość różnicy,
+- istotność statystyczna.
+
+To klasyczny przypadek informacji niepełnej, mimo że zdanie wydaje się informacyjne.
+
+## Przykład 3
+
+Tekst:  
+„Urządzenie działa poprawnie po aktualizacji.”
+
+Braki:
+- jakie urządzenie,
+- jaka aktualizacja,
+- co znaczy „poprawnie”,
+- czy wcześniej występował błąd,
+- czy poprawność dotyczy wszystkich funkcji.
+
+## Różnica między niepełną informacją a fałszem
+
+To bardzo ważne.
+
+- **Fałsz**: informacja sprzeczna z rzeczywistością lub danymi.
+- **Niepełna informacja**: informacja niewystarczająca.
+
+**Przykład:**  
+„Warszawa jest stolicą Polski.”  
+To informacja pełna w swoim zakresie i prawdziwa.
+
+„Warszawa jest dużym miastem.”  
+To informacja częściowa i ogólna, ale niekoniecznie fałszywa.
+
+„Stolicą Polski jest Kraków.”  
+To fałsz.
+
+System nie może traktować każdej niepełności jak błędu. Często tekst jest częściowy, ale poprawny.
+
+## Jak wykrywać luki w wiedzy
+
+Przy analizie tekstu można zadawać zestaw pytań kontrolnych:
+
+### O obiekty
+- Kto?
+- Co?
+- Jaki obiekt?
+- Ilu?
+
+### O czas
+- Kiedy?
+- Jak długo?
+- W jakiej kolejności?
+
+### O miejsce
+- Gdzie?
+- W jakim kontekście przestrzennym?
+
+### O przyczynę i skutek
+- Dlaczego?
+- Co z czego wynika?
+- Czy związek jest potwierdzony?
+
+### O definicje
+- Co znaczą użyte pojęcia?
+- Czy termin jest jednoznaczny?
+
+### O źródło pewności
+- Czy to fakt zapisany wprost?
+- Czy to wniosek?
+- Czy to tylko przypuszczenie?
+
+Jeżeli na wiele z tych pytań nie ma odpowiedzi, system ma do czynienia z niepełną informacją.
+
+## Strategie pracy z niepełną informacją
+
+## 1. Oznaczanie luk
+
+System powinien umieć zapisać nie tylko wiedzę, ale także brak wiedzy.
+
+Przykład struktury:
+- fakt: „Jan kupił samochód”
+- czas: „2022”
+- marka: „nieznana”
+- cena: „niepodana w źródle”
+
+To lepsze niż wymyślanie brakujących danych.
+
+## 2. Oddzielanie faktów od inferencji
+
+Każdy element wiedzy warto oznaczyć jako:
+- fakt ze źródła,
+- wniosek logiczny,
+- hipoteza,
+- pytanie otwarte.
+
+## 3. Zachowanie wielu możliwości
+
+Jeśli tekst dopuszcza kilka interpretacji, nie należy wybierać jednej bez podstaw.
+
+**Przykład:**  
+„Po spotkaniu dyrektor zadzwonił do Marka.”  
+Nie wiadomo, czy:
+- dyrektor dzwonił do pracownika,
+- Marka nie było na spotkaniu,
+- rozmowa dotyczyła spotkania.
+
+## 4. Aktualizacja wiedzy
+
+Niepełna informacja może zostać później uzupełniona przez nowe źródło. System powinien:
+- umieć dodać nowe dane,
+- umieć poprawić wcześniejszy stan niewiedzy,
+- nie traktować pierwszej wersji jako ostatecznej.
+
+## 5. Zadawanie pytań uzupełniających
+
+Dla autonomicznego uczenia ważne jest generowanie pytań, takich jak:
+- „Jakie dane są brakujące?”
+- „Które pojęcia wymagają definicji?”
+- „Jakie relacje nie zostały ustalone?”
+- „Jakie dodatkowe źródło mogłoby uzupełnić lukę?”
+
+## Niepełna informacja w reprezentacji wiedzy
+
+Jeśli system buduje bazę wiedzy, powinien przechowywać:
+- treść faktu,
+- źródło,
+- poziom pewności,
+- typ braków,
+- pytania otwarte.
+
+Przykład:
+- fakt: „Model osiągnął 95% skuteczności”
+- źródło: dokument X
+- pewność: wysoka dla samej liczby
+- luki:
+  - brak metryki
+  - brak zbioru testowego
+  - brak porównania bazowego
+
+Taka reprezentacja jest użyteczna, bo nie ukrywa ograniczeń wiedzy.
+
+## Typowe błędy przy pracy z niepełną informacją
+
+## 1. Uzupełnianie luk intuicją
+System dopisuje szczegóły, których nie ma w tekście.
+
+## 2. Mylenie braku danych z zaprzeczeniem
+Jeśli tekst nie mówi, że coś zaszło, nie znaczy to, że to nie zaszło.
+
+Brak informacji o zdarzeniu to nie dowód, że zdarzenie nie wystąpiło.
+
+## 3. Nadmierne uogólnienie
+Z jednego przykładu nie wolno wyprowadzać reguły ogólnej bez podstaw.
+
+## 4. Ignorowanie kontekstu
+Tekst może być fragmentem większej całości.
+
+## 5. Brak oznaczenia poziomu pewności
+Wszystkie informacje są traktowane tak samo, mimo że część jest pewna, a część tylko przypuszczalna.
+
+## Zastosowanie praktyczne dla M.A.R.I.A.
+
+Dla systemu lokalnego uczącego się z plików tekstowych temat niepełnej informacji ma znaczenie operacyjne.
+
+M.A.R.I.A. powinna umieć:
+
+- wykrywać, które elementy tekstu są faktami jawnymi,
+- rozpoznawać brakujące pola opisu,
+- nie tworzyć niepotwierdzonych szczegółów,
+- przechowywać pytania bez odpowiedzi,
+- aktualizować wiedzę po odczycie nowych plików,
+- oznaczać relacje jako pewne, niepewne albo nieustalone.
+
+### Minimalny schemat analizy tekstu
+
+Po przeczytaniu fragmentu tekstu system może tworzyć cztery sekcje:
+
+1. **Fakty jawne**
+2. **Bezpieczne wnioski**
+3. **Luki informacyjne**
+4. **Pytania do dalszego uczenia**
+
+### Przykład
+
+Tekst:  
+„Sensor przestał działać po burzy. Po wymianie przewodu urządzenie wróciło do pracy.”
+
+Fakty jawne:
+- sensor przestał działać po burzy,
+- wymieniono przewód,
+- urządzenie wróciło do pracy.
+
+Bezpieczne wnioski:
+- awaria wystąpiła przed wymianą przewodu,
+- wymiana przewodu poprzedzała powrót do pracy.
+
+Luki informacyjne:
+- jaki był typ sensora,
+- czy burza była bezpośrednią przyczyną,
+- jaki przewód wymieniono,
+- czy problem został rozwiązany trwale.
+
+Pytania:
+- czy wykonano diagnostykę,
+- czy uszkodzenie dotyczyło przewodu czy innego modułu,
+- czy są dane z kolejnych dni pracy.
+
+## Kluczowe zasady
+
+- Nie zakładaj danych, których nie ma w źródle.
+- Odróżniaj fakt od interpretacji.
+- Brak informacji nie jest zaprzeczeniem.
+- Każdy tekst ma granice informacyjne.
+- Wiedza może być poprawna, ale niepełna.
+- Luki powinny być jawnie zapisane.
+- Nowe źródła mogą zmieniać stan wiedzy.
+
+## Podsumowanie
+
+Niepełna informacja to podstawowy problem w uczeniu z tekstu. Polega na tym, że źródło dostarcza tylko część wiedzy potrzebnej do pełnego opisu rzeczywistości. Dla systemu autonomicznego najważniejsze jest nie tylko gromadzenie faktów, ale także rozpoznawanie tego, czego jeszcze nie wiadomo.
+
+Poprawne podejście obejmuje:
+- ekstrakcję faktów,
+- ostrożne wnioskowanie,
+- oznaczanie luk,
+- przechowywanie pytań otwartych,
+- późniejszą aktualizację wiedzy.
+
+System, który rozumie niepełną informację, uczy się bezpieczniej, dokładniej i bardziej modułowo. To jest warunek budowy wiarygodnej pamięci i poprawnej strukturyzacji wiedzy z plików tekstowych.

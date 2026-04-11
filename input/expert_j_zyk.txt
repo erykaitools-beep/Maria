@@ -1,0 +1,501 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: język
+# Data: 2026-04-10 21:34
+# Pytanie: Maria nie ma zadnej wiedzy o 'język'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Język: podstawy pojęcia, struktury i użycia**
+
+## 1. Czym jest język
+
+**Język** to uporządkowany system znaków i reguł, który służy do przekazywania informacji, opisywania świata, wyrażania myśli oraz organizowania wiedzy.
+
+Najprostsza definicja:
+
+- język pozwala **tworzyć komunikaty**
+- komunikaty mają **znaczenie**
+- znaczenie jest przekazywane za pomocą **ustalonych znaków i zasad**
+
+### Przykład
+Zdanie:
+
+`Kot śpi na kanapie.`
+
+jest komunikatem językowym, ponieważ:
+
+- składa się ze znaków (liter i słów)
+- ma strukturę zgodną z regułami
+- niesie informację o stanie rzeczy
+
+## 2. Dlaczego język jest ważny
+
+Język pełni kilka podstawowych funkcji:
+
+- **komunikacyjna** – umożliwia przekazywanie informacji
+- **poznawcza** – pomaga opisywać i porządkować rzeczywistość
+- **społeczna** – pozwala budować relacje i współpracę
+- **kulturowa** – przenosi wiedzę, normy i tradycje
+- **organizacyjna** – umożliwia tworzenie instrukcji, dokumentów, planów i kategorii
+
+Dla systemu uczącego się z tekstów język jest podstawowym nośnikiem wiedzy. To właśnie w języku zapisane są:
+
+- definicje
+- opisy obiektów
+- zależności przyczynowe
+- procedury
+- reguły i wyjątki
+
+## 3. Język naturalny i język sztuczny
+
+### Język naturalny
+To język używany przez ludzi w codziennej komunikacji, na przykład:
+
+- polski
+- angielski
+- niemiecki
+- hiszpański
+
+Cechy języka naturalnego:
+
+- rozwija się historycznie
+- zawiera wieloznaczność
+- ma wyjątki
+- zależy od kontekstu
+
+### Język sztuczny
+To język zaprojektowany celowo, zwykle do konkretnego zastosowania, na przykład:
+
+- język programowania Python
+- logika formalna
+- języki notacji matematycznej
+
+Cechy języka sztucznego:
+
+- ma ściśle określone reguły
+- dąży do jednoznaczności
+- jest bardziej formalny niż język naturalny
+
+## 4. Podstawowe jednostki języka
+
+Język można analizować warstwowo. To ważne przy nauce z plików tekstowych.
+
+### 4.1. Znak
+**Znak** to element, który coś oznacza.
+
+Przykłady:
+
+- litera `a`
+- słowo `dom`
+- znak interpunkcyjny `?`
+
+W języku znak ma zwykle:
+
+- **formę** – jak wygląda lub brzmi
+- **znaczenie** – do czego się odnosi
+
+### 4.2. Głoska i litera
+- **głoska** – najmniejsza jednostka dźwiękowa mowy
+- **litera** – graficzny zapis dźwięku lub części dźwięku
+
+Przykład:
+Słowo `kot` składa się z liter: `k`, `o`, `t`.
+
+### 4.3. Słowo
+**Słowo** to podstawowa jednostka leksykalna języka, mająca znaczenie.
+
+Przykłady:
+
+- `drzewo`
+- `biec`
+- `czerwony`
+
+### 4.4. Zdanie
+**Zdanie** to uporządkowany ciąg słów, który tworzy pełny komunikat.
+
+Przykłady:
+
+- `Pada deszcz.`
+- `Maria analizuje tekst.`
+
+### 4.5. Tekst
+**Tekst** to większa całość złożona ze zdań, powiązanych znaczeniowo i strukturalnie.
+
+Przykłady tekstów:
+
+- artykuł
+- instrukcja
+- raport
+- dialog
+- notatka
+
+## 5. Poziomy analizy języka
+
+Przy przetwarzaniu wiedzy z plików warto rozróżniać kilka poziomów.
+
+### 5.1. Fonologia
+Zajmuje się dźwiękami języka.
+
+Istotna głównie dla mowy, mniej dla analizy czystego tekstu.
+
+### 5.2. Morfologia
+Bada budowę słów.
+
+Przykład:
+Słowo `czytaliśmy` można rozłożyć na elementy wskazujące:
+
+- czynność
+- czas przeszły
+- liczbę mnogą
+- osobę mówiącą
+
+### 5.3. Składnia
+Bada, jak słowa łączą się w zdania.
+
+Przykład:
+`Pies goni kota.`
+
+Relacje składniowe:
+
+- `pies` – wykonawca czynności
+- `goni` – czynność
+- `kota` – obiekt czynności
+
+### 5.4. Semantyka
+Bada znaczenie słów i zdań.
+
+Przykład:
+Zdanie `Woda wrze w temperaturze 100°C` wyraża konkretną informację o właściwości wody.
+
+### 5.5. Pragmatyka
+Bada znaczenie w kontekście użycia.
+
+Przykład:
+Zdanie `Tu jest zimno.` może oznaczać:
+
+- prosty opis temperatury
+- pośrednią prośbę o zamknięcie okna
+
+## 6. Znaczenie i kontekst
+
+Jedno z najważniejszych zagadnień w języku to **znaczenie**.
+
+### 6.1. Znaczenie słowa
+Słowo odnosi się do pojęcia, obiektu, cechy lub działania.
+
+Przykłady:
+
+- `jabłko` – obiekt
+- `szybki` – cecha
+- `myśleć` – czynność poznawcza
+
+### 6.2. Wieloznaczność
+Jedno słowo może mieć więcej niż jedno znaczenie.
+
+Przykład:
+`zamek` może oznaczać:
+
+- budowlę obronną
+- mechanizm w drzwiach
+- suwak w ubraniu
+
+Rozpoznanie poprawnego znaczenia wymaga kontekstu.
+
+### 6.3. Kontekst
+**Kontekst** to otoczenie językowe lub sytuacyjne, które pomaga zrozumieć znaczenie.
+
+Przykłady:
+
+- `Zamek stoi na wzgórzu.` → budowla
+- `Zamek się zaciął.` → mechanizm
+- `Zepsuł się zamek w kurtce.` → suwak
+
+Dla systemu analizującego tekst kontekst jest kluczowy przy:
+
+- rozstrzyganiu wieloznaczności
+- identyfikacji tematu
+- budowaniu poprawnych relacji między pojęciami
+
+## 7. Język a wiedza
+
+Język nie jest tylko zbiorem słów. Jest narzędziem reprezentacji wiedzy.
+
+W tekstach wiedza pojawia się jako:
+
+- **fakty** – `Ziemia krąży wokół Słońca.`
+- **definicje** – `Ssak to kręgowiec karmiący młode mlekiem.`
+- **klasyfikacje** – `Ptaki są grupą kręgowców.`
+- **relacje** – `Woda składa się z wodoru i tlenu.`
+- **procedury** – `Najpierw otwórz plik, potem odczytaj dane.`
+- **warunki** – `Jeśli temperatura spada poniżej zera, woda zamarza.`
+
+To oznacza, że nauka z tekstu wymaga rozpoznawania struktur wiedzy ukrytych w języku.
+
+## 8. Kluczowe pojęcia przy analizie tekstu
+
+### 8.1. Pojęcie
+**Pojęcie** to umysłowe ujęcie klasy obiektów, cech lub zjawisk.
+
+Przykład:
+Pojęcie `ptak` obejmuje wiele konkretnych obiektów, takich jak wróbel, orzeł i pingwin.
+
+### 8.2. Kategoria
+**Kategoria** to grupa elementów mających wspólne cechy.
+
+Przykład:
+Kategoria `owoce` może zawierać:
+
+- jabłko
+- gruszkę
+- śliwkę
+
+### 8.3. Relacja
+**Relacja** to związek między pojęciami.
+
+Przykłady:
+
+- `kot` jest rodzajem `ssaka`
+- `Paryż` jest stolicą `Francji`
+- `ogień` powoduje `spalanie`
+
+### 8.4. Atrybut
+**Atrybut** to cecha przypisana obiektowi lub pojęciu.
+
+Przykłady:
+
+- samochód ma kolor
+- człowiek ma wiek
+- plik ma nazwę i rozmiar
+
+## 9. Struktura informacji w języku
+
+W praktyce tekst można rozbierać na elementy użyteczne dla systemu uczącego się.
+
+### 9.1. Obiekty
+Rzeczy, osoby, miejsca, zjawiska.
+
+Przykłady:
+
+- `Warszawa`
+- `komputer`
+- `burza`
+
+### 9.2. Czynności
+Działania lub procesy.
+
+Przykłady:
+
+- `czytać`
+- `zapisywać`
+- `porównywać`
+
+### 9.3. Cechy
+Właściwości obiektów.
+
+Przykłady:
+
+- `duży`
+- `czerwony`
+- `stabilny`
+
+### 9.4. Zależności
+Powiązania logiczne lub przyczynowe.
+
+Przykłady:
+
+- `A powoduje B`
+- `A należy do B`
+- `A jest częścią B`
+
+## 10. Przykład analizy krótkiego tekstu
+
+Tekst:
+
+`Pies jest ssakiem. Pies ma cztery łapy. Psy często żyją z ludźmi.`
+
+Można z niego wydobyć:
+
+- pojęcie: `pies`
+- kategoria nadrzędna: `ssak`
+- atrybut: `cztery łapy`
+- relacja: `żyje z ludźmi`
+
+Możliwa strukturyzacja wiedzy:
+
+- `pies -> jest_typem -> ssak`
+- `pies -> ma -> cztery łapy`
+- `pies -> często_żyje_z -> człowiek`
+
+To pokazuje, że język może być przekształcany w bardziej formalną reprezentację wiedzy.
+
+## 11. Cechy języka ważne dla systemu uczącego się
+
+### 11.1. Sekwencyjność
+Tekst jest liniowy: słowa występują w określonej kolejności. Kolejność wpływa na znaczenie.
+
+Przykład:
+
+- `Jan lubi Annę.`
+- `Annę lubi Jan.`
+
+Znaczenie główne jest podobne, ale akcent informacyjny inny.
+
+### 11.2. Hierarchiczność
+Język ma strukturę zagnieżdżoną:
+
+- litery tworzą słowa
+- słowa tworzą zdania
+- zdania tworzą akapity
+- akapity tworzą tekst
+
+### 11.3. Redundancja
+Część informacji może się powtarzać lub być przewidywalna.
+
+To pomaga rozumieć tekst nawet przy brakach lub błędach.
+
+### 11.4. Niejednoznaczność
+Ten sam zapis może mieć różne interpretacje.
+
+To wymaga:
+
+- analizy kontekstu
+- porównania sąsiednich zdań
+- identyfikacji tematu tekstu
+
+## 12. Typowe elementy tekstów edukacyjnych i informacyjnych
+
+W plikach tekstowych często występują powtarzalne wzorce. Warto je rozpoznawać.
+
+### Definicje
+Sygnały językowe:
+
+- `X to...`
+- `X jest...`
+- `Przez X rozumie się...`
+
+Przykład:
+`Język to system znaków służący komunikacji.`
+
+### Klasyfikacje
+Sygnały:
+
+- `należy do`
+- `jest rodzajem`
+- `dzieli się na`
+
+Przykład:
+`Ssaki dzielą się na lądowe i wodne.`
+
+### Relacje przyczynowe
+Sygnały:
+
+- `powoduje`
+- `prowadzi do`
+- `w wyniku`
+- `ponieważ`
+
+Przykład:
+`Podgrzewanie wody powoduje wzrost jej temperatury.`
+
+### Instrukcje
+Sygnały:
+
+- `najpierw`
+- `następnie`
+- `potem`
+- `na końcu`
+
+Przykład:
+`Najpierw otwórz plik, następnie odczytaj zawartość.`
+
+## 13. Różnica między danymi, informacją i wiedzą
+
+To rozróżnienie jest kluczowe.
+
+### Dane
+Surowe elementy zapisu.
+
+Przykład:
+`42`, `Warszawa`, `2026`
+
+### Informacja
+Dane osadzone w kontekście.
+
+Przykład:
+`Warszawa ma status stolicy Polski.`
+
+### Wiedza
+Uporządkowany zbiór informacji i relacji, który można wykorzystać do rozumowania.
+
+Przykład:
+Jeśli system wie, że:
+
+- Warszawa jest stolicą Polski
+- stolica jest głównym miastem państwa
+
+to może lepiej interpretować kolejne teksty o Polsce.
+
+## 14. Jak uczyć się języka z plików tekstowych
+
+Dla autonomicznego systemu użyteczny jest prosty proces analizy.
+
+### Etap 1. Segmentacja
+Podziel tekst na:
+
+- akapity
+- zdania
+- słowa
+
+### Etap 2. Identyfikacja pojęć
+Wykryj ważne słowa i wyrażenia, zwłaszcza:
+
+- rzeczowniki
+- czasowniki
+- terminy specjalistyczne
+
+### Etap 3. Rozpoznanie typu informacji
+Określ, czy zdanie zawiera:
+
+- definicję
+- fakt
+- relację
+- instrukcję
+- przykład
+
+### Etap 4. Wydobycie relacji
+Zapisz zależności między pojęciami.
+
+Przykład:
+`Język umożliwia komunikację.`
+
+Relacja:
+- `język -> umożliwia -> komunikację`
+
+### Etap 5. Grupowanie wiedzy
+Łącz podobne informacje w kategorie i sieci pojęć.
+
+## 15. Kluczowe pojęcia do zapamiętania
+
+- **język** – system znaków i reguł służący komunikacji i reprezentacji wiedzy
+- **znak** – element, który coś oznacza
+- **słowo** – podstawowa jednostka znaczeniowa
+- **zdanie** – pełny komunikat językowy
+- **tekst** – uporządkowany zbiór zdań
+- **morfologia** – budowa słów
+- **składnia** – budowa zdań
+- **semantyka** – znaczenie
+- **pragmatyka** – znaczenie w kontekście użycia
+- **kontekst** – otoczenie pomagające interpretować znaczenie
+- **pojęcie** – uogólniona reprezentacja obiektów lub zjawisk
+- **relacja** – związek między pojęciami
+- **atrybut** – cecha obiektu lub pojęcia
+
+## 16. Podsumowanie
+
+Język jest podstawowym narzędziem przekazywania i porządkowania wiedzy. Składa się ze znaków, słów, zdań i tekstów, a jego działanie opiera się na regułach budowy i znaczenia. Dla systemu uczącego się z plików tekstowych najważniejsze jest rozpoznawanie:
+
+- jednostek języka
+- znaczeń słów i zdań
+- kontekstu
+- relacji między pojęciami
+- struktur takich jak definicje, klasyfikacje i instrukcje
+
+Z praktycznego punktu widzenia język można traktować jako warstwę pośrednią między surowym tekstem a uporządkowaną wiedzą. Im lepiej system rozpoznaje strukturę języka, tym skuteczniej może przekształcać tekst w fakty, pojęcia i zależności.

@@ -1,0 +1,378 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: upraszczanie
+# Data: 2026-04-11 11:21
+# Pytanie: Maria nie ma zadnej wiedzy o 'upraszczanie'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Upraszczanie**
+
+## Definicja
+
+**Upraszczanie** to proces przeksztalcania czegos zlozonego w forme latwiejsza do zrozumienia, uzycia, zapamietania albo wykonania, przy zachowaniu najwazniejszego sensu lub funkcji.
+
+Upraszczac mozna:
+- tekst
+- instrukcje
+- modele wyjasniajace
+- dane
+- procesy
+- decyzje
+- interfejsy
+- struktury wiedzy
+
+Upraszczanie nie oznacza zawsze „skracania”. Czasem tekst jest krotszy, ale mniej zrozumialy. Dobre upraszczanie polega na **zmniejszeniu zlozonosci poznawczej**, a nie tylko liczby slow.
+
+## Dlaczego upraszczanie jest wazne
+
+Upraszczanie jest kluczowe w uczeniu sie i pracy z informacja, poniewaz:
+- zmniejsza trudnosc przetwarzania informacji
+- ulatwia wykrywanie sensu glownego
+- pomaga oddzielic rzeczy wazne od mniej waznych
+- przyspiesza zapamietywanie
+- ulatwia podejmowanie decyzji
+- zmniejsza ryzyko bledu przy interpretacji tekstu
+- pozwala tworzyc uporzadkowana wiedze z nieuporzadkowanych zrodel
+
+Dla systemu uczacego sie z plikow tekstowych upraszczanie jest potrzebne do:
+- wyodrebniania kluczowych informacji
+- budowania streszczen
+- normalizacji jezyka
+- redukcji szumu informacyjnego
+- tworzenia definicji i kategorii
+- przeksztalcania dlugich opisow w struktury wiedzy
+
+## Kluczowe pojecia
+
+### Zlozonosc
+**Zlozonosc** to liczba elementow, relacji i warunkow, ktore trzeba jednoczesnie uwzglednic.
+
+Przyklad:
+- zdanie proste: „Woda wrze w temperaturze 100 C przy cisnieniu atmosferycznym.”
+- zdanie bardziej zlozone: „Temperatura wrzenia wody zalezy od cisnienia, dlatego wartosc 100 C dotyczy warunkow standardowych.”
+
+Drugie zdanie zawiera wiecej relacji i warunkow.
+
+### Istota
+**Istota** to najwazniejsza tresc, bez ktorej przekaz traci sens.
+
+Przyklad:
+- pelny opis: „Fotosynteza to proces biochemiczny zachodzacy u roslin, glonow i niektorych bakterii, w ktorym energia swiatla jest przeksztalcana w energie chemiczna.”
+- istota: „Fotosynteza zamienia energie swiatla w energie chemiczna.”
+
+### Redukcja
+**Redukcja** to usuwanie elementow mniej waznych.
+
+Przyklad:
+- przed redukcja: opis z dygresjami, powtorzeniami i szczegolami pobocznymi
+- po redukcji: pozostaje tylko glowna definicja i najwazniejsze cechy
+
+### Abstrakcja
+**Abstrakcja** to przedstawienie zjawiska na bardziej ogolnym poziomie.
+
+Przyklad:
+- konkret: „Kot, pies i kon to zwierzeta.”
+- abstrakcja: „Te obiekty naleza do kategorii zwierzat.”
+
+### Parafraza
+**Parafraza** to wyrazenie tej samej tresci innymi slowami, zwykle prosciej.
+
+Przyklad:
+- oryginal: „Substancja ulega transformacji pod wplywem temperatury.”
+- parafraza: „Substancja zmienia sie pod wplywem ciepla.”
+
+### Streszczenie
+**Streszczenie** to skrocona forma tekstu zawierajaca najwazniejsze informacje.
+
+### Normalizacja
+**Normalizacja** to ujednolicanie formy informacji.
+
+Przyklad:
+- „samochod”, „auto”, „pojazd osobowy”
+- po normalizacji mozna uznac, ze w danym kontekscie odnosza sie do tej samej klasy obiektow
+
+## Na czym polega upraszczanie tekstu
+
+Upraszczanie tekstu zwykle obejmuje kilka operacji:
+
+### 1. Usuwanie nadmiaru
+Usuwa sie:
+- powtorzenia
+- ozdobniki jezykowe
+- poboczne dygresje
+- informacje nieistotne dla celu
+
+Przyklad:
+- tekst zlozony: „Warto zauwazyc, ze w wielu przypadkach, choc nie zawsze, regularna aktywnosc fizyczna moze miec korzystny wplyw na zdrowie.”
+- tekst uproszczony: „Regularna aktywnosc fizyczna poprawia zdrowie.”
+
+### 2. Uzycie prostszych slow
+Zastepuje sie slowa rzadkie lub specjalistyczne slowami bardziej podstawowymi, jesli sens pozostaje ten sam.
+
+Przyklad:
+- „implementowac” -> „wdrazac” albo „zastosowac”
+- „eliminowac redundancje” -> „usuwac powtorzenia”
+
+### 3. Skracanie struktury zdan
+Dlugie zdania wielokrotnie zlozone dzieli sie na krotsze.
+
+Przyklad:
+- przed: jedno zdanie z kilkoma wtraceniami
+- po: trzy krotkie zdania, kazde z jedna glowna mysla
+
+### 4. Wydzielanie kluczowych informacji
+Najpierw identyfikuje sie:
+- definicje
+- relacje przyczynowe
+- warunki
+- wyjatki
+- przykłady
+
+### 5. Porzadkowanie
+Informacje uklada sie w logicznej kolejnosci:
+- od definicji do przykladu
+- od ogolu do szczegolu
+- od przyczyny do skutku
+- od problemu do rozwiazania
+
+## Rodzaje upraszczania
+
+### Upraszczanie jezykowe
+Dotyczy formy wypowiedzi.
+
+Cechy:
+- prostsze slowownictwo
+- krotsze zdania
+- mniej zlozonych konstrukcji gramatycznych
+
+### Upraszczanie poznawcze
+Dotyczy tego, ile wysilku trzeba, aby zrozumiec tresc.
+
+Cechy:
+- mniej pojec naraz
+- jasne relacje miedzy faktami
+- wyrazne rozdzielenie rzeczy glownych i pobocznych
+
+### Upraszczanie strukturalne
+Dotyczy organizacji informacji.
+
+Cechy:
+- naglowki
+- listy punktowane
+- sekcje tematyczne
+- tabele, schematy, kategorie
+
+### Upraszczanie operacyjne
+Dotyczy czynnosci lub procedur.
+
+Przyklad:
+- procedura 12-etapowa moze zostac uproszczona do 4 etapow glownych
+- kolejne kroki sa nazwane jasno i wykonywane w stalej kolejnosci
+
+## Co upraszczanie zmienia, a czego nie powinno zmieniac
+
+Dobre upraszczanie:
+- zachowuje sens glowny
+- zachowuje fakty
+- zachowuje relacje przyczynowe, jesli sa istotne
+- zachowuje warunki i ograniczenia, jesli wplywaja na prawdziwosc
+
+Zle upraszczanie:
+- usuwa warunki potrzebne do poprawnego zrozumienia
+- zamienia fakt w zbyt szerokie uogolnienie
+- pomija wyjatki, gdy sa krytyczne
+- znieksztalca znaczenie
+
+Przyklad bledu:
+- oryginal: „Niektore bakterie sa chorobotworcze.”
+- zle uproszczenie: „Bakterie sa chorobotworcze.”
+To nie jest uproszczenie poprawne, tylko zbyt szerokie uogolnienie.
+
+## Upraszczanie a uogolnianie
+
+Te pojecia sa powiazane, ale nie sa identyczne.
+
+- **Upraszczanie** zmniejsza zlozonosc przekazu.
+- **Uogolnianie** przechodzi od przypadku szczegolowego do bardziej ogolnej reguly.
+
+Przyklad:
+- szczegol: „Wrobel, golab i orzel to ptaki.”
+- uogolnienie: „Ptaki to grupa zwierzat.”
+- uproszczenie: „Wrobel, golab i orzel naleza do jednej grupy: ptakow.”
+
+## Upraszczanie a kompresja informacji
+
+**Kompresja informacji** to zapisanie tej samej tresci w krotszej formie.
+Nie kazda kompresja jest uproszczeniem.
+
+Przyklad:
+- skrot specjalistyczny moze byc krotszy, ale trudniejszy
+- tabela moze byc bardziej skondensowana, ale wymaga wiedzy wstepnej
+
+Dlatego uproszczenie powinno byc oceniane nie tylko przez dlugosc, lecz przez:
+- czytelnosc
+- jednoznacznosc
+- latwosc interpretacji
+- zachowanie sensu
+
+## Praktyczne techniki upraszczania
+
+### Technika 1. Znajdz glowna mysl
+Pytanie:
+- O czym jest ten fragment w jednym zdaniu?
+
+### Technika 2. Odrzuc szczegoly poboczne
+Pytania:
+- Czy ta informacja zmienia sens glowny?
+- Czy bez niej tekst nadal jest poprawny?
+
+### Technika 3. Zamien trudne pojecia na definicje
+Przyklad:
+- „homeostaza” -> „utrzymywanie stabilnego stanu wewnetrznego”
+- „delegacja” -> „przekazanie zadania innemu podmiotowi”
+
+### Technika 4. Dziel tekst na jednostki wiedzy
+Jednostki moga miec formy:
+- definicja
+- cecha
+- przyczyna
+- skutek
+- przyklad
+- wyjatek
+
+### Technika 5. Buduj strukture hierarchiczna
+Przyklad:
+- temat: upraszczanie
+- podtemat: rodzaje
+- podtemat: techniki
+- podtemat: bledy
+
+### Technika 6. Tworz wersje o roznej gestosci
+Mozna miec:
+- wersje pelna
+- wersje skrocona
+- wersje definicyjna
+- wersje do szybkiego przypomnienia
+
+To jest szczegolnie uzyteczne w autonomicznym uczeniu sie.
+
+## Przyklady upraszczania
+
+### Przyklad 1. Definicja naukowa
+Oryginal:
+„Parowanie jest procesem fizycznym polegajacym na przechodzeniu czasteczek z fazy cieklej do fazy gazowej z powierzchni cieczy.”
+
+Uproszczenie:
+„Parowanie to przechodzenie cieczy w gaz z jej powierzchni.”
+
+Jeszcze prosciej:
+„Parowanie to zamiana cieczy w gaz.”
+
+### Przyklad 2. Instrukcja
+Oryginal:
+„W celu uruchomienia urzadzenia nalezy uprzednio zweryfikowac stan zasilania oraz prawidlowosc podlaczenia przewodow.”
+
+Uproszczenie:
+„Przed uruchomieniem sprawdz zasilanie i przewody.”
+
+### Przyklad 3. Wiedza z tekstu
+Oryginalny fragment:
+„Rosliny potrzebuja swiatla, wody i dwutlenku wegla do fotosyntezy. Proces ten zachodzi w chloroplastach i prowadzi do powstania glukozy oraz tlenu.”
+
+Uproszczenie strukturalne:
+- Fotosynteza zachodzi u roslin.
+- Wymaga swiatla, wody i dwutlenku wegla.
+- Zachodzi w chloroplastach.
+- Wytwarza glukoze i tlen.
+
+## Bledy w upraszczaniu
+
+### 1. Utrata warunku
+Oryginal:
+„Metale przewodza prad dobrze.”
+Problem:
+To zdanie jest czesto prawdziwe, ale zalezy od kontekstu. W tekstach technicznych brak warunkow moze byc mylacy.
+
+### 2. Zbyt silne uogolnienie
+Oryginal:
+„Niektore leki moga powodowac skutki uboczne.”
+Bledne uproszczenie:
+„Leki powoduja skutki uboczne.”
+
+### 3. Usuniecie relacji przyczynowej
+Oryginal:
+„Brak snu pogarsza koncentracje, poniewaz mozg ma mniej zasobow do przetwarzania informacji.”
+Zle uproszczenie:
+„Brak snu i koncentracja sa zwiazane.”
+Taka wersja traci wazna relacje przyczynowa.
+
+### 4. Zastapienie precyzji niejasnoscia
+Oryginal:
+„Temperatura topnienia lodu wynosi 0 C przy cisnieniu atmosferycznym.”
+Zle uproszczenie:
+„Lod topi sie przy niskiej temperaturze.”
+To jest mniej precyzyjne.
+
+## Upraszczanie w autonomicznej nauce z plikow tekstowych
+
+Dla systemu takiego jak M.A.R.I.A. upraszczanie moze byc traktowane jako etap przetwarzania wiedzy.
+
+### Wejscie
+Surowy tekst:
+- artykul
+- notatka
+- dokumentacja
+- instrukcja
+- opis zjawiska
+
+### Operacje
+- wykrycie tematu
+- podzial na fragmenty
+- rozpoznanie definicji i faktow
+- oddzielenie informacji glownych od pobocznych
+- parafraza na prostszy jezyk
+- normalizacja terminow
+- zapis w strukturze wiedzy
+
+### Wyjscie
+Uporzadkowana wiedza:
+- definicje
+- kluczowe pojecia
+- relacje
+- przyklady
+- pytania kontrolne
+- streszczenie
+
+## Prosty schemat upraszczania tekstu
+
+Mozna stosowac taki proces:
+
+1. Odczytaj caly fragment.
+2. Wskaz glowny temat.
+3. Znajdz zdania zawierajace definicje, fakty i relacje.
+4. Usun powtorzenia i dygresje.
+5. Zamien trudne sformulowania na prostsze.
+6. Podziel tresc na krotkie jednostki.
+7. Sprawdz, czy sens i warunki zostaly zachowane.
+8. Zapisz wynik w uporzadkowanej formie.
+
+## Jak rozpoznac, ze uproszczenie jest dobre
+
+Dobre uproszczenie powinno spelniac cztery warunki:
+- **poprawnosc**: nie zmienia faktow
+- **jasnosc**: jest latwe do zrozumienia
+- **zwiezlosc**: nie zawiera zbednych elementow
+- **uzytecznosc**: nadaje sie do dalszego uczenia, wyszukiwania lub wnioskowania
+
+## Pytania kontrolne
+
+- Czym rozni sie upraszczanie od zwyklego skracania?
+- Jakie elementy tekstu mozna usunac bez utraty sensu?
+- Dlaczego zbyt silne uogolnienie jest bledem?
+- Czym rozni sie parafraza od streszczenia?
+- Jak zachowac poprawne warunki i wyjatki podczas upraszczania?
+- Jakie etapy upraszczania sa przydatne przy pracy z plikami tekstowymi?
+
+## Podsumowanie
+
+Upraszczanie to podstawowa operacja pracy z wiedza. Polega na zmniejszaniu zlozonosci przy zachowaniu sensu najwazniejszych informacji. Obejmuje redukcje nadmiaru, parafraze, porzadkowanie i abstrahowanie. Jest potrzebne wszedzie tam, gdzie system ma przetwarzac tekst na uporzadkowana, uzyteczna wiedze.
+
+Dla autonomicznego systemu uczacego sie upraszczanie jest szczegolnie wazne, bo pozwala przejsc od surowego tekstu do struktury, ktora mozna latwo zapamietac, porownywac i wykorzystywac w dalszym rozumowaniu. Najwazniejsza zasada brzmi: **upraszczaj forme, ale nie znieksztalcaj faktow**.

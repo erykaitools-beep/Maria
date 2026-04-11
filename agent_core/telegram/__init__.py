@@ -34,6 +34,9 @@ class TelegramBridge:
         # Command handlers: command_text -> callable(args_text) -> response_text
         self._command_handlers = {}
 
+        # Track operator messages for proactive contact module
+        self.last_poll_message_count = 0
+
     @property
     def configured(self):
         return self.bot.configured
@@ -60,6 +63,7 @@ class TelegramBridge:
             return []
 
         messages = self.bot.get_updates()
+        self.last_poll_message_count = len(messages)
         unhandled = []
 
         for msg in messages:

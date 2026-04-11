@@ -158,6 +158,9 @@ class HomeostasisCore:
         # Reminder scheduler (Phase 12)
         self._reminder_scheduler = None
 
+        # Proactive contact scheduler (Phase 13)
+        self._proactive_scheduler = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -206,6 +209,10 @@ class HomeostasisCore:
     def set_reminder_scheduler(self, scheduler) -> None:
         """Set reminder scheduler for Phase 12 tick check."""
         self._reminder_scheduler = scheduler
+
+    def set_proactive_scheduler(self, scheduler) -> None:
+        """Set proactive contact scheduler for Phase 13 tick check."""
+        self._proactive_scheduler = scheduler
 
     def set_telegram_bridge(self, bridge) -> None:
         """
@@ -464,6 +471,15 @@ class HomeostasisCore:
                 self._reminder_scheduler.tick()
             except Exception as e:
                 logger.debug(f"Phase 12 reminder error: {e}")
+
+        # ──────────────────────────────────────
+        # PHASE 13: PROACTIVE CONTACT (Maria initiates)
+        # ──────────────────────────────────────
+        if self._proactive_scheduler:
+            try:
+                self._proactive_scheduler.tick()
+            except Exception as e:
+                logger.debug(f"Phase 13 proactive error: {e}")
 
     def _aggregate_perception(
         self,
@@ -803,6 +819,10 @@ class HomeostasisCore:
 
         try:
             self._telegram_bridge.poll_and_respond()
+            # Track operator contact for proactive scheduler
+            if (self._proactive_scheduler
+                    and self._telegram_bridge.last_poll_message_count > 0):
+                self._proactive_scheduler.record_operator_contact()
         except Exception as e:
             logger.debug(f"[TELEGRAM] Poll error: {e}")
 

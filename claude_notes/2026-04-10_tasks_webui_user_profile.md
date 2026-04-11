@@ -47,8 +47,23 @@
 - Web UI brain nie mial podlaczonego UserProfile -> dodane w get_maria_brain()
 - Cross-process: Telegram zapisuje, Web UI nie widzi -> _reload_if_changed() (mtime)
 
+## Bugi naprawione w trakcie sesji
+- UserProfile._create_default() nadpisywal plik przy restarcie -> fix: nie nadpisuje jesli istnieje
+- Web UI brain nie mial UserProfile -> fix: wired w get_maria_brain()
+- Cross-process: Telegram zapisuje, Web UI nie widzi -> fix: _reload_if_changed() (mtime)
+- NIM_CHAT_ENABLED=true -> pytania o uzytkownika szly do NIM (brak profilu) -> fix: _is_personal_query()
+- "co wiesz o mnie" matchowalo GROUNDED_KNOWLEDGE -> fix: user markers w query_router
+
+## Commity (4)
+- 9e2f392 feat: Task Pipeline Web UI + UserProfile (operator memory)
+- a776b41 data: Maria learning materials - expert files
+- 20e65a7 fix: UserProfile persistence + route personal queries through Ollama
+- 7ce93b4 fix: Route personal queries (o mnie) to normal chat, not evidence collector
+
 ## Na nastepna sesje
-- Eryk testuje UserProfile na zywo
+- **Przypomnienia** - /remind <czas> <tekst> -> Telegram notify o zadanej godzinie
+- **Lista zadan** - /todo <tekst>, /todo list, /todo done <id>
+- **Proaktywnosc** - Maria sama inicjuje kontakt (np. poranne podsumowanie)
 - Rozbudowa auto-learn (wiecej patternow PL/EN)
-- Moze: strona /profile w Web UI (nie tylko API)
+- Strona /profile w Web UI (nie tylko API)
 - Git remote (GitHub private)

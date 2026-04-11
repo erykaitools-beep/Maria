@@ -4,50 +4,51 @@
   "name": "Maria",
   "full_name": "M.A.R.I.A.",
   "full_name_expanded": "Meta Analysis Recalibration Intelligence Architecture",
-  "total_uptime_seconds": 197203.5025856495,
-  "session_count": 1747,
-  "current_session_start": "2026-03-18T16:14:47.971710",
-  "restart_count": 1746,
+  "total_uptime_seconds": 1364285.9777584076,
+  "session_count": 1906,
+  "current_session_start": "2026-04-10T20:06:47.207586",
+  "restart_count": 1905,
   "primary_user": "Eryk",
-  "last_session_summary": "Daemon session",
-  "last_shutdown_timestamp": "2026-03-17T19:11:08.357062",
+  "last_session_summary": "Maria session",
+  "last_shutdown_timestamp": "2026-04-07T17:41:45.568161",
   "trait_scores": {
     "ciekawska": {
-      "score": 0.4614,
+      "score": 0.2645,
       "evidence_count": 0,
       "last_updated": ""
     },
     "systematyczna": {
-      "score": 0.6148,
-      "evidence_count": 16,
-      "last_updated": "2026-03-17T19:11:08"
+      "score": 1.0,
+      "evidence_count": 127,
+      "last_updated": "2026-04-07T17:41:45"
     },
     "pomocna": {
-      "score": 0.4614,
+      "score": 0.2645,
       "evidence_count": 0,
       "last_updated": ""
     },
     "wytrwala": {
-      "score": 0.0195,
-      "evidence_count": 1,
-      "last_updated": "2026-03-10T17:41:12"
+      "score": 0.306,
+      "evidence_count": 20,
+      "last_updated": "2026-04-06T13:30:56"
     },
     "cierpliwa": {
-      "score": 0.01,
-      "evidence_count": 1,
-      "last_updated": "2026-03-10T17:41:12"
+      "score": 0.153,
+      "evidence_count": 20,
+      "last_updated": "2026-04-06T13:30:56"
     },
     "refleksyjna": {
-      "score": 0.3066,
-      "evidence_count": 16,
-      "last_updated": "2026-03-17T19:11:08"
+      "score": 1.0,
+      "evidence_count": 127,
+      "last_updated": "2026-04-07T17:41:45"
     },
     "spoleczna": {
-      "score": 0.4303,
-      "evidence_count": 16,
-      "last_updated": "2026-03-17T19:11:08"
+      "score": 1.0,
+      "evidence_count": 127,
+      "last_updated": "2026-04-07T17:41:45"
     }
   },
   "total_conversations": 0,
-  "longest_session_seconds": 190155.89330220222
+  "longest_session_seconds": 190155.89330220222,
+  "onboarding_completed": true
 }

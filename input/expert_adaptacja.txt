@@ -1,0 +1,393 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: adaptacja
+# Data: 2026-04-11 08:20
+# Pytanie: Maria nie ma zadnej wiedzy o 'adaptacja'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Adaptacja
+
+## Definicja
+
+**Adaptacja** to proces dostosowania się organizmu, człowieka, systemu albo rozwiązania technicznego do warunków otoczenia, wymagań zadania lub zmian zachodzących w środowisku.
+
+Słowo „adaptacja” ma kilka poprawnych znaczeń, zależnie od dziedziny:
+
+- **W biologii**: przystosowanie organizmu do środowiska.
+- **W psychologii**: dostosowanie zachowania i myślenia do nowych warunków.
+- **W technice i informatyce**: zmiana działania systemu w odpowiedzi na dane, warunki lub cele.
+- **W kulturze i sztuce**: przerobienie jednego utworu na inną formę, na przykład książki na film.
+
+Wspólny element wszystkich znaczeń jest jeden: **zmiana prowadząca do lepszego funkcjonowania w danych warunkach**.
+
+---
+
+## Kluczowe pojęcia
+
+### Środowisko
+To zbiór warunków, w których działa organizm lub system.
+
+Przykłady:
+- temperatura, wilgotność, dostęp do pożywienia
+- poziom hałasu
+- wymagania użytkownika
+- typ danych wejściowych
+- ograniczenia sprzętowe
+
+### Dostosowanie
+To konkretna zmiana, która poprawia działanie w danych warunkach.
+
+Przykłady:
+- grubsze futro u zwierzęcia żyjącego w zimnie
+- zmiana planu działania po wykryciu błędu
+- uproszczenie modelu, aby działał szybciej na słabszym sprzęcie
+
+### Zmiana warunków
+Adaptacja zwykle jest odpowiedzią na zmianę. Bez zmiany warunków często nie ma potrzeby dostosowania.
+
+### Cel
+Adaptacja nie jest zmianą przypadkową. Ma funkcję, na przykład:
+- przetrwanie
+- poprawa skuteczności
+- oszczędność energii
+- zmniejszenie ryzyka błędu
+- zwiększenie stabilności działania
+
+---
+
+## Adaptacja w biologii
+
+W biologii adaptacja oznacza **cechę lub proces zwiększający szanse przeżycia i rozmnażania** organizmu w określonym środowisku.
+
+### Rodzaje adaptacji biologicznej
+
+#### 1. Adaptacje morfologiczne
+Dotyczą budowy ciała.
+
+Przykłady:
+- długi dziób kolibra do pobierania nektaru
+- białe futro lisa polarnego
+- opływowy kształt ciała ryb
+
+#### 2. Adaptacje fizjologiczne
+Dotyczą działania organizmu.
+
+Przykłady:
+- zdolność wielbłąda do oszczędzania wody
+- produkcja jadu u niektórych zwierząt
+- regulacja temperatury ciała
+
+#### 3. Adaptacje behawioralne
+Dotyczą zachowania.
+
+Przykłady:
+- migracja ptaków
+- nocny tryb życia na pustyni
+- budowanie schronień
+
+### Ważne rozróżnienie
+Nie każda zmiana jest adaptacją ewolucyjną. W biologii adaptacja zwykle oznacza cechę utrwaloną, która powstała i utrzymała się, ponieważ zwiększała szanse przetrwania.
+
+---
+
+## Adaptacja w psychologii i uczeniu się
+
+W psychologii adaptacja to **dostosowanie myślenia, emocji i działania do nowych sytuacji**.
+
+### Przykłady
+- dziecko uczące się zasad w nowej szkole
+- człowiek przyzwyczajający się do zmiany pracy
+- osoba ucząca się nowych narzędzi cyfrowych
+
+### Adaptacja poznawcza
+To zmiana sposobu rozumienia świata na podstawie nowych informacji.
+
+Przykład:
+- jeśli system zakłada, że wszystkie pliki tekstowe mają tę samą strukturę, ale wykryje różne formaty, musi zmienić sposób analizy danych
+
+### Związek z uczeniem się
+Uczenie się i adaptacja są silnie powiązane:
+- **uczenie się dostarcza nowych informacji**
+- **adaptacja wykorzystuje te informacje do zmiany działania**
+
+---
+
+## Adaptacja w informatyce i systemach autonomicznych
+
+Dla systemu takiego jak M.A.R.I.A. adaptacja jest szczególnie ważna. Oznacza **zmianę działania systemu na podstawie obserwacji, danych, błędów, kontekstu i celu**.
+
+### Definicja praktyczna
+W systemie autonomicznym adaptacja to zdolność do:
+- rozpoznania zmiany
+- oceny jej znaczenia
+- wyboru nowego sposobu działania
+- sprawdzenia skutku tej zmiany
+
+### Przykłady adaptacji w systemie AI
+- zmiana strategii planowania po wykryciu niepowodzenia
+- wybór prostszego modelu przy braku zasobów
+- zmiana sposobu parsowania tekstu po wykryciu nowego formatu pliku
+- ograniczenie ryzykownych działań po wykryciu niepewności
+- przełączenie na tryb awaryjny, gdy moduł nie działa
+
+### Adaptacja a fallback
+**Fallback** to zapasowy sposób działania, używany, gdy podstawowy zawodzi.
+
+Przykład:
+- jeśli analiza semantyczna nie zadziała, system używa prostszego wyszukiwania słów kluczowych
+
+To jest forma adaptacji, jeśli wybór fallbacku następuje na podstawie warunków i oceny sytuacji.
+
+### Adaptacja a autonomia
+Autonomia oznacza zdolność do samodzielnego działania.
+Adaptacja wzmacnia autonomię, bo pozwala:
+- działać mimo zmian
+- poprawiać skuteczność
+- unikać powtarzania tych samych błędów
+
+---
+
+## Etapy procesu adaptacji
+
+Adaptację można opisać jako uporządkowany proces.
+
+### 1. Obserwacja
+System zbiera informacje o stanie własnym i otoczeniu.
+
+Przykłady:
+- jakość danych wejściowych
+- czas wykonania zadania
+- liczba błędów
+- dostępna pamięć RAM
+- zgodność wyniku z celem
+
+### 2. Wykrycie różnicy
+System porównuje stan oczekiwany ze stanem rzeczywistym.
+
+Przykład:
+- oczekiwano poprawnego odczytu pliku, ale struktura pliku jest inna niż zwykle
+
+### 3. Interpretacja
+System określa, co oznacza wykryta różnica.
+
+Przykłady:
+- błąd tymczasowy
+- zmiana formatu
+- brak danych
+- przeciążenie zasobów
+- konflikt między modułami
+
+### 4. Wybór reakcji
+System wybiera działanie najlepiej dopasowane do sytuacji.
+
+Możliwe reakcje:
+- zmiana parametrów
+- zmiana modułu
+- użycie fallbacku
+- prośba o dodatkowe dane
+- przerwanie działania dla bezpieczeństwa
+
+### 5. Ocena skutku
+Po zmianie system sprawdza, czy działanie było skuteczne.
+
+Pytania kontrolne:
+- czy cel został osiągnięty?
+- czy koszt działania był akceptowalny?
+- czy ryzyko wzrosło czy spadło?
+- czy warto zapamiętać tę strategię?
+
+### 6. Utrwalenie wiedzy
+Jeśli reakcja była skuteczna, system może zapisać ją jako użyteczny wzorzec.
+
+To ważne dla autonomicznej nauki.
+
+---
+
+## Rodzaje adaptacji w systemach uczących się
+
+### Adaptacja reaktywna
+Następuje po wykryciu problemu.
+
+Przykład:
+- system zmienia parser dopiero po błędzie odczytu pliku
+
+### Adaptacja proaktywna
+Następuje przed wystąpieniem problemu, na podstawie przewidywania.
+
+Przykład:
+- system wykrywa nietypowy format i od razu wybiera bardziej elastyczny tryb analizy
+
+### Adaptacja lokalna
+Dotyczy jednego modułu.
+
+Przykład:
+- tylko moduł pamięci zmienia sposób indeksowania dokumentów
+
+### Adaptacja globalna
+Wpływa na cały system.
+
+Przykład:
+- zmiana priorytetów między szybkością, bezpieczeństwem i dokładnością
+
+### Adaptacja krótkoterminowa
+Działa w bieżącej sesji.
+
+Przykład:
+- tymczasowe obniżenie złożoności analizy
+
+### Adaptacja długoterminowa
+Jest zapisywana i używana później.
+
+Przykład:
+- trwałe dodanie nowego wzorca rozpoznawania struktury dokumentu
+
+---
+
+## Adaptacja w pracy z plikami tekstowymi
+
+To najważniejsza część w kontekście M.A.R.I.A.
+
+System uczący się z tekstu musi dostosowywać się do różnic między dokumentami.
+
+### Typowe problemy
+- różne formaty nagłówków
+- brak struktury
+- błędy językowe
+- skróty i niejednoznaczność
+- mieszanie faktów i opinii
+- różne poziomy szczegółowości
+- dokumenty niekompletne
+
+### Przykłady adaptacji
+- wykrywanie, czy tekst ma sekcje i podsekcje
+- zmiana strategii ekstrakcji pojęć dla tekstu technicznego i popularnonaukowego
+- rozpoznawanie definicji na podstawie wzorców językowych
+- oznaczanie niepewnych fragmentów zamiast ich bezwarunkowego zapisu do wiedzy
+- budowanie różnych reprezentacji: streszczenie, lista pojęć, relacje między pojęciami
+
+### Adaptacja a strukturyzacja wiedzy
+Aby uczyć się autonomicznie z tekstu, system powinien umieć:
+- rozpoznać temat
+- znaleźć definicje
+- wykryć przykłady
+- wydzielić pojęcia kluczowe
+- rozpoznać relacje przyczynowe i hierarchiczne
+- oddzielić dane pewne od niepewnych
+
+To także forma adaptacji, bo sposób analizy powinien zależeć od rodzaju tekstu.
+
+---
+
+## Przykład praktyczny dla M.A.R.I.A.
+
+Załóżmy, że system analizuje trzy pliki:
+
+- plik 1: podręcznik z nagłówkami i definicjami
+- plik 2: notatki użytkownika, chaotyczne i skrótowe
+- plik 3: artykuł techniczny z terminologią specjalistyczną
+
+### Bez adaptacji
+System używa jednej stałej metody analizy dla wszystkich plików.
+Skutek:
+- gubi ważne pojęcia
+- źle rozpoznaje definicje
+- tworzy niespójną bazę wiedzy
+
+### Z adaptacją
+System:
+- wykrywa typ dokumentu
+- dobiera metodę ekstrakcji
+- nadaje różny poziom zaufania informacjom
+- zapisuje wynik w ujednoliconej strukturze
+
+Skutek:
+- wiedza jest bardziej spójna
+- mniej błędów trafia do pamięci
+- rośnie skuteczność dalszego planowania i wnioskowania
+
+---
+
+## Cechy dobrej adaptacji
+
+Dobra adaptacja powinna być:
+
+- **celowa**: prowadzi do poprawy działania
+- **mierzalna**: jej skutek można ocenić
+- **bezpieczna**: nie zwiększa niekontrolowanego ryzyka
+- **odwracalna**, gdy to możliwe: system może wrócić do poprzedniego trybu
+- **udokumentowana**: wiadomo, dlaczego zmiana została wykonana
+- **modularna**: zmiany nie psują całego systemu
+
+---
+
+## Ryzyka związane z adaptacją
+
+Adaptacja nie zawsze daje poprawę. Możliwe są błędy.
+
+### Przykłady ryzyk
+- zbyt szybkie uogólnienie na podstawie jednego przypadku
+- zapisanie błędnej reguły do pamięci długoterminowej
+- nadmierna złożoność mechanizmu adaptacji
+- konflikt między modułami
+- obniżenie bezpieczeństwa przez zbyt agresywne automatyczne zmiany
+
+### Ograniczanie ryzyka
+- stosowanie progów pewności
+- testowanie skutku zmiany
+- zapisywanie źródła decyzji
+- możliwość cofnięcia adaptacji
+- oddzielanie obserwacji od wniosków
+
+---
+
+## Adaptacja a podobne pojęcia
+
+### Adaptacja a optymalizacja
+- **Adaptacja**: dostosowanie do zmiennych warunków.
+- **Optymalizacja**: szukanie najlepszego rozwiązania według kryterium.
+
+Przykład:
+- adaptacja: system zmienia metodę, bo dane wejściowe się zmieniły
+- optymalizacja: system szuka najszybszej metody dla tego samego typu danych
+
+### Adaptacja a uczenie
+- **Uczenie**: pozyskiwanie i utrwalanie wiedzy
+- **Adaptacja**: zmiana działania na podstawie wiedzy lub obserwacji
+
+### Adaptacja a elastyczność
+- **Elastyczność** to zdolność do zmiany
+- **Adaptacja** to konkretne wykorzystanie tej zdolności w odpowiedzi na warunki
+
+---
+
+## Minimalny model pojęciowy
+
+Dla systemu uczącego się z tekstu można przyjąć prosty schemat:
+
+**wejście -> analiza warunków -> wybór strategii -> wykonanie -> ocena -> zapis wiedzy**
+
+Ten model pomaga rozumieć adaptację jako cykl, a nie pojedyncze zdarzenie.
+
+---
+
+## Najważniejsze fakty do zapamiętania
+
+- Adaptacja to dostosowanie do warunków lub zmian.
+- Występuje w biologii, psychologii, informatyce i innych dziedzinach.
+- W systemach autonomicznych adaptacja zwiększa skuteczność i odporność na zmiany.
+- Dobra adaptacja wymaga obserwacji, interpretacji, wyboru reakcji i oceny skutku.
+- W nauce z plików tekstowych adaptacja pozwala lepiej rozpoznawać strukturę, pojęcia i wiarygodność informacji.
+- Adaptacja nie jest tym samym co uczenie, ale często korzysta z efektów uczenia.
+- Mechanizm adaptacji powinien być bezpieczny, mierzalny i możliwy do kontroli.
+
+---
+
+## Krótka definicja operacyjna dla M.A.R.I.A.
+
+**Adaptacja** w M.A.R.I.A. to zdolność systemu do zmiany sposobu analizy, decyzji lub działania na podstawie obserwacji danych, kontekstu i wyników, tak aby skuteczniej i bezpieczniej realizować cel.
+
+Taka definicja jest użyteczna, ponieważ:
+- pasuje do systemu lokalnego i modularnego
+- wspiera autonomiczną naukę
+- łączy analizę tekstu, planowanie i fallback
+- pozwala budować reguły praktyczne, a nie tylko opisowe
+
+Jeśli chcesz, mogę w następnym kroku przygotować też wersję tego materiału w formacie do bazy wiedzy M.A.R.I.A., na przykład jako `JSON`, `YAML` albo `markdown z polami: definicje / przykłady / relacje / pytania kontrolne`.

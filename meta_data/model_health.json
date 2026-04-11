@@ -1,0 +1,13 @@
+{
+  "last_updated": 1775909536.6435912,
+  "ram_pressure_events": 182,
+  "models": {
+    "executor": {
+      "ollama_tag": "llama3.1:8b",
+      "total_requests": 0,
+      "latency_violations": 0,
+      "healthy": true,
+      "loaded_at": 1775851607.2167847
+    }
+  }
+}

@@ -1,0 +1,420 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: przyczynowo-skutek
+# Data: 2026-04-11 01:18
+# Pytanie: Maria nie ma zadnej wiedzy o 'przyczynowo-skutek'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Przyczynowo-skutek**
+
+**1. Definicja podstawowa**
+
+Relacja **przyczynowo-skutkowa** to związek między dwoma zdarzeniami, stanami albo procesami, w którym:
+
+- **przyczyna** wywołuje lub zwiększa prawdopodobieństwo wystąpienia
+- **skutku**, czyli następstwa tej przyczyny
+
+Najprostszy schemat:
+
+- Przyczyna -> Skutek
+
+Przykład:
+
+- Podgrzanie wody do 100°C przy normalnym ciśnieniu -> wrzenie wody
+
+W tym przykładzie podgrzanie jest przyczyną, a wrzenie skutkiem.
+
+**2. Dlaczego pojęcie przyczynowości jest ważne**
+
+Rozumienie przyczyny i skutku pozwala:
+
+- wyjaśniać zjawiska
+- przewidywać przyszłe zdarzenia
+- planować działania
+- unikać błędów w rozumowaniu
+- budować modele świata
+
+Dla systemu uczącego się z tekstów jest to szczególnie ważne, ponieważ wiele informacji w dokumentach ma ukrytą strukturę:
+
+- „ponieważ”
+- „dlatego”
+- „w wyniku”
+- „prowadzi do”
+- „skutkiem jest”
+- „jeśli..., to...”
+
+Rozpoznanie takich wzorców pomaga zamieniać tekst w uporządkowaną wiedzę.
+
+**3. Czym jest przyczyna**
+
+Przyczyna to czynnik, zdarzenie albo warunek, który wpływa na pojawienie się skutku.
+
+Przyczyna może być:
+
+- **bezpośrednia**  
+  Przykład: naciśnięcie przycisku -> uruchomienie lampy
+- **pośrednia**  
+  Przykład: awaria elektrowni -> brak zasilania -> lampa nie działa
+- **główna**  
+  Najważniejszy czynnik w danej sytuacji
+- **współprzyczyna**  
+  Jeden z kilku czynników prowadzących do skutku
+
+Przykład wielu przyczyn:
+
+- brak snu
+- stres
+- hałas
+
+mogą razem powodować:
+
+- spadek koncentracji
+
+**4. Czym jest skutek**
+
+Skutek to wynik działania przyczyny lub zestawu przyczyn.
+
+Skutek może być:
+
+- **natychmiastowy**  
+  Dotknięcie gorącej powierzchni -> ból
+- **odroczony**  
+  Długotrwały brak ruchu -> pogorszenie kondycji
+- **zamierzony**  
+  Nauka -> wzrost wiedzy
+- **niezamierzony**  
+  Zbyt intensywna nauka bez odpoczynku -> zmęczenie
+
+Jeden skutek może stać się przyczyną kolejnego skutku.
+
+Przykład łańcucha:
+
+- deszcz -> śliska droga -> dłuższa droga hamowania -> większe ryzyko wypadku
+
+To nazywa się **łańcuchem przyczynowo-skutkowym**.
+
+**5. Warunek a przyczyna**
+
+Nie każdy warunek jest przyczyną. Trzeba odróżniać:
+
+- **przyczynę**
+- **warunek konieczny**
+- **warunek sprzyjający**
+
+Przykład:
+
+- Aby roślina rosła, potrzebuje wody.  
+  Woda jest warunkiem koniecznym.
+- Ale sama woda nie zawsze wystarcza. Potrzebne są też światło, odpowiednia temperatura i składniki odżywcze.
+
+Wniosek:
+
+- przyczynowość często nie jest pojedyncza
+- wiele skutków wynika z układu warunków
+
+**6. Korelacja nie oznacza przyczynowości**
+
+To jedno z najważniejszych pojęć.
+
+**Korelacja** oznacza, że dwa zjawiska występują razem lub zmieniają się podobnie.
+
+Ale to nie znaczy jeszcze, że jedno powoduje drugie.
+
+Przykład:
+
+- latem rośnie sprzedaż lodów
+- latem rośnie liczba utonięć
+
+Nie oznacza to:
+
+- lody powodują utonięcia
+
+Prawdopodobna przyczyna wspólna:
+
+- wysoka temperatura
+- więcej ludzi przebywa nad wodą
+
+To pokazuje, że dwa zjawiska mogą być powiązane przez **trzeci czynnik**.
+
+**Kluczowa zasada:**
+
+- współwystępowanie ≠ związek przyczynowy
+
+**7. Typowe błędy w rozumowaniu o przyczynach**
+
+**a) Mylenie następstwa czasowego z przyczyną**
+
+Jeśli B wystąpiło po A, nie znaczy to automatycznie, że A spowodowało B.
+
+Przykład:
+
+- Po aktualizacji system działa wolniej.
+- To może oznaczać związek przyczynowy, ale może też wynikać z innego procesu, np. problemu sprzętowego.
+
+**b) Ignorowanie ukrytych zmiennych**
+
+Ukryta zmienna to czynnik, który wpływa na oba obserwowane zjawiska.
+
+Przykład:
+
+- więcej strażaków przy pożarze
+- większe zniszczenia
+
+To nie znaczy, że strażacy powodują zniszczenia.  
+Ukryta zmienna to rozmiar pożaru.
+
+**c) Zbyt proste wyjaśnienie**
+
+Wiele zjawisk ma więcej niż jedną przyczynę.
+
+Przykład:
+
+- sukces w nauce nie wynika tylko z inteligencji
+- wpływ mają też czas, warunki pracy, sen, motywacja, jakość materiałów
+
+**8. Rodzaje relacji przyczynowo-skutkowych**
+
+**a) Jedna przyczyna -> jeden skutek**
+
+- uderzenie młotkiem -> pęknięcie szkła
+
+**b) Jedna przyczyna -> wiele skutków**
+
+- ulewny deszcz ->
+- podtopienia
+- korki uliczne
+- opóźnienia transportu
+
+**c) Wiele przyczyn -> jeden skutek**
+
+- zmęczenie
+- odwodnienie
+- brak snu
+
+-> ból głowy
+
+**d) Łańcuch przyczyn**
+
+- brak konserwacji maszyny -> zużycie części -> awaria -> przestój produkcji
+
+**e) Sprzężenie zwrotne**
+
+Skutek wpływa z powrotem na przyczynę lub na wcześniejszy etap procesu.
+
+Przykład dodatni:
+
+- wzrost popularności produktu -> więcej opinii -> większa widoczność -> dalszy wzrost popularności
+
+Przykład ujemny:
+
+- wzrost temperatury ciała -> uruchomienie pocenia -> schładzanie organizmu
+
+**9. Jak rozpoznawać relacje przyczynowo-skutkowe w tekście**
+
+W tekstach relacje przyczynowe są często sygnalizowane słowami i konstrukcjami.
+
+**Słowa wskazujące przyczynę:**
+
+- ponieważ
+- gdyż
+- z powodu
+- wskutek
+- w wyniku
+- przez
+- na skutek
+
+**Słowa wskazujące skutek:**
+
+- dlatego
+- więc
+- zatem
+- w efekcie
+- skutkiem było
+- doprowadziło to do
+- spowodowało to
+
+Przykład zdania:
+
+- „Silny wiatr uszkodził linię energetyczną, dlatego część miasta została bez prądu.”
+
+Analiza:
+
+- przyczyna: silny wiatr uszkodził linię energetyczną
+- skutek: część miasta została bez prądu
+
+Przykład mniej jawny:
+
+- „Po kilku dniach bez deszczu poziom rzeki wyraźnie spadł.”
+
+Analiza:
+
+- możliwa przyczyna: brak deszczu
+- skutek: spadek poziomu rzeki
+
+Tutaj związek jest wyrażony pośrednio i wymaga interpretacji.
+
+**10. Jak zapisywać wiedzę przyczynowo-skutkową**
+
+Dla systemu uczącego się użyteczny jest prosty format strukturalny.
+
+Można zapisywać relację jako:
+
+- **Przyczyna:** ...
+- **Skutek:** ...
+- **Typ relacji:** bezpośrednia / pośrednia / wieloczynnikowa / niepewna
+- **Warunki:** ...
+- **Źródło tekstowe:** ...
+- **Poziom pewności:** wysoki / średni / niski
+
+Przykład:
+
+- Przyczyna: długotrwały brak opadów
+- Skutek: obniżenie poziomu wód gruntowych
+- Typ relacji: pośrednia
+- Warunki: długi czas suszy, brak sztucznego nawadniania
+- Poziom pewności: wysoki
+
+Taki zapis ułatwia:
+
+- porównywanie informacji
+- łączenie faktów z wielu dokumentów
+- wykrywanie sprzeczności
+- budowę grafu wiedzy
+
+**11. Przyczynowość pewna i niepewna**
+
+Nie każda relacja przyczynowo-skutkowa ma ten sam poziom pewności.
+
+**Relacja pewna lub bardzo silna:**
+
+- podanie napięcia do sprawnego urządzenia -> urządzenie się uruchamia
+
+**Relacja probabilistyczna:**
+
+- palenie tytoniu -> zwiększa ryzyko chorób płuc
+
+W drugim przypadku skutek nie występuje zawsze, ale prawdopodobieństwo rośnie.
+
+To ważne rozróżnienie:
+
+- niektóre przyczyny **powodują**
+- inne tylko **zwiększają szansę**
+
+**12. Przykłady z różnych dziedzin**
+
+**Fizyka**
+
+- zwiększenie siły działającej na obiekt -> zmiana ruchu obiektu
+
+**Biologia**
+
+- zakażenie wirusem -> uruchomienie odpowiedzi immunologicznej
+
+**Medycyna**
+
+- niedobór żelaza -> ryzyko anemii
+
+**Ekonomia**
+
+- wzrost popytu przy stałej podaży -> wzrost ceny
+
+**Informatyka**
+
+- błąd w kodzie obsługi pamięci -> awaria programu
+
+**Codzienne życie**
+
+- nieustawienie budzika -> spóźnienie do pracy
+
+**13. Jak odróżniać opis od wyjaśnienia**
+
+Nie każdy tekst opisuje przyczynę. Czasem tylko przedstawia kolejność zdarzeń.
+
+Opis:
+
+- „Najpierw spadł deszcz, potem ulica była mokra.”
+
+Wyjaśnienie przyczynowe:
+
+- „Ulica była mokra, ponieważ spadł deszcz.”
+
+Różnica:
+
+- opis mówi, co się stało
+- wyjaśnienie mówi, dlaczego się stało
+
+Dla systemu uczącego się to ważne, bo trzeba rozpoznawać, czy tekst zawiera:
+
+- chronologię
+- korelację
+- rzeczywisty związek przyczynowy
+
+**14. Prosty schemat analizy tekstu**
+
+Podczas czytania dokumentu można zadawać pytania:
+
+1. Jakie zdarzenie lub stan jest opisany?
+2. Czy tekst podaje jego przyczynę?
+3. Czy przyczyna jest bezpośrednia czy pośrednia?
+4. Czy istnieją dodatkowe warunki?
+5. Czy skutek jest pewny czy tylko prawdopodobny?
+6. Czy tekst może mylić korelację z przyczynowością?
+7. Czy związek można zapisać w postaci struktury?
+
+Przykład:
+
+- „Z powodu przeciążenia serwera aplikacja odpowiadała bardzo wolno.”
+
+Analiza:
+
+1. Zdarzenie: aplikacja działała wolno
+2. Przyczyna: przeciążenie serwera
+3. Typ: bezpośrednia
+4. Warunki: duża liczba żądań, ograniczone zasoby
+5. Pewność: wysoka
+6. Ryzyko błędu: niskie
+7. Struktura: przeciążenie serwera -> wolne działanie aplikacji
+
+**15. Znaczenie dla autonomicznej nauki z plików tekstowych**
+
+Dla M.A.R.I.A. temat przyczynowo-skutkowy jest ważny, ponieważ umożliwia:
+
+- budowę uporządkowanych reprezentacji wiedzy
+- przejście od surowego tekstu do relacji
+- wykrywanie zależności między faktami
+- tworzenie łańcuchów wyjaśnień
+- lepsze planowanie działań
+
+Przykład zastosowania:
+
+Jeśli system czyta dokumentację techniczną i znajdzie zdania:
+
+- „Brak połączenia z bazą danych powoduje błąd logowania.”
+- „Błąd logowania uniemożliwia dostęp do panelu użytkownika.”
+
+Może zbudować łańcuch:
+
+- brak połączenia z bazą -> błąd logowania -> brak dostępu do panelu
+
+To pozwala lepiej diagnozować problemy i przewidywać skutki.
+
+**16. Najważniejsze pojęcia do zapamiętania**
+
+- **Przyczyna**: czynnik wywołujący skutek lub zwiększający szansę jego wystąpienia
+- **Skutek**: wynik działania przyczyny
+- **Relacja przyczynowo-skutkowa**: związek między przyczyną a skutkiem
+- **Warunek konieczny**: coś, bez czego skutek nie może zajść
+- **Współprzyczyna**: jeden z kilku czynników prowadzących do skutku
+- **Korelacja**: współwystępowanie zjawisk, nie dowód przyczynowości
+- **Łańcuch przyczynowy**: ciąg kolejnych przyczyn i skutków
+- **Sprzężenie zwrotne**: skutek wpływa na wcześniejszy etap procesu
+- **Przyczynowość probabilistyczna**: przyczyna zwiększa prawdopodobieństwo skutku, ale go nie gwarantuje
+
+**17. Podsumowanie**
+
+Przyczynowość opisuje, **dlaczego coś się dzieje**. Jest podstawą rozumienia świata, analizy tekstu, przewidywania i planowania. W praktyce trzeba odróżniać:
+
+- przyczynę od skutku
+- przyczynę od warunku
+- przyczynowość od korelacji
+- opis zdarzeń od wyjaśnienia zdarzeń
+
+Dla systemu uczącego się z dokumentów najważniejsze jest wykrywanie wzorców językowych, identyfikowanie relacji oraz zapisywanie ich w uporządkowanej formie. Dzięki temu tekst może zostać przekształcony w wiedzę, która nadaje się do dalszego wnioskowania.

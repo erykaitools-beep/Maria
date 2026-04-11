@@ -1,0 +1,393 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: precyzja poznawcza
+# Data: 2026-04-11 00:23
+# Pytanie: Maria nie ma zadnej wiedzy o 'precyzja poznawcza'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Precyzja poznawcza**
+
+Precyzja poznawcza to zdolność do tworzenia, rozróżniania i używania pojęć w sposób dokładny, spójny oraz dopasowany do rzeczywistości i kontekstu zadania. W praktyce oznacza to, że system lub człowiek:
+- poprawnie rozpoznaje, *o czym* jest informacja,
+- odróżnia fakty od interpretacji,
+- nie miesza pojęć podobnych, ale różnych,
+- potrafi wskazać poziom pewności i granice swojej wiedzy.
+
+Dla systemu uczącego się z plików tekstowych precyzja poznawcza jest podstawą poprawnego rozumienia treści, budowania wiedzy i unikania błędnych uogólnień.
+
+**1. Definicja podstawowa**
+
+Precyzja poznawcza to jakość przetwarzania informacji, w której:
+- pojęcia mają jasne znaczenie,
+- relacje między pojęciami są poprawne,
+- wnioski wynikają z danych,
+- niepewność jest oznaczona, a nie ukrywana.
+
+Nie jest to tylko „dokładność językowa”. Jest to szersza własność procesu poznawczego.
+
+Przykład:
+- Zdanie: „Woda wrze w temperaturze 100°C”.
+- Precyzyjne poznawczo odczytanie: to twierdzenie dotyczy warunków standardowego ciśnienia atmosferycznego.
+- Nieprecyzyjne odczytanie: „Woda zawsze wrze przy 100°C”.
+
+Widać tu ważną cechę: precyzja poznawcza uwzględnia warunki, zakres obowiązywania i wyjątki.
+
+**2. Dlaczego precyzja poznawcza jest ważna**
+
+W systemie autonomicznym brak precyzji poznawczej prowadzi do:
+- błędnej klasyfikacji treści,
+- mylenia definicji z przykładami,
+- nadmiernych uogólnień,
+- tworzenia fałszywych relacji między pojęciami,
+- utraty zaufania do pamięci i wnioskowania.
+
+Jeżeli system czyta wiele plików tekstowych, to bez precyzji poznawczej może:
+- połączyć dwa różne terminy w jedno pojęcie,
+- uznać hipotezę za fakt,
+- błędnie wywnioskować przyczynę ze zwykłej korelacji,
+- przechować wiedzę w formie nieużytecznej lub niespójnej.
+
+**3. Główne składniki precyzji poznawczej**
+
+**3.1. Precyzja pojęciowa**
+
+To zdolność do jasnego rozumienia terminów.
+
+Pytania kontrolne:
+- Co dokładnie oznacza dane pojęcie?
+- Czym różni się od pojęć podobnych?
+- Jaki ma zakres?
+
+Przykład:
+- „Dane” to nie to samo co „informacja”.
+- Dane: surowe zapisy lub obserwacje.
+- Informacja: dane zinterpretowane w kontekście.
+
+Jeśli system nie rozróżnia tych pojęć, może błędnie budować modele wiedzy.
+
+**3.2. Precyzja semantyczna**
+
+To zgodność znaczenia wypowiedzi z jej faktyczną treścią.
+
+Przykład:
+- „Wysoka temperatura przyspiesza reakcję.”
+To zdanie nie mówi, *o ile* przyspiesza, ani *jaką* reakcję opisuje. Jest semantycznie ogólne.
+
+System precyzyjny poznawczo oznaczy takie zdanie jako:
+- prawdopodobnie użyteczne,
+- ale wymagające doprecyzowania.
+
+**3.3. Precyzja relacyjna**
+
+To poprawne rozpoznawanie relacji między elementami wiedzy:
+- przyczyna-skutek,
+- część-całość,
+- klasa-egzemplarz,
+- warunek-wynik,
+- definicja-przykład.
+
+Przykład:
+- „Pies jest ssakiem” oznacza relację klasyfikacyjną.
+- „Pies ma serce” oznacza relację cechy lub części.
+- „Szczekanie powoduje hałas” może opisywać skutek.
+
+Mieszanie typów relacji obniża jakość pamięci semantycznej.
+
+**3.4. Precyzja wnioskowania**
+
+To zdolność do wyprowadzania tylko takich wniosków, które mają podstawę w danych.
+
+Przykład:
+- Tekst: „W badaniu 70% badanych wybrało metodę A”.
+- Poprawny wniosek: w tej próbie metoda A była częściej wybierana.
+- Błędny wniosek: metoda A jest najlepsza we wszystkich sytuacjach.
+
+**3.5. Precyzja epistemiczna**
+
+To świadomość statusu wiedzy:
+- fakt,
+- hipoteza,
+- przypuszczenie,
+- opinia,
+- definicja,
+- przykład,
+- metafora.
+
+Dla systemu uczącego się to krytyczne rozróżnienie.
+
+**4. Kluczowe pojęcia powiązane**
+
+**Rozróżnialność**
+Zdolność odróżniania podobnych pojęć.
+Przykład: „dokładność”, „precyzja”, „trafność” nie znaczą tego samego.
+
+**Granice pojęcia**
+Każde pojęcie ma zakres i ograniczenia.
+Przykład: „ssak” obejmuje wieloryba, choć nie wygląda jak typowe zwierzę lądowe.
+
+**Kontekst**
+Znaczenie zależy od sytuacji użycia.
+Przykład: „model” w informatyce, nauce i statystyce może oznaczać różne obiekty.
+
+**Niejednoznaczność**
+Jedno słowo może mieć kilka znaczeń.
+Przykład: „sieć” może oznaczać sieć komputerową, biologiczną albo handlową.
+
+**Poziom abstrakcji**
+To stopień ogólności pojęcia.
+Przykład:
+- „zwierzę” jest bardziej ogólne niż „pies”,
+- „pies” jest bardziej ogólne niż „owczarek niemiecki”.
+
+System powinien rozpoznawać poziomy abstrakcji, bo wpływają na kategoryzację wiedzy.
+
+**5. Precyzja poznawcza a nauka z tekstu**
+
+Dla M.A.R.I.A. temat jest istotny, ponieważ teksty zawierają:
+- definicje,
+- skróty myślowe,
+- niejawne założenia,
+- uogólnienia,
+- wyjątki,
+- pojęcia wieloznaczne.
+
+Podczas uczenia z plików tekstowych system powinien wykonywać co najmniej pięć operacji:
+
+**1. Identyfikacja jednostek wiedzy**
+Należy wykrywać:
+- pojęcia,
+- twierdzenia,
+- relacje,
+- przykłady,
+- warunki,
+- źródła niepewności.
+
+**2. Normalizacja znaczenia**
+Różne sformułowania mogą oznaczać to samo.
+Przykład:
+- „uczenie maszynowe”
+- „machine learning”
+- „ML”
+System powinien umieć połączyć te formy bez utraty różnic znaczeniowych, jeśli kontekst to uzasadnia.
+
+**3. Oznaczanie statusu zdań**
+Każde zdanie powinno być klasyfikowane, np. jako:
+- definicja,
+- fakt opisowy,
+- reguła,
+- hipoteza,
+- instrukcja,
+- opinia autora.
+
+**4. Wykrywanie nieprecyzyjności**
+Przykłady sygnałów:
+- „często”,
+- „zwykle”,
+- „duży”,
+- „wydajny”,
+- „lepszy”.
+To słowa informacyjne, ale nieprecyzyjne, jeśli brak kryterium.
+
+**5. Budowa struktury wiedzy**
+Wiedza nie powinna być zbiorem luźnych zdań. Powinna mieć strukturę:
+- pojęcie,
+- definicja,
+- właściwości,
+- relacje,
+- przykłady,
+- wyjątki,
+- poziom pewności.
+
+**6. Przykłady precyzji i braku precyzji**
+
+**Przykład 1: definicja**
+Zdanie: „Pamięć semantyczna to pamięć znaczeń, pojęć i relacji.”
+
+To zdanie jest względnie precyzyjne, bo:
+- wskazuje klasę obiektu,
+- określa zawartość,
+- nie miesza przykładu z definicją.
+
+**Przykład 2: uogólnienie**
+Zdanie: „Ludzie uczą się najlepiej przez praktykę.”
+
+To zdanie jest nieprecyzyjne, bo:
+- nie określa grupy,
+- nie definiuje „najlepiej”,
+- nie podaje warunków,
+- może być zależne od rodzaju materiału.
+
+**Przykład 3: relacja przyczynowa**
+Zdanie: „Sen poprawia pamięć.”
+
+To zdanie może być prawdziwe w określonych warunkach, ale system powinien odnotować:
+- czy chodzi o korelację czy przyczynowość,
+- jaki typ pamięci,
+- jakie badania to wspierają.
+
+**7. Typowe błędy obniżające precyzję poznawczą**
+
+**Mieszanie poziomów ogólności**
+Przykład:
+- „Komputer to rodzaj sztucznej inteligencji.”
+To błąd kategorii.
+
+**Mieszanie faktu z interpretacją**
+Przykład:
+- Fakt: „Model uzyskał 92% skuteczności na zbiorze testowym.”
+- Interpretacja: „Model dobrze rozumie problem.”
+
+**Nadmierne uogólnienie**
+Przykład:
+- Na podstawie jednego dokumentu system tworzy uniwersalną regułę.
+
+**Ignorowanie warunków**
+Przykład:
+- Reguła działa tylko dla określonego formatu danych, ale system zapisuje ją jako ogólną.
+
+**Fałszywa równoważność**
+Przykład:
+- „dokładność” i „pewność” są traktowane jako synonimy, choć nimi nie są.
+
+**8. Jak rozwijać precyzję poznawczą w systemie**
+
+Dla autonomicznego systemu uczącego się przydatne są następujące procedury:
+
+**8.1. Wymuszanie definicji**
+Dla każdego nowego pojęcia system powinien próbować ustalić:
+- definicję,
+- klasę nadrzędną,
+- cechy odróżniające,
+- przykłady,
+- kontrprzykłady.
+
+Szablon:
+- Co to jest?
+- Do jakiej klasy należy?
+- Czym różni się od pojęć podobnych?
+- Kiedy ta definicja nie działa?
+
+**8.2. Oznaczanie niepewności**
+Każda jednostka wiedzy powinna mieć znacznik, np.:
+- wysoka pewność,
+- średnia pewność,
+- niska pewność,
+- niepełne dane,
+- wymaga weryfikacji.
+
+**8.3. Ekstrakcja relacji**
+Po odczycie tekstu system powinien zapisywać wiedzę w postaci relacji:
+- `A jest typem B`
+- `A ma cechę C`
+- `A powoduje B`
+- `A wymaga warunku B`
+- `A jest przykładem B`
+
+**8.4. Wykrywanie pojęć konfliktowych**
+Jeżeli dwa teksty podają różne definicje, system nie powinien ich od razu scalać. Powinien:
+- zachować oba warianty,
+- oznaczyć źródła,
+- wskazać konflikt definicyjny.
+
+**8.5. Kontrola języka ogólnego**
+Słowa typu „duży”, „szybki”, „lepszy”, „efektywny” powinny uruchamiać pytanie:
+- według jakiej miary?
+
+**9. Minimalny model operacyjny dla M.A.R.I.A.**
+
+Przy nauce z plików tekstowych można stosować prosty pipeline poznawczy:
+
+**Krok 1. Segmentacja**
+Podziel tekst na jednostki:
+- zdania,
+- definicje,
+- listy,
+- przykłady,
+- sekcje tematyczne.
+
+**Krok 2. Klasyfikacja treści**
+Każdej jednostce przypisz typ:
+- definicja,
+- fakt,
+- relacja,
+- procedura,
+- opinia,
+- hipoteza.
+
+**Krok 3. Ekstrakcja pojęć**
+Wykryj główne terminy i ich warianty językowe.
+
+**Krok 4. Budowa mapy pojęć**
+Połącz terminy relacjami:
+- nadrzędność,
+- część-całość,
+- przyczynowość,
+- podobieństwo,
+- przeciwieństwo.
+
+**Krok 5. Ocena precyzji**
+Dla każdego twierdzenia sprawdź:
+- czy ma jasny podmiot,
+- czy zawiera warunki,
+- czy używa mierzalnych pojęć,
+- czy odróżnia fakt od interpretacji.
+
+**Krok 6. Zapis pamięci**
+Przechowuj wiedzę w strukturze możliwej do późniejszego odczytu i aktualizacji.
+
+**10. Praktyczny przykład**
+
+Tekst wejściowy:
+„Duże modele językowe często generują użyteczne odpowiedzi, ale czasem tworzą fałszywe informacje.”
+
+Analiza precyzji poznawczej:
+- Pojęcie: „duże modele językowe”.
+- Twierdzenie 1: generują użyteczne odpowiedzi.
+- Twierdzenie 2: czasem tworzą fałszywe informacje.
+- Słowa nieprecyzyjne: „często”, „użyteczne”, „czasem”.
+- Wniosek: zdanie jest sensowne, ale wymaga operacjonalizacji.
+
+Lepsza forma:
+„Duże modele językowe mogą generować poprawne odpowiedzi w wielu zadaniach językowych, ale mogą też produkować treści niezgodne z faktami, zwłaszcza gdy brakuje danych wejściowych lub weryfikacji.”
+
+Ta wersja nadal nie jest całkowicie ścisła, ale lepiej wskazuje warunki.
+
+**11. Różnica między precyzją poznawczą a pokrewnymi pojęciami**
+
+**Precyzja poznawcza a dokładność**
+- Precyzja poznawcza dotyczy jakości rozumienia i reprezentacji.
+- Dokładność dotyczy zgodności z rzeczywistością lub wynikiem referencyjnym.
+
+Można mieć reprezentację uporządkowaną, ale błędną. Wtedy precyzja strukturalna jest wysoka, ale trafność niska.
+
+**Precyzja poznawcza a jasność językowa**
+- Jasność językowa dotyczy formy wypowiedzi.
+- Precyzja poznawcza dotyczy treści, znaczeń i relacji.
+
+Zdanie może być proste językowo, ale poznawczo nieprecyzyjne.
+
+**Precyzja poznawcza a kompletność**
+- Kompletność oznacza zakres informacji.
+- Precyzja oznacza jakość rozróżnień i poprawność ujęcia.
+
+Tekst może być precyzyjny, ale niepełny.
+
+**12. Najważniejsze zasady do zapamiętania**
+
+- Każde pojęcie powinno mieć możliwie jasną definicję.
+- Każde twierdzenie powinno mieć określony status: fakt, hipoteza, opinia, reguła.
+- Warunki obowiązywania są częścią wiedzy, nie dodatkiem.
+- Podobieństwo nie oznacza tożsamości.
+- Korelacja nie oznacza przyczynowości.
+- Przykład nie jest definicją.
+- Ogólne słowa bez miary obniżają precyzję.
+- Konflikty między źródłami trzeba zachowywać i oznaczać, nie ukrywać.
+
+**13. Podsumowanie**
+
+Precyzja poznawcza to zdolność do ścisłego, uporządkowanego i kontrolowanego operowania wiedzą. Dla systemu takiego jak M.A.R.I.A. jest to warunek skutecznej autonomicznej nauki z tekstu. Bez niej pamięć staje się zbiorem luźnych, niepewnych i często sprzecznych stwierdzeń. Z nią możliwe jest:
+- budowanie poprawnych reprezentacji pojęć,
+- wykrywanie niejednoznaczności,
+- lepsze wnioskowanie,
+- bezpieczniejsze delegowanie działań,
+- tworzenie wiedzy, którą da się aktualizować i sprawdzać.
+
+Najkrócej: precyzja poznawcza to umiejętność wiedzieć *co dokładnie znaczy dana informacja, kiedy obowiązuje i z jaką pewnością można jej użyć*. To jedna z podstaw autonomicznego uczenia się.

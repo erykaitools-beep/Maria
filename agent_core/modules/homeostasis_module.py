@@ -948,6 +948,64 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"Reminders not initialized: {e}")
 
+        # Initialize Proactive Contact (Phase 13)
+        try:
+            from agent_core.proactive import ProactiveScheduler
+            proactive = ProactiveScheduler()
+
+            # Wire Telegram send
+            if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'notifier'):
+                proactive.set_notify_fn(ctx.telegram_bridge.notifier.send_raw)
+
+            # Wire data accessors for content generators
+            gen = proactive.generators
+            if ctx.user_profile:
+                gen.set_user_name_fn(lambda: ctx.user_profile.get_name())
+                gen.set_user_interests_fn(lambda: ctx.user_profile.get_interests())
+            if ctx.evaluation_observer:
+                gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
+            if ctx.knowledge_analyzer:
+                gen.set_knowledge_fn(lambda: ctx.knowledge_analyzer.get_knowledge_snapshot())
+            if ctx.goal_store:
+                gen.set_goal_stats_fn(lambda: ctx.goal_store.stats())
+                gen.set_active_goals_fn(
+                    lambda: [
+                        {"description": g.description, "id": g.id}
+                        for g in ctx.goal_store.get_active()
+                    ]
+                )
+                gen.set_proposed_goals_fn(
+                    lambda: [
+                        {"description": g.description, "id": g.id}
+                        for g in ctx.goal_store.get_proposed()
+                    ]
+                )
+                gen.set_recent_achievements_fn(
+                    lambda: [
+                        g.description
+                        for g in ctx.goal_store.get_all()
+                        if g.status.value == "achieved"
+                    ][-5:]
+                )
+            if core:
+                gen.set_health_fn(lambda: core.get_state().get("health_score", 0))
+                gen.set_mode_fn(lambda: core.get_state().get("mode", "?"))
+            if ctx.planner_core:
+                gen.set_planner_stats_fn(
+                    lambda: {"total_cycles": ctx.planner_core.state.total_cycles}
+                    if hasattr(ctx.planner_core, 'state') else {}
+                )
+
+            ctx.proactive_scheduler = proactive
+
+            if core:
+                core.set_proactive_scheduler(proactive)
+
+            status = "enabled" if proactive.enabled else "disabled"
+            print(f"[Homeostasis] [OK] Proactive contact ({status}, {proactive.state.contacts_today} today)")
+        except Exception as e:
+            logger.debug(f"Proactive contact not initialized: {e}")
+
         return True
 
     def get_commands(self):
@@ -1713,6 +1771,11 @@ def _register_telegram_commands(bridge, ctx):
             "/todo <tekst> - nowe zadanie\n"
             "/todo list - lista zadan\n"
             "/todo done <id> - oznacz zrobione\n"
+            "\n*Proaktywnosc:*\n"
+            "/proactive - status proaktywnego kontaktu\n"
+            "/proactive on|off - wlacz/wylacz\n"
+            "/proactive history - historia kontaktow\n"
+            "/profile - profil operatora\n"
             "\n*Diagnostyka:*\n"
             "/tasks [N] - historia taskow Claude/Codex\n"
             "/pdf <task_id> - wyslij wynik jako PDF\n"
@@ -2372,6 +2435,60 @@ def _register_telegram_commands(bridge, ctx):
                 return item
         return None
 
+    def _cmd_proactive(args):
+        """Handle /proactive [status|on|off|history]."""
+        sched = ctx.proactive_scheduler if hasattr(ctx, 'proactive_scheduler') else None
+        if not sched:
+            return "Proactive contact not initialized"
+
+        parts = args.split() if isinstance(args, str) else list(args)
+        sub = parts[0].lower() if parts else "status"
+
+        if sub == "on":
+            sched.set_enabled(True)
+            return "Proaktywny kontakt: WLACZONY"
+
+        if sub == "off":
+            sched.set_enabled(False)
+            return "Proaktywny kontakt: WYLACZONY"
+
+        if sub == "history":
+            limit = 5
+            if len(parts) > 1:
+                try:
+                    limit = int(parts[1])
+                except ValueError:
+                    pass
+            history = sched.get_history(limit)
+            if not history:
+                return "Brak historii kontaktow"
+            lines = [f"*Ostatnie kontakty ({len(history)}):*"]
+            for h in history:
+                from datetime import datetime
+                ts = h.get("timestamp", 0)
+                dt = datetime.fromtimestamp(ts).strftime("%m-%d %H:%M") if ts else "?"
+                reason = h.get("reason", "?")
+                lines.append(f"  [{dt}] {reason}")
+            return "\n".join(lines)
+
+        # Default: status
+        status = sched.get_status()
+        state = "WLACZONY" if status["enabled"] else "WYLACZONY"
+        lines = [
+            f"*Proaktywny kontakt: {state}*",
+            f"Dzisiaj: {status['contacts_today']}/{status['max_per_day']}",
+            f"Cisza nocna: {'tak' if status['quiet_hours'] else 'nie'}",
+            f"Idle operatora: {status['operator_idle_human']}",
+        ]
+        # Next possible contacts
+        for reason, info in status.get("cooldowns", {}).items():
+            remaining = info.get("remaining_sec", 0)
+            if remaining > 0:
+                from agent_core.homeostasis.time_awareness import TimeAwareness
+                lines.append(f"  {reason}: za {TimeAwareness.format_duration(remaining)}")
+        return "\n".join(lines)
+
+    bridge.register_command("proactive", _cmd_proactive)
     bridge.register_command("remind", _cmd_remind)
     bridge.register_command("todo", _cmd_todo)
     bridge.register_command("profile", _cmd_profile)

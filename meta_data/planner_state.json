@@ -1,8 +1,15 @@
 {
-  "last_cycle_tick": 120,
-  "last_evaluation_ts": 1773577379.3821075,
+  "last_cycle_tick": 57453,
+  "last_evaluation_ts": 1775899717.6095145,
   "last_recommendation_ts": 0.0,
-  "total_cycles": 3259,
-  "total_plans_executed": 119,
-  "current_plan_id": "plan-64da9a01137e"
+  "last_self_analysis_ts": 1775899898.8849533,
+  "last_validation_ts": 1775899778.0396943,
+  "last_critique_ts": 1775899838.4497874,
+  "last_experiment_scan_ts": 1775899959.3174736,
+  "total_cycles": 31702,
+  "total_plans_executed": 29316,
+  "consecutive_noop_count": 0,
+  "current_plan_id": "plan-fa150b28b4d6",
+  "stuck_history": [],
+  "stuck_cooldowns": {}
 }

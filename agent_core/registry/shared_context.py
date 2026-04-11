@@ -84,6 +84,9 @@ class SharedContext:
     todo_store: Any = None               # TodoStore (task tracking)
     reminder_scheduler: Any = None       # ReminderScheduler (tick-based firing)
 
+    # Proactive Contact
+    proactive_scheduler: Any = None      # ProactiveScheduler (Maria initiates contact)
+
     # REPL state
     last_result: Any = None
 

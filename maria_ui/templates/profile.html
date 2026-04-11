@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Profile - M.A.R.I.A.{% endblock %}
+{% block page_class %}mo-page--profile{% endblock %}
+
+{% block content %}
+<div class="mo-profile">
+  <div class="mo-flex mo-flex-between mo-flex-center mo-mb-3">
+    <h2 class="mo-text-xl mo-accent">Profil operatora</h2>
+    <button class="mo-btn mo-btn--sm" onclick="loadProfile()">Odswiez</button>
+  </div>
+
+  <div class="mo-tabs">
+    <button class="mo-tab mo-tab--active" data-tab="tab-profile">Profil</button>
+    <button class="mo-tab" data-tab="tab-proactive">Proaktywnosc</button>
+    <button class="mo-tab" data-tab="tab-history">Historia kontaktow</button>
+  </div>
+
+  <!-- Profile tab -->
+  <div class="mo-tab-content mo-tab-content--active" id="tab-profile">
+    <div class="mo-grid mo-grid--2col">
+      <!-- Identity card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Tozsamosc</h3>
+        <div id="profile-identity">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+      </div>
+
+      <!-- Preferences card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Preferencje</h3>
+        <div id="profile-preferences">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+      </div>
+
+      <!-- Interests card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Zainteresowania</h3>
+        <div id="profile-interests">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+        <div class="mo-mt-2">
+          <input type="text" id="new-interest" class="mo-input" placeholder="Dodaj zainteresowanie...">
+          <button class="mo-btn mo-btn--sm mo-mt-1" onclick="addInterest()">Dodaj</button>
+        </div>
+      </div>
+
+      <!-- Schedule card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Harmonogram</h3>
+        <div id="profile-schedule">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+        <div class="mo-mt-2">
+          <input type="text" id="new-schedule" class="mo-input" placeholder="np. pracuje 9-17...">
+          <button class="mo-btn mo-btn--sm mo-mt-1" onclick="addSchedule()">Dodaj</button>
+        </div>
+      </div>
+
+      <!-- Facts card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Fakty</h3>
+        <div id="profile-facts">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+        <div class="mo-mt-2">
+          <input type="text" id="new-fact" class="mo-input" placeholder="Dodaj fakt...">
+          <button class="mo-btn mo-btn--sm mo-mt-1" onclick="addFact()">Dodaj</button>
+        </div>
+      </div>
+
+      <!-- Stats card -->
+      <div class="mo-card">
+        <h3 class="mo-text-lg mo-mb-2">Statystyki</h3>
+        <div id="profile-stats">
+          <div class="mo-empty-state">Ladowanie...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Proactive contact tab -->
+  <div class="mo-tab-content" id="tab-proactive">
+    <div class="mo-card mo-mb-3">
+      <div class="mo-flex mo-flex-between mo-flex-center">
+        <h3 class="mo-text-lg">Proaktywny kontakt</h3>
+        <div>
+          <span id="proactive-status" class="mo-badge">---</span>
+          <button class="mo-btn mo-btn--sm mo-ml-2" id="proactive-toggle" onclick="toggleProactive()">---</button>
+        </div>
+      </div>
+      <div id="proactive-info" class="mo-mt-2">
+        <div class="mo-empty-state">Ladowanie...</div>
+      </div>
+    </div>
+
+    <div class="mo-card">
+      <h3 class="mo-text-lg mo-mb-2">Cooldowny</h3>
+      <div id="proactive-cooldowns">
+        <div class="mo-empty-state">Ladowanie...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contact history tab -->
+  <div class="mo-tab-content" id="tab-history">
+    <div class="mo-card">
+      <h3 class="mo-text-lg mo-mb-2">Historia proaktywnych kontaktow</h3>
+      <div id="proactive-history">
+        <div class="mo-empty-state">Ladowanie...</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/profile.js') }}"></script>
+{% endblock %}

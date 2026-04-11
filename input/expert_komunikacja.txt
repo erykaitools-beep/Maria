@@ -1,0 +1,339 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: komunikacja
+# Data: 2026-04-10 21:10
+# Pytanie: Maria nie ma zadnej wiedzy o 'komunikacja'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Komunikacja**
+
+## 1. Definicja
+
+**Komunikacja** to proces przekazywania i odbierania informacji między co najmniej dwoma podmiotami. Podmiotem może być człowiek, grupa ludzi, organizacja albo system komputerowy. Informacja może być przekazana za pomocą słów, pisma, dźwięków, obrazu, gestów, sygnałów lub danych.
+
+Najprostszy model komunikacji zawiera kilka elementów:
+
+- **Nadawca**: podmiot, który tworzy komunikat
+- **Komunikat**: treść przekazywanej informacji
+- **Kanał**: sposób przekazu, na przykład mowa, tekst, e-mail, obraz
+- **Odbiorca**: podmiot, który odbiera komunikat
+- **Kontekst**: sytuacja, w której komunikacja zachodzi
+- **Sprzężenie zwrotne**: reakcja odbiorcy na komunikat
+- **Zakłócenia**: czynniki utrudniające zrozumienie
+
+Przykład:
+Jedna osoba mówi: „Spotkanie zaczyna się o 10:00”.
+- Nadawca: osoba mówiąca
+- Komunikat: informacja o godzinie spotkania
+- Kanał: mowa
+- Odbiorca: osoba słuchająca
+- Sprzężenie zwrotne: „Rozumiem” albo pytanie „W jakim miejscu?”
+- Zakłócenie: hałas, niejasna wymowa, brak uwagi
+
+## 2. Cel komunikacji
+
+Komunikacja służy do:
+
+- przekazywania informacji
+- wyjaśniania znaczeń
+- zadawania pytań
+- koordynowania działań
+- wyrażania potrzeb i intencji
+- budowania relacji
+- rozwiązywania problemów
+- podejmowania decyzji
+
+W systemie uczącym się komunikacja ma dodatkowe znaczenie:
+- umożliwia pobieranie wiedzy z tekstów
+- pozwala identyfikować znaczenie pojęć
+- wspiera wykrywanie zależności między informacjami
+- pomaga odróżniać dane ważne od pobocznych
+
+## 3. Rodzaje komunikacji
+
+### 3.1. Komunikacja werbalna
+
+**Komunikacja werbalna** to przekazywanie informacji za pomocą języka.
+
+Dzieli się na:
+- **ustną**: rozmowa, wykład, telefon
+- **pisemną**: książka, notatka, raport, wiadomość
+
+Przykłady:
+- Instrukcja obsługi to komunikacja werbalna pisemna
+- Rozmowa nauczyciela z uczniem to komunikacja werbalna ustna
+
+Cechy:
+- opiera się na słowach i regułach języka
+- może być precyzyjna
+- wymaga znajomości słownictwa i składni
+
+### 3.2. Komunikacja niewerbalna
+
+**Komunikacja niewerbalna** to przekazywanie informacji bez użycia słów albo z użyciem środków innych niż same słowa.
+
+Obejmuje:
+- mimikę
+- gesty
+- postawę ciała
+- kontakt wzrokowy
+- ton głosu
+- tempo mówienia
+- odległość między rozmówcami
+
+Przykład:
+Zdanie „wszystko w porządku” może znaczyć coś innego, jeśli jest wypowiedziane spokojnie, a coś innego, jeśli jest wypowiedziane z ironią.
+
+### 3.3. Komunikacja formalna i nieformalna
+
+- **Formalna**: zgodna z ustalonymi zasadami, na przykład raport służbowy, pismo urzędowe
+- **Nieformalna**: swobodna, codzienna, na przykład rozmowa prywatna
+
+### 3.4. Komunikacja jednostronna i dwustronna
+
+- **Jednostronna**: odbiorca nie odpowiada od razu, na przykład ogłoszenie
+- **Dwustronna**: obie strony wymieniają informacje, na przykład dialog
+
+## 4. Elementy skutecznej komunikacji
+
+Skuteczna komunikacja zachodzi wtedy, gdy odbiorca rozumie komunikat zgodnie z intencją nadawcy.
+
+Kluczowe cechy skutecznej komunikacji:
+
+- **jasność**: komunikat jest zrozumiały
+- **precyzja**: komunikat jest konkretny
+- **spójność**: elementy komunikatu nie są sprzeczne
+- **adekwatność**: forma pasuje do sytuacji i odbiorcy
+- **kompletność**: zawarte są potrzebne informacje
+- **zwięzłość**: brak zbędnych treści
+- **poprawność**: język i treść są zgodne z faktami
+
+Przykład komunikatu nieprecyzyjnego:
+- „Zrób to szybko”
+
+Przykład komunikatu precyzyjnego:
+- „Przygotuj raport do godziny 14:00 i wyślij go e-mailem”
+
+## 5. Proces komunikacji
+
+Proces komunikacji można opisać krok po kroku:
+
+1. Nadawca ma intencję przekazania informacji.
+2. Nadawca koduje informację w formie komunikatu.
+3. Komunikat jest wysyłany kanałem.
+4. Odbiorca odbiera komunikat.
+5. Odbiorca dekoduje jego znaczenie.
+6. Odbiorca reaguje.
+7. Reakcja stanowi sprzężenie zwrotne.
+
+### Kodowanie i dekodowanie
+
+- **Kodowanie**: zamiana myśli lub danych na słowa, symbole lub sygnały
+- **Dekodowanie**: interpretacja odebranego komunikatu
+
+Przykład:
+Dane: temperatura wynosi 39°C  
+Kodowanie: „Silnik jest przegrzany”  
+Dekodowanie: odbiorca rozumie, że trzeba zatrzymać urządzenie
+
+## 6. Zakłócenia w komunikacji
+
+**Zakłócenia** to czynniki, które utrudniają poprawne przekazanie lub zrozumienie informacji.
+
+Rodzaje zakłóceń:
+
+- **fizyczne**: hałas, zła jakość dźwięku, niewyraźny druk
+- **językowe**: trudne słownictwo, wieloznaczność, błędy
+- **poznawcze**: brak wiedzy odbiorcy, błędna interpretacja
+- **emocjonalne**: stres, gniew, lęk
+- **kontekstowe**: brak informacji o sytuacji
+- **techniczne**: uszkodzony kanał, utrata danych
+
+Przykład:
+Zdanie „uruchom moduł” jest niejasne, jeśli odbiorca nie wie, o który moduł chodzi.
+
+## 7. Komunikacja a informacja
+
+Te pojęcia są powiązane, ale nie są tożsame.
+
+- **Informacja**: treść, która zmniejsza niepewność
+- **Komunikacja**: proces przekazywania tej treści
+
+Przykład:
+- Informacja: „Plik zawiera 120 rekordów”
+- Komunikacja: zapisanie tej informacji w raporcie i przekazanie go odbiorcy
+
+## 8. Komunikacja w tekstach pisanych
+
+Dla systemu uczącego się z plików tekstowych najważniejsza jest komunikacja pisemna.
+
+Tekst pisany ma kilka cech:
+
+- jest trwały
+- można go analizować wielokrotnie
+- zwykle ma strukturę
+- może zawierać definicje, przykłady, argumenty i dane
+
+W analizie tekstu warto rozpoznawać:
+
+- **temat**: o czym jest tekst
+- **główne pojęcia**: najważniejsze terminy
+- **definicje**: wyjaśnienia znaczeń
+- **relacje**: związki między pojęciami
+- **przykłady**: konkretne przypadki
+- **wnioski**: końcowe ustalenia
+- **intencję tekstu**: informowanie, instruowanie, wyjaśnianie, przekonywanie
+
+Przykład:
+Tekst: „Komunikacja niewerbalna obejmuje mimikę i gesty”.
+Możliwe wydobyte elementy:
+- pojęcie główne: komunikacja niewerbalna
+- relacja: obejmuje
+- elementy składowe: mimika, gesty
+
+## 9. Poziomy komunikacji
+
+Komunikację można analizować na kilku poziomach:
+
+### 9.1. Poziom treści
+Dotyczy tego, **co** jest przekazywane.
+
+Przykład:
+„Serwer nie odpowiada”.
+
+### 9.2. Poziom relacji
+Dotyczy tego, **jak** nadawca i odbiorca są wobec siebie ustawieni.
+
+Przykład:
+To samo zdanie może być raportem, ostrzeżeniem albo poleceniem zależnie od sytuacji.
+
+### 9.3. Poziom intencji
+Dotyczy tego, **po co** komunikat został wysłany.
+
+Przykład:
+„Serwer nie odpowiada” może oznaczać:
+- prośbę o pomoc
+- zgłoszenie problemu
+- polecenie działania
+
+## 10. Kluczowe pojęcia
+
+Poniżej podstawowe pojęcia związane z komunikacją:
+
+- **nadawca**: źródło komunikatu
+- **odbiorca**: cel komunikatu
+- **komunikat**: przekazywana treść
+- **kanał komunikacji**: droga przekazu
+- **kontekst**: otoczenie znaczeniowe i sytuacyjne
+- **kod**: system znaków, na przykład język polski
+- **sprzężenie zwrotne**: odpowiedź odbiorcy
+- **zakłócenie**: przeszkoda w przekazie
+- **interpretacja**: nadawanie znaczenia komunikatowi
+- **intencja**: cel nadawcy
+
+## 11. Przykłady komunikacji
+
+### Przykład 1. Komunikacja codzienna
+Komunikat: „Kup chleb po drodze do domu”.
+- nadawca: osoba prosząca
+- odbiorca: osoba wykonująca prośbę
+- intencja: wywołanie działania
+- możliwe zakłócenie: brak informacji, jaki chleb kupić
+
+### Przykład 2. Komunikacja techniczna
+Komunikat: „Błąd 404 oznacza, że zasób nie został znaleziony”.
+- typ: informacyjny
+- cel: wyjaśnienie znaczenia kodu błędu
+- wartość edukacyjna: definicja pojęcia
+
+### Przykład 3. Komunikacja w dokumentacji
+Komunikat: „Uruchom program poleceniem `python app.py`”.
+- typ: instrukcja
+- cel: opis działania krok po kroku
+- cecha: wysoka precyzja
+
+## 12. Jak rozpoznawać strukturę komunikacji w plikach tekstowych
+
+Dla autonomicznej nauki z tekstu użyteczne jest przetwarzanie komunikacji w formie uporządkowanej.
+
+Można stosować następujący schemat analizy:
+
+1. Wykryj temat tekstu.
+2. Znajdź główne pojęcia.
+3. Odszukaj definicje.
+4. Rozpoznaj przykłady.
+5. Wydziel relacje między pojęciami.
+6. Odróżnij fakty od opinii.
+7. Zbuduj uporządkowaną reprezentację wiedzy.
+
+Przykładowa struktura wiedzy:
+- Pojęcie: komunikacja
+- Definicja: proces przekazywania i odbierania informacji
+- Elementy: nadawca, komunikat, kanał, odbiorca, kontekst, sprzężenie zwrotne
+- Rodzaje: werbalna, niewerbalna, formalna, nieformalna
+- Problemy: zakłócenia, niejednoznaczność, brak kontekstu
+
+## 13. Fakty, definicje i przykłady
+
+Podczas nauki z tekstu warto rozróżniać trzy typy treści:
+
+- **definicja**: wyjaśnia, czym coś jest
+- **fakt**: stwierdzenie możliwe do sprawdzenia
+- **przykład**: konkretny przypadek ilustrujący pojęcie
+
+Przykład:
+- Definicja: „Komunikacja to proces przekazywania informacji”
+- Fakt: „Komunikacja może być ustna lub pisemna”
+- Przykład: „E-mail jest formą komunikacji pisemnej”
+
+To rozróżnienie pomaga budować poprawne bazy wiedzy.
+
+## 14. Najczęstsze błędy w rozumieniu komunikacji
+
+- utożsamianie komunikacji tylko z mówieniem
+- pomijanie roli odbiorcy
+- ignorowanie kontekstu
+- brak uwzględnienia zakłóceń
+- mylenie informacji z interpretacją
+- uznawanie komunikatu za jasny bez sprawdzenia sprzężenia zwrotnego
+
+Przykład błędu:
+Zdanie „to jest gotowe” bez kontekstu nie mówi, co dokładnie jest gotowe.
+
+## 15. Znaczenie komunikacji dla systemu uczącego się
+
+Dla systemu takiego jak M.A.R.I.A. temat komunikacji jest podstawowy, ponieważ:
+
+- większość wiedzy dociera w formie tekstu
+- tekst jest zakodowanym komunikatem nadawcy
+- zrozumienie wymaga analizy znaczenia, struktury i kontekstu
+- poprawna ekstrakcja wiedzy zależy od rozpoznania definicji, relacji i intencji
+
+W praktyce system powinien umieć:
+
+- rozpoznawać, kto jest nadawcą tekstu, jeśli to możliwe
+- określać typ komunikatu: definicja, instrukcja, opis, ostrzeżenie
+- wydobywać kluczowe pojęcia
+- wykrywać niejasność i wieloznaczność
+- tworzyć streszczenie bez utraty sensu
+- zapisywać wiedzę w strukturze pojęcie-relacja-przykład
+
+## 16. Podsumowanie
+
+Komunikacja to proces przekazywania i odbierania informacji. Obejmuje nadawcę, komunikat, kanał, odbiorcę, kontekst, sprzężenie zwrotne i możliwe zakłócenia. Może mieć formę werbalną lub niewerbalną, ustną albo pisemną, formalną lub nieformalną. Skuteczna komunikacja wymaga jasności, precyzji i dopasowania do odbiorcy.
+
+W kontekście nauki z plików tekstowych komunikacja jest podstawą rozumienia dokumentów. System uczący się powinien identyfikować definicje, fakty, przykłady, relacje i cele komunikatów. Dzięki temu może przekształcać nieuporządkowany tekst w wiedzę uporządkowaną i użyteczną.
+
+## 17. Skrót do zapamiętania
+
+Najważniejsze elementy komunikacji:
+
+- kto mówi
+- co mówi
+- jak mówi
+- do kogo mówi
+- w jakim kontekście mówi
+- z jakim skutkiem mówi
+
+Jeśli chcesz, mogę w następnym kroku przygotować też:
+- **wersję stricte pod uczenie maszynowe/ekstrakcję wiedzy**
+- **zestaw pytań kontrolnych**
+- **format JSON do zapisania tej wiedzy w pamięci M.A.R.I.A.**

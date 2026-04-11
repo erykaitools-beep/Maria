@@ -1,0 +1,483 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: modelowanie rzeczywistości
+# Data: 2026-04-10 23:54
+# Pytanie: Maria nie ma zadnej wiedzy o 'modelowanie rzeczywistości'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+# Modelowanie rzeczywistości
+
+## 1. Czym jest modelowanie rzeczywistości
+
+**Modelowanie rzeczywistości** to tworzenie uproszczonego opisu świata, zjawiska, procesu albo systemu w taki sposób, aby dało się go **zrozumieć, przewidywać, porównywać lub wykorzystywać do działania**.
+
+Model nie jest samą rzeczywistością. Jest jej **reprezentacją**.
+
+### Definicja
+**Model** to uporządkowany zbiór pojęć, relacji, cech i reguł, który opisuje wybrany fragment rzeczywistości.
+
+### Przykład
+Rzeczywistość:
+- w sklepie są klienci, produkty, zamówienia i płatności
+
+Model:
+- `Klient`
+- `Produkt`
+- `Zamówienie`
+- `Płatność`
+- relacje:
+  - klient składa zamówienie
+  - zamówienie zawiera produkty
+  - zamówienie ma płatność
+
+Taki model nie zawiera wszystkiego. Pomija na przykład kolor ścian sklepu, jeśli nie jest to potrzebne.
+
+## 2. Dlaczego modelowanie jest potrzebne
+
+Rzeczywistość jest zbyt złożona, aby opisać ją w całości bez uproszczeń. Modelowanie pozwala:
+
+- **redukovać złożoność**
+- **wydzielać istotne elementy**
+- **porządkować wiedzę**
+- **wykrywać zależności**
+- **przewidywać skutki działań**
+- **łączyć informacje z wielu źródeł**
+
+Dla systemu uczącego się z plików tekstowych modelowanie jest potrzebne, aby:
+- zamieniać tekst na strukturę wiedzy
+- odróżniać fakty od przykładów i komentarzy
+- łączyć różne wzmianki o tym samym obiekcie
+- budować spójny obraz świata z rozproszonych danych
+
+## 3. Podstawowe elementy modelu
+
+Każdy model rzeczywistości zwykle zawiera kilka podstawowych składników.
+
+### 3.1. Obiekty
+To byty istniejące w modelowanym świecie.
+
+Przykłady:
+- człowiek
+- miasto
+- dokument
+- urządzenie
+- organizacja
+
+### 3.2. Cechy
+To właściwości obiektów.
+
+Przykłady:
+- człowiek ma wiek
+- miasto ma liczbę mieszkańców
+- dokument ma autora i datę
+
+### 3.3. Relacje
+To związki między obiektami.
+
+Przykłady:
+- autor napisał dokument
+- miasto leży w kraju
+- sensor mierzy temperaturę
+
+### 3.4. Zdarzenia
+To zmiany zachodzące w czasie.
+
+Przykłady:
+- użytkownik otworzył plik
+- firma wydała produkt
+- czujnik wykrył ruch
+
+### 3.5. Reguły
+To zasady opisujące, co wynika z czego.
+
+Przykłady:
+- jeśli dokument ma autora i datę, można go uporządkować chronologicznie
+- jeśli obiekt jest miastem, to może należeć do państwa
+- jeśli zamówienie nie ma płatności, to jest nieopłacone
+
+## 4. Model a rzeczywistość
+
+To rozróżnienie jest kluczowe.
+
+### Fakty
+Fakt to informacja o rzeczywistości lub o treści źródła, którą można zapisać w modelu.
+
+Przykład:
+- „Warszawa jest stolicą Polski”
+
+### Model
+Model zapisuje ten fakt w uporządkowanej formie, na przykład:
+- obiekt: `Warszawa`
+- typ: `miasto`
+- relacja: `jest_stolicą`
+- obiekt docelowy: `Polska`
+
+### Ważna zasada
+**Model zawsze coś upraszcza.**
+Jeśli model jest zbyt szczegółowy, staje się trudny w użyciu.
+Jeśli jest zbyt ubogi, traci wartość poznawczą.
+
+## 5. Rodzaje modeli
+
+### 5.1. Model pojęciowy
+Opisuje najważniejsze pojęcia i relacje między nimi.
+
+Przykład:
+- osoba
+- organizacja
+- dokument
+- osoba pracuje w organizacji
+- organizacja tworzy dokument
+
+Jest dobry na początek nauki.
+
+### 5.2. Model danych
+Opisuje, jak zapisać informacje w strukturze technicznej.
+
+Przykład:
+- tabela `persons`
+- tabela `documents`
+- klucze i relacje
+
+Jest potrzebny do implementacji.
+
+### 5.3. Model przyczynowy
+Opisuje, co powoduje co.
+
+Przykład:
+- wzrost temperatury powoduje rozszerzalność materiału
+- brak snu obniża koncentrację
+
+Jest ważny dla przewidywania.
+
+### 5.4. Model czasowy
+Uwzględnia kolejność i moment zdarzeń.
+
+Przykład:
+- dokument powstał przed publikacją
+- zgłoszenie zostało zamknięte po naprawie błędu
+
+Jest potrzebny, gdy wiedza się zmienia.
+
+## 6. Abstrakcja i poziomy opisu
+
+**Abstrakcja** to świadome pomijanie szczegółów, które nie są potrzebne do danego celu.
+
+### Przykład: samochód
+Na różnych poziomach można modelować samochód inaczej:
+
+- poziom ogólny: pojazd
+- poziom użytkowy: marka, model, właściciel
+- poziom techniczny: silnik, skrzynia biegów, masa
+- poziom fizyczny: siły, tarcie, spalanie
+
+Nie istnieje jeden uniwersalny model najlepiej opisujący wszystko. Model zależy od celu.
+
+## 7. Kluczowe pojęcia dla systemu uczącego się z tekstu
+
+Dla autonomicznej nauki z plików tekstowych ważne są następujące pojęcia.
+
+### 7.1. Encja
+Jednostka rozpoznawana w tekście jako obiekt.
+
+Przykłady:
+- „Polska”
+- „Isaac Newton”
+- „Ubuntu”
+- „12 marca 2024”
+
+### 7.2. Klasa
+Typ obiektu.
+
+Przykłady:
+- Polska -> państwo
+- Isaac Newton -> osoba
+- Ubuntu -> system operacyjny
+- 12 marca 2024 -> data
+
+### 7.3. Atrybut
+Cecha encji.
+
+Przykład:
+- dokument ma tytuł
+- osoba ma datę urodzenia
+
+### 7.4. Relacja semantyczna
+Znaczeniowe powiązanie między encjami.
+
+Przykłady:
+- „Newton opracował mechanikę klasyczną”
+- „Ubuntu bazuje na Linuksie”
+
+### 7.5. Kontekst
+Otoczenie znaczeniowe, które wpływa na interpretację.
+
+Przykład:
+Słowo „Java” może oznaczać:
+- język programowania
+- wyspę
+- kawę
+
+Bez kontekstu model może być błędny.
+
+## 8. Jak modelować rzeczywistość na podstawie tekstu
+
+Proces można podzielić na etapy.
+
+## 8.1. Ekstrakcja informacji
+Z tekstu należy wydobyć:
+- obiekty
+- klasy
+- cechy
+- relacje
+- zdarzenia
+- daty
+- źródło informacji
+
+Przykład tekstu:
+„Marie Curie otrzymała Nagrodę Nobla w 1903 roku.”
+
+Ekstrakcja:
+- encja: Marie Curie
+- typ: osoba
+- encja: Nagroda Nobla
+- typ: nagroda
+- relacja: otrzymała
+- data: 1903
+
+## 8.2. Normalizacja
+Różne formy zapisu trzeba sprowadzać do jednej postaci.
+
+Przykłady:
+- „M. Curie” i „Marie Curie” mogą oznaczać tę samą osobę
+- „rok 1903” i „1903” oznaczają ten sam czas
+- „USA” i „Stany Zjednoczone” mogą odnosić się do tego samego państwa
+
+## 8.3. Rozstrzyganie tożsamości
+Trzeba ustalić, czy dwa fragmenty tekstu mówią o tym samym obiekcie.
+
+Przykład:
+- „Jan Kowalski napisał raport.”
+- „Autor raportu pracuje w Gdańsku.”
+
+Jeśli kontekst to potwierdza, „autor raportu” może oznaczać Jana Kowalskiego.
+
+## 8.4. Budowa struktury wiedzy
+Po ekstrakcji i normalizacji wiedza może zostać zapisana jako:
+- graf wiedzy
+- baza encji i relacji
+- sieć pojęć
+- zbiór twierdzeń z metadanymi
+
+## 8.5. Aktualizacja modelu
+Nowe informacje mogą:
+- potwierdzać istniejący fakt
+- doprecyzowywać go
+- przeczyć wcześniejszym danym
+- rozszerzać model o nowe klasy i relacje
+
+## 9. Reprezentacje wiedzy
+
+### 9.1. Lista faktów
+Najprostsza forma.
+
+Przykład:
+- `Paris -> isCapitalOf -> France`
+- `Curie -> received -> NobelPrize`
+
+Zaleta:
+- łatwa do zapisu i wyszukiwania
+
+Wada:
+- słabo oddaje złożony kontekst
+
+### 9.2. Graf wiedzy
+Obiekty są węzłami, relacje są połączeniami.
+
+Przykład:
+- `Osoba -> pracuje_w -> Organizacja`
+- `Dokument -> opisuje -> Zjawisko`
+
+Zalety:
+- dobrze pokazuje powiązania
+- wspiera wnioskowanie
+- nadaje się do łączenia wiedzy z wielu plików
+
+### 9.3. Ontologia
+To formalny opis pojęć, klas i reguł w danej dziedzinie.
+
+Przykład:
+- każda stolica jest miastem
+- każde miasto leży w jakimś państwie
+- osoba nie jest organizacją
+
+Ontologia pomaga utrzymać spójność modelu.
+
+## 10. Jakość modelu
+
+Dobry model rzeczywistości powinien mieć określone cechy.
+
+### 10.1. Spójność
+Model nie powinien zawierać sprzeczności.
+
+Przykład sprzeczności:
+- „Berlin jest stolicą Francji”
+- „Paryż jest stolicą Francji”
+
+### 10.2. Jednoznaczność
+Pojęcia i relacje powinny mieć jasne znaczenie.
+
+Zamiast relacji:
+- `ma_związek_z`
+
+lepiej użyć:
+- `jest_autorem`
+- `należy_do`
+- `powoduje`
+- `powstało_w`
+
+### 10.3. Użyteczność
+Model powinien wspierać zadanie.
+
+Jeśli celem jest nauka z tekstu, model musi pomagać w:
+- porządkowaniu faktów
+- odpowiadaniu na pytania
+- wykrywaniu braków wiedzy
+- łączeniu informacji z wielu dokumentów
+
+### 10.4. Rozszerzalność
+Model powinien dać się rozwijać bez przebudowy całości.
+
+## 11. Typowe błędy w modelowaniu rzeczywistości
+
+### 11.1. Mylenie słów z obiektami
+To, że w tekście występują dwa różne słowa, nie znaczy, że są to dwa różne obiekty.
+
+### 11.2. Nadmierna szczegółowość
+Zbyt wiele klas i relacji utrudnia użycie modelu.
+
+### 11.3. Zbyt duże uproszczenie
+Jeśli wszystko zostanie sprowadzone do ogólnych kategorii, model przestaje być informacyjny.
+
+### 11.4. Brak czasu i źródła
+Wiedza bez informacji:
+- skąd pochodzi
+- kiedy była prawdziwa
+
+jest trudniejsza do oceny.
+
+### 11.5. Brak obsługi niepewności
+Nie każde zdanie w tekście jest pewnym faktem. Mogą występować:
+- hipotezy
+- opinie
+- przypuszczenia
+- cytaty cudzych twierdzeń
+
+## 12. Modelowanie a wnioskowanie
+
+Model rzeczywistości nie służy tylko do magazynowania danych. Pozwala też **wnioskować**.
+
+### Przykład
+Fakty:
+- Warszawa jest miastem
+- miasto może być stolicą państwa
+- Warszawa jest stolicą Polski
+
+Wniosek:
+- Warszawa jest ważnym obiektem administracyjnym w modelu państwa
+
+Wnioskowanie może być:
+- **dedukcyjne**: z reguł do pewnych wniosków
+- **indukcyjne**: z wielu przykładów do uogólnienia
+- **abdukcyjne**: szukanie najlepszego wyjaśnienia
+
+Dla systemu uczącego się z tekstów szczególnie ważne jest ostrożne oddzielanie:
+- tego, co zostało wprost zapisane
+- tego, co zostało wywnioskowane
+
+## 13. Minimalny schemat modelu dla M.A.R.I.A.
+
+Dla autonomicznej nauki z plików tekstowych przydatny jest prosty model startowy.
+
+### Warstwa 1. Obiekty
+- encja
+- typ encji
+- nazwa podstawowa
+- warianty nazwy
+
+### Warstwa 2. Fakty
+- podmiot
+- relacja
+- obiekt albo wartość
+- źródło
+- fragment tekstu
+- czas
+- poziom pewności
+
+### Warstwa 3. Dokumenty
+- nazwa pliku
+- ścieżka
+- data modyfikacji
+- temat
+- streszczenie
+
+### Warstwa 4. Powiązania
+- dokument mówi o encji
+- dokument zawiera twierdzenie
+- encja występuje w wielu dokumentach
+- dwa twierdzenia są zgodne albo sprzeczne
+
+Taki model jest wystarczający do rozpoczęcia nauki i może być później rozszerzany.
+
+## 14. Praktyczny przykład
+
+Tekst:
+„Alan Turing był matematykiem. W 1936 roku opisał maszynę Turinga.”
+
+Model:
+
+**Encje**
+- Alan Turing -> osoba
+- maszyna Turinga -> pojęcie teoretyczne
+- 1936 -> data
+
+**Fakty**
+- Alan Turing -> był -> matematyk
+- Alan Turing -> opisał -> maszyna Turinga
+- opisanie maszyny Turinga -> miało_miejsce_w -> 1936
+
+**Metadane**
+- źródło: konkretny plik tekstowy
+- pewność: wysoka, jeśli zdanie jest jednoznaczne
+
+## 15. Najważniejsze zasady końcowe
+
+- Modelowanie rzeczywistości to tworzenie użytecznej reprezentacji świata, a nie kopiowanie świata w całości.
+- Każdy model zawiera obiekty, cechy, relacje, zdarzenia i reguły.
+- Dobra reprezentacja wiedzy musi być spójna, jednoznaczna i rozszerzalna.
+- W nauce z tekstu kluczowe są: ekstrakcja encji, relacji, czasu, źródła i poziomu pewności.
+- Graf wiedzy i model faktów są praktycznymi formami zapisu wiedzy.
+- Trzeba odróżniać tekst źródłowy, fakt zapisany w modelu i wniosek wyprowadzony z faktów.
+- Model powinien być dopasowany do celu: w tym przypadku do autonomicznego uczenia się i strukturyzacji wiedzy z plików tekstowych.
+
+## 16. Słowa kluczowe
+
+- model
+- rzeczywistość
+- reprezentacja wiedzy
+- abstrakcja
+- encja
+- klasa
+- atrybut
+- relacja
+- zdarzenie
+- fakt
+- graf wiedzy
+- ontologia
+- normalizacja
+- rozstrzyganie tożsamości
+- wnioskowanie
+- spójność
+- kontekst
+- źródło
+- niepewność
+
+Jeśli chcesz, mogę w następnym kroku przygotować także **wersję bardziej techniczną dla M.A.R.I.A.**, na przykład: „jak zamienić tekst na graf wiedzy krok po kroku”.

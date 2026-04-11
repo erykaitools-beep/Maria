@@ -1,0 +1,484 @@
+# Zrodlo: ChatGPT (Codex CLI)
+# Temat: analiza decyzji
+# Data: 2026-04-11 05:32
+# Pytanie: Maria nie ma zadnej wiedzy o 'analiza decyzji'. Potrzebuje materialu edukacyjnego od podstaw. Cel nauki: Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych.
+
+**Analiza decyzji**
+
+## Czym jest analiza decyzji
+
+Analiza decyzji to uporządkowany sposób wyboru działania spośród kilku możliwych opcji. Jej celem jest zmniejszenie przypadkowości i poprawa jakości wyboru przez użycie jasnych kryteriów, danych oraz logicznego porównania wariantów.
+
+Najprostsza definicja:
+
+- **decyzja**: wybór jednego działania z co najmniej dwóch możliwości
+- **analiza decyzji**: proces zbierania informacji, porządkowania opcji, oceny skutków i wyboru najlepszego wariantu według ustalonych kryteriów
+
+Analiza decyzji jest stosowana w wielu obszarach:
+
+- zarządzanie
+- medycyna
+- inżynieria
+- ekonomia
+- systemy autonomiczne
+- planowanie działań agentów AI
+
+Dla systemu uczącego się z plików tekstowych analiza decyzji jest ważna, ponieważ pozwala odpowiadać na pytania typu:
+
+- Które źródło uznać za bardziej wiarygodne?
+- Który plan działania wybrać?
+- Kiedy wykonać akcję, a kiedy zebrać więcej danych?
+- Jak porównać kilka możliwych interpretacji tekstu?
+
+## Dlaczego analiza decyzji jest potrzebna
+
+Bez analizy decyzji wybór często opiera się na:
+
+- przypadku
+- pojedynczej przesłance
+- niepełnych danych
+- błędach poznawczych
+- nadmiernym uproszczeniu
+
+Analiza decyzji pomaga:
+
+- jasno zdefiniować problem
+- oddzielić fakty od założeń
+- porównać warianty według tych samych zasad
+- uwzględnić ryzyko i niepewność
+- uzasadnić wybór
+
+Przykład:
+
+System ma trzy możliwe działania po przeczytaniu dokumentu:
+
+- zapisać informację do pamięci trwałej
+- odrzucić informację
+- oznaczyć informację jako niepewną i czekać na potwierdzenie
+
+Bez analizy decyzji wybór może być losowy. Z analizą decyzji system może ocenić:
+
+- wiarygodność źródła
+- zgodność z wcześniejszą wiedzą
+- znaczenie informacji
+- koszt błędu
+
+## Podstawowe elementy decyzji
+
+Każda decyzja ma kilka podstawowych składników.
+
+### 1. Problem decyzyjny
+
+To pytanie, na które trzeba odpowiedzieć.
+
+Przykłady:
+
+- Czy zapisać tę informację jako fakt?
+- Który dokument potraktować jako źródło podstawowe?
+- Czy wykonać działanie automatycznie, czy przekazać je do weryfikacji?
+
+Dobrze zdefiniowany problem powinien być:
+
+- konkretny
+- ograniczony w czasie lub kontekście
+- możliwy do rozstrzygnięcia
+
+### 2. Warianty decyzji
+
+To możliwe opcje działania.
+
+Przykład:
+
+Dla problemu „Co zrobić z nową informacją z tekstu?” wariantami mogą być:
+
+- zaakceptować
+- odrzucić
+- oznaczyć jako hipotezę
+- odłożyć do dalszej analizy
+
+Jeżeli nie ma co najmniej dwóch wariantów, nie ma realnej decyzji.
+
+### 3. Kryteria oceny
+
+To cechy, według których porównuje się warianty.
+
+Typowe kryteria:
+
+- trafność
+- koszt
+- czas
+- bezpieczeństwo
+- odwracalność skutków
+- zgodność z celami
+- poziom ryzyka
+
+Przykład dla systemu AI:
+
+- wiarygodność źródła
+- spójność z pamięcią
+- użyteczność informacji
+- ryzyko utrwalenia błędu
+
+### 4. Skutki decyzji
+
+Każdy wariant prowadzi do określonych konsekwencji.
+
+Skutki mogą być:
+
+- krótkoterminowe
+- długoterminowe
+- bezpośrednie
+- pośrednie
+- odwracalne
+- nieodwracalne
+
+Przykład:
+
+Jeśli system błędnie uzna nieprawdziwe zdanie za fakt, może:
+
+- zanieczyścić pamięć
+- tworzyć błędne wnioski
+- obniżyć jakość przyszłych odpowiedzi
+
+### 5. Niepewność
+
+W praktyce często nie wiadomo dokładnie, jaki będzie wynik decyzji. Wtedy analiza decyzji musi uwzględnić niepewność.
+
+Źródła niepewności:
+
+- brak danych
+- sprzeczne źródła
+- niejednoznaczny język
+- zmienność otoczenia
+- ograniczona jakość pomiaru
+
+## Główne pojęcia w analizie decyzji
+
+### Alternatywa
+
+Alternatywa to jedna z możliwych opcji działania.
+
+### Stan świata
+
+Stan świata to sytuacja zewnętrzna, na którą decydent nie ma pełnego wpływu, ale która wpływa na wynik.
+
+Przykład:
+
+- dokument jest prawdziwy
+- dokument zawiera błąd
+- dokument jest częściowo aktualny
+
+### Wynik
+
+Wynik to efekt połączenia wybranego działania i rzeczywistego stanu świata.
+
+### Użyteczność
+
+Użyteczność to miara wartości wyniku dla decydenta. Nie musi oznaczać pieniędzy. Może oznaczać:
+
+- trafność wiedzy
+- bezpieczeństwo
+- oszczędność czasu
+- zgodność z celem systemu
+
+### Ryzyko
+
+Ryzyko to możliwość wystąpienia niekorzystnego wyniku.
+
+### Prawdopodobieństwo
+
+Prawdopodobieństwo opisuje, jak bardzo prawdopodobny jest dany stan świata lub wynik.
+
+## Typy decyzji
+
+### Decyzje w warunkach pewności
+
+Wiadomo, jakie będą skutki każdego wariantu.
+
+Przykład:
+
+Jeśli plik jest pusty, system wie, że nie wydobędzie z niego faktów.
+
+### Decyzje w warunkach ryzyka
+
+Skutki są niepewne, ale można oszacować prawdopodobieństwa.
+
+Przykład:
+
+System ocenia, że źródło ma 80% szans bycia wiarygodnym.
+
+### Decyzje w warunkach niepewności
+
+Nie wiadomo ani jaki będzie wynik, ani jakie są dokładne prawdopodobieństwa.
+
+Przykład:
+
+Nowe źródło nie ma historii wiarygodności i dotyczy nieznanego obszaru.
+
+## Etapy analizy decyzji
+
+## 1. Zdefiniowanie celu
+
+Najpierw trzeba ustalić, co ma zostać osiągnięte.
+
+Przykłady celów:
+
+- maksymalizacja trafności wiedzy
+- minimalizacja ryzyka błędu
+- szybka selekcja ważnych informacji
+- zachowanie bezpiecznej autonomii
+
+Cel musi być jasny, bo różne cele prowadzą do różnych decyzji.
+
+## 2. Sformułowanie problemu
+
+Problem należy opisać w formie pytania decyzyjnego.
+
+Zamiast:
+
+- „Coś jest niejasne”
+
+lepiej:
+
+- „Czy tę informację zapisać jako fakt, hipotezę czy odrzucić?”
+
+## 3. Zebranie wariantów
+
+Należy wypisać wszystkie sensowne opcje. Częstym błędem jest porównywanie tylko dwóch wariantów, gdy istnieje trzeci, lepszy.
+
+## 4. Ustalenie kryteriów
+
+Kryteria powinny być:
+
+- istotne dla celu
+- mierzalne lub przynajmniej porównywalne
+- zrozumiałe
+
+## 5. Ocena wariantów
+
+Każdy wariant porównuje się według tych samych kryteriów.
+
+Można użyć:
+
+- opisu jakościowego
+- skali liczbowej
+- wag
+- progów minimalnych
+
+## 6. Wybór wariantu
+
+Wybór powinien wynikać z analizy, a nie z przypadkowej preferencji.
+
+## 7. Monitorowanie skutków
+
+Po decyzji trzeba sprawdzić rezultat. To pozwala poprawić przyszłe decyzje.
+
+Dla systemu uczącego się jest to szczególnie ważne, bo umożliwia:
+
+- korektę błędnych reguł
+- aktualizację wag kryteriów
+- uczenie się na podstawie wyników
+
+## Narzędzia analizy decyzji
+
+## Macierz decyzyjna
+
+To tabela, w której:
+
+- wiersze oznaczają warianty
+- kolumny oznaczają kryteria
+- komórki zawierają oceny
+
+Przykład uproszczony:
+
+Problem: jak potraktować nowy fragment tekstu?
+
+Warianty:
+
+- zapisać jako fakt
+- zapisać jako hipotezę
+- odrzucić
+
+Kryteria:
+
+- wiarygodność źródła
+- zgodność z pamięcią
+- użyteczność
+- ryzyko błędu
+
+Każdy wariant otrzymuje ocenę, np. od 1 do 5. Następnie można dodać wagi kryteriów i policzyć wynik łączny.
+
+## Drzewo decyzyjne
+
+To graficzne przedstawienie decyzji i możliwych konsekwencji.
+
+Zawiera:
+
+- węzły decyzji
+- możliwe działania
+- stany świata
+- wyniki
+- czasem prawdopodobieństwa
+
+Przykład:
+
+- decyzja: zaakceptować informację lub wstrzymać
+- jeśli zaakceptować:
+  - informacja prawdziwa
+  - informacja fałszywa
+- jeśli wstrzymać:
+  - zysk bezpieczeństwa
+  - koszt opóźnienia
+
+Drzewa decyzyjne są użyteczne, gdy decyzja ma kilka etapów.
+
+## Reguły progowe
+
+System może stosować proste progi decyzyjne.
+
+Przykład:
+
+- jeśli wiarygodność > 0.85 i zgodność z pamięcią > 0.8, zapisz jako fakt
+- jeśli wiarygodność między 0.5 a 0.85, zapisz jako hipotezę
+- jeśli wiarygodność < 0.5, odrzuć lub oznacz do weryfikacji
+
+To praktyczne w systemach autonomicznych, bo ułatwia automatyzację.
+
+## Przykład pełnej analizy decyzji
+
+### Problem
+
+System odczytał zdanie z dokumentu technicznego i musi zdecydować, czy dodać informację do pamięci semantycznej.
+
+### Warianty
+
+- A: zapisać jako fakt
+- B: zapisać jako hipotezę
+- C: odrzucić
+
+### Kryteria
+
+- wiarygodność źródła
+- zgodność z istniejącą wiedzą
+- znaczenie informacji
+- koszt potencjalnego błędu
+
+### Ocena
+
+- A ma sens, gdy źródło jest mocne i informacja zgodna z pamięcią
+- B ma sens, gdy informacja może być przydatna, ale nie ma pełnego potwierdzenia
+- C ma sens, gdy źródło jest słabe lub treść sprzeczna z wieloma wcześniejszymi faktami
+
+### Decyzja
+
+Jeżeli źródło jest średnio wiarygodne, a informacja cenna, najlepszy może być wariant B: zapisać jako hipotezę.
+
+### Wniosek
+
+Analiza decyzji nie zawsze prowadzi do prostego „tak” lub „nie”. Często najlepszym rozwiązaniem jest stan pośredni, np. przechowanie informacji z oznaczeniem niepewności.
+
+## Najczęstsze błędy w analizie decyzji
+
+- niejasne zdefiniowanie problemu
+- pomijanie ważnych wariantów
+- mieszanie faktów z założeniami
+- brak kryteriów lub niespójne kryteria
+- ignorowanie ryzyka
+- brak oceny skutków długoterminowych
+- zbyt szybkie zamykanie procesu decyzyjnego
+
+Dla systemów uczących się z tekstu szczególnie groźne są:
+
+- uznawanie pojedynczego źródła za pewne
+- brak rozróżnienia między faktem a hipotezą
+- brak oznaczania poziomu pewności
+- utrwalanie informacji bez późniejszej rewizji
+
+## Związek analizy decyzji z uczeniem z tekstów
+
+System uczący się z plików tekstowych nie tylko odczytuje treść, ale też stale podejmuje decyzje. Na przykład:
+
+- które fragmenty są ważne
+- które pojęcia są definicjami
+- które zdania opisują fakty
+- które informacje są sprzeczne
+- co zapisać do pamięci trwałej
+- co odrzucić
+- co przekazać do późniejszej analizy
+
+W tym kontekście analiza decyzji pełni rolę mechanizmu sterującego. Pomaga zamienić surowy tekst na uporządkowaną wiedzę.
+
+Praktyczne zastosowania:
+
+- klasyfikacja informacji jako fakt, hipoteza, przykład, definicja
+- ocena jakości źródła
+- wybór strategii ekstrakcji wiedzy
+- rozstrzyganie konfliktów między dokumentami
+- planowanie kolejnych kroków analizy
+
+## Minimalny schemat decyzyjny dla M.A.R.I.A.
+
+Dla systemu autonomicznego można przyjąć prosty schemat:
+
+### Wejście
+
+- fragment tekstu
+- metadane źródła
+- zgodność z pamięcią
+- poziom pewności ekstrakcji
+
+### Pytanie decyzyjne
+
+- Co zrobić z tą informacją?
+
+### Warianty
+
+- zapisać jako fakt
+- zapisać jako hipotezę
+- zapisać jako przykład
+- odrzucić
+- przekazać do dalszej analizy
+
+### Kryteria
+
+- wiarygodność
+- spójność
+- istotność
+- ryzyko
+- koszt błędu
+
+### Wynik
+
+- decyzja
+- uzasadnienie
+- poziom pewności
+- ślad decyzyjny do późniejszej kontroli
+
+To ważne, ponieważ decyzja bez śladu decyzyjnego jest trudna do poprawy.
+
+## Kluczowe pojęcia do zapamiętania
+
+- **decyzja**: wybór działania
+- **analiza decyzji**: uporządkowany proces wyboru
+- **wariant**: możliwa opcja
+- **kryterium**: cecha używana do oceny
+- **skutek**: konsekwencja wyboru
+- **ryzyko**: możliwość niekorzystnego wyniku
+- **niepewność**: brak pełnej wiedzy o skutkach lub stanie świata
+- **użyteczność**: wartość wyniku względem celu
+- **macierz decyzyjna**: tabela do porównania wariantów
+- **drzewo decyzyjne**: model decyzji i możliwych następstw
+
+## Podsumowanie
+
+Analiza decyzji to metoda świadomego wyboru działania. Jej podstawą są: jasny problem, zbiór wariantów, kryteria oceny, analiza skutków oraz uwzględnienie ryzyka i niepewności. W systemie uczącym się z tekstów analiza decyzji jest niezbędna, ponieważ pozwala kontrolować, jakie informacje są przyjmowane, jak są klasyfikowane i kiedy wymagają dodatkowej weryfikacji.
+
+Dla M.A.R.I.A. analiza decyzji jest szczególnie użyteczna w zadaniach takich jak:
+
+- ekstrakcja wiedzy z dokumentów
+- ocena wiarygodności źródeł
+- rozróżnianie faktów od hipotez
+- bezpieczna autonomia
+- aktualizacja pamięci bez utrwalania błędów
+
+Najważniejsza zasada praktyczna brzmi: **nie każda informacja z tekstu powinna być od razu uznana za fakt**. Analiza decyzji pozwala wprowadzić etap oceny, a to zwiększa jakość wiedzy i bezpieczeństwo działania systemu.

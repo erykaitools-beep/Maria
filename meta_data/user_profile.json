@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "identity": {
+    "name": "Eryk",
+    "language": "pl",
+    "timezone": "Europe/Warsaw"
+  },
+  "preferences": {
+    "response_style": "casual",
+    "autonomy_level": "medium",
+    "notify_channel": "telegram"
+  },
+  "interests": [
+    "programowanie",
+    "fizyka"
+  ],
+  "schedule": {
+    "notes": [
+      "praca: 9-17"
+    ]
+  },
+  "facts": [
+    "testowy fakt - przetrwa restart",
+    "mam 32lata , pracuje obecnie jako płytkarz w Niemczech"
+  ],
+  "channels": {
+    "telegram": true,
+    "web_ui": true,
+    "repl": false
+  },
+  "stats": {
+    "first_seen": "2026-04-10T17:44:37.028423",
+    "last_seen": "2026-04-10T18:16:08.602121",
+    "total_messages": 1,
+    "sessions_count": 0
+  },
+  "updated_at": "2026-04-10T18:16:08.602143"
+}

@@ -3344,6 +3344,12 @@ def _get_user_profile():
         return None
 
 
+@app.route('/profile')
+@require_auth
+def page_profile():
+    return render_template('profile.html', active_page='profile')
+
+
 @app.route('/api/user/profile')
 @require_auth
 def api_user_profile():
@@ -3570,6 +3576,54 @@ def api_task_pdf(task_id):
     except Exception:
         pass
     return jsonify({"error": "PDF generation failed"}), 500
+
+
+# ====== PROACTIVE CONTACT ======
+
+def _get_proactive_scheduler():
+    """Get ProactiveScheduler from SharedContext."""
+    try:
+        from agent_core.registry import SharedContext
+        ctx = SharedContext.instance() if hasattr(SharedContext, 'instance') else None
+        if ctx and hasattr(ctx, 'proactive_scheduler') and ctx.proactive_scheduler:
+            return ctx.proactive_scheduler
+    except Exception:
+        pass
+    return None
+
+
+@app.route('/api/proactive/status')
+@require_auth
+def api_proactive_status():
+    """Get proactive contact scheduler status."""
+    sched = _get_proactive_scheduler()
+    if not sched:
+        return jsonify({"error": "ProactiveScheduler not available"}), 503
+    return jsonify(sched.get_status())
+
+
+@app.route('/api/proactive/toggle', methods=['POST'])
+@require_auth
+def api_proactive_toggle():
+    """Enable/disable proactive contact."""
+    sched = _get_proactive_scheduler()
+    if not sched:
+        return jsonify({"error": "ProactiveScheduler not available"}), 503
+    data = request.get_json() or {}
+    enabled = data.get("enabled", not sched.enabled)
+    sched.set_enabled(enabled)
+    return jsonify({"enabled": sched.enabled})
+
+
+@app.route('/api/proactive/history')
+@require_auth
+def api_proactive_history():
+    """Get recent proactive contacts."""
+    sched = _get_proactive_scheduler()
+    if not sched:
+        return jsonify({"error": "ProactiveScheduler not available"}), 503
+    limit = request.args.get("limit", 20, type=int)
+    return jsonify({"contacts": sched.get_history(limit)})
 
 
 if __name__ == '__main__':
