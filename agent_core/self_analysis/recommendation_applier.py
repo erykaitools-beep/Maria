@@ -6,7 +6,7 @@ Converts analysis recommendations into concrete actions:
 - Topic hints for WebSource fetcher
 - Beliefs in K6 World Model
 
-All goals are PROPOSED (not ACTIVE) - Eryk approves.
+All goals are PROPOSED (not ACTIVE) - operator approves.
 """
 
 import json

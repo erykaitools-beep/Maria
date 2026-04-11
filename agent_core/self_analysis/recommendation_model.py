@@ -33,7 +33,7 @@ class AnalyzerBackend(Enum):
     LOCAL_PLANNER = "local_planner"   # qwen3:8b via ModelScheduler
     CLAUDE_CLI = "claude_cli"         # Claude Code CLI (Phase 2)
     CHATGPT_CLI = "chatgpt_cli"      # ChatGPT/Codex (Phase 3)
-    MANUAL = "manual"                 # Eryk pasted results
+    MANUAL = "manual"                 # Operator pasted results
 
 
 def _gen_id(prefix: str) -> str:

@@ -48,7 +48,7 @@ def mock_ctx():
     identity.get_identity_dict.return_value = {
         "session_count": 42, "total_uptime_hours": 100,
         "birth_date": "2025-11-14", "age_string": "5 miesiecy",
-        "primary_user": "Eryk",
+        "primary_user": "Operator",
     }
     ctx.identity_store = identity
 

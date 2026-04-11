@@ -169,7 +169,7 @@ def build_pdf():
     pdf.ln(15)
     pdf.set_font("DejaVu", "", 8)
     pdf.set_text_color(150, 150, 150)
-    pdf.cell(0, 5, "Autor: Eryk | Asystent: Claude (Anthropic)",
+    pdf.cell(0, 5, "M.A.R.I.A. Project | AGPL-3.0",
              align="C", new_x="LMARGIN", new_y="NEXT")
 
     # ══════════════════════════════════════════════════
@@ -527,12 +527,12 @@ def build_pdf():
     pdf.kv_line("RAM:", "32 GB")
     pdf.kv_line("Dysk:", "1 TB SSD")
     pdf.kv_line("OS:", "Ubuntu 22.04 LTS")
-    pdf.kv_line("IP LAN:", "192.168.178.32")
+    pdf.kv_line("IP LAN:", "192.168.1.32")
     pdf.kv_line("Deploy:", "22.02.2026")
 
     pdf.subsection("Security")
     security = [
-        "UFW: deny all incoming, allow SSH + 5000 z LAN (192.168.178.0/24)",
+        "UFW: deny all incoming, allow SSH + 5000 z LAN (192.168.1.0/24)",
         "fail2ban: sshd jail (5 prob -> ban 1h)",
         "SSH: klucz ed25519, PasswordAuthentication no, MaxAuthTries 3",
         "Automatyczne security updates (unattended-upgrades)",
@@ -549,7 +549,7 @@ def build_pdf():
     pdf.kv_line("Backup:", "Cron codziennie o 3:00 -> /home/maria/maria_backups/")
 
     pdf.subsection("Web UI")
-    pdf.kv_line("URL:", "http://192.168.178.32:5000")
+    pdf.kv_line("URL:", "http://192.168.1.32:5000")
     pdf.kv_line("Auth:", "PIN (4 cyfry)")
     pdf.kv_line("Funkcje:", "Chat, Status dashboard, Powiadomienia toast")
     pdf.kv_line("Rate limit:", "2 wiadomosci / 60s")

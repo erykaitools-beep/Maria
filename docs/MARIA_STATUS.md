@@ -24,7 +24,7 @@ Offline-first, prywatny, bez chmury.
 | Mini PC | NiPoGi (AMD Ryzen 5 7430U, 32GB RAM, 1TB SSD) |
 | OS | Ubuntu 22.04 LTS |
 | Storage | 6TB ext4 dysk na logi/backupy (/mnt/storage/) |
-| Siec | LAN 192.168.178.32, WireGuard VPN |
+| Siec | LAN (local network), WireGuard VPN |
 | Bezpieczenstwo | UFW, fail2ban, SSH key-only, no root |
 | Backup | Codziennie 3:00, 30 kopii na 6TB |
 | Kamera | Innomaker U20CAM-1080PD&N-S1 (USB, /dev/video0) |

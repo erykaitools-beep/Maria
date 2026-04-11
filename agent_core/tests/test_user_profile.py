@@ -27,17 +27,17 @@ def profile(tmp_path):
 def loaded_profile(tmp_path):
     """UserProfile with pre-loaded data."""
     p = UserProfile(path=tmp_path / "user_profile.json")
-    p.set_name("Eryk")
+    p.set_name("TestUser")
     p.add_interest("fizyka")
     p.add_interest("programowanie")
-    p.add_fact("mieszka w Niemczech")
+    p.add_fact("mieszka w Polsce")
     p.add_schedule_note("praca: 9-17")
     return p
 
 
 class TestIdentity:
     def test_default_name(self, profile):
-        assert profile.get_name() == "Eryk"
+        assert profile.get_name() == "Operator"
 
     def test_set_name(self, profile):
         profile.set_name("Jan")
@@ -193,7 +193,7 @@ class TestAutoLearnFromMessage:
     def test_no_false_name_maria(self, profile):
         profile.learn_from_message("jestem Maria")
         # Should not change name to Maria (that's the bot)
-        assert profile.get_name() == "Eryk"
+        assert profile.get_name() == "Operator"
 
     def test_learn_work_schedule(self, profile):
         profile.learn_from_message("pracuje od 9 do 17")
@@ -218,11 +218,11 @@ class TestLearnFromUserFacts:
 
     def test_mixed_facts(self, profile):
         profile.learn_from_user_facts([
-            "operator: Eryk",
+            "operator: TestUser",
             "interesuje sie kosmosem",
             "",  # empty - should skip
         ])
-        assert profile.get_name() == "Eryk"
+        assert profile.get_name() == "TestUser"
         assert "interesuje sie kosmosem" in profile.get_facts()
 
     def test_dedup_on_ingest(self, profile):
@@ -235,7 +235,7 @@ class TestContextForPrompt:
     def test_basic_context(self, profile):
         ctx = profile.get_context_for_prompt()
         assert "[Profil uzytkownika]" in ctx
-        assert "Eryk" in ctx
+        assert "Operator" in ctx
 
     def test_with_interests(self, loaded_profile):
         ctx = loaded_profile.get_context_for_prompt()
@@ -248,7 +248,7 @@ class TestContextForPrompt:
 
     def test_with_facts(self, loaded_profile):
         ctx = loaded_profile.get_context_for_prompt()
-        assert "Niemczech" in ctx
+        assert "Polsce" in ctx
 
 
 class TestPersistence:
@@ -309,13 +309,13 @@ class TestStats:
 class TestSummary:
     def test_summary_includes_name(self, profile):
         s = profile.get_summary()
-        assert "Eryk" in s
+        assert "Operator" in s
 
     def test_summary_with_data(self, loaded_profile):
         s = loaded_profile.get_summary()
         assert "fizyka" in s
         assert "9-17" in s
-        assert "Niemczech" in s
+        assert "Polsce" in s
 
 
 class TestCrossProcessReload:
@@ -367,4 +367,4 @@ class TestFullProfile:
         """Returned dict should be a copy, not a reference."""
         fp = profile.get_full_profile()
         fp["identity"]["name"] = "HACKED"
-        assert profile.get_name() == "Eryk"
+        assert profile.get_name() == "Operator"

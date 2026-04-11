@@ -91,10 +91,10 @@ class TestProposal:
             current_value=1, proposed_value=2,
             hypothesis="h", rationale="r", expected_outcome="e",
         )
-        p.add_comment("Dobry pomysl", "eryk")
+        p.add_comment("Dobry pomysl", "operator")
         assert len(p.comments) == 1
         assert p.comments[0]["text"] == "Dobry pomysl"
-        assert p.comments[0]["author"] == "eryk"
+        assert p.comments[0]["author"] == "operator"
         assert p.comments[0]["timestamp"] > 0
 
     def test_comments_persist_in_roundtrip(self):
@@ -408,7 +408,7 @@ class TestProposalEngine:
             k9_patterns={"consecutive_failures": {"exam": 5}},
         )
         p = engine.get_active_proposals()[0]
-        engine.add_comment(p.proposal_id, "Sprawdze to jutro", "eryk")
+        engine.add_comment(p.proposal_id, "Sprawdze to jutro", "operator")
 
         # Reload
         engine2 = self._make_engine(tmp_path)
@@ -783,7 +783,7 @@ class TestExperimentSystem:
             k9_patterns={"consecutive_failures": {"exam": 5}},
         )
         pid = proposals[0].proposal_id
-        assert system.add_comment(pid, "ciekawe", "eryk")
+        assert system.add_comment(pid, "ciekawe", "operator")
 
         p = system.proposal_engine.get_proposal(pid)
         assert len(p.comments) == 1

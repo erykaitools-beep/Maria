@@ -3,7 +3,7 @@
 # Hardware: NiPoGi Mini PC | Ryzen 5 7430U | 32 GB RAM | Ubuntu 22.04
 # Runtime: Ollama (primary) | llama.cpp (debug/fallback)
 # Status: HARDENED v1.1 | 2026-03-21
-# Author: Eryk Wyrebek (METAOPERATOR)
+# M.A.R.I.A. Project
 # Purpose: production-oriented registry for local model orchestration
 ---
 ## OPERATING PRINCIPLE

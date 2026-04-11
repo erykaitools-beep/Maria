@@ -2,8 +2,8 @@
 Telegram integration for M.A.R.I.A.
 
 Provides bidirectional communication with operator:
-- Maria -> Eryk: alerts, tensions, recommendations, health drops
-- Eryk -> Maria: commands (status, approve, reject)
+- Maria -> Operator: alerts, tensions, recommendations, health drops
+- Operator -> Maria: commands (status, approve, reject)
 
 Usage:
     from agent_core.telegram import TelegramBridge

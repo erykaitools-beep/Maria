@@ -1,7 +1,7 @@
 # M.A.R.I.A. - Kontrakty Architektoniczne
 
 > Version: 1.6 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja), v1.3 (Kontrakt K5: Planner), v1.4 (Kontrakt K6: World Model), v1.5 (Kontrakt K7: Autonomy Policy), v1.6 (Kontrakt K8: Deliberation)
-> Zatwierdzone przez: Eryk + Claude
+> Zatwierdzone przez: M.A.R.I.A. Project
 >
 > Ten dokument definiuje formalne kontrakty ("konstytucje") dla nowych warstw systemu.
 > Kazda implementacja MUSI byc zgodna z tymi kontraktami.
@@ -1154,7 +1154,7 @@ meta_data/
 ---
 
 *Utworzono: 2026-03-01*
-*Zatwierdzone przez: Eryk + Claude*
+*Zatwierdzone przez: M.A.R.I.A. Project*
 *Warstwa 1 (K1-K4): Zaimplementowana (941 testow)*
 *Warstwa 2 (K5 Planner): Zaimplementowana (1023 testow)*
 *Warstwa 3 (K6 World Model): Zaimplementowana (1194 testow)*

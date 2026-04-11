@@ -101,7 +101,7 @@ class UserFacingSelfModel:
                 "total_uptime_hours": id_dict.get("total_uptime_hours", 0),
                 "birth_date": id_dict.get("birth_date", ""),
                 "age_string": id_dict.get("age_string", ""),
-                "primary_user": id_dict.get("primary_user", "Eryk"),
+                "primary_user": id_dict.get("primary_user", "Operator"),
                 "last_session_summary": id_dict.get("last_session_summary", ""),
             })
 

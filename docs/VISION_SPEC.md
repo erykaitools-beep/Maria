@@ -368,7 +368,7 @@ class FaceModuleOutput:
         landmarks: Optional[Dict[str, Tuple[int, int]]]
 
         # Identyfikacja
-        identity: Optional[str]  # "Eryk", "unknown", None
+        identity: Optional[str]  # "operator", "unknown", None
         identity_confidence: float
 
         # Emocje (opcjonalne)
@@ -593,7 +593,7 @@ class VisionPercept:
         Jak Maria opisuje co widzi.
 
         Examples:
-            "Widze Eryka siedzacego przy biurku. Wyglada na skupionego."
+            "Widze operatora siedzacego przy biurku. Wyglada na skupionego."
             "Widze cos sie rusza w rogu pokoju, ale obraz jest rozmyty."
             "Widze bardzo slabo - chyba jest ciemno lub cos zaslania mi obiektyw."
         """
@@ -785,7 +785,7 @@ class AttentionMechanism:
         Bierze pod uwage:
         - Saliency map
         - Wykryte obiekty/twarze
-        - Kontekst (np. Eryk mowil, wiec patrz na niego)
+        - Kontekst (np. operator mowil, wiec patrz na niego)
         - Historia (nie skakaj chaotycznie)
         """
         ...
@@ -820,7 +820,7 @@ class VisionPerceptionAdapter:
 
         Output format (dual):
         {
-            "human": "Widze Eryka przy biurku, wyglada na zajętego.",
+            "human": "Widze operatora przy biurku, wyglada na zajętego.",
             "technical": {
                 "faces": [...],
                 "objects": [...],

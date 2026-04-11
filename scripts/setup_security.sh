@@ -74,9 +74,9 @@ apt-get install -y ufw > /dev/null 2>&1
 ufw default deny incoming > /dev/null 2>&1
 ufw default allow outgoing > /dev/null 2>&1
 
-# SSH - tylko z sieci LAN (192.168.178.0/24 = domyslna Fritz!Box)
-# Jesli Twoja siec ma inny zakres, zmien ponizej
-LAN_SUBNET="192.168.178.0/24"
+# SSH - tylko z sieci LAN
+# Zmien ponizszy zakres na swoja siec lokalna
+LAN_SUBNET="192.168.1.0/24"
 
 ufw allow from $LAN_SUBNET to any port 22 proto tcp comment "SSH z LAN" > /dev/null 2>&1
 info "SSH (port 22) - dozwolone tylko z $LAN_SUBNET"

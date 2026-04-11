@@ -177,8 +177,8 @@ class TestIdentityStore:
         assert identity_store.get_name() == "Maria"
 
     def test_get_primary_user(self, identity_store):
-        """get_primary_user() returns Eryk."""
-        assert identity_store.get_primary_user() == "Eryk"
+        """get_primary_user() returns default operator name."""
+        assert identity_store.get_primary_user() == DEFAULT_PRIMARY_USER
 
     def test_get_total_uptime_hours(self, identity_store):
         """get_total_uptime_hours() includes current session."""
@@ -465,10 +465,10 @@ class TestConsciousnessCore:
         consciousness.initialize()
 
         mock_brain = MagicMock()
-        mock_brain.think.return_value = "Witaj Eryk! Dobrze Cie widziec."
+        mock_brain.think.return_value = "Witaj! Dobrze Cie widziec."
 
         greeting = consciousness.get_startup_greeting(mock_brain)
-        assert "Witaj" in greeting or "Eryk" in greeting
+        assert "Witaj" in greeting or "Dobrze" in greeting
         mock_brain.think.assert_called_once()
 
     def test_get_startup_greeting_fallback(self, consciousness):

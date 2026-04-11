@@ -18,7 +18,7 @@ Lokalny, autonomiczny agent AI do samodzielnego uczenia sie z plikow tekstowych.
 - Web UI (Flask) z 8-panelowym dashboardem
 
 **Hardware:** Mini PC NiPoGi, AMD Ryzen 5 7430U, 32GB RAM, 1TB SSD, 6TB HDD archiwum
-**OS:** Ubuntu 22.04 LTS | **IP:** 192.168.178.32
+**OS:** Ubuntu 22.04 LTS | **IP:** (local network)
 **Uzytkownicy:** maria (aplikacja, bez sudo), deployadmin (admin)
 
 ---
@@ -747,7 +747,7 @@ python main.py
 ### Web UI (run_ui.py)
 ```bash
 sudo systemctl start maria-ui
-# -> http://192.168.178.32:5000 (PIN auth)
+# -> http://localhost:5000 (PIN auth)
 ```
 - 8-panelowy dashboard, chat z Maria, architektura, eksperymenty
 
@@ -809,4 +809,4 @@ sudo systemctl start maria-ui
 
 *Wygenerowano: 2026-04-01 przez Claude Code*
 *Projekt: github.com (prywatne repo)*
-*Operator: Eryk (@DonCames)*
+*License: AGPL-3.0*

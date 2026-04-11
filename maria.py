@@ -368,7 +368,7 @@ def main():
     # Wait a moment for UI to bind
     time.sleep(1)
     port = int(os.environ.get("MARIA_PORT", "5000"))
-    print(f"  Web UI:   http://192.168.178.32:{port}")
+    print(f"  Web UI:   http://localhost:{port}")
     print(f"  Daemon:   homeostasis tick loop (1Hz)")
     print(f"  Stop:     Ctrl+C or SIGTERM\n")
     print("=" * 60)

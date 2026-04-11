@@ -26,9 +26,9 @@ class TestBasePrompt:
         assert "spokojny" in result
         assert "konkretny" in result
 
-    def test_base_prompt_contains_eryk(self):
+    def test_base_prompt_contains_operator_name(self):
         result = build_base_prompt()
-        assert "Eryk" in result
+        assert "Operator" in result or "M.A.R.I.A." in result
 
     def test_base_prompt_polish_default(self):
         result = build_base_prompt()
@@ -71,8 +71,8 @@ class TestFullPrompt:
         assert "Sesja #42" in result
 
     def test_full_prompt_with_user(self):
-        result = build_full_prompt(user_context="[Profil] Eryk lubi AI")
-        assert "Eryk lubi AI" in result
+        result = build_full_prompt(user_context="[Profil] User lubi AI")
+        assert "User lubi AI" in result
 
     def test_full_prompt_with_work(self):
         result = build_full_prompt(work_context="Planner: LEARN neuroscience")
@@ -131,8 +131,8 @@ class TestCompactPrompt:
         assert "Sobota rano" in result
 
     def test_compact_with_user(self):
-        result = build_compact_prompt(user_context="[Profil] Eryk")
-        assert "Eryk" in result
+        result = build_compact_prompt(user_context="[Profil] User")
+        assert "User" in result
 
     def test_compact_no_work_context(self):
         # Compact prompt doesn't accept work_context

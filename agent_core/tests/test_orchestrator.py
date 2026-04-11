@@ -34,7 +34,7 @@ def mock_identity_store():
         "total_uptime_hours": 120.5,
         "birth_date": "2025-11-14",
         "age_string": "4 miesiace",
-        "primary_user": "Eryk",
+        "primary_user": "Operator",
         "last_session_summary": "Nauka o fizyce",
     }
     store.get_session_count.return_value = 42
@@ -197,7 +197,7 @@ class TestUserFacingSelfModelIdentity:
 
     def test_identity_has_operator(self, self_model):
         identity = self_model.get_identity()
-        assert identity["primary_user"] == "Eryk"
+        assert identity["primary_user"] == "Operator"
 
 
 # ===========================================================================

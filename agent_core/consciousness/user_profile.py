@@ -16,6 +16,7 @@ Integration:
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -81,7 +82,7 @@ class UserProfile:
         data = {
             "version": 1,
             "identity": {
-                "name": "Eryk",
+                "name": os.environ.get("MARIA_OPERATOR_NAME", "Operator"),
                 "language": "pl",
                 "timezone": "Europe/Warsaw",
             },
@@ -348,7 +349,7 @@ class UserProfile:
         """
         Ingest user_facts from ConversationMemory condensation.
 
-        Parses structured facts like "operator: Eryk" and free-form ones.
+        Parses structured facts like "operator: Name" and free-form ones.
         Returns number of new facts added.
 
         Args:

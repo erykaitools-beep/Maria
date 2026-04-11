@@ -97,7 +97,7 @@ class ContentGenerators:
 
     def _morning_summary(self) -> Optional[ProactiveContact]:
         """Daily morning briefing with overnight stats."""
-        name = self._safe_call(self._get_user_name) or "Eryk"
+        name = self._safe_call(self._get_user_name) or "Operator"
         greeting = TimeAwareness.get_greeting()
 
         lines = [f"*{greeting}, {name}!*", ""]
@@ -149,7 +149,7 @@ class ContentGenerators:
 
     def _evening_recap(self) -> Optional[ProactiveContact]:
         """Daily evening summary of what happened today."""
-        name = self._safe_call(self._get_user_name) or "Eryk"
+        name = self._safe_call(self._get_user_name) or "Operator"
 
         lines = [f"*Podsumowanie dnia, {name}*", ""]
 
@@ -200,7 +200,7 @@ class ContentGenerators:
         if now.weekday() != 6:  # Only on Sunday
             return None
 
-        name = self._safe_call(self._get_user_name) or "Eryk"
+        name = self._safe_call(self._get_user_name) or "Operator"
         lines = [f"*Przeglad tygodnia, {name}*", ""]
 
         # Knowledge coverage
@@ -290,7 +290,7 @@ class ContentGenerators:
 
     def _idle_checkin(self) -> Optional[ProactiveContact]:
         """Check in when operator hasn't been in touch for a while."""
-        name = self._safe_call(self._get_user_name) or "Eryk"
+        name = self._safe_call(self._get_user_name) or "Operator"
         greeting = TimeAwareness.get_greeting()
 
         lines = [
@@ -347,7 +347,7 @@ class ContentGenerators:
         if not matches:
             return None
 
-        name = self._safe_call(self._get_user_name) or "Eryk"
+        name = self._safe_call(self._get_user_name) or "Operator"
         lines = [f"*{name}, cos dla Ciebie!*", ""]
         for f, interest in matches[:3]:
             title = f.get("title", f.get("file_id", "?"))

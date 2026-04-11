@@ -45,7 +45,7 @@ def mock_brain():
     brain._ask_once.return_value = json.dumps({
         "summary": "Rozmawialismy o testach",
         "facts": ["Testy przechodza", "Dodano nowy modul"],
-        "user_facts": ["Eryk lubi grafy"],
+        "user_facts": ["User lubi grafy"],
         "sentiment": "positive",
     })
     return brain
@@ -369,7 +369,7 @@ class TestContextRetrieval:
         memory.save_summary({
             "session": 7, "date": "2026-02-25",
             "summary": "Pracowalismy nad NIM API",
-            "facts": [], "user_facts": ["Eryk lubi grafy"],
+            "facts": [], "user_facts": ["User lubi grafy"],
             "sentiment": "positive",
         })
         memory.save_summary({
@@ -386,7 +386,7 @@ class TestContextRetrieval:
         assert "NIM API" in ctx
         assert "Sesja 8" in ctx
         assert "homeostasis" in ctx
-        assert "Eryk lubi grafy" in ctx
+        assert "User lubi grafy" in ctx
 
     def test_get_conversation_context_empty(self, memory):
         """Should return empty string when no summaries."""
@@ -397,18 +397,18 @@ class TestContextRetrieval:
         """User facts across sessions should be deduplicated."""
         memory.save_summary({
             "session": 1, "summary": "S1",
-            "user_facts": ["Eryk lubi grafy", "Eryk ma mini PC"],
+            "user_facts": ["User lubi grafy", "User ma mini PC"],
         })
         memory.save_summary({
             "session": 2, "summary": "S2",
-            "user_facts": ["Eryk lubi grafy", "Eryk planuje test 8h"],
+            "user_facts": ["User lubi grafy", "User planuje test 8h"],
         })
 
         facts = memory.get_all_user_facts()
         assert len(facts) == 3
-        assert "Eryk lubi grafy" in facts
-        assert "Eryk ma mini PC" in facts
-        assert "Eryk planuje test 8h" in facts
+        assert "User lubi grafy" in facts
+        assert "User ma mini PC" in facts
+        assert "User planuje test 8h" in facts
 
     def test_get_all_user_facts_empty(self, memory):
         """No summaries returns empty list."""
@@ -417,8 +417,8 @@ class TestContextRetrieval:
 
     def test_get_all_user_facts_case_insensitive_dedup(self, memory):
         """Deduplication should be case-insensitive."""
-        memory.save_summary({"session": 1, "summary": "S1", "user_facts": ["Eryk lubi grafy"]})
-        memory.save_summary({"session": 2, "summary": "S2", "user_facts": ["eryk lubi grafy"]})
+        memory.save_summary({"session": 1, "summary": "S1", "user_facts": ["User lubi grafy"]})
+        memory.save_summary({"session": 2, "summary": "S2", "user_facts": ["user lubi grafy"]})
 
         facts = memory.get_all_user_facts()
         assert len(facts) == 1
@@ -493,7 +493,7 @@ class TestIntegration:
             "session": 4, "date": "2026-02-26",
             "summary": "Pracowalismy nad swiadomoscia",
             "facts": ["Dodano TraitEvolver"],
-            "user_facts": ["Eryk preferuje systematyczne podejscie"],
+            "user_facts": ["User preferuje systematyczne podejscie"],
             "sentiment": "positive",
         })
 

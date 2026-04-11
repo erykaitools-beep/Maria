@@ -367,13 +367,13 @@ def main():
             intro = ctx.consciousness.get_startup_greeting(ctx.brain)
         except Exception:
             intro = ctx.brain.think(
-                "Przywitaj sie z Erykiem. "
+                "Przywitaj sie z uzytkownikiem. "
                 "Powiedz kim jestes (M.A.R.I.A.) i ze jestes gotowa do pracy.",
                 temperature=0.3,
             )
     else:
         intro = ctx.brain.think(
-            "Przywitaj sie z Erykiem. "
+            "Przywitaj sie z uzytkownikiem. "
             "Powiedz kim jestes (M.A.R.I.A. z pelnym systemem uczenia) "
             "i zadaj jedno pytanie o priorytecie nauki.",
             temperature=0.3,

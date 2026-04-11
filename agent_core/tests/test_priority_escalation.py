@@ -312,7 +312,7 @@ class TestTelegramPriorityCommand:
         bot = MagicMock()
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
-            {"text": "/priority goal-test 0.9", "from": "Eryk", "chat_id": 123,
+            {"text": "/priority goal-test 0.9", "from": "User", "chat_id": 123,
              "date": 0, "message_id": 1}
         ])
         bot.send_message = MagicMock(return_value=True)
@@ -368,7 +368,7 @@ class TestTelegramPriorityCommand:
         bot = MagicMock()
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
-            {"text": "/priority goal-x abc", "from": "Eryk", "chat_id": 123,
+            {"text": "/priority goal-x abc", "from": "User", "chat_id": 123,
              "date": 0, "message_id": 1}
         ])
         bot.send_message = MagicMock(return_value=True)
@@ -395,7 +395,7 @@ class TestTelegramPriorityCommand:
         bot = MagicMock()
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
-            {"text": "/priority goal-x 1.5", "from": "Eryk", "chat_id": 123,
+            {"text": "/priority goal-x 1.5", "from": "User", "chat_id": 123,
              "date": 0, "message_id": 1}
         ])
         bot.send_message = MagicMock(return_value=True)

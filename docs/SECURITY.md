@@ -7,7 +7,7 @@ Internet
    |
 [Fritz!Box] ---- WireGuard VPN (zdalny dostep)
    |                    |
-   |-- Siec glowna (192.168.178.x)
+   |-- Siec glowna (192.168.1.x)
    |     |-- Mini PC (Maria)  <-- SSH + Web UI
    |     |-- Twoj laptop
    |     |-- Telefon
@@ -43,14 +43,14 @@ Fritz!Box od firmware 7.39+ ma wbudowany WireGuard.
 2. **Internet > Freigaben > VPN (WireGuard)**
 3. "VPN-Verbindung hinzufugen" (dodaj polaczenie VPN)
 4. Wybierz: "Einzelgerat verbinden" (polacz pojedyncze urzadzenie)
-5. Nadaj nazwe: np. "Telefon-Eryk" lub "Laptop-zdalny"
+5. Nadaj nazwe: np. "Telefon-operator" lub "Laptop-zdalny"
 6. Fritz!Box wygeneruje konfiguracje - pobierz ja
 7. Na telefonie/laptopie:
    - Zainstaluj WireGuard: https://www.wireguard.com/install/
    - Zaimportuj pobrany plik konfiguracji
 8. Polacz sie z VPN -> masz dostep do calej sieci domowej
 
-**Weryfikacja:** Po polaczeniu VPN, otworz `http://192.168.178.X:5000` (IP mini PC).
+**Weryfikacja:** Po polaczeniu VPN, otworz `http://192.168.1.X:5000` (IP mini PC).
 
 ### 1.3 MyFRITZ! (Dynamic DNS)
 
@@ -99,10 +99,10 @@ Po uruchomieniu `setup_security.sh`, skonfiguruj logowanie kluczem:
 ssh-keygen -t ed25519 -C "maria-minipc"
 
 # Skopiuj na mini PC
-ssh-copy-id maria@192.168.178.X
+ssh-copy-id maria@192.168.1.X
 
 # Sprawdz czy dziala
-ssh maria@192.168.178.X
+ssh maria@192.168.1.X
 # Powinno wpuscic BEZ hasla
 ```
 
@@ -210,7 +210,7 @@ sudo systemctl restart maria-ui
 
 ### Chce zmienic subnet LAN
 ```bash
-# Jesli Fritz!Box uzywa innego subnetu niz 192.168.178.x:
+# Jesli Fritz!Box uzywa innego subnetu niz 192.168.1.x:
 sudo ufw status numbered
 # Usun stare reguly i dodaj nowe:
 sudo ufw delete <numer>

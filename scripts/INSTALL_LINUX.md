@@ -203,8 +203,8 @@ python main.py
 # Sprawdz reguly
 sudo ufw status verbose
 
-# Jesli Twoja siec to nie 192.168.178.x, zmien reguly:
-sudo ufw delete allow from 192.168.178.0/24 to any port 5000
+# Jesli Twoja siec to nie 192.168.1.x, zmien reguly:
+sudo ufw delete allow from 192.168.1.0/24 to any port 5000
 sudo ufw allow from 192.168.YOUR.0/24 to any port 5000 proto tcp
 ```
 

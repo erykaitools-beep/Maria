@@ -130,7 +130,7 @@ class TestContentGenerators:
         self.gen = ContentGenerators()
 
     def test_morning_summary_basic(self):
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_health_fn(lambda: 0.92)
         self.gen.set_mode_fn(lambda: "ACTIVE")
         self.gen.set_knowledge_fn(lambda: {
@@ -146,7 +146,7 @@ class TestContentGenerators:
 
         contact = self.gen.generate(ContactReason.MORNING_SUMMARY)
         assert contact is not None
-        assert "Eryk" in contact.message
+        assert "Operator" in contact.message
         assert "92%" in contact.message
         assert "8/20" in contact.message
         assert "Learn physics" in contact.message
@@ -156,10 +156,10 @@ class TestContentGenerators:
         contact = self.gen.generate(ContactReason.MORNING_SUMMARY)
         assert contact is not None
         assert contact.reason == ContactReason.MORNING_SUMMARY
-        assert "Eryk" in contact.message  # default fallback
+        assert "Operator" in contact.message  # default fallback
 
     def test_evening_recap_with_stats(self):
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_planner_stats_fn(lambda: {"total_cycles": 150})
         self.gen.set_knowledge_fn(lambda: {
             "total_chunks_learned": 12,
@@ -170,13 +170,13 @@ class TestContentGenerators:
 
         contact = self.gen.generate(ContactReason.EVENING_RECAP)
         assert contact is not None
-        assert "Eryk" in contact.message
+        assert "Operator" in contact.message
         assert "150" in contact.message
         assert "chemistry" in contact.message
 
     def test_evening_recap_empty(self):
         """Evening recap returns None if nothing happened."""
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         contact = self.gen.generate(ContactReason.EVENING_RECAP)
         assert contact is None
 
@@ -196,7 +196,7 @@ class TestContentGenerators:
         mock_now.weekday.return_value = 6  # Sunday
         mock_dt.now.return_value = mock_now
 
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_knowledge_fn(lambda: {
             "total_files": 10,
             "files_by_status": {"completed": 5},
@@ -245,7 +245,7 @@ class TestContentGenerators:
         assert contact is None
 
     def test_idle_checkin(self):
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_knowledge_fn(lambda: {
             "files_by_status": {"new": 3},
         })
@@ -254,12 +254,12 @@ class TestContentGenerators:
 
         contact = self.gen.generate(ContactReason.IDLE_CHECKIN)
         assert contact is not None
-        assert "Eryk" in contact.message
+        assert "Operator" in contact.message
         assert "3 nowych" in contact.message
 
     def test_interest_match(self):
         self.gen.set_user_interests_fn(lambda: ["physics", "chemistry"])
-        self.gen.set_user_name_fn(lambda: "Eryk")
+        self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_knowledge_fn(lambda: {
             "new_files_available": [
                 {"title": "Quantum Physics Basics", "file_id": "f1"},
@@ -447,7 +447,7 @@ class TestProactiveScheduler:
         mock_dt.now.return_value = _make_mock_dt(hour=12).now.return_value
 
         self.sched.state.last_operator_contact = time.time() - (72 * 3600)
-        self.sched.generators.set_user_name_fn(lambda: "Eryk")
+        self.sched.generators.set_user_name_fn(lambda: "Operator")
 
         sent = self.sched._check_idle()
         assert sent == 1
@@ -493,7 +493,7 @@ class TestProactiveScheduler:
         """Morning summary fires in window with data."""
         mock_dt.now.return_value = _make_mock_dt(hour=7, weekday=1).now.return_value
 
-        self.sched.generators.set_user_name_fn(lambda: "Eryk")
+        self.sched.generators.set_user_name_fn(lambda: "Operator")
         self.sched.generators.set_health_fn(lambda: 0.9)
         self.sched.generators.set_mode_fn(lambda: "ACTIVE")
         self.sched.generators.set_knowledge_fn(lambda: {
@@ -508,7 +508,7 @@ class TestProactiveScheduler:
         self.sched._tick_count = CHECK_INTERVAL_TICKS - 1
         result = self.sched.tick()
         assert result >= 1
-        assert any("Eryk" in msg for msg in self.sent_messages)
+        assert any("Operator" in msg for msg in self.sent_messages)
 
 
 # ============================================================

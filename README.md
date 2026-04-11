@@ -205,10 +205,10 @@ python main.py
 
 ## License
 
-MIT
+AGPL-3.0 - see [LICENSE](LICENSE)
 
 ## Credits
 
-Created by Eryk ([@DonCames](https://github.com/DonCames)), with help from Claude, ChatGPT, and Grok.
-
 M.A.R.I.A. has been running continuously since February 2026.
+
+Built with help from Claude, ChatGPT, and Grok.

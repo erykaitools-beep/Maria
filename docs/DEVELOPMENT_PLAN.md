@@ -457,4 +457,4 @@ Najlepsze dane wejsciowe dla zewnetrznych LLM:
 
 *Utworzono: 2026-02-28*
 *Ostatnia aktualizacja: 2026-03-29 (K1-K13 + Stabilization + Faza F COMPLETE, 2448 testow)*
-*Zatwierdzone przez: Eryk + Claude*
+*Zatwierdzone przez: M.A.R.I.A. Project*

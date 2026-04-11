@@ -7,6 +7,7 @@ age, offline duration, conversation stats.
 """
 
 import json
+import os
 import time
 import threading
 from pathlib import Path
@@ -18,8 +19,8 @@ from typing import Dict, Any, Optional
 MARIA_BIRTH_TIMESTAMP = "2025-11-14T00:00:00"
 MARIA_BIRTH_DATE = "2025-11-14"
 
-# Default primary user
-DEFAULT_PRIMARY_USER = "Eryk"
+# Default primary user (override with MARIA_OPERATOR_NAME env var)
+DEFAULT_PRIMARY_USER = os.environ.get("MARIA_OPERATOR_NAME", "Operator")
 
 
 class IdentityStore:

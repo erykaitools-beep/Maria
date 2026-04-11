@@ -205,10 +205,10 @@ class TestUserAdapter:
 
     def test_user_message_webui(self):
         """WebUI message with custom channel."""
-        event = UserAdapter.from_message("hello", channel="webui", user_id="eryk")
+        event = UserAdapter.from_message("hello", channel="webui", user_id="user1")
 
         assert event.payload["channel"] == "webui"
-        assert event.payload["user_id"] == "eryk"
+        assert event.payload["user_id"] == "user1"
 
     def test_user_message_no_user_id(self):
         """user_id should not be in payload when not provided."""

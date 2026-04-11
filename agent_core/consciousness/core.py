@@ -36,7 +36,7 @@ class ConsciousnessCore:
 
         # At startup
         greeting = core.get_startup_greeting(brain)
-        print(greeting)  # "Witaj Eryk! To moja 25. sesja..."
+        print(greeting)  # "Witaj! To moja 25. sesja..."
 
         # During operation
         feeling = core.get_current_feeling()
