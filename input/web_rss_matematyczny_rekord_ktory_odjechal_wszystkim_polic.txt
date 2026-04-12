@@ -1,7 +1,0 @@
-# Zrodlo: RSS Feed
-# Tytul: Matematyczny rekord, który odjechał wszystkim. Policzone do niewyobrażalnej liczby cyfr
-# URL: https://www.focus.pl/artykul/matematyczny-rekord-ktory-odjechal-wszystkim-policzone-do-niewyobrazalnej-liczby-cyfr
-# Pobrano: 2026-03-19
-# ---
-
-<img width="1920" height="1280" src="https://konto.focus.pl/wp-content/uploads/2023/04/matematyka-liczby.jpg" alt="" style="margin-bottom:10px;" /><p>Liczba π ma w sobie coś z matematycznej gwiazdy rocka. Wszyscy ją znają, prawie nikt nie potrafi jej domknąć, a mimo to co jakiś czas ktoś znów próbuje pobić rekord w dopisywaniu kolejnych cyfr po przecinku. Tym razem nie skończyło się na symbolicznym poprawieniu wyniku. Nowy rekord dosłownie przeorał poprzedni: zespół StorageReview obliczył π do [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/matematyczny-rekord-ktory-odjechal-wszystkim-policzone-do-niewyobrazalnej-liczby-cyfr">Matematyczny rekord, który odjechał wszystkim. Policzone do niewyobrażalnej liczby cyfr</a></p>

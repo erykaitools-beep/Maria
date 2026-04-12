@@ -1,6 +1,0 @@
-# Zrodlo: ChatGPT (Codex CLI)
-# Temat: genetyka
-# Data: 2026-04-11 12:06
-# Pytanie: Co to jest RNA?
-
-Expert answer

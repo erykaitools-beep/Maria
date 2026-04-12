@@ -1,7 +1,0 @@
-# Zrodlo: RSS Feed
-# Tytul: Zamiast wyrzucić liście, wsypali je do metalu. Tak powstał wyjątkowy kompozyt
-# URL: https://www.focus.pl/artykul/zamiast-wyrzucic-liscie-wsypali-je-do-metalu-tak-powstal-wyjatkowy-kompozyt
-# Pobrano: 2026-03-18
-# ---
-
-<img width="1500" height="1000" src="https://konto.focus.pl/wp-content/uploads/2025/01/magnes.jpg" alt="" style="margin-bottom:10px;" /><p>Martwy liść zwykle kojarzy się z czymś, co kończy swój żywot na chodniku, w kompoście albo pod kołami samochodów. Naukowcy postanowili jednak potraktować go inaczej: nie jak odpad, lecz jak składnik metalu przyszłości. Zespół pracujący nad nowym materiałem dodał do magnezu zaledwie 5% proszku z suszonych, opadłych liści mango i otrzymał kompozyt, który znacznie lepiej [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/zamiast-wyrzucic-liscie-wsypali-je-do-metalu-tak-powstal-wyjatkowy-kompozyt">Zamiast wyrzucić liście, wsypali je do metalu. Tak powstał wyjątkowy kompozyt</a></p>

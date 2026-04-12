@@ -1,7 +1,0 @@
-# Zrodlo: RSS Feed
-# Tytul: Pustynny pył po cichu zmienia chmury nad północną półkulą
-# URL: https://www.focus.pl/artykul/pustynny-pyl-po-cichu-zmienia-chmury-nad-polnocna-polkula
-# Pobrano: 2026-03-19
-# ---
-
-<img width="1920" height="1239" src="https://konto.focus.pl/wp-content/uploads/2024/10/chmury.jpg" alt="" style="margin-bottom:10px;" /><p>Pył pustynny brzmi jak coś, co co najwyżej brudzi samochody w Europie i robi mleczne niebo nad miastem. Tymczasem nowe badanie pokazuje, że jego rola jest znacznie bardziej wyrafinowana. Drobiny niesione z odległych pustyń pomagają chmurom zamarzać w północnej hemisferze, a to wpływa i na to, ile światła odbijają, i na to, jak produkują deszcz [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/pustynny-pyl-po-cichu-zmienia-chmury-nad-polnocna-polkula">Pustynny pył po cichu zmienia chmury nad północną półkulą</a></p>

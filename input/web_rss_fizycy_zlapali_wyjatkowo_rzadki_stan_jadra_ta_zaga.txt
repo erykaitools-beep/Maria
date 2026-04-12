@@ -1,7 +1,0 @@
-# Zrodlo: RSS Feed
-# Tytul: Fizycy złapali wyjątkowo rzadki stan jądra. Ta zagadka czekała 40 lat
-# URL: https://www.focus.pl/artykul/fizycy-zlapali-wyjatkowo-rzadki-stan-jadra-ta-zagadka-czekala-40-lat
-# Pobrano: 2026-03-18
-# ---
-
-<img width="1920" height="1076" src="https://konto.focus.pl/wp-content/uploads/2025/09/atomy.jpg" alt="" style="margin-bottom:10px;" /><p>Jądro atomowe zwykle wyobrażamy sobie jako coś zwartego, surowego i niechętnego niespodziankom. Tymczasem fizycy od lat wiedzą, że potrafi ono zachowywać się bardziej kapryśnie, niż sugeruje szkolny schemat. Czasem nie wraca od razu do swojego najniższego stanu energetycznego, lecz zatrzymuje się w czymś w rodzaju wzbudzonej &#8220;poczekalni&#8221;. Taki stan nazywa się izomerem jądrowym. I właśnie [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/fizycy-zlapali-wyjatkowo-rzadki-stan-jadra-ta-zagadka-czekala-40-lat">Fizycy złapali wyjątkowo rzadki stan jądra. Ta zagadka czekała 40 lat</a></p>

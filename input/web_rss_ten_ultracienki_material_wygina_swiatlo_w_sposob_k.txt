@@ -1,7 +1,0 @@
-# Zrodlo: RSS Feed
-# Tytul: Ten ultracienki materiał wygina światło w sposób, który długo wyglądał jak optyczny wybryk
-# URL: https://www.focus.pl/artykul/ten-ultracienki-material-wygina-swiatlo-w-sposob-ktory-dlugo-wygladal-jak-optyczny-wybryk
-# Pobrano: 2026-03-20
-# ---
-
-<img width="1536" height="1024" src="https://konto.focus.pl/wp-content/uploads/2026/03/Artistic-Impression-of-a-2D-Crystal-Inside-a-Chip.webp" alt="" style="margin-bottom:10px;" /><p>Światło w szkolnej wersji fizyki jest dość grzeczne. Wchodzi do materiału, zwalnia, załamuje się zgodnie z regułą, którą da się narysować linijką, i generalnie zachowuje się jak dobrze wychowany gość. Tymczasem naukowcy z TU Delft i Radboud University pokazali materiał, który tę grzeczność wyraźnie podkopuje. Chodzi o dwuwymiarowy ferroelektryk CuInP₂S₆, w skrócie CIPS, w którym [&#8230;]</p> <p><a rel="nofollow" href="https://www.focus.pl/artykul/ten-ultracienki-material-wygina-swiatlo-w-sposob-ktory-dlugo-wygladal-jak-optyczny-wybryk">Ten ultracienki materiał wygina światło w sposób, który długo wyglądał jak optyczny wybryk</a></p>
