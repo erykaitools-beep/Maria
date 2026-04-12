@@ -42,7 +42,7 @@ Thumbs.db
 # These directories are created at runtime and should not be committed.
 # The public repo ships with empty placeholder dirs.
 data/
-memory/
+/memory/
 logs/
 *.log
 *.jsonl
