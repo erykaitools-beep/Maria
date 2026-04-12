@@ -13,5 +13,6 @@ Part of Digital Human Roadmap, Faza 1.
 
 from agent_core.operator.operator_model import OperatorModel
 from agent_core.operator.privacy_guard import PrivacyGuard
+from agent_core.operator.rhythm_detector import RhythmDetector
 
-__all__ = ["OperatorModel", "PrivacyGuard"]
+__all__ = ["OperatorModel", "PrivacyGuard", "RhythmDetector"]
