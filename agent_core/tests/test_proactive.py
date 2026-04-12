@@ -135,7 +135,7 @@ class TestContentGenerators:
         self.gen.set_mode_fn(lambda: "ACTIVE")
         self.gen.set_knowledge_fn(lambda: {
             "total_files": 20,
-            "files_by_status": {"completed": 8, "new": 5},
+            "files_by_status": {"completed": [{}] * 8, "new": [{}] * 5},
             "total_chunks_learned": 45,
         })
         self.gen.set_active_goals_fn(lambda: [
@@ -199,7 +199,7 @@ class TestContentGenerators:
         self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_knowledge_fn(lambda: {
             "total_files": 10,
-            "files_by_status": {"completed": 5},
+            "files_by_status": {"completed": [{}] * 5},
         })
         self.gen.set_goal_stats_fn(lambda: {"achieved": 3, "active": 2})
         self.gen.set_evaluation_fn(lambda: None)
@@ -227,7 +227,7 @@ class TestContentGenerators:
     def test_learning_milestone(self):
         self.gen.set_knowledge_fn(lambda: {
             "total_files": 10,
-            "files_by_status": {"completed": 5},
+            "files_by_status": {"completed": [{}] * 5},
             "total_chunks_learned": 30,
             "average_exam_score": 0.8,
         })
@@ -239,7 +239,7 @@ class TestContentGenerators:
     def test_learning_milestone_zero(self):
         self.gen.set_knowledge_fn(lambda: {
             "total_files": 10,
-            "files_by_status": {"completed": 0},
+            "files_by_status": {"completed": []},
         })
         contact = self.gen.generate(ContactReason.LEARNING_MILESTONE)
         assert contact is None
@@ -247,7 +247,7 @@ class TestContentGenerators:
     def test_idle_checkin(self):
         self.gen.set_user_name_fn(lambda: "Operator")
         self.gen.set_knowledge_fn(lambda: {
-            "files_by_status": {"new": 3},
+            "files_by_status": {"new": [{}] * 3},
         })
         self.gen.set_proposed_goals_fn(lambda: [{"id": "g1", "description": "test"}])
         self.gen.set_health_fn(lambda: 0.95)
@@ -498,7 +498,7 @@ class TestProactiveScheduler:
         self.sched.generators.set_mode_fn(lambda: "ACTIVE")
         self.sched.generators.set_knowledge_fn(lambda: {
             "total_files": 10,
-            "files_by_status": {"completed": 5, "new": 2},
+            "files_by_status": {"completed": [{}] * 5, "new": [{}] * 2},
             "total_chunks_learned": 20,
         })
         self.sched.generators.set_active_goals_fn(lambda: [])

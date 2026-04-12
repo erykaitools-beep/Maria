@@ -112,13 +112,16 @@ class ContentGenerators:
         snap = self._safe_call(self._get_knowledge_snapshot)
         if snap:
             total = snap.get("total_files", 0)
-            completed = snap.get("files_by_status", {}).get("completed", 0)
-            new_count = snap.get("files_by_status", {}).get("new", 0)
+            by_status = snap.get("files_by_status", {})
+            completed = len(by_status.get("completed", []))
+            new_count = len(by_status.get("new", []))
             chunks = snap.get("total_chunks_learned", 0)
-            lines.append(
-                f"Wiedza: {completed}/{total} plikow, "
-                f"{chunks} chunkow, {new_count} nowych do nauki"
-            )
+            avg_score = snap.get("average_exam_score", 0)
+            lines.append(f"Wiedza: {completed}/{total} plikow, {chunks} chunkow")
+            if new_count > 0:
+                lines.append(f"Nowe do nauki: {new_count}")
+            if avg_score > 0:
+                lines.append(f"Sredni wynik egzaminow: {avg_score:.0%}")
 
         # Active goals
         goals = self._safe_call(self._get_active_goals) or []
@@ -207,7 +210,8 @@ class ContentGenerators:
         snap = self._safe_call(self._get_knowledge_snapshot)
         if snap:
             total = snap.get("total_files", 0)
-            completed = snap.get("files_by_status", {}).get("completed", 0)
+            by_status = snap.get("files_by_status", {})
+            completed = len(by_status.get("completed", []))
             coverage = (completed / total * 100) if total > 0 else 0
             lines.append(f"Pokrycie wiedzy: {coverage:.0f}% ({completed}/{total})")
 
@@ -260,7 +264,8 @@ class ContentGenerators:
             return None
 
         total = snap.get("total_files", 0)
-        completed = snap.get("files_by_status", {}).get("completed", 0)
+        by_status = snap.get("files_by_status", {})
+        completed = len(by_status.get("completed", []))
         if total == 0:
             return None
 
@@ -302,7 +307,8 @@ class ContentGenerators:
         # Add something interesting
         snap = self._safe_call(self._get_knowledge_snapshot)
         if snap:
-            new_count = snap.get("files_by_status", {}).get("new", 0)
+            by_status = snap.get("files_by_status", {})
+            new_count = len(by_status.get("new", []))
             if new_count > 0:
                 lines.append(f"Mam {new_count} nowych plikow do nauki.")
 
