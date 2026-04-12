@@ -101,6 +101,12 @@ class SharedContext:
     salience_filter: Any = None          # SalienceFilter
     perception_fusion: Any = None        # PerceptionFusion
 
+    # Digital Hands (Faza 4)
+    task_executor: Any = None            # TaskExecutor
+    execution_journal: Any = None        # ExecutionJournal
+    web_researcher: Any = None           # WebResearcher
+    file_manager: Any = None             # FileManager
+
     # REPL state
     last_result: Any = None
 

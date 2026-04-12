@@ -1126,6 +1126,44 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"PerceptionFusion not initialized: {e}")
 
+            # Wire Digital Hands (Faza 4)
+            try:
+                from agent_core.hands import (
+                    ExecutionJournal, TaskExecutor, ResultValidator,
+                    WebResearcher, FileManager,
+                )
+                _journal = ExecutionJournal()
+                _validator = ResultValidator()
+                _task_exec = TaskExecutor(journal=_journal, validator=_validator)
+                _web_researcher = WebResearcher()
+                _file_manager = FileManager()
+
+                # Wire web researcher with existing web_source clients
+                try:
+                    from agent_core.web_source.wiki_client import WikiClient
+                    from agent_core.web_source.content_writer import ContentWriter
+                    _web_researcher.set_wiki_client(WikiClient())
+                    _web_researcher.set_content_writer(ContentWriter())
+                except Exception:
+                    pass
+
+                # Register tool handlers
+                _task_exec.register_tool("wiki_search", _web_researcher.search_wikipedia)
+                _task_exec.register_tool("web_fetch", _web_researcher.fetch_url)
+                _task_exec.register_tool("search_and_save", _web_researcher.search_and_save)
+                _task_exec.register_tool("file_write", _file_manager.write_note)
+                _task_exec.register_tool("file_read", _file_manager.read_file)
+                _task_exec.register_tool("file_list", _file_manager.list_files)
+
+                ctx.execution_journal = _journal
+                ctx.task_executor = _task_exec
+                ctx.web_researcher = _web_researcher
+                ctx.file_manager = _file_manager
+
+                print(f"[Homeostasis] [OK] Digital Hands (Faza 4, {len(_task_exec.get_available_tools())} tools)")
+            except Exception as e:
+                logger.debug(f"Digital Hands not initialized: {e}")
+
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
             if ctx.knowledge_analyzer:
