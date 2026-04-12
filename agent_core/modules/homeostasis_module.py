@@ -118,14 +118,46 @@ class HomeostasisModule(MariaModule):
         # Initialize OperatorModel (K14 - replaces UserProfile)
         try:
             from agent_core.operator.operator_model import OperatorModel
+            from agent_core.operator.rhythm_detector import RhythmDetector
             operator_model = OperatorModel()
             ctx.user_profile = operator_model  # backward compat name in SharedContext
             ctx.operator_model = operator_model
+            # RhythmDetector - seed from proactive contact history
+            rhythm_detector = RhythmDetector()
+            try:
+                import json
+                _history = Path("meta_data/proactive_contacts.jsonl")
+                if _history.exists():
+                    _ts_list = []
+                    with open(_history, "r", encoding="utf-8") as _f:
+                        for _line in _f:
+                            _line = _line.strip()
+                            if _line:
+                                try:
+                                    _rec = json.loads(_line)
+                                    if _rec.get("reason") != "morning_summary":
+                                        _ts_list.append(_rec.get("timestamp", 0))
+                                except (json.JSONDecodeError, KeyError):
+                                    pass
+                    # Also seed from proactive state (operator contact timestamps)
+                    _state_file = Path("meta_data/proactive_state.json")
+                    if _state_file.exists():
+                        _state = json.loads(_state_file.read_text(encoding="utf-8"))
+                        _last = _state.get("last_operator_contact", 0)
+                        if _last > 0:
+                            _ts_list.append(_last)
+                    rhythm_detector.seed(_ts_list)
+            except Exception:
+                pass
+            ctx.rhythm_detector = rhythm_detector
+            # Update OperatorModel rhythm from detector
+            if rhythm_detector.sample_count >= 5:
+                operator_model.set_rhythm(rhythm_detector.get_rhythm())
             # Wire to brain for system prompt injection
             _brain = getattr(ctx.brain, 'ollama', ctx.brain)
             if _brain and hasattr(_brain, 'set_user_profile'):
                 _brain.set_user_profile(operator_model)
-            print(f"[Homeostasis] [OK] OperatorModel initialized (operator: {operator_model.get_name()})")
+            print(f"[Homeostasis] [OK] OperatorModel initialized (operator: {operator_model.get_name()}, rhythm samples: {rhythm_detector.sample_count})")
         except Exception as e:
             logger.debug(f"OperatorModel not initialized: {e}")
 

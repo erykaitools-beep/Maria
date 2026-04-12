@@ -26,11 +26,40 @@ class RhythmDetector:
     """
     Detects operator daily rhythm from interaction timestamps.
 
+    Supports both stateless (analyze(list)) and stateful (record_contact) usage.
+
     Usage:
         detector = RhythmDetector()
+        detector.record_contact(time.time())  # accumulate
+        rhythm = detector.get_rhythm()        # analyze accumulated
+
+        # or stateless:
         rhythm = detector.analyze(timestamps)
-        # -> DayRhythm(typical_wake_hour=7, ...)
     """
+
+    def __init__(self):
+        self._timestamps: List[float] = []
+
+    def record_contact(self, timestamp: float) -> None:
+        """Record a single operator contact timestamp."""
+        self._timestamps.append(timestamp)
+        # Cap at 1000 most recent
+        if len(self._timestamps) > 1000:
+            self._timestamps = self._timestamps[-1000:]
+
+    def seed(self, timestamps: List[float]) -> None:
+        """Bulk-load historical timestamps (e.g. from JSONL at startup)."""
+        self._timestamps.extend(timestamps)
+        if len(self._timestamps) > 1000:
+            self._timestamps = self._timestamps[-1000:]
+
+    def get_rhythm(self) -> DayRhythm:
+        """Analyze accumulated timestamps and return DayRhythm."""
+        return self.analyze(self._timestamps)
+
+    @property
+    def sample_count(self) -> int:
+        return len(self._timestamps)
 
     def analyze(self, timestamps: List[float]) -> DayRhythm:
         """

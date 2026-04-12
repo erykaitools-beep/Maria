@@ -819,10 +819,20 @@ class HomeostasisCore:
 
         try:
             self._telegram_bridge.poll_and_respond()
-            # Track operator contact for proactive scheduler
+            # Track operator contact for proactive scheduler + rhythm
             if (self._proactive_scheduler
                     and self._telegram_bridge.last_poll_message_count > 0):
                 self._proactive_scheduler.record_operator_contact()
+                # Feed RhythmDetector + OperatorModel learning
+                import time as _time
+                om = getattr(self._ctx, 'operator_model', None)
+                rd = getattr(self._ctx, 'rhythm_detector', None)
+                if rd:
+                    rd.record_contact(_time.time())
+                if om:
+                    # Learn from last messages (non-command texts)
+                    for msg_text in getattr(self._telegram_bridge, 'last_poll_texts', []):
+                        om.learn_from_message(msg_text)
         except Exception as e:
             logger.debug(f"[TELEGRAM] Poll error: {e}")
 

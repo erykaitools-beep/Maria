@@ -36,6 +36,8 @@ class TelegramBridge:
 
         # Track operator messages for proactive contact module
         self.last_poll_message_count = 0
+        # Last poll raw texts (for OperatorModel learning)
+        self.last_poll_texts = []
 
     @property
     def configured(self):
@@ -64,6 +66,7 @@ class TelegramBridge:
 
         messages = self.bot.get_updates()
         self.last_poll_message_count = len(messages)
+        self.last_poll_texts = []
         unhandled = []
 
         for msg in messages:
@@ -103,6 +106,7 @@ class TelegramBridge:
                     self.bot.send_message(f"Blad: {e}")
             else:
                 unhandled.append(msg)
+                self.last_poll_texts.append(text)
 
         return unhandled
 
