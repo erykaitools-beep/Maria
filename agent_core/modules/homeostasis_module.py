@@ -115,18 +115,19 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"LLM Tape not initialized: {e}")
 
-        # Initialize UserProfile (operator knowledge)
+        # Initialize OperatorModel (K14 - replaces UserProfile)
         try:
-            from agent_core.consciousness.user_profile import UserProfile
-            user_profile = UserProfile()
-            ctx.user_profile = user_profile
+            from agent_core.operator.operator_model import OperatorModel
+            operator_model = OperatorModel()
+            ctx.user_profile = operator_model  # backward compat name in SharedContext
+            ctx.operator_model = operator_model
             # Wire to brain for system prompt injection
             _brain = getattr(ctx.brain, 'ollama', ctx.brain)
             if _brain and hasattr(_brain, 'set_user_profile'):
-                _brain.set_user_profile(user_profile)
-            print(f"[Homeostasis] [OK] UserProfile initialized (operator: {user_profile.get_name()})")
+                _brain.set_user_profile(operator_model)
+            print(f"[Homeostasis] [OK] OperatorModel initialized (operator: {operator_model.get_name()})")
         except Exception as e:
-            logger.debug(f"UserProfile not initialized: {e}")
+            logger.debug(f"OperatorModel not initialized: {e}")
 
         # Initialize PerceptionBuffer (Warstwa 1)
         if core:
@@ -962,6 +963,10 @@ class HomeostasisModule(MariaModule):
             if ctx.user_profile:
                 gen.set_user_name_fn(lambda: ctx.user_profile.get_name())
                 gen.set_user_interests_fn(lambda: ctx.user_profile.get_interests())
+            om = getattr(ctx, 'operator_model', None)
+            if om:
+                gen.set_operator_context_fn(lambda: om.get_context())
+                gen.set_operator_rhythm_fn(lambda: om.rhythm)
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
             if ctx.knowledge_analyzer:
@@ -2275,38 +2280,59 @@ def _register_telegram_commands(bridge, ctx):
         return f"PDF wygenerowany dla task {task['task_id']}."
 
     def _cmd_profile(args):
-        """User profile: /profile [add_interest|add_fact|add_schedule|remove_interest] <text>"""
-        up = getattr(ctx, 'user_profile', None)
-        if not up:
-            return "UserProfile niedostepny."
+        """Operator profile: /profile [set|rhythm|add_interest|remove_interest] <text>"""
+        om = getattr(ctx, 'operator_model', None) or getattr(ctx, 'user_profile', None)
+        if not om:
+            return "OperatorModel niedostepny."
 
         if not args or not args.strip():
-            return up.get_summary()
+            return om.get_summary()
 
         parts = args.strip().split(None, 1)
         subcmd = parts[0].lower()
         text = parts[1] if len(parts) > 1 else ""
 
-        if subcmd == "add_interest" and text:
-            ok = up.add_interest(text)
+        if subcmd == "set" and text:
+            # /profile set job plytkarz
+            kv = text.split(None, 1)
+            if len(kv) < 2:
+                return "Uzycie: /profile set <klucz> <wartosc>"
+            key, value = kv[0], kv[1]
+            om.set_fact(key, value, 1.0, "explicit:telegram")
+            return f"Ustawiono {key} = {value}"
+        elif subcmd == "rhythm":
+            r = om.rhythm
+            if r.confidence == 0:
+                return "Brak danych o rytmie dnia (za malo interakcji)."
+            return (
+                f"*Rytm dnia:*\n"
+                f"Wstaje: ~{r.typical_wake_hour}:00\n"
+                f"Praca: {r.work_hours[0]}:00-{r.work_hours[1]}:00\n"
+                f"Spi od: ~{r.typical_sleep_hour}:00\n"
+                f"Pewnosc: {r.confidence:.0%} (probek: {r.sample_count})"
+            )
+        elif subcmd == "add_interest" and text:
+            ok = om.add_interest(text)
             return f"Dodano zainteresowanie: {text}" if ok else f"Juz znane: {text}"
         elif subcmd == "add_fact" and text:
-            ok = up.add_fact(text)
+            ok = om.add_fact(text)
             return f"Dodano fakt: {text}" if ok else f"Juz znane: {text}"
-        elif subcmd == "add_schedule" and text:
-            up.add_schedule_note(text)
-            return f"Dodano do harmonogramu: {text}"
         elif subcmd == "remove_interest" and text:
-            ok = up.remove_interest(text)
+            ok = om.remove_interest(text)
+            return f"Usunieto: {text}" if ok else f"Nie znaleziono: {text}"
+        elif subcmd == "remove_fact" and text:
+            ok = om.remove_fact(text)
             return f"Usunieto: {text}" if ok else f"Nie znaleziono: {text}"
         else:
             return (
-                "*Profil uzytkownika:*\n"
+                "*Profil operatora:*\n"
                 "/profile - pokaz profil\n"
+                "/profile set <klucz> <wartosc>\n"
+                "/profile rhythm - rytm dnia\n"
                 "/profile add\\_interest <temat>\n"
                 "/profile add\\_fact <fakt>\n"
-                "/profile add\\_schedule <notatka>\n"
-                "/profile remove\\_interest <temat>"
+                "/profile remove\\_interest <temat>\n"
+                "/profile remove\\_fact <klucz>"
             )
 
     def _cmd_remind(args):
@@ -2488,6 +2514,67 @@ def _register_telegram_commands(bridge, ctx):
                 lines.append(f"  {reason}: za {TimeAwareness.format_duration(remaining)}")
         return "\n".join(lines)
 
+    def _cmd_privacy(args):
+        """Privacy boundaries: /privacy [add|remove|list] <topic>"""
+        om = getattr(ctx, 'operator_model', None)
+        if not om:
+            return "OperatorModel niedostepny."
+        if not args or not args.strip():
+            boundaries = om.get_boundaries()
+            if not boundaries:
+                return "Brak granic prywatnosci. Uzyj /privacy add <temat>"
+            lines = ["*Granice prywatnosci:*"]
+            for b in boundaries:
+                lines.append(f"  - {b}")
+            lines.append("\n/privacy add <temat> | /privacy remove <temat>")
+            return "\n".join(lines)
+
+        parts = args.strip().split(None, 1)
+        subcmd = parts[0].lower()
+        text = parts[1] if len(parts) > 1 else ""
+
+        if subcmd == "add" and text:
+            ok = om.add_boundary(text)
+            return f"Dodano granice: {text}" if ok else f"Juz istnieje: {text}"
+        elif subcmd == "remove" and text:
+            ok = om.remove_boundary(text)
+            return f"Usunieto granice: {text}" if ok else f"Nie znaleziono: {text}"
+        elif subcmd == "list":
+            return _cmd_privacy("")
+        else:
+            return "Uzycie: /privacy add <temat> | /privacy remove <temat> | /privacy list"
+
+    def _cmd_context(args):
+        """Current context: /context <text> [hours] | /context clear"""
+        om = getattr(ctx, 'operator_model', None)
+        if not om:
+            return "OperatorModel niedostepny."
+        if not args or not args.strip():
+            current = om.get_context()
+            if current:
+                return f"Aktualny kontekst: {current}"
+            return "Brak kontekstu. Uzyj /context <tekst> [godziny]"
+
+        text = args.strip()
+        if text.lower() == "clear":
+            om.clear_context()
+            return "Kontekst wyczyszczony."
+
+        # Parse optional hours at the end: "/context deadline today 8"
+        parts = text.rsplit(None, 1)
+        hours = 24
+        if len(parts) == 2:
+            try:
+                hours = int(parts[1])
+                text = parts[0]
+            except ValueError:
+                pass  # Last word wasn't a number, use full text
+
+        om.set_context(text, expires_hours=hours)
+        return f"Kontekst ustawiony: {text} (wygasa za {hours}h)"
+
+    bridge.register_command("privacy", _cmd_privacy)
+    bridge.register_command("context", _cmd_context)
     bridge.register_command("proactive", _cmd_proactive)
     bridge.register_command("remind", _cmd_remind)
     bridge.register_command("todo", _cmd_todo)

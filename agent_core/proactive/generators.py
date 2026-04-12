@@ -37,6 +37,8 @@ class ContentGenerators:
         self._get_recent_achievements: Optional[Callable] = None
         self._get_planner_stats: Optional[Callable] = None
         self._get_mode: Optional[Callable] = None
+        self._get_operator_context: Optional[Callable] = None
+        self._get_operator_rhythm: Optional[Callable] = None
 
     # -- Accessor setters (called during wiring) --
 
@@ -73,6 +75,12 @@ class ContentGenerators:
     def set_mode_fn(self, fn: Callable) -> None:
         self._get_mode = fn
 
+    def set_operator_context_fn(self, fn: Callable) -> None:
+        self._get_operator_context = fn
+
+    def set_operator_rhythm_fn(self, fn: Callable) -> None:
+        self._get_operator_rhythm = fn
+
     # -- Generators --
 
     def generate(self, reason: ContactReason) -> Optional[ProactiveContact]:
@@ -100,7 +108,18 @@ class ContentGenerators:
         name = self._safe_call(self._get_user_name) or "Operator"
         greeting = TimeAwareness.get_greeting()
 
+        # Check operator context - skip if "urlop" / "nie przeszkadzac"
+        op_context = self._safe_call(self._get_operator_context)
+        if op_context:
+            skip_keywords = ("urlop", "nie przeszkadza", "vacation", "dnd")
+            if any(kw in op_context.lower() for kw in skip_keywords):
+                return None
+
         lines = [f"*{greeting}, {name}!*", ""]
+
+        # Operator context (if set)
+        if op_context:
+            lines.append(f"Pamietam: {op_context}")
 
         # Health & mode
         health = self._safe_call(self._get_health)
@@ -123,7 +142,7 @@ class ContentGenerators:
             if avg_score > 0:
                 lines.append(f"Sredni wynik egzaminow: {avg_score:.0%}")
 
-        # Active goals
+        # Active goals (compact)
         goals = self._safe_call(self._get_active_goals) or []
         if goals:
             lines.append(f"Aktywne cele: {len(goals)}")
@@ -136,12 +155,12 @@ class ContentGenerators:
         if proposed:
             lines.append(f"\nCzeka na zatwierdzenie: {len(proposed)} celow")
 
-        # Evaluation recommendations
+        # Evaluation recommendations (max 2, keep it short)
         report = self._safe_call(self._get_evaluation)
         if report and hasattr(report, "recommendations") and report.recommendations:
             lines.append("\nSugestie:")
-            for r in report.recommendations[:3]:
-                lines.append(f"  - {r[:100]}")
+            for r in report.recommendations[:2]:
+                lines.append(f"  - {r[:80]}")
 
         lines.append("\nMilego dnia!")
 
