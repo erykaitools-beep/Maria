@@ -94,6 +94,13 @@ class SharedContext:
     growth_awareness: Any = None         # GrowthAwareness (K15.3)
     weather_sensor: Any = None           # WeatherSensor (M3)
 
+    # Operational Perception (Faza 3)
+    holiday_sensor: Any = None           # HolidaySensor (PL+DE)
+    system_sensor: Any = None            # SystemSensor v2
+    workspace_sensor: Any = None         # WorkspaceSensor
+    salience_filter: Any = None          # SalienceFilter
+    perception_fusion: Any = None        # PerceptionFusion
+
     # REPL state
     last_result: Any = None
 

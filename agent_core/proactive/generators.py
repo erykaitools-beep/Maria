@@ -40,6 +40,7 @@ class ContentGenerators:
         self._get_operator_context: Optional[Callable] = None
         self._get_operator_rhythm: Optional[Callable] = None
         self._get_weather: Optional[Callable] = None
+        self._get_perception: Optional[Callable] = None
 
     # -- Accessor setters (called during wiring) --
 
@@ -85,6 +86,9 @@ class ContentGenerators:
     def set_weather_fn(self, fn: Callable) -> None:
         self._get_weather = fn
 
+    def set_perception_fn(self, fn: Callable) -> None:
+        self._get_perception = fn
+
     # -- Generators --
 
     def generate(self, reason: ContactReason) -> Optional[ProactiveContact]:
@@ -129,6 +133,11 @@ class ContentGenerators:
         weather_line = self._safe_call(self._get_weather)
         if weather_line:
             lines.append(weather_line)
+
+        # Perception fusion (Faza 3: holidays, system alerts, workspace)
+        perception_lines = self._safe_call(self._get_perception) or []
+        for pl in perception_lines:
+            lines.append(pl)
 
         # Health & mode
         health = self._safe_call(self._get_health)

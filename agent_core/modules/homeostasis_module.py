@@ -1084,6 +1084,48 @@ class HomeostasisModule(MariaModule):
                 except Exception as e:
                     logger.warning("WeatherSensor init failed: %s", e)
 
+            # Wire Faza 3: Operational Perception (holidays, system, workspace, fusion)
+            try:
+                from agent_core.weather.holiday_sensor import HolidaySensor
+                from agent_core.homeostasis.sensors.system_sensor import SystemSensor
+                from agent_core.homeostasis.sensors.workspace_sensor import WorkspaceSensor
+                from agent_core.perception.salience_filter import SalienceFilter
+                from agent_core.perception.fusion import PerceptionFusion
+
+                _holiday = HolidaySensor()
+                _sys_sensor = SystemSensor()
+                _ws_sensor = WorkspaceSensor()
+                _salience = SalienceFilter(operator_model=om)
+                _fusion = PerceptionFusion()
+                _fusion.set_holiday_sensor(_holiday)
+                _fusion.set_system_sensor(_sys_sensor)
+                _fusion.set_workspace_sensor(_ws_sensor)
+                _fusion.set_salience_filter(_salience)
+                if hasattr(ctx, 'weather_sensor') and ctx.weather_sensor:
+                    from agent_core.weather import is_weather_salient, format_weather_line as _fmt_weather
+                    _ws_ref = ctx.weather_sensor
+                    def _weather_for_fusion(_ws=_ws_ref, _om=om):
+                        data = _ws.fetch()
+                        if data is None:
+                            return None
+                        sal = is_weather_salient(data, _om)
+                        return _fmt_weather(data, sal)
+                    _fusion.set_weather_fn(_weather_for_fusion)
+
+                gen.set_perception_fn(lambda _f=_fusion: _f.format_for_brief())
+
+                ctx.holiday_sensor = _holiday
+                ctx.system_sensor = _sys_sensor
+                ctx.workspace_sensor = _ws_sensor
+                ctx.salience_filter = _salience
+                ctx.perception_fusion = _fusion
+
+                _holiday_today = _holiday.format_today()
+                _holiday_info = f", dzis: {_holiday_today}" if _holiday_today else ""
+                print(f"[Homeostasis] [OK] PerceptionFusion (Faza 3){_holiday_info}")
+            except Exception as e:
+                logger.debug(f"PerceptionFusion not initialized: {e}")
+
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
             if ctx.knowledge_analyzer:
