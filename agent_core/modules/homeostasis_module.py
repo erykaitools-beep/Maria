@@ -1,6 +1,7 @@
 """Homeostasis REPL commands: /homeostasis [status|start|stop|events|summary]."""
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -1012,6 +1013,32 @@ class HomeostasisModule(MariaModule):
             if om:
                 gen.set_operator_context_fn(lambda: om.get_context())
                 gen.set_operator_rhythm_fn(lambda: om.rhythm)
+
+            # Wire weather sensor (M3: WeatherSensor + SalienceFilter)
+            _owm_key = os.environ.get("OPENWEATHERMAP_API_KEY", "")
+            _owm_city = ""
+            if om:
+                _owm_city = om.get_fact_value("city", "") if hasattr(om, "get_fact_value") else ""
+            if not _owm_city:
+                _owm_city = os.environ.get("OPENWEATHERMAP_CITY", "")
+            if _owm_key and _owm_city:
+                try:
+                    from agent_core.weather import WeatherSensor, is_weather_salient, format_weather_line
+                    _weather_sensor = WeatherSensor(api_key=_owm_key, city=_owm_city)
+                    ctx.weather_sensor = _weather_sensor
+
+                    def _weather_accessor(_ws=_weather_sensor, _om=om):
+                        data = _ws.fetch()
+                        if data is None:
+                            return None
+                        salient = is_weather_salient(data, _om)
+                        return format_weather_line(data, salient)
+
+                    gen.set_weather_fn(_weather_accessor)
+                    print(f"[Homeostasis] [OK] WeatherSensor ({_owm_city})")
+                except Exception as e:
+                    logger.warning("WeatherSensor init failed: %s", e)
+
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
             if ctx.knowledge_analyzer:

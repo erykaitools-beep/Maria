@@ -39,6 +39,7 @@ class ContentGenerators:
         self._get_mode: Optional[Callable] = None
         self._get_operator_context: Optional[Callable] = None
         self._get_operator_rhythm: Optional[Callable] = None
+        self._get_weather: Optional[Callable] = None
 
     # -- Accessor setters (called during wiring) --
 
@@ -81,6 +82,9 @@ class ContentGenerators:
     def set_operator_rhythm_fn(self, fn: Callable) -> None:
         self._get_operator_rhythm = fn
 
+    def set_weather_fn(self, fn: Callable) -> None:
+        self._get_weather = fn
+
     # -- Generators --
 
     def generate(self, reason: ContactReason) -> Optional[ProactiveContact]:
@@ -120,6 +124,11 @@ class ContentGenerators:
         # Operator context (if set)
         if op_context:
             lines.append(f"Pamietam: {op_context}")
+
+        # Weather (M3: filtered through SalienceFilter)
+        weather_line = self._safe_call(self._get_weather)
+        if weather_line:
+            lines.append(weather_line)
 
         # Health & mode
         health = self._safe_call(self._get_health)
