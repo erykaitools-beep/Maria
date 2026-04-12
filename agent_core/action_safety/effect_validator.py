@@ -159,7 +159,7 @@ class EffectValidator:
             tool_result = result.get("tool_result")
 
             # Empty result on reported success = suspicious
-            if success and not tool_result and tool_result != 0:
+            if success and (tool_result is None or tool_result == ""):
                 unexpected = True
                 details["empty_result_on_success"] = True
 

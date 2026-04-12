@@ -1975,6 +1975,28 @@ class PlannerCore:
         plan.message = f"Wykonuje zatwierdzony efektor: {approved_request.tool_name}"
         plan.metadata["approval_request_id"] = approved_request.request_id
 
+        # K7: Validate even approved effectors through autonomy policy
+        if self._autonomy_policy:
+            check = self._autonomy_policy.check(
+                action_type="effector",
+                action_params=plan.action_params,
+                goal_id=plan.goal_id,
+            )
+            if not check.allowed:
+                plan.status = PlanStatus.FAILED
+                plan.result = check.blocked_result or {
+                    "success": False,
+                    "error": f"K7 blocked approved effector: {check.reasons}",
+                }
+                if trace:
+                    trace.add_step("k7", "blocked_approved", "rejected", {
+                        "reasons": check.reasons,
+                    })
+                    trace.finalize(success=False, result_summary="k7_blocked_approved")
+                    self._save_trace(trace)
+                self._log_decision(plan)
+                return plan
+
         if trace:
             trace.plan_id = plan.plan_id
             trace.action_type = plan.action_type.value

@@ -230,13 +230,15 @@ class OpenClawClient:
             cmd_parts = command.split()
         elif tool_name == "read":
             path = args["path"]
-            cmd_parts = ["cat", path]
+            import shlex
+            cmd_parts = ["cat", "--", path]  # -- prevents path starting with -
         elif tool_name == "write":
             path = args["path"]
             content = args["content"]
             # Use tee for writing (content via stdin not supported by nodes run)
             # Fall back to shell: printf 'content' > path
-            cmd_parts = ["sh", "-c", f"printf '%s' '{self._escape_shell(content)}' > {path}"]
+            import shlex
+            cmd_parts = ["sh", "-c", f"printf '%s' {shlex.quote(self._escape_shell(content))} > {shlex.quote(path)}"]
         else:
             raise OpenClawError(f"Unknown node tool: {tool_name}")
 

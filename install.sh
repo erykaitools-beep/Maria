@@ -92,7 +92,11 @@ if command -v ollama &>/dev/null; then
     echo -e "  Ollama: ${GREEN}already installed ($OLLAMA_VERSION)${NC}"
 else
     echo "  Ollama not found. Installing..."
-    curl -fsSL https://ollama.com/install.sh | sh
+    OLLAMA_INSTALLER=$(mktemp)
+    curl -fsSL https://ollama.com/install.sh -o "$OLLAMA_INSTALLER"
+    echo "  Downloaded installer to $OLLAMA_INSTALLER"
+    sh "$OLLAMA_INSTALLER"
+    rm -f "$OLLAMA_INSTALLER"
     echo -e "  Ollama: ${GREEN}installed${NC}"
 fi
 

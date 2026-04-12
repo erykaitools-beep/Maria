@@ -89,7 +89,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # Initialize SocketIO with restricted CORS
 socketio = SocketIO(
     app,
-    cors_allowed_origins=CORS_ORIGINS if not DEBUG_MODE else "*",
+    cors_allowed_origins=CORS_ORIGINS,  # Never use wildcard, even in debug
     async_mode='threading'
 )
 
@@ -650,7 +650,8 @@ def login():
     if request.method == 'POST':
         pin = request.form.get('pin', '')
 
-        if pin == UI_PIN:
+        import hmac
+        if UI_PIN and hmac.compare_digest(pin, UI_PIN):
             session['authenticated'] = True
             session.permanent = True
             return redirect(url_for('index'))

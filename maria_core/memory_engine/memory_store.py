@@ -49,10 +49,9 @@ class MemoryStore:
     """Interfejs do operacji na plikach JSONL."""
 
     def __init__(self, filepath):
-        # ZAWSZE zamień na Path – czy przyjdzie str, czy Path
+        # ZAWSZE zamien na Path - czy przyjdzie str, czy Path
         self.filepath = Path(filepath)
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
-        ...
 
     def append(self, record: Dict[str, Any]) -> bool:
         """

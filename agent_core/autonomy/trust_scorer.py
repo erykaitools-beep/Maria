@@ -14,6 +14,7 @@ Faza 7: Trust & Autonomy Graduation (Digital Human Roadmap).
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
@@ -132,7 +133,8 @@ class TrustScorer:
         self._incident_memory = incident_memory
         self._confidence_tracker = confidence_tracker
         self._authority_manager = authority_manager
-        # Track promotion history
+        # Track promotion history (thread-safe)
+        self._lock = threading.Lock()
         self._last_promotion_at: float = 0.0
         self._promotion_action_types: Set[str] = set()
 
@@ -343,21 +345,25 @@ class TrustScorer:
 
     def record_promotion(self) -> None:
         """Record that a promotion was approved (starts probation)."""
-        self._last_promotion_at = time.time()
+        with self._lock:
+            self._last_promotion_at = time.time()
 
     def is_in_probation(self) -> bool:
         """Check if Maria is in probation period after promotion."""
-        if self._last_promotion_at <= 0:
-            return False
-        days_since = (time.time() - self._last_promotion_at) / 86400.0
-        return days_since < PROBATION_DAYS
+        with self._lock:
+            if self._last_promotion_at <= 0:
+                return False
+            days_since = (time.time() - self._last_promotion_at) / 86400.0
+            return days_since < PROBATION_DAYS
 
     def get_probation_remaining_days(self) -> float:
         """Days remaining in probation (0.0 if not in probation)."""
-        if not self.is_in_probation():
-            return 0.0
-        days_since = (time.time() - self._last_promotion_at) / 86400.0
-        return max(0.0, PROBATION_DAYS - days_since)
+        with self._lock:
+            if self._last_promotion_at <= 0:
+                return 0.0
+            days_since = (time.time() - self._last_promotion_at) / 86400.0
+            remaining = PROBATION_DAYS - days_since
+            return max(0.0, remaining)
 
     # -- Dashboard data --
 

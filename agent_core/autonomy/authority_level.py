@@ -126,6 +126,11 @@ class AuthorityManager:
         self._config_path = config_path or DEFAULT_CONFIG_PATH
         self._lock = threading.Lock()
         self._config = self._load()
+        self._on_downgrade_fn = None  # Callback for downgrade (e.g. reject pending approvals)
+
+    def set_on_downgrade(self, fn) -> None:
+        """Set callback invoked on authority downgrade. fn(old_level, new_level)."""
+        self._on_downgrade_fn = fn
 
     def _load(self) -> AuthorityConfig:
         """Load config from JSON file, or return defaults."""
@@ -133,6 +138,14 @@ class AuthorityManager:
             if self._config_path.exists():
                 data = json.loads(self._config_path.read_text(encoding="utf-8"))
                 config = AuthorityConfig.from_dict(data)
+                # Validate loaded level against MAX_ALLOWED_LEVEL
+                loaded_level = config.get_level()
+                if level_index(loaded_level) > level_index(self.MAX_ALLOWED_LEVEL):
+                    logger.warning(
+                        "Loaded authority %s exceeds max %s, clamping",
+                        loaded_level.value, self.MAX_ALLOWED_LEVEL.value,
+                    )
+                    config.level = self.MAX_ALLOWED_LEVEL.value
                 logger.info("Authority config loaded: level=%s", config.level)
                 return config
         except Exception as e:
@@ -180,10 +193,19 @@ class AuthorityManager:
         with self._lock:
             import time
             old = self._config.level
+            old_level_enum = self._config.get_level()
             self._config.level = level.value
             self._config.updated_at = time.time()
             self._save()
             logger.info("Authority level changed: %s -> %s", old, level.value)
+
+        # On downgrade: notify callback (e.g. reject pending approvals)
+        if level_index(level) < level_index(old_level_enum) and self._on_downgrade_fn:
+            try:
+                self._on_downgrade_fn(old_level_enum, level)
+            except Exception as e:
+                logger.warning("Downgrade callback error: %s", e)
+
         return True
 
     def get_tool_rate_limit(self, tool_name: str) -> int:

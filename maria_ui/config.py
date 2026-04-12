@@ -31,7 +31,12 @@ DATA_DIR.mkdir(exist_ok=True)
 
 # PIN code for UI access (change this!)
 # Can be overridden by environment variable MARIA_PIN
-UI_PIN = os.environ.get("MARIA_PIN", "1234")
+UI_PIN = os.environ.get("MARIA_PIN", "")
+if not UI_PIN:
+    import logging
+    logging.getLogger(__name__).warning(
+        "MARIA_PIN not set! Web UI login disabled until PIN is configured in .env"
+    )
 
 # Session secret key (auto-generated if not set)
 SECRET_KEY = os.environ.get("MARIA_SECRET_KEY", secrets.token_hex(32))

@@ -167,7 +167,7 @@ class BrainMemoryLoop:
         episode: Dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "input_snippet": perception[:80],
-	    "context": context,
+            "context": context,
             "stats": processed_stats,
             "success": success_status,
             "learning_goals": all_learning_goals,
