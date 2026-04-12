@@ -78,3 +78,12 @@ claude_notes/
 CLAUDE.md
 MARIA_Project_Summary.pdf
 docs/archive/
+docs/SESSION_SUMMARY_*.md
+docs/NEXT_SESSION_PLAN.md
+docs/PLANNER_BRIEF_FOR_REVIEW.md
+docs/CONTEXT_BRIEF.md
+docs/plans/*.pdf
+docs/plans/*.docx
+config/
+models/
+scripts/generate_project_summary_pdf.py
