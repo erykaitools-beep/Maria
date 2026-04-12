@@ -1274,12 +1274,57 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"Proactive contact not initialized: {e}")
 
-        # Wire tick hooks for Faza 5+6
+        # Faza 7: Trust & Autonomy Graduation
+        try:
+            from agent_core.autonomy.incident_memory import IncidentMemory
+            from agent_core.autonomy.trust_scorer import TrustScorer
+            from agent_core.autonomy.auto_promotion import AutoPromotion
+
+            incident_memory = IncidentMemory()
+            ctx.incident_memory = incident_memory
+
+            trust_scorer = TrustScorer()
+            # Wire available data sources
+            if ctx.goal_store:
+                trust_scorer.set_goal_store(ctx.goal_store)
+            if getattr(ctx, 'approval_queue', None):
+                trust_scorer.set_approval_queue(ctx.approval_queue)
+            trust_scorer.set_incident_memory(incident_memory)
+            if getattr(ctx, 'meta_cognition', None):
+                try:
+                    tracker = ctx.meta_cognition._confidence
+                    trust_scorer.set_confidence_tracker(tracker)
+                except Exception:
+                    pass
+            if getattr(ctx, 'authority_manager', None):
+                trust_scorer.set_authority_manager(ctx.authority_manager)
+            ctx.trust_scorer = trust_scorer
+
+            auto_promotion = AutoPromotion(
+                trust_scorer=trust_scorer,
+                authority_manager=getattr(ctx, 'authority_manager', None),
+                goal_store=ctx.goal_store if ctx.goal_store else None,
+            )
+            ctx.auto_promotion = auto_promotion
+
+            avg_trust = trust_scorer.get_average_trust()
+            inc_count = incident_memory.count()
+            # Wire incident memory to planner executor
+            if planner:
+                planner.set_incident_memory(incident_memory)
+
+            print(f"[Homeostasis] [OK] Faza 7 Trust & Autonomy (trust={avg_trust:.2f}, incidents={inc_count})")
+        except Exception as e:
+            logger.debug(f"Faza 7 not initialized: {e}")
+
+        # Wire tick hooks for Faza 5+6+7
         if core:
             if ctx.workflow_engine:
                 core.set_workflow_engine(ctx.workflow_engine)
             if ctx.environment_manager:
                 core.set_environment_manager(ctx.environment_manager)
+            if getattr(ctx, 'auto_promotion', None):
+                core.set_auto_promotion(ctx.auto_promotion)
 
         return True
 
@@ -2071,6 +2116,68 @@ def _register_telegram_commands(bridge, ctx):
 
         return f"Authority: {new_level.value}"
 
+    def _cmd_trust(args):
+        """Show trust scores and promotion status."""
+        scorer = getattr(ctx, 'trust_scorer', None)
+        if not scorer:
+            return "TrustScorer niedostepny"
+
+        arg = args.strip().lower()
+
+        if arg == "incidents":
+            mem = getattr(ctx, 'incident_memory', None)
+            if not mem:
+                return "IncidentMemory niedostepny"
+            stats = mem.get_stats()
+            recent = mem.get_recent(limit=5)
+            lines = [
+                f"*Incydenty:* {stats['total']} (nierozwiazane: {stats['unresolved']}, 7d: {stats['recent_7d']})",
+            ]
+            for inc in reversed(recent):
+                age = inc.age_days()
+                lines.append(f"  [{inc.severity}] {inc.action_type}: {inc.error_type} ({age:.1f}d ago)")
+            return "\n".join(lines)
+
+        if arg == "promotion":
+            promo = getattr(ctx, 'auto_promotion', None)
+            if not promo:
+                return "AutoPromotion niedostepny"
+            status = promo.get_status()
+            lines = [
+                f"*AutoPromotion:*",
+                f"Pending: {status['pending_goal_id'] or 'brak'}",
+                f"Probacja: {'tak' if status['in_probation'] else 'nie'}",
+            ]
+            if status['in_probation']:
+                lines.append(f"Pozostalo: {status['probation_remaining_days']:.1f} dni")
+            history = promo.get_history(limit=3)
+            if history:
+                lines.append("Ostatnie:")
+                for h in reversed(history):
+                    lines.append(f"  {h['event_type']}: {h['from_level']}->{h['to_level']} (trust:{h['trust_score']:.2f})")
+            return "\n".join(lines)
+
+        # Default: show dashboard
+        dash = scorer.get_dashboard()
+        lines = [
+            f"*Trust Dashboard:*",
+            f"Authority: {dash['current_authority']}",
+            f"Sredni trust: {dash['average_trust']:.3f}",
+            f"Probacja: {'tak' if dash['in_probation'] else 'nie'}",
+        ]
+        if dash['promotion_available'] and dash['promotion']:
+            p = dash['promotion']
+            lines.append(f"Awans dostepny: {p['current_level']}->{p['proposed_level']} (trust:{p['trust_score']:.2f})")
+
+        scores = dash.get('trust_scores', {})
+        if scores:
+            lines.append("Wyniki per typ:")
+            for at, ts in sorted(scores.items()):
+                marker = "+" if ts['has_enough_data'] else "?"
+                lines.append(f"  {marker} {at}: {ts['score']:.3f} ({ts['total_actions']} akcji)")
+
+        return "\n".join(lines)
+
     def _cmd_validate(args):
         """Show cross-validation stats and disputes."""
         cv = getattr(ctx, 'cross_validator', None)
@@ -2248,6 +2355,7 @@ def _register_telegram_commands(bridge, ctx):
             "/status - stan systemu\n"
             "/restart - restart Marii\n"
             "/authority [level] - autoryzacja\n"
+            "/trust [incidents|promotion] - trust score i autonomia\n"
             "\n*Cele i zatwierdzanie:*\n"
             "/goals - lista celow\n"
             "/approve <id> - zatwierdz cel\n"
@@ -3244,6 +3352,7 @@ def _register_telegram_commands(bridge, ctx):
     bridge.register_command("efreject", _cmd_efreject)
     bridge.register_command("efstatus", _cmd_efstatus)
     bridge.register_command("authority", _cmd_authority)
+    bridge.register_command("trust", _cmd_trust)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 

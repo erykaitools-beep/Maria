@@ -195,6 +195,10 @@ class PlannerCore:
         """Set CriticAgent for knowledge quality gate (Faza G)."""
         self._critic_agent = critic
 
+    def set_incident_memory(self, incident_memory) -> None:
+        """Set IncidentMemory for recording action failures (Faza 7)."""
+        self.executor.set_incident_memory(incident_memory)
+
     def set_telegram_notifier(self, notifier) -> None:
         """Set TelegramNotifier for effector request notifications (Phase 5)."""
         self._telegram_notifier = notifier

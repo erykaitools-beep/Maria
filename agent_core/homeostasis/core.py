@@ -167,6 +167,9 @@ class HomeostasisCore:
         # Environment manager (Phase 15)
         self._environment_manager = None
 
+        # Auto-Promotion (Phase 16 - Faza 7)
+        self._auto_promotion = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -227,6 +230,10 @@ class HomeostasisCore:
     def set_environment_manager(self, manager) -> None:
         """Set environment manager for Phase 15 auto-detection."""
         self._environment_manager = manager
+
+    def set_auto_promotion(self, auto_promotion) -> None:
+        """Set auto-promotion module for Phase 16 (Faza 7 - Trust & Autonomy)."""
+        self._auto_promotion = auto_promotion
 
     def set_telegram_bridge(self, bridge) -> None:
         """
@@ -512,6 +519,15 @@ class HomeostasisCore:
                 self._environment_manager.maybe_auto_switch()
             except Exception as e:
                 logger.debug(f"Phase 15 environment error: {e}")
+
+        # ──────────────────────────────────────
+        # PHASE 16: AUTO-PROMOTION (Faza 7 - Trust & Autonomy)
+        # ──────────────────────────────────────
+        if self._auto_promotion and self._tick_count % 180 == 0:
+            try:
+                self._auto_promotion.tick()
+            except Exception as e:
+                logger.debug(f"Phase 16 auto-promotion error: {e}")
 
     def _aggregate_perception(
         self,

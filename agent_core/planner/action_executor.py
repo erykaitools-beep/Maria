@@ -133,6 +133,10 @@ class ActionExecutor:
         """Set WorldModel for belief confidence updates (Faza F)."""
         self._world_model = world_model
 
+    def set_incident_memory(self, incident_memory) -> None:
+        """Set IncidentMemory for recording action failures (Faza 7)."""
+        self._incident_memory = incident_memory
+
     # Action -> method name mapping (replaces Phase B if/elif chain)
     _ACTION_MAP = {
         ActionType.LEARN: "_exec_learn",
@@ -177,6 +181,19 @@ class ActionExecutor:
             result = {"success": False, "error": str(e)}
 
         result["duration_ms"] = (time.time() - start) * 1000
+
+        # Faza 7: Record failed actions as incidents
+        if not result.get("success", True) and hasattr(self, '_incident_memory') and self._incident_memory:
+            try:
+                self._incident_memory.record_incident(
+                    action_type=action.value if hasattr(action, 'value') else str(action),
+                    error_type="execution_failure",
+                    description=str(result.get("error", ""))[:200],
+                    goal_id=getattr(plan, 'goal_id', "") or "",
+                )
+            except Exception:
+                pass
+
         return result
 
     def _resolve_topics(self, plan: Plan) -> list:
