@@ -16,6 +16,25 @@
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/bfca558d-33df-4abc-ba71-1d373ed1022e" width="700" alt="Status Dashboard">
+  <br><em>Status Dashboard — system health, mode, goals, knowledge stats</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/f3840380-0830-4624-8aae-d97175fce977" width="700" alt="Status Dashboard (extended)">
+  <br><em>Status Dashboard — planner, experiments, model registry</em>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/75afda18-9c92-4488-a108-a13687d18ecc" width="700" alt="Decision Traces">
+  <br><em>Decision Traces — episode-based cognitive traceability</em>
+</p>
+
+---
+
 ## What is Maria?
 
 Maria is a **personal digital companion**, not a chatbot. She runs continuously as a daemon on your machine, learning autonomously from files you provide, building knowledge over time, and reaching out when she has something to say.
