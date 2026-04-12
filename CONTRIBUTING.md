@@ -15,7 +15,7 @@ Thank you for your interest in contributing to M.A.R.I.A.!
 ## Development Setup
 
 ```bash
-git clone https://github.com/YOUR_FORK/maria.git
+git clone https://github.com/YOUR_USERNAME/Maria.git
 cd maria
 bash install.sh
 source venv/bin/activate

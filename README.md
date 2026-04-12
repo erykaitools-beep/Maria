@@ -1,43 +1,87 @@
-# M.A.R.I.A.
+<p align="center">
+  <h1 align="center">M.A.R.I.A.</h1>
+  <p align="center"><b>Meta Analysis Recalibration Intelligence Architecture</b></p>
+  <p align="center">
+    A local, autonomous AI agent that lives on your machine.<br>
+    She learns, plans, reflects, and communicates — all offline.
+  </p>
+  <p align="center">
+    <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+    <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/tests-4200%2B-brightgreen" alt="4200+ tests">
+    <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
+    <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
+  </p>
+</p>
 
-**Meta Analysis Recalibration Intelligence Architecture**
-
-A local, autonomous AI agent that lives on your machine. Maria learns from text files, remembers you, plans her own work, and communicates proactively - all running offline with a local LLM.
+---
 
 ## What is Maria?
 
-Maria is a personal digital companion, not a chatbot. She runs continuously as a daemon, learning autonomously from files you provide, building knowledge over time, and reaching out when she has something to say. She remembers who you are, what you care about, and adapts to your preferences.
+Maria is a **personal digital companion**, not a chatbot. She runs continuously as a daemon on your machine, learning autonomously from files you provide, building knowledge over time, and reaching out when she has something to say.
+
+She remembers who you are, what you care about, and adapts to your preferences.
 
 **Core idea:** Clone, run, and she works forever. No cloud dependencies required.
 
-### What she does
+### Key Features
 
-- **Learns autonomously** from `.txt` files in `input/` (chunking, LLM extraction, spaced repetition exams)
-- **Remembers you** - name, interests, schedule, preferences (UserProfile)
-- **Plans her own work** - goal system, planner with ReAct loop, experiment tuning
-- **Communicates proactively** - morning summaries, learning milestones, idle check-ins via Telegram
-- **Reflects on herself** - self-analysis, creative tensions, meta-cognition
-- **Web UI** - chat, status dashboard, knowledge browser, experiment viewer
-- **Telegram bot** - two-way communication, approve/reject goals, remote control
+| Feature | Description |
+|---------|-------------|
+| **Autonomous Learning** | Drop `.txt` files in `input/` — Maria chunks, extracts knowledge, runs spaced repetition exams |
+| **Cognitive Core** | 13 architectural contracts (K1-K13): perception, goals, planning, world model, meta-cognition |
+| **Self-Reflection** | Self-analysis, creative tension detection, experiment system for parameter tuning |
+| **Proactive Communication** | Morning summaries, learning milestones, idle check-ins via Telegram |
+| **Operator Memory** | Remembers your name, interests, schedule, preferences across sessions |
+| **Web UI** | Chat, status dashboard, knowledge browser, experiment viewer |
+| **Telegram Bot** | Two-way communication, approve/reject goals, remote control |
+| **Vision** | Optional camera integration for scene understanding (LLaVA) |
 
-### Architecture
+### Architecture Overview
 
-Maria has 13 cognitive contracts (K1-K13) forming a complete cognitive core:
+```
+                    ┌─────────────────────────────────────┐
+                    │          Homeostasis Loop (1Hz)       │
+                    │  sense → interpret → validate → act   │
+                    └──────────────┬──────────────────────┘
+                                   │
+        ┌──────────┬───────────┬───┴────┬──────────┬──────────┐
+        │          │           │        │          │          │
+   ┌────┴────┐ ┌───┴───┐ ┌────┴───┐ ┌──┴──┐ ┌────┴────┐ ┌───┴────┐
+   │ Percept.│ │ Goals │ │Planner │ │World│ │Creative │ │Teacher │
+   │  (K1)   │ │ (K3)  │ │ (K5)   │ │Model│ │ (K13)   │ │ Agent  │
+   └─────────┘ └───────┘ └────────┘ │(K6) │ └─────────┘ └────────┘
+                                     └─────┘
+        ┌──────────┬───────────┬───────────┬──────────┐
+        │          │           │           │          │
+   ┌────┴────┐ ┌───┴───┐ ┌────┴────┐ ┌────┴───┐ ┌───┴────┐
+   │Autonomy │ │Safety │ │  Meta-  │ │ Self-  │ │Experim.│
+   │  (K7)   │ │(K10)  │ │Cognit.  │ │Analysis│ │ (K11)  │
+   └─────────┘ └───────┘ │  (K9)   │ │ (K12)  │ └────────┘
+                          └─────────┘ └────────┘
 
-| Layer | Modules | Purpose |
-|-------|---------|---------|
-| Perception | K1 Unified Perception | Event aggregation from all sources |
-| Safety | K2 Sandbox, K7 Autonomy, K10 Action Safety | Isolation, classification, audit |
-| Planning | K3 Goals, K5 Planner, K8 Deliberation | Goal system, ReAct loop, strategies |
-| Knowledge | K6 World Model, K9 Meta-Cognition | Beliefs, confidence, assumptions |
-| Growth | K11 Experiments, K12 Self-Analysis, K13 Creative | Parameter tuning, reflection, innovation |
-| Learning | Teacher Agent, Spaced Repetition, Exam System | Autonomous learning pipeline |
+   ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+   │Telegram │ │ Web UI  │ │ Vision  │ │Semantic │
+   │  Bot    │ │ (Flask) │ │(camera) │ │ Memory  │
+   └─────────┘ └─────────┘ └─────────┘ └─────────┘
+```
+
+### Cognitive Contracts (K1-K13)
+
+| Layer | Contracts | Purpose |
+|-------|-----------|---------|
+| **Perception** | K1 Unified Perception | Event aggregation from all sources |
+| **Boundary** | K2 Sandbox | Isolated learning, promote-to-production gate |
+| **Planning** | K3 Goals, K5 Planner, K8 Deliberation | Goal system, ReAct loop, multi-step strategies |
+| **Knowledge** | K6 World Model, K9 Meta-Cognition | Belief system, confidence tracking, assumptions |
+| **Safety** | K7 Autonomy, K10 Action Safety | Action classification, rate limiting, audit log |
+| **Growth** | K11 Experiments, K12 Self-Analysis, K13 Creative | Parameter tuning, reflection, tension detection |
 
 ## Quick Start
 
 ### Requirements
 
-- **OS:** Linux (Ubuntu 22.04+ recommended), macOS
+- **OS:** Linux (Ubuntu 22.04+), macOS
 - **Python:** 3.10+
 - **RAM:** 16 GB+ (8 GB minimum)
 - **Disk:** 10 GB free (for LLM model)
@@ -45,8 +89,8 @@ Maria has 13 cognitive contracts (K1-K13) forming a complete cognitive core:
 ### Install
 
 ```bash
-git clone https://github.com/YOUR_USER/maria.git
-cd maria
+git clone https://github.com/erykaitools-beep/Maria.git
+cd Maria
 bash install.sh
 ```
 
@@ -75,7 +119,7 @@ Drop `.txt` files into `input/`. Maria will find them and start learning automat
 
 ```bash
 cp my_notes.txt input/
-# Maria picks it up on next planner cycle
+# Maria picks it up on the next planner cycle (~60s)
 ```
 
 ## Configuration
@@ -84,11 +128,11 @@ All config is in `.env` (created by `install.sh`). Nothing is required for basic
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MARIA_PIN` | (random) | Web UI login PIN |
+| `MARIA_PIN` | *(random)* | Web UI login PIN |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `TELEGRAM_BOT_TOKEN` | (empty) | Telegram bot token (optional) |
-| `TELEGRAM_CHAT_ID` | (empty) | Your Telegram chat ID (optional) |
-| `NIM_API_KEY` | (empty) | NVIDIA NIM API key (optional, stronger LLM for analysis) |
+| `TELEGRAM_BOT_TOKEN` | *(empty)* | Telegram bot token (optional) |
+| `TELEGRAM_CHAT_ID` | *(empty)* | Your Telegram chat ID (optional) |
+| `NIM_API_KEY` | *(empty)* | NVIDIA NIM API key (optional, for stronger analysis) |
 
 ### Optional: Telegram Bot
 
@@ -101,9 +145,9 @@ All config is in `.env` (created by `install.sh`). Nothing is required for basic
    ```
 4. Restart Maria
 
-Commands: `/status`, `/goals`, `/approve`, `/reject`, `/learn`, `/remind`, `/proactive`, `/help`
+Commands: `/status`, `/goals`, `/approve`, `/reject`, `/learn`, `/remind`, `/help`
 
-### Optional: Run as systemd service
+### Optional: Systemd service
 
 ```bash
 sudo cp scripts/maria.service /etc/systemd/system/
@@ -111,51 +155,17 @@ sudo systemctl enable maria
 sudo systemctl start maria
 ```
 
-## Project Structure
-
-```
-maria/
-├── maria.py              # Main entry point (daemon + Web UI)
-├── main.py               # REPL interface
-├── install.sh            # Quick install script
-├── agent_core/           # Core modules
-│   ├── homeostasis/      # 1Hz tick loop, sensors, mode regulation
-│   ├── planner/          # ReAct planning loop (K5)
-│   ├── goals/            # Goal system (K3)
-│   ├── teacher/          # Autonomous learning agent
-│   ├── consciousness/    # Personality, memory, user profile
-│   ├── creative/         # Tension detection, meta-goals (K13)
-│   ├── proactive/        # Maria initiates contact
-│   ├── telegram/         # Telegram bot integration
-│   ├── vision/           # Camera/vision (optional hardware)
-│   ├── llm/              # LLM routing, model registry
-│   └── tests/            # ~3800 tests
-├── maria_ui/             # Flask Web UI
-│   ├── templates/        # HTML (Jinja2)
-│   └── static/           # CSS + JS
-├── input/                # Learning materials (.txt files)
-├── memory/               # Knowledge index (JSONL)
-├── meta_data/            # Runtime state (JSON/JSONL)
-└── docs/                 # Architecture, contracts, specs
-```
-
 ## How Maria Works
 
 ### The Tick Loop
 
-Maria runs a 1Hz homeostasis loop with 13 phases:
+Maria runs a 1Hz homeostasis loop:
 
-1. **Sense** - Read system resources, CPU, RAM, temperature
-2. **Interpret** - Map sensor data to cognitive state
-3. **Validate** - Check constraints and thresholds
-4. **Decide** - Mode regulation (ACTIVE/REDUCED/SLEEP/SURVIVAL)
-5. **Act** - Execute mode transitions
-6. **Health** - Compute overall health score
-7. **Perceive** - Aggregate events from all subsystems
-8. **Planner** - Run autonomous decision cycle (learn, review, analyze...)
-9. **Telegram** - Poll for operator messages
-10. **Reminders** - Check due reminders and todos
-11. **Proactive** - Check if Maria should initiate contact
+```
+SENSE → INTERPRET → VALIDATE → DECIDE → ACT → HEALTH → PERCEIVE → PLANNER → TELEGRAM → REMINDERS → PROACTIVE
+```
+
+The **mode regulator** manages four states: `ACTIVE` → `REDUCED` → `SLEEP` → `SURVIVAL`, based on system resources and health.
 
 ### Learning Pipeline
 
@@ -163,52 +173,85 @@ Maria runs a 1Hz homeostasis loop with 13 phases:
 input/*.txt → chunk → LLM extract → knowledge_index.jsonl → exam → spaced repetition
 ```
 
-Maria decides what to learn based on:
-- Knowledge gaps (what she doesn't know)
-- Spaced repetition schedule (what needs review)
-- Topic suggestions (semantic novelty)
-- Operator hints (Telegram `/learn <topic>`)
+Maria decides **what** to learn based on knowledge gaps, spaced repetition schedule, semantic novelty, and operator hints.
 
 ### Proactive Contact
 
-Maria reaches out via Telegram when she has something to say:
-- **Morning summary** (7:00-9:00) - health, goals, learning stats
-- **Evening recap** (20:00-21:00) - what happened today
-- **Goal achieved** - celebration when a goal is completed
-- **Learning milestone** - every 10% knowledge coverage
-- **Idle check-in** - after 48h without operator contact
+Maria reaches out via Telegram when she has something meaningful to say:
+- **Morning summary** (7-9am) — health, goals, learning stats
+- **Evening recap** (8-9pm) — what happened today
+- **Goal achieved** — celebration when a goal is completed
+- **Learning milestone** — every 10% knowledge coverage
+- **Idle check-in** — after 48h without operator contact
 
-Quiet hours (23:00-6:00), daily limit (8 messages), per-reason cooldowns.
+Quiet hours (23:00-6:00), daily limits, per-reason cooldowns.
+
+## Project Structure
+
+```
+maria/
+├── maria.py              # Entry point (daemon + Web UI)
+├── main.py               # REPL interface (interactive)
+├── install.sh            # Quick install script
+├── agent_core/           # Core cognitive modules
+│   ├── homeostasis/      # 1Hz tick loop, sensors, mode regulation
+│   ├── planner/          # ReAct planning loop (K5)
+│   ├── goals/            # Goal system with audit trail (K3)
+│   ├── teacher/          # Autonomous learning agent
+│   ├── consciousness/    # Personality, dreams, user profile
+│   ├── creative/         # Tension detection, meta-goals (K13)
+│   ├── world_model/      # Belief system (K6)
+│   ├── meta_cognition/   # Reflection, confidence (K9)
+│   ├── autonomy/         # Action classification, rate limits (K7)
+│   ├── action_safety/    # Audit log, effect validation (K10)
+│   ├── experiment/       # Parameter tuning system (K11)
+│   ├── self_analysis/    # Self-reflection via LLM (K12)
+│   ├── semantic/         # Embedding-based memory (nomic-embed-text)
+│   ├── telegram/         # Telegram bot integration
+│   ├── vision/           # Camera/vision (optional)
+│   ├── llm/              # LLM routing, model registry
+│   ├── reminders/        # Time-triggered notifications
+│   ├── web_source/       # Wikipedia + RSS content fetcher
+│   └── tests/            # 4200+ tests
+├── maria_ui/             # Flask Web UI
+│   ├── templates/        # HTML (Jinja2)
+│   └── static/           # CSS + JS
+├── docs/                 # Architecture, contracts, specs
+└── scripts/              # Install, backup, systemd
+```
 
 ## Development
 
 ```bash
-# Run tests
+# Run all tests
 source venv/bin/activate
 python -m pytest agent_core/tests/ -q
 
 # Run specific module tests
-python -m pytest agent_core/tests/test_proactive.py -v
+python -m pytest agent_core/tests/test_planner.py -v
 
-# REPL mode (interactive)
+# Interactive REPL
 python main.py
 ```
 
 ## Tech Stack
 
-- **Runtime:** Python 3.10+, threading (not asyncio)
-- **LLM:** Ollama (llama3.1:8b default), optional NVIDIA NIM API
-- **Web UI:** Flask + Flask-SocketIO, vanilla JS
-- **Storage:** JSONL files (no database)
-- **Communication:** Telegram Bot API (optional)
-- **Tests:** pytest (~3800 tests, all mocked, zero external deps)
+| Component | Technology |
+|-----------|-----------|
+| **Runtime** | Python 3.10+, threading |
+| **LLM** | Ollama (llama3.1:8b), optional NVIDIA NIM API |
+| **Web UI** | Flask + Flask-SocketIO, vanilla JS |
+| **Storage** | JSONL files (no database) |
+| **Embeddings** | nomic-embed-text (768-dim, via Ollama) |
+| **Communication** | Telegram Bot API |
+| **Tests** | pytest, all mocked, zero external deps |
 
 ## License
 
-AGPL-3.0 - see [LICENSE](LICENSE)
+[AGPL-3.0](LICENSE) — Copyright (C) 2025-2026 Eryk (@DonCames)
 
 ## Credits
 
 M.A.R.I.A. has been running continuously since February 2026.
 
-Built with help from Claude, ChatGPT, and Grok.
+Built by Eryk with help from Claude, ChatGPT, and Grok.
