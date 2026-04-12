@@ -769,6 +769,51 @@ class HomeostasisModule(MariaModule):
                             manifest.set_mode_fn(lambda: core.current_mode.name if core.current_mode else "UNKNOWN")
                         ctx.capability_manifest = manifest
                         print(f"[Homeostasis] [OK] CapabilityManifest wired ({len(manifest.get_available())} available)")
+
+                        # Wire HonestyProtocol (K15.2) - evidence-based confidence
+                        try:
+                            from agent_core.operator.honesty_protocol import HonestyProtocol
+                            honesty = HonestyProtocol()
+                            honesty.set_capability_manifest(manifest)
+                            ctx.honesty_protocol = honesty
+                            print("[Homeostasis] [OK] HonestyProtocol (K15.2) wired")
+                        except Exception as e:
+                            logger.debug(f"HonestyProtocol not initialized: {e}")
+
+                        # Wire StateReporter (K15.1) - structured self-status
+                        try:
+                            from agent_core.operator.state_reporter import StateReporter
+                            state_reporter = StateReporter()
+                            state_reporter.set_capability_manifest(manifest)
+                            if core:
+                                state_reporter.set_homeostasis_core(core)
+                            if ctx.goal_store:
+                                state_reporter.set_goal_store(ctx.goal_store)
+                            if ctx.knowledge_analyzer:
+                                state_reporter.set_knowledge_analyzer(ctx.knowledge_analyzer)
+                            if hasattr(ctx, 'identity_store') and ctx.identity_store:
+                                state_reporter.set_identity_store(ctx.identity_store)
+                            ctx.state_reporter = state_reporter
+                            print("[Homeostasis] [OK] StateReporter (K15.1) wired")
+                        except Exception as e:
+                            logger.debug(f"StateReporter not initialized: {e}")
+
+                        # Wire GrowthAwareness (K15.3) - limitations as targets
+                        try:
+                            from agent_core.operator.growth_awareness import GrowthAwareness
+                            growth = GrowthAwareness()
+                            growth.set_capability_manifest(manifest)
+                            if hasattr(ctx, 'honesty_protocol') and ctx.honesty_protocol:
+                                growth.set_honesty_protocol(ctx.honesty_protocol)
+                            if ctx.knowledge_analyzer:
+                                growth.set_knowledge_analyzer(ctx.knowledge_analyzer)
+                            growth.refresh()
+                            ctx.growth_awareness = growth
+                            _target_count = len(growth.get_targets(status="identified"))
+                            print(f"[Homeostasis] [OK] GrowthAwareness (K15.3) wired ({_target_count} targets)")
+                        except Exception as e:
+                            logger.debug(f"GrowthAwareness not initialized: {e}")
+
                     except Exception as e:
                         logger.debug(f"CapabilityManifest not initialized: {e}")
                 except Exception as e:

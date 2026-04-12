@@ -87,6 +87,13 @@ class SharedContext:
     # Proactive Contact
     proactive_scheduler: Any = None      # ProactiveScheduler (Maria initiates contact)
 
+    # Self-Model Maturity (K15)
+    capability_manifest: Any = None      # CapabilityManifest (K15)
+    honesty_protocol: Any = None         # HonestyProtocol (K15.2)
+    state_reporter: Any = None           # StateReporter (K15.1)
+    growth_awareness: Any = None         # GrowthAwareness (K15.3)
+    weather_sensor: Any = None           # WeatherSensor (M3)
+
     # REPL state
     last_result: Any = None
 
