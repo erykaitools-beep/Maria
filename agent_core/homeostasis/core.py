@@ -161,6 +161,12 @@ class HomeostasisCore:
         # Proactive contact scheduler (Phase 13)
         self._proactive_scheduler = None
 
+        # Workflow engine (Phase 14)
+        self._workflow_engine = None
+
+        # Environment manager (Phase 15)
+        self._environment_manager = None
+
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
         Set semantic memory reference for sleep processing.
@@ -213,6 +219,14 @@ class HomeostasisCore:
     def set_proactive_scheduler(self, scheduler) -> None:
         """Set proactive contact scheduler for Phase 13 tick check."""
         self._proactive_scheduler = scheduler
+
+    def set_workflow_engine(self, engine) -> None:
+        """Set workflow engine for Phase 14 tick-driven workflow advancement."""
+        self._workflow_engine = engine
+
+    def set_environment_manager(self, manager) -> None:
+        """Set environment manager for Phase 15 auto-detection."""
+        self._environment_manager = manager
 
     def set_telegram_bridge(self, bridge) -> None:
         """
@@ -480,6 +494,24 @@ class HomeostasisCore:
                 self._proactive_scheduler.tick()
             except Exception as e:
                 logger.debug(f"Phase 13 proactive error: {e}")
+
+        # ──────────────────────────────────────
+        # PHASE 14: WORKFLOW ENGINE (advance active workflows)
+        # ──────────────────────────────────────
+        if self._workflow_engine and self._tick_count % 60 == 30:
+            try:
+                self._workflow_engine.advance_next_active()
+            except Exception as e:
+                logger.debug(f"Phase 14 workflow error: {e}")
+
+        # ──────────────────────────────────────
+        # PHASE 15: ENVIRONMENT (auto-detect mode)
+        # ──────────────────────────────────────
+        if self._environment_manager and self._tick_count % 300 == 0:
+            try:
+                self._environment_manager.maybe_auto_switch()
+            except Exception as e:
+                logger.debug(f"Phase 15 environment error: {e}")
 
     def _aggregate_perception(
         self,

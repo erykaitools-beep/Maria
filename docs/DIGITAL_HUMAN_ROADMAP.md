@@ -30,12 +30,12 @@ Digital human w kontekscie M.A.R.I.A. to system ktory spelnia **6 warunkow jedno
 
 | # | Nazwa | Cel | Status |
 |---|-------|-----|--------|
-| 1 | **Operator Understanding** | Maria naprawde rozumie operatora | PLANNED |
-| 2 | **Self-Model Maturity** | Maria uczciwie wie kim jest i co umie | PLANNED |
-| 3 | **Operational Perception** | Maria widzi caly swiat operacyjny | PLANNED |
-| 4 | **Digital Hands** | Maria potrafi cos ZROBIC | PLANNED |
-| 5 | **Workflow Orchestration** | Maria prowadzi zlozone procesy | PLANNED |
-| 6 | **Environment Adaptation** | Maria dopasowuje sie do kontekstu | PLANNED |
+| 1 | **Operator Understanding** | Maria naprawde rozumie operatora | DONE |
+| 2 | **Self-Model Maturity** | Maria uczciwie wie kim jest i co umie | DONE |
+| 3 | **Operational Perception** | Maria widzi caly swiat operacyjny | DONE |
+| 4 | **Digital Hands** | Maria potrafi cos ZROBIC | DONE |
+| 5 | **Workflow Orchestration** | Maria prowadzi zlozone procesy | DONE |
+| 6 | **Environment Adaptation** | Maria dopasowuje sie do kontekstu | DONE |
 | 7 | **Trust & Autonomy Graduation** | Maria zarabia na samodzielnosc | PLANNED |
 
 ### Szesc warstw koncepcyjnych (mapping na fazy):

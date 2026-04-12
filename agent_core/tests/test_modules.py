@@ -155,8 +155,11 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         cmds = m.get_commands()
-        assert len(cmds) == 1
-        assert cmds[0].name == "/homeostasis"
+        assert len(cmds) == 3  # /homeostasis, /workflow, /env
+        names = [c.name for c in cmds]
+        assert "/homeostasis" in names
+        assert "/workflow" in names
+        assert "/env" in names
 
     def test_help_category(self):
         from agent_core.modules.homeostasis_module import HomeostasisModule

@@ -1164,6 +1164,72 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.debug(f"Digital Hands not initialized: {e}")
 
+            # Wire Workflow Orchestration (Faza 5)
+            try:
+                from agent_core.workflow import WorkflowStore, WorkflowEngine, DelegationManager, ProgressReporter
+                from agent_core.planner.planner_model import Plan, PlanStatus, ActionType, create_plan
+
+                _wf_store = WorkflowStore()
+                _delegation = DelegationManager()
+
+                # Wire delegation to capability router and task executor
+                if ctx.capability_router:
+                    _delegation.set_capability_router(ctx.capability_router)
+                    _delegation.set_plan_factory(
+                        lambda action, params, gid: create_plan(
+                            goal_id=gid,
+                            goal_description=f"workflow step: {action}",
+                            action_type=ActionType(action),
+                            action_params=params,
+                        )
+                    )
+                if ctx.task_executor:
+                    _delegation.set_task_executor(ctx.task_executor)
+
+                _wf_engine = WorkflowEngine(_wf_store, _delegation)
+
+                # Wire progress reporter
+                _wf_reporter = ProgressReporter()
+                if ctx.perception_buffer:
+                    _wf_reporter.set_perception_buffer(ctx.perception_buffer)
+                if ctx.telegram_bridge:
+                    _wf_reporter.set_telegram_notifier(
+                        lambda msg: ctx.telegram_bridge.send_message(msg)
+                        if hasattr(ctx.telegram_bridge, 'send_message')
+                        else None
+                    )
+                _wf_engine.set_progress_reporter(_wf_reporter)
+
+                # Recover interrupted workflows
+                _interrupted = _wf_store.recover_interrupted()
+
+                ctx.workflow_engine = _wf_engine
+                ctx.workflow_store = _wf_store
+
+                _wf_count = _wf_store.count()
+                _int_info = f", {len(_interrupted)} recovered" if _interrupted else ""
+                print(f"[Homeostasis] [OK] Workflow Engine (Faza 5, {_wf_count} workflows{_int_info})")
+            except Exception as e:
+                logger.debug(f"Workflow Engine not initialized: {e}")
+
+            # Wire Environment Adaptation (Faza 6)
+            try:
+                from agent_core.environment import EnvironmentManager, ModeDetector
+
+                _env_detector = ModeDetector()
+                if core:
+                    _env_detector.set_homeostasis_core(core)
+                if ctx.user_profile:
+                    _env_detector.set_operator_model(ctx.user_profile)
+
+                _env_manager = EnvironmentManager(detector=_env_detector)
+                ctx.environment_manager = _env_manager
+
+                _env_mode = _env_manager.get_active_mode().value
+                print(f"[Homeostasis] [OK] Environment Manager (Faza 6, mode={_env_mode})")
+            except Exception as e:
+                logger.debug(f"Environment Manager not initialized: {e}")
+
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
             if ctx.knowledge_analyzer:
@@ -1208,6 +1274,13 @@ class HomeostasisModule(MariaModule):
         except Exception as e:
             logger.debug(f"Proactive contact not initialized: {e}")
 
+        # Wire tick hooks for Faza 5+6
+        if core:
+            if ctx.workflow_engine:
+                core.set_workflow_engine(ctx.workflow_engine)
+            if ctx.environment_manager:
+                core.set_environment_manager(ctx.environment_manager)
+
         return True
 
     def get_commands(self):
@@ -1220,6 +1293,26 @@ class HomeostasisModule(MariaModule):
                 "  /homeostasis events N  - pokaz ostatnie N zdarzen (domyslnie 10)\n"
                 "  /homeostasis summary   - pokaz podsumowanie sesji",
                 "[HEART] HOMEOSTASIS",
+            ),
+            CommandInfo(
+                "/workflow", self._cmd_workflow,
+                "  /workflow              - lista aktywnych workflow\n"
+                "  /workflow list         - lista wszystkich workflow\n"
+                "  /workflow start <tmpl> [topic] - uruchom z szablonu\n"
+                "  /workflow pause <id>   - wstrzymaj workflow\n"
+                "  /workflow resume <id>  - wznow workflow\n"
+                "  /workflow cancel <id>  - anuluj workflow\n"
+                "  /workflow progress <id>- postep workflow\n"
+                "  /workflow templates    - dostepne szablony",
+                "[BRAIN] WORKFLOW",
+            ),
+            CommandInfo(
+                "/env", self._cmd_env,
+                "  /env                   - aktualny tryb srodowiska\n"
+                "  /env list              - dostepne tryby\n"
+                "  /env switch <mode>     - przelacz tryb (default/learning/monitoring/quiet)\n"
+                "  /env auto              - wlacz auto-detekcje",
+                "[BRAIN] ENVIRONMENT",
             ),
         ]
 
@@ -1398,6 +1491,216 @@ class HomeostasisModule(MariaModule):
         print(f"    WARNING:  {summary['alerts']['WARNING']}")
         print(f"\n  Log File: {summary['log_file']}")
         print("=" * 50 + "\n")
+
+    # --- Workflow commands (Faza 5) ---
+
+    def _cmd_workflow(self, args):
+        """Handle /workflow commands."""
+        engine = self.ctx.workflow_engine
+        if not engine:
+            print("[Workflow] Not initialized")
+            return
+
+        sub = args[0].lower() if args else "status"
+
+        if sub in ("status", ""):
+            self._wf_show_active(engine)
+        elif sub == "list":
+            self._wf_show_all(engine)
+        elif sub == "templates":
+            self._wf_show_templates()
+        elif sub == "start" and len(args) >= 2:
+            topic = " ".join(args[2:]) if len(args) > 2 else None
+            self._wf_start(engine, args[1], topic)
+        elif sub == "pause" and len(args) >= 2:
+            self._wf_control(engine, "pause", args[1])
+        elif sub == "resume" and len(args) >= 2:
+            self._wf_control(engine, "resume", args[1])
+        elif sub == "cancel" and len(args) >= 2:
+            self._wf_control(engine, "cancel", args[1])
+        elif sub == "progress" and len(args) >= 2:
+            self._wf_show_progress(engine, args[1])
+        else:
+            print("[Workflow] Usage: /workflow [list|start|pause|resume|cancel|progress|templates]")
+
+    def _wf_show_active(self, engine):
+        active = engine.list_workflows()
+        active = [w for w in active if w["status"] in ("running", "pending", "paused")]
+        if not active:
+            print("[Workflow] No active workflows")
+            return
+        print(f"\n{'='*50}")
+        print("[WORKFLOW] Active Workflows")
+        print(f"{'='*50}")
+        for w in active:
+            print(f"  {w['workflow_id'][:12]}  {w['name']:<20} {w['status']:<10} {w['progress_pct']:.0f}%")
+        print()
+
+    def _wf_show_all(self, engine):
+        wfs = engine.list_workflows()
+        if not wfs:
+            print("[Workflow] No workflows")
+            return
+        print(f"\n{'='*50}")
+        print(f"[WORKFLOW] All Workflows ({len(wfs)})")
+        print(f"{'='*50}")
+        for w in wfs:
+            print(f"  {w['workflow_id'][:12]}  {w['name']:<20} {w['status']:<10} {w['progress_pct']:.0f}%")
+        print()
+
+    def _wf_show_templates(self):
+        try:
+            from agent_core.workflow.templates import WORKFLOW_TEMPLATES
+            print(f"\n{'='*50}")
+            print("[WORKFLOW] Available Templates")
+            print(f"{'='*50}")
+            for name, tmpl in WORKFLOW_TEMPLATES.items():
+                topic = " <topic>" if tmpl["needs_topic"] else ""
+                print(f"  {name:<15} ~{tmpl['estimated_minutes']}min  {tmpl['description']}")
+                print(f"                  /workflow start {name}{topic}")
+            print()
+        except Exception as e:
+            print(f"[Workflow] Error: {e}")
+
+    def _wf_start(self, engine, template_name, topic=None):
+        try:
+            from agent_core.workflow.templates import WORKFLOW_TEMPLATES
+            if template_name not in WORKFLOW_TEMPLATES:
+                print(f"[Workflow] Unknown template: {template_name}")
+                print(f"  Available: {', '.join(WORKFLOW_TEMPLATES.keys())}")
+                return
+            tmpl = WORKFLOW_TEMPLATES[template_name]
+            if tmpl["needs_topic"] and not topic:
+                print(f"[Workflow] Template '{template_name}' requires a topic")
+                print(f"  Usage: /workflow start {template_name} <topic>")
+                return
+
+            if tmpl["needs_topic"]:
+                steps = tmpl["factory"](topic)
+            else:
+                steps = tmpl["factory"]()
+
+            desc = f"{tmpl['description']}" + (f": {topic}" if topic else "")
+            wf = engine.create(template_name, desc, steps)
+            engine.start(wf.workflow_id)
+            print(f"[Workflow] Started: {wf.workflow_id[:12]} ({len(steps)} steps)")
+        except Exception as e:
+            print(f"[Workflow] Error: {e}")
+
+    def _wf_control(self, engine, action, wf_id_prefix):
+        # Find workflow by prefix
+        wf = None
+        for w in engine.list_workflows():
+            if w["workflow_id"].startswith(wf_id_prefix):
+                wf = w
+                break
+        if not wf:
+            print(f"[Workflow] Not found: {wf_id_prefix}")
+            return
+
+        full_id = wf["workflow_id"]
+        if action == "pause":
+            ok = engine.pause(full_id)
+        elif action == "resume":
+            ok = engine.resume(full_id)
+        elif action == "cancel":
+            ok = engine.cancel(full_id, "operator")
+        else:
+            ok = False
+
+        status = "OK" if ok else "failed"
+        print(f"[Workflow] {action} {full_id[:12]}: {status}")
+
+    def _wf_show_progress(self, engine, wf_id_prefix):
+        # Find by prefix
+        for w in engine.list_workflows():
+            if w["workflow_id"].startswith(wf_id_prefix):
+                progress = engine.get_progress(w["workflow_id"])
+                if progress:
+                    print(f"\n{'='*50}")
+                    print(f"[WORKFLOW] {progress['name']}")
+                    print(f"{'='*50}")
+                    print(f"  Status:    {progress['status']}")
+                    print(f"  Progress:  {progress['progress_pct']:.0f}% ({progress['completed_steps']}/{progress['total_steps']})")
+                    if progress['current_action']:
+                        print(f"  Current:   {progress['current_action']}")
+                    if progress['error']:
+                        print(f"  Error:     {progress['error']}")
+                    print(f"  Duration:  {progress['total_duration_ms']:.0f}ms")
+                    print()
+                return
+        print(f"[Workflow] Not found: {wf_id_prefix}")
+
+    # --- Environment commands (Faza 6) ---
+
+    def _cmd_env(self, args):
+        """Handle /env commands."""
+        mgr = self.ctx.environment_manager
+        if not mgr:
+            print("[Environment] Not initialized")
+            return
+
+        sub = args[0].lower() if args else "status"
+
+        if sub in ("status", ""):
+            self._env_show_status(mgr)
+        elif sub == "list":
+            self._env_list_modes(mgr)
+        elif sub == "switch" and len(args) >= 2:
+            self._env_switch(mgr, args[1])
+        elif sub == "auto":
+            self._env_enable_auto(mgr)
+        else:
+            print("[Environment] Usage: /env [list|switch <mode>|auto]")
+
+    def _env_show_status(self, mgr):
+        status = mgr.get_status()
+        import datetime
+        switched = datetime.datetime.fromtimestamp(status['switched_at']).strftime('%H:%M')
+        print(f"\n{'='*50}")
+        print("[ENVIRONMENT] Status")
+        print(f"{'='*50}")
+        print(f"  Mode:          {status['mode']}")
+        print(f"  Description:   {status['description']}")
+        print(f"  Switched at:   {switched} (by: {status['switched_by']})")
+        print(f"  Auto-detect:   {'ON' if status['auto_detect_enabled'] else 'OFF'}")
+        print(f"  Notifications: {status['notification_level']}")
+        print(f"  LLM budget:    {status['llm_budget_multiplier']:.1f}x")
+        if status['priority_actions']:
+            print(f"  Priority:      {', '.join(status['priority_actions'])}")
+        if status['blocked_actions']:
+            print(f"  Blocked:       {', '.join(status['blocked_actions'])}")
+        print()
+
+    def _env_list_modes(self, mgr):
+        modes = mgr.list_modes()
+        print(f"\n{'='*50}")
+        print("[ENVIRONMENT] Available Modes")
+        print(f"{'='*50}")
+        for m in modes:
+            marker = " <-- active" if m['active'] else ""
+            print(f"  {m['mode']:<15} {m['description']}{marker}")
+        print(f"\n  Switch: /env switch <mode>")
+        print()
+
+    def _env_switch(self, mgr, mode_str):
+        try:
+            from agent_core.environment.environment_model import EnvironmentMode
+            mode = EnvironmentMode(mode_str.lower())
+            ok = mgr.switch(mode, by="operator")
+            if ok:
+                print(f"[Environment] Switched to: {mode.value}")
+            else:
+                print(f"[Environment] Already in mode: {mode.value}")
+        except ValueError:
+            valid = [m.value for m in EnvironmentMode]
+            print(f"[Environment] Unknown mode: {mode_str}")
+            print(f"  Valid modes: {', '.join(valid)}")
+
+    def _env_enable_auto(self, mgr):
+        mgr._state.auto_detect_enabled = True
+        mgr.switch(EnvironmentMode.DEFAULT, by="operator")
+        print("[Environment] Auto-detection enabled, switched to DEFAULT")
 
     def cleanup(self):
         if self._running:
@@ -1978,6 +2281,16 @@ def _register_telegram_commands(bridge, ctx):
             "/proactive on|off - wlacz/wylacz\n"
             "/proactive history - historia kontaktow\n"
             "/profile - profil operatora\n"
+            "\n*Workflow (Faza 5):*\n"
+            "/wf - lista aktywnych workflow\n"
+            "/wf start <szablon> [temat]\n"
+            "/wf pause|resume|cancel <id>\n"
+            "/wf templates - szablony\n"
+            "\n*Srodowisko (Faza 6):*\n"
+            "/env - aktualny tryb\n"
+            "/env switch <tryb> - przelacz\n"
+            "/env list - dostepne tryby\n"
+            "/env auto - auto-detekcja\n"
             "\n*Diagnostyka:*\n"
             "/tasks [N] - historia taskow Claude/Codex\n"
             "/pdf <task_id> - wyslij wynik jako PDF\n"
@@ -2777,6 +3090,130 @@ def _register_telegram_commands(bridge, ctx):
             return "CapabilityManifest niedostepny."
         return manifest.get_summary()
 
+    # --- Workflow commands (Faza 5) ---
+
+    def _cmd_wf(args):
+        """Telegram /wf - workflow management."""
+        engine = ctx.workflow_engine
+        if not engine:
+            return "Workflow Engine niedostepny."
+        sub = args[0].lower() if args else "list"
+
+        if sub == "list":
+            wfs = engine.list_workflows()
+            active = [w for w in wfs if w["status"] in ("running", "pending", "paused")]
+            if not active:
+                return "Brak aktywnych workflow."
+            lines = []
+            for w in active[:10]:
+                lines.append(f"{w['workflow_id'][:8]} {w['name']} [{w['status']}] {w['progress_pct']:.0f}%")
+            return "\n".join(lines)
+
+        if sub == "start" and len(args) >= 2:
+            try:
+                from agent_core.workflow.templates import WORKFLOW_TEMPLATES
+                tmpl_name = args[1]
+                if tmpl_name not in WORKFLOW_TEMPLATES:
+                    return f"Nieznany szablon. Dostepne: {', '.join(WORKFLOW_TEMPLATES.keys())}"
+                tmpl = WORKFLOW_TEMPLATES[tmpl_name]
+                topic = " ".join(args[2:]) if len(args) > 2 else None
+                if tmpl["needs_topic"] and not topic:
+                    return f"Podaj temat: /wf start {tmpl_name} <topic>"
+                steps = tmpl["factory"](topic) if tmpl["needs_topic"] else tmpl["factory"]()
+                desc = tmpl["description"] + (f": {topic}" if topic else "")
+                wf = engine.create(tmpl_name, desc, steps)
+                engine.start(wf.workflow_id)
+                return f"Workflow started: {wf.workflow_id[:8]} ({len(steps)} steps)"
+            except Exception as e:
+                return f"Error: {e}"
+
+        if sub == "pause" and len(args) >= 2:
+            wf_obj = _find_wf(engine, args[1])
+            if not wf_obj:
+                return f"Nie znaleziono: {args[1]}"
+            ok = engine.pause(wf_obj["workflow_id"])
+            return f"Paused: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wstrzymac."
+
+        if sub == "resume" and len(args) >= 2:
+            wf_obj = _find_wf(engine, args[1])
+            if not wf_obj:
+                return f"Nie znaleziono: {args[1]}"
+            ok = engine.resume(wf_obj["workflow_id"])
+            return f"Resumed: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wznowic."
+
+        if sub == "cancel" and len(args) >= 2:
+            wf_obj = _find_wf(engine, args[1])
+            if not wf_obj:
+                return f"Nie znaleziono: {args[1]}"
+            ok = engine.cancel(wf_obj["workflow_id"], "operator via Telegram")
+            return f"Cancelled: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna anulowac."
+
+        if sub == "templates":
+            try:
+                from agent_core.workflow.templates import WORKFLOW_TEMPLATES
+                lines = []
+                for name, t in WORKFLOW_TEMPLATES.items():
+                    lines.append(f"{name} (~{t['estimated_minutes']}min): {t['description']}")
+                return "\n".join(lines)
+            except Exception:
+                return "Error loading templates."
+
+        return "Usage: /wf [list|start|pause|resume|cancel|templates]"
+
+    def _find_wf(engine, prefix):
+        for w in engine.list_workflows():
+            if w["workflow_id"].startswith(prefix) or w["workflow_id"][:8] == prefix:
+                return w
+        return None
+
+    def _cmd_env(args):
+        """Telegram /env - environment mode management."""
+        mgr = ctx.environment_manager
+        if not mgr:
+            return "Environment Manager niedostepny."
+        sub = args[0].lower() if args else "status"
+
+        if sub == "status":
+            status = mgr.get_status()
+            lines = [
+                f"Mode: {status['mode']}",
+                f"Auto: {'ON' if status['auto_detect_enabled'] else 'OFF'}",
+                f"LLM budget: {status['llm_budget_multiplier']:.1f}x",
+                f"Notifications: {status['notification_level']}",
+            ]
+            if status['blocked_actions']:
+                lines.append(f"Blocked: {', '.join(status['blocked_actions'])}")
+            return "\n".join(lines)
+
+        if sub in ("switch", "set") and len(args) >= 2:
+            try:
+                from agent_core.environment.environment_model import EnvironmentMode
+                mode = EnvironmentMode(args[1].lower())
+                ok = mgr.switch(mode, by="operator")
+                return f"Switched to: {mode.value}" if ok else f"Already in: {mode.value}"
+            except ValueError:
+                from agent_core.environment.environment_model import EnvironmentMode
+                valid = [m.value for m in EnvironmentMode]
+                return f"Nieznany tryb. Dostepne: {', '.join(valid)}"
+
+        if sub == "list":
+            modes = mgr.list_modes()
+            lines = []
+            for m in modes:
+                marker = " <--" if m['active'] else ""
+                lines.append(f"{m['mode']}: {m['description']}{marker}")
+            return "\n".join(lines)
+
+        if sub == "auto":
+            mgr._state.auto_detect_enabled = True
+            from agent_core.environment.environment_model import EnvironmentMode
+            mgr.switch(EnvironmentMode.DEFAULT, by="operator")
+            return "Auto-detection ON, mode: default"
+
+        return "Usage: /env [status|list|switch <mode>|auto]"
+
+    bridge.register_command("wf", _cmd_wf)
+    bridge.register_command("env", _cmd_env)
     bridge.register_command("capabilities", _cmd_capabilities)
     bridge.register_command("privacy", _cmd_privacy)
     bridge.register_command("context", _cmd_context)

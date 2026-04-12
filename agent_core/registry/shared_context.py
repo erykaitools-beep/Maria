@@ -107,6 +107,13 @@ class SharedContext:
     web_researcher: Any = None           # WebResearcher
     file_manager: Any = None             # FileManager
 
+    # Workflow Orchestration (Faza 5)
+    workflow_engine: Any = None          # WorkflowEngine
+    workflow_store: Any = None           # WorkflowStore
+
+    # Environment Adaptation (Faza 6)
+    environment_manager: Any = None      # EnvironmentManager
+
     # REPL state
     last_result: Any = None
 
