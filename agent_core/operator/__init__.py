@@ -11,8 +11,9 @@ Operator Understanding module (K14).
 Part of Digital Human Roadmap, Faza 1.
 """
 
+from agent_core.operator.capability_manifest import CapabilityManifest
 from agent_core.operator.operator_model import OperatorModel
 from agent_core.operator.privacy_guard import PrivacyGuard
 from agent_core.operator.rhythm_detector import RhythmDetector
 
-__all__ = ["OperatorModel", "PrivacyGuard", "RhythmDetector"]
+__all__ = ["CapabilityManifest", "OperatorModel", "PrivacyGuard", "RhythmDetector"]

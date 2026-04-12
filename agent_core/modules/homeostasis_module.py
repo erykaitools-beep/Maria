@@ -757,6 +757,19 @@ class HomeostasisModule(MariaModule):
                     planner.set_capability_router(cap_router)
                     ctx.capability_router = cap_router
                     print(f"[Homeostasis] [OK] CapabilityRouter wired ({cap_router.registered_count} capabilities)")
+
+                    # Wire CapabilityManifest (K15)
+                    try:
+                        from agent_core.operator.capability_manifest import CapabilityManifest
+                        manifest = CapabilityManifest()
+                        manifest.set_capability_router(cap_router)
+                        manifest.set_context(ctx)
+                        if core:
+                            manifest.set_mode_fn(lambda: core.current_mode.name if core.current_mode else "UNKNOWN")
+                        ctx.capability_manifest = manifest
+                        print(f"[Homeostasis] [OK] CapabilityManifest wired ({len(manifest.get_available())} available)")
+                    except Exception as e:
+                        logger.debug(f"CapabilityManifest not initialized: {e}")
                 except Exception as e:
                     logger.warning(f"CapabilityRouter not initialized: {e}")
 
@@ -2605,6 +2618,14 @@ def _register_telegram_commands(bridge, ctx):
         om.set_context(text, expires_hours=hours)
         return f"Kontekst ustawiony: {text} (wygasa za {hours}h)"
 
+    def _cmd_capabilities(args):
+        """What can Maria do: /capabilities"""
+        manifest = getattr(ctx, 'capability_manifest', None)
+        if not manifest:
+            return "CapabilityManifest niedostepny."
+        return manifest.get_summary()
+
+    bridge.register_command("capabilities", _cmd_capabilities)
     bridge.register_command("privacy", _cmd_privacy)
     bridge.register_command("context", _cmd_context)
     bridge.register_command("proactive", _cmd_proactive)

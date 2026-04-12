@@ -294,27 +294,42 @@ class EvidenceCollector:
         except Exception as e:
             logger.debug(f"[EvidenceCollector] code_self_model failed: {e}")
 
-        # Capabilities from CapabilityRouter or hardcoded
+        # Capabilities from CapabilityManifest (K15) or hardcoded fallback
         try:
-            # Try reading capability info
-            cap_info = []
-            cap_categories = {
-                "Nauka": ["learn", "exam", "review", "fetch"],
-                "Samoanaliza": ["self_analyze", "creative", "critique"],
-                "Kodowanie": ["code_design", "code_generate", "code_test"],
-                "System": ["maintenance", "evaluate", "experiment"],
-                "Internet": ["fetch", "ask_expert"],
-                "Efektory": ["effector"],
-                "Wzrok": ["vision"],
-            }
-            for cat, actions in cap_categories.items():
-                cap_info.append(f"{cat}: {', '.join(actions)}")
-            evidence.append(Evidence(
-                key="identity_capabilities",
-                value="Moje zdolnosci: " + "; ".join(cap_info) + ".",
-                source="capability_registry",
-                confidence=0.9,
-            ))
+            manifest = getattr(self._ctx, 'capability_manifest', None) if self._ctx else None
+            if manifest:
+                available = manifest.get_available()
+                cap_text = ", ".join(c.description for c in available)
+                unavailable = manifest.get_unavailable()
+                limits_text = ""
+                if unavailable:
+                    limits_text = " Niedostepne: " + ", ".join(
+                        c.description for c in unavailable
+                    ) + "."
+                evidence.append(Evidence(
+                    key="identity_capabilities",
+                    value=f"Moje aktywne zdolnosci ({len(available)}): {cap_text}.{limits_text}",
+                    source="capability_manifest",
+                    confidence=0.95,
+                ))
+            else:
+                # Hardcoded fallback
+                cap_info = []
+                cap_categories = {
+                    "Nauka": ["learn", "exam", "review", "fetch"],
+                    "Samoanaliza": ["self_analyze", "creative", "critique"],
+                    "System": ["maintenance", "evaluate", "experiment"],
+                    "Internet": ["fetch", "ask_expert"],
+                    "Efektory": ["effector"],
+                }
+                for cat, actions in cap_categories.items():
+                    cap_info.append(f"{cat}: {', '.join(actions)}")
+                evidence.append(Evidence(
+                    key="identity_capabilities",
+                    value="Moje zdolnosci: " + "; ".join(cap_info) + ".",
+                    source="capability_registry",
+                    confidence=0.9,
+                ))
         except Exception:
             pass
 
