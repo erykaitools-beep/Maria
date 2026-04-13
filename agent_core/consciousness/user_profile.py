@@ -47,7 +47,7 @@ class UserProfile:
     def __init__(self, path: Optional[Path] = None):
         self._path = Path(path or DEFAULT_PROFILE_PATH)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._data = self._load_or_create()
         self._last_mtime = self._get_mtime()
 
