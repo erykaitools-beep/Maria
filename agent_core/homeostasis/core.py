@@ -954,6 +954,7 @@ class HomeostasisCore:
         3. Idle >= TEACHER_IDLE_THRESHOLD
         4. No session currently running
         5. Cooldown period has passed
+        6. Within learning window (EnvironmentManager LEARNING mode or time-based)
         """
         if self._teacher_agent is None:
             return
@@ -972,6 +973,24 @@ class HomeostasisCore:
         now = time.time()
         if now - self._teacher_last_run < self.TEACHER_COOLDOWN:
             return
+
+        # Learning window gate (idle-triggered only, planner-driven unaffected)
+        try:
+            from agent_core.environment.environment_model import (
+                EnvironmentMode, is_learning_window,
+            )
+            if self._environment_manager is not None:
+                current_mode = self._environment_manager.get_active_mode()
+                if current_mode == EnvironmentMode.LEARNING:
+                    pass  # Explicitly in learning mode - allow
+                elif is_learning_window():
+                    pass  # Within time window - allow
+                else:
+                    return  # Outside learning window - suppress idle learning
+            elif not is_learning_window():
+                return  # No manager, use static time check
+        except Exception as e:
+            logger.debug("[TEACHER] Learning window check failed, allowing: %s", e)
 
         self._start_teacher_session()
 

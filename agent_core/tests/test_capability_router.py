@@ -35,6 +35,11 @@ class MockPlan:
     action_params: Dict[str, Any]
     goal_id: Optional[str] = None
     goal_description: str = ""
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @pytest.fixture

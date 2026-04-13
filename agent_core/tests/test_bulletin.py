@@ -563,7 +563,9 @@ class TestBulletinExecutorIntegration:
         executor.set_goal_store(mock_gs)
 
         plan = create_plan("goal-phys", "Fizyka", ActionType.LEARN)
-        executor._exec_learn(plan)
+        from unittest.mock import patch
+        with patch("agent_core.environment.environment_model.is_learning_window", return_value=True):
+            executor._exec_learn(plan)
 
         # Entry should be resolved
         assert store.get(entry.entry_id).status == EntryStatus.RESOLVED

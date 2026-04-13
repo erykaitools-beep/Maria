@@ -614,6 +614,13 @@ class HomeostasisModule(MariaModule):
                     planner.executor.set_expert_bridge(expert_bridge)
 
                     print("[Homeostasis] [OK] BulletinStore + Auditor + GapPlanner + ExpertBridge wired (Learning Upgrade)")
+
+                    # Wire critic + bulletin into TeacherAgent for gap-driven priorities
+                    if core._teacher_agent:
+                        if hasattr(ctx, 'critic_agent') and ctx.critic_agent:
+                            core._teacher_agent.set_critic_agent(ctx.critic_agent)
+                        core._teacher_agent.set_bulletin_store(bulletin_store)
+                        logger.info("[TEACHER] Critic + BulletinStore wired for gap-driven learning")
                 except Exception as e:
                     logger.warning(f"BulletinStore not initialized: {e}")
 

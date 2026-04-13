@@ -77,6 +77,10 @@ class TeacherAgent:
         self._learn_chunk_fn: Optional[Callable] = None
         self._run_exam_fn: Optional[Callable] = None
 
+        # Gap-driven learning (from Critic / Auditor)
+        self._critic_agent = None
+        self._bulletin_store = None
+
     # ──────────────────────────────────────────────
     # Setup: inject learning/exam functions
     # ──────────────────────────────────────────────
@@ -88,6 +92,14 @@ class TeacherAgent:
     def set_exam_fn(self, fn: Callable) -> None:
         """Set the function to run exam: fn(file_id) -> Dict or None."""
         self._run_exam_fn = fn
+
+    def set_critic_agent(self, critic) -> None:
+        """Set CriticAgent for quality-driven learning priorities."""
+        self._critic_agent = critic
+
+    def set_bulletin_store(self, store) -> None:
+        """Set BulletinStore for gap-driven learning priorities."""
+        self._bulletin_store = store
 
     # ──────────────────────────────────────────────
     # Main loop
@@ -179,6 +191,52 @@ class TeacherAgent:
     # Decision engine (priorities 1-6)
     # ──────────────────────────────────────────────
 
+    def _find_critic_gap(self, snapshot: Dict[str, Any]) -> Optional[tuple]:
+        """
+        Check Critic findings for topics that match available new files.
+
+        Returns (file_id, topic) if a gap matches, else None.
+        Zero LLM cost - reads last persisted Critic report.
+        """
+        gap_topics = []
+
+        # Critic findings: LEARN_MORE, REFRESH, REVIEW actions
+        if self._critic_agent is not None:
+            try:
+                report = self._critic_agent.get_last_report()
+                if report and report.findings:
+                    for f in report.findings:
+                        if f.suggested_action in ("learn_more", "refresh", "review"):
+                            gap_topics.append(f.topic_normalized)
+            except Exception:
+                pass
+
+        # Bulletin NEED_MATERIAL entries
+        if self._bulletin_store is not None:
+            try:
+                from agent_core.bulletin.bulletin_store import EntryType
+                needs = self._bulletin_store.get_entries_by_type(EntryType.NEED_MATERIAL)
+                for entry in needs:
+                    topic = entry.get("topic", entry.get("title", ""))
+                    if topic:
+                        gap_topics.append(topic.lower().replace(" ", "_"))
+            except Exception:
+                pass
+
+        if not gap_topics:
+            return None
+
+        # Match gap topics to available new files
+        new_files = snapshot.get("new_files_available", [])
+        for nf in new_files:
+            file_id = nf.get("id", nf.get("file", ""))
+            file_lower = file_id.lower().replace("-", "_").replace(" ", "_")
+            for topic in gap_topics:
+                if topic in file_lower or file_lower in topic:
+                    return (file_id, topic)
+
+        return None
+
     def _filter_records(self, records: List[Dict]) -> List[Dict]:
         """Filter file records by topic filter if active."""
         if self._filter_file_ids is None:
@@ -243,6 +301,16 @@ class TeacherAgent:
                 params={"reason": "weak_topic_priority",
                         "attempts": target.get("exam_attempts", 0)},
             )
+
+        # P2.7: Gap-driven learning (Critic/Bulletin say what's missing)
+        if self._filter_file_ids is None:
+            gap_file = self._find_critic_gap(snapshot)
+            if gap_file:
+                return TeachingStrategy(
+                    TeachingStrategy.LEARN_NEW,
+                    gap_file[0],
+                    params={"reason": "critic_gap", "topic": gap_file[1]},
+                )
 
         # P3: Start new file
         new_files = self._filter_records(

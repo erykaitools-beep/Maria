@@ -1046,6 +1046,7 @@ class PlannerCore:
         Decide which learning action to take based on knowledge state.
 
         Priority logic:
+        - P0: Outside learning window -> redirect to non-learning actions
         - P1: Files in "learning" status -> LEARN (continue partial)
         - P2: Files in "learned" status (ready for exam) -> EXAM
         - P2.5: Weak beliefs (confidence < 0.3) -> REVIEW weak topic
@@ -1054,6 +1055,14 @@ class PlannerCore:
         - P5: No materials left -> FETCH (get new content from web)
         - P6: Nothing to do -> NOOP
         """
+        # P0: Outside learning window -> skip all learning, do other work
+        try:
+            from agent_core.environment.environment_model import is_learning_window
+            if not is_learning_window():
+                return self._decide_non_learning_action(metrics)
+        except Exception:
+            pass
+
         if snapshot is None:
             return ActionType.LEARN  # Default to learning
 
@@ -1099,6 +1108,27 @@ class PlannerCore:
         # P7: Post NEED_MATERIAL to bulletin board (instead of silent NOOP)
         self._post_need_material_if_missing()
 
+        return ActionType.NOOP
+
+    def _decide_non_learning_action(self, metrics: Dict) -> ActionType:
+        """Pick a productive action when outside learning window.
+
+        Instead of learn/exam/fetch, Maria does reflection and maintenance:
+        creative, self_analyze, critique, evaluate, validate, experiment.
+        """
+        # Priority: creative > self_analyze > critique > evaluate > validate
+        candidates = [
+            ("creative", ActionType.CREATIVE),
+            ("self_analyze", ActionType.SELF_ANALYZE),
+            ("critique", ActionType.CRITIQUE),
+            ("evaluate", ActionType.EVALUATE),
+            ("validate", ActionType.VALIDATE),
+        ]
+        for name, action_type in candidates:
+            if not self._is_action_rate_limited(name):
+                return action_type
+
+        # Everything rate-limited -> maintenance or NOOP
         return ActionType.NOOP
 
     def _find_weak_topic_file(self, snapshot: Optional[Dict]) -> Optional[str]:

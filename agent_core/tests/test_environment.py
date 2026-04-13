@@ -146,31 +146,31 @@ class TestModeDetector:
     def test_detect_learning_weekday_morning(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # Monday at 10:00 -> LEARNING should trigger
-        now = datetime(2026, 4, 13, 10, 0)  # Monday
+        # Monday at 08:00 UTC (10:00 Berlin) -> LEARNING should trigger
+        now = datetime(2026, 4, 13, 8, 0)  # Monday
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.LEARNING
 
     def test_detect_quiet_at_night(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # Any day at 23:00 -> QUIET should trigger
-        now = datetime(2026, 4, 12, 23, 0)  # Saturday night
+        # 21:00 UTC (23:00 Berlin) -> QUIET should trigger
+        now = datetime(2026, 4, 12, 21, 0)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.QUIET
 
     def test_detect_quiet_early_morning(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # 3 AM -> QUIET
-        now = datetime(2026, 4, 13, 3, 0)  # Monday 3AM
+        # 3 AM UTC (5 AM Berlin) -> QUIET
+        now = datetime(2026, 4, 13, 3, 0)  # Monday 3AM UTC
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.QUIET
 
     def test_anti_flap_guard(self):
         detector = ModeDetector()
         detector._last_switch_ts = time.time()  # Just switched
-        now = datetime(2026, 4, 13, 10, 0)
+        now = datetime(2026, 4, 13, 8, 0)  # 8 UTC = 10 Berlin
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result is None  # Anti-flap blocks
 
@@ -182,7 +182,7 @@ class TestModeDetector:
             _current_mode = "REDUCED"
 
         detector.set_homeostasis_core(FakeCore())
-        now = datetime(2026, 4, 13, 14, 0)  # Afternoon (would be LEARNING)
+        now = datetime(2026, 4, 13, 12, 0)  # 12 UTC = 14 Berlin (would be LEARNING)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         # Homeostasis degradation should override to QUIET
         assert result == EnvironmentMode.QUIET
@@ -195,7 +195,7 @@ class TestModeDetector:
             _current_mode = "ACTIVE"
 
         detector.set_homeostasis_core(FakeCore())
-        now = datetime(2026, 4, 13, 10, 0)  # Monday morning
+        now = datetime(2026, 4, 13, 8, 0)  # 8 UTC = 10 Berlin
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         # Should detect LEARNING, not QUIET
         assert result == EnvironmentMode.LEARNING

@@ -109,7 +109,7 @@ PROFILE_LEARNING = EnvironmentProfile(
     planner_interval_multiplier=0.5,  # Faster cycles
     prompt_addition="Tryb nauki: skupiam sie na przyswajaniu wiedzy. "
                     "Priorytet na nauke, egzaminy i powtorki.",
-    auto_trigger_hours=(9, 10, 11, 14, 15, 16),  # Morning + afternoon
+    auto_trigger_hours=(7, 8, 9, 12, 13, 14),    # 9-11 + 14-16 Berlin (UTC+2)
     auto_trigger_days=(0, 1, 2, 3, 4),            # Mon-Fri
 )
 
@@ -138,7 +138,7 @@ PROFILE_QUIET = EnvironmentProfile(
     planner_interval_multiplier=3.0,  # Very slow cycles
     prompt_addition="Tryb cichy: minimalna aktywnosc, "
                     "tylko niezbedne operacje. Operator nie chce byc niepokojony.",
-    auto_trigger_hours=(22, 23, 0, 1, 2, 3, 4, 5, 6, 7),  # Night hours
+    auto_trigger_hours=(20, 21, 22, 23, 0, 1, 2, 3, 4, 5),  # 22-07 Berlin (UTC+2)
 )
 
 # Registry: mode -> profile
@@ -148,6 +148,25 @@ ENVIRONMENT_PROFILES = {
     EnvironmentMode.MONITORING: PROFILE_MONITORING,
     EnvironmentMode.QUIET: PROFILE_QUIET,
 }
+
+
+def is_learning_window(now=None) -> bool:
+    """
+    Check if current time falls within LEARNING profile's auto-trigger window.
+
+    Uses PROFILE_LEARNING.auto_trigger_hours and auto_trigger_days.
+    Returns True if now is within a configured learning window.
+    If no auto_trigger_hours defined, returns True (no restriction).
+    """
+    from datetime import datetime as dt
+    if now is None:
+        now = dt.now()
+    profile = ENVIRONMENT_PROFILES[EnvironmentMode.LEARNING]
+    if not profile.auto_trigger_hours:
+        return True
+    hour_match = now.hour in profile.auto_trigger_hours
+    day_match = (not profile.auto_trigger_days) or (now.weekday() in profile.auto_trigger_days)
+    return hour_match and day_match
 
 
 @dataclass

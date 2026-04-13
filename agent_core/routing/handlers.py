@@ -20,6 +20,19 @@ logger = logging.getLogger(__name__)
 # Shared utilities
 # ---------------------------------------------------------------------------
 
+def _is_outside_learning_window(plan) -> bool:
+    """Check if autonomous learning should be suppressed (outside window).
+    User-requested goals always pass. Returns True if blocked."""
+    try:
+        goal_type = getattr(plan, "metadata", {}).get("goal_type", "")
+        if goal_type == "USER":
+            return False
+        from agent_core.environment.environment_model import is_learning_window
+        return not is_learning_window()
+    except Exception:
+        return False
+
+
 def resolve_topics(plan, knowledge_analyzer) -> Optional[List[str]]:
     """
     Resolve topics from plan.action_params to file_ids.
@@ -206,6 +219,10 @@ def make_learn_handler(
         if teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
+        if _is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
+
         filter_ids = resolve_topics(plan, knowledge_analyzer)
         status = teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
@@ -245,6 +262,10 @@ def make_exam_handler(
         if teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
+        if _is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
+
         filter_ids = resolve_topics(plan, knowledge_analyzer)
         status = teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
@@ -279,6 +300,10 @@ def make_review_handler(
     def handler(plan) -> Dict[str, Any]:
         if teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
+
+        if _is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         filter_ids = resolve_topics(plan, knowledge_analyzer)
         status = teacher_agent.run_session(
@@ -368,6 +393,10 @@ def make_fetch_handler(
     def handler(plan) -> Dict[str, Any]:
         if knowledge_analyzer is None:
             return {"success": False, "error": "No knowledge analyzer configured"}
+
+        if _is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         try:
             from agent_core.web_source import run_fetch_session

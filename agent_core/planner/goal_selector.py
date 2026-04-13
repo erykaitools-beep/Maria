@@ -106,8 +106,15 @@ class GoalSelector:
                 return False, "metric within threshold"
             return True, ""
 
-        # META goals are always feasible
+        # META goals: learning-related META goals respect learning window
         if goal_type == "meta":
+            if "nauk" in goal.description.lower() or "learn" in goal.description.lower():
+                try:
+                    from agent_core.environment.environment_model import is_learning_window
+                    if not is_learning_window():
+                        return False, "outside learning window"
+                except Exception:
+                    pass
             return True, ""
 
         # USER goals are always feasible
@@ -119,6 +126,13 @@ class GoalSelector:
             # User-requested goals are always feasible (will trigger FETCH if needed)
             if goal.metadata.get("source") == "conversation":
                 return True, ""
+            # Outside learning window: learning goals not feasible
+            try:
+                from agent_core.environment.environment_model import is_learning_window
+                if not is_learning_window():
+                    return False, "outside learning window"
+            except Exception:
+                pass
             if knowledge_snapshot:
                 by_status = knowledge_snapshot.get("files_by_status", {})
                 new_files = knowledge_snapshot.get("new_files_available", [])

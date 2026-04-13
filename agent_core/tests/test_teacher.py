@@ -1479,3 +1479,168 @@ class TestTeacherTopicFilter:
         status = agent.run_session(max_iterations=1)
         stats = status.get("stats", {})
         assert stats["chunks_learned"] == 1
+
+
+# ======================================================
+# TestLearningWindow
+# ======================================================
+
+class TestLearningWindow:
+    """Tests for learning window and gap-driven priorities."""
+
+    def test_is_learning_window_inside(self):
+        """During learning hours (7-9, 12-14 UTC = 9-11, 14-16 Berlin) returns True."""
+        from agent_core.environment.environment_model import is_learning_window
+        # Monday 08:30 UTC = 10:30 Berlin
+        dt = datetime(2026, 4, 13, 8, 30)  # Monday
+        assert is_learning_window(dt) is True
+
+    def test_is_learning_window_outside(self):
+        """Outside learning hours returns False (test profile data directly)."""
+        from agent_core.environment.environment_model import PROFILE_LEARNING
+        # Monday 18:00 UTC - outside (7,8,9,12,13,14)
+        assert 18 not in PROFILE_LEARNING.auto_trigger_hours
+
+    def test_is_learning_window_weekend(self):
+        """Weekend not in learning days."""
+        from agent_core.environment.environment_model import PROFILE_LEARNING
+        # Saturday = weekday 5, not in (0,1,2,3,4)
+        assert 5 not in PROFILE_LEARNING.auto_trigger_days
+
+    def test_is_learning_window_afternoon(self):
+        """Afternoon window (12-14 UTC = 14-16 Berlin) returns True."""
+        from agent_core.environment.environment_model import is_learning_window
+        dt = datetime(2026, 4, 14, 13, 30)  # Tuesday 13:30 UTC = 15:30 Berlin
+        assert is_learning_window(dt) is True
+
+    def test_teacher_trigger_respects_learning_window(self, tmp_path):
+        """Idle teacher trigger is suppressed outside learning window."""
+        from unittest.mock import patch
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        # Outside learning window -> no session started
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=False,
+        ):
+            core._check_teacher_trigger()
+        assert core._teacher_thread is None or not core._teacher_thread.is_alive()
+
+    def test_teacher_trigger_allows_in_learning_window(self, tmp_path):
+        """Idle teacher trigger fires within learning window."""
+        from unittest.mock import patch
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=True,
+        ):
+            core._check_teacher_trigger()
+        # Session should have started
+        assert core._teacher_thread is not None
+
+    def test_teacher_trigger_allows_in_learning_mode(self, tmp_path):
+        """When EnvironmentManager is in LEARNING mode, always allow."""
+        from unittest.mock import patch
+        from agent_core.environment.environment_model import EnvironmentMode
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        # Mock environment manager in LEARNING mode
+        env_mgr = MagicMock()
+        env_mgr.get_active_mode.return_value = EnvironmentMode.LEARNING
+        core.set_environment_manager(env_mgr)
+
+        # Even if is_learning_window returns False, LEARNING mode overrides
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=False,
+        ):
+            core._check_teacher_trigger()
+        assert core._teacher_thread is not None
+
+    def test_critic_gap_priority(self, tmp_path):
+        """Critic findings drive learning priority over random new files."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("random_physics.txt", status="new", priority=90),
+            _make_index_record("web_order_flow.txt", status="new", priority=50),
+        ])
+
+        # Mock Critic with finding about "order_flow"
+        mock_critic = MagicMock()
+        mock_report = MagicMock()
+        mock_finding = MagicMock()
+        mock_finding.suggested_action = "learn_more"
+        mock_finding.topic_normalized = "order_flow"
+        mock_report.findings = [mock_finding]
+        mock_critic.get_last_report.return_value = mock_report
+        agent.set_critic_agent(mock_critic)
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        # Should pick order_flow file (critic gap) over physics (higher priority)
+        assert strategy is not None
+        assert strategy.target_file_id == "web_order_flow.txt"
+        assert strategy.params.get("reason") == "critic_gap"
+
+    def test_critic_gap_no_match_falls_through(self, tmp_path):
+        """When critic gap doesn't match any file, falls through to P3."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("physics.txt", status="new", priority=90),
+        ])
+
+        mock_critic = MagicMock()
+        mock_report = MagicMock()
+        mock_finding = MagicMock()
+        mock_finding.suggested_action = "learn_more"
+        mock_finding.topic_normalized = "blockchain_consensus"
+        mock_report.findings = [mock_finding]
+        mock_critic.get_last_report.return_value = mock_report
+        agent.set_critic_agent(mock_critic)
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        # No match -> falls through to P3 (new file)
+        assert strategy is not None
+        assert strategy.target_file_id == "physics.txt"
+        assert strategy.params.get("reason") == "new_file"
+
+    def test_no_critic_backward_compatible(self, tmp_path):
+        """Without critic, P2.7 is skipped - same behavior as before."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new", priority=50),
+        ])
+        # No critic set
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.params.get("reason") == "new_file"

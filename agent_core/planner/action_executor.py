@@ -71,6 +71,19 @@ class ActionExecutor:
         """Set SemanticMemory for semantic-aware fetch sessions."""
         self._semantic_search = semantic_memory
 
+    def _is_outside_learning_window(self, plan: "Plan") -> bool:
+        """Check if autonomous learning should be suppressed (outside window).
+
+        User-requested goals always pass. Returns True if blocked."""
+        try:
+            goal_type = getattr(plan, "metadata", {}).get("goal_type", "")
+            if goal_type == "USER":
+                return False
+            from agent_core.environment.environment_model import is_learning_window
+            return not is_learning_window()
+        except Exception:
+            return False  # Allow if import fails
+
     def _incremental_index(self) -> None:
         """Index new knowledge files into semantic memory."""
         try:
@@ -246,6 +259,11 @@ class ActionExecutor:
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
+        # Gate: respect learning windows for autonomous learning
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
+
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
@@ -282,6 +300,10 @@ class ActionExecutor:
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
 
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
+
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
@@ -307,6 +329,10 @@ class ActionExecutor:
         """Delegate review/spaced repetition to TeacherAgent."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
+
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
@@ -344,6 +370,11 @@ class ActionExecutor:
         """Fetch web content via web_source module."""
         if self._knowledge_analyzer is None:
             return {"success": False, "error": "No knowledge analyzer configured"}
+
+        # Gate: respect learning windows (fetch feeds learning pipeline)
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         try:
             from agent_core.web_source import run_fetch_session
