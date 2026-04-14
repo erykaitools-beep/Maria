@@ -88,6 +88,10 @@ class GoalAdapter:
 
             result = self._goal_store.propose(goal)
             if result:
+                try:
+                    self._goal_store.save()
+                except Exception:
+                    pass
                 logger.info(
                     f"[CREATIVE] Meta-goal promoted to GoalStore: "
                     f"{meta_goal.goal_id} -> {meta_goal.title}"

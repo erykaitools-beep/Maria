@@ -114,6 +114,11 @@ class SharedContext:
     # Environment Adaptation (Faza 6)
     environment_manager: Any = None      # EnvironmentManager
 
+    # Trust & Autonomy Graduation (Faza 7)
+    trust_scorer: Any = None             # TrustScorer
+    incident_memory: Any = None          # IncidentMemory
+    auto_promotion: Any = None           # AutoPromotion
+
     # REPL state
     last_result: Any = None
 

@@ -842,6 +842,9 @@ class PlannerCore:
         if self._goal_store is None:
             return []
 
+        # Auto-abandon stale goals before ranking
+        self._cleanup_stale_goals()
+
         active_goals = self._goal_store.get_active()
         if not active_goals:
             return []
@@ -1598,9 +1601,16 @@ class PlannerCore:
             except Exception:
                 pass
 
-        # Reset idle streak so Maria doesn't stay in SLEEP forever
-        # after autonomous learning/exam/evaluation actions
-        if plan.action_type != ActionType.NOOP and self._homeostasis_core:
+        # Reset idle streak only for actions that produce real work.
+        # Reflection actions (creative, self_analyze, critique, evaluate, validate)
+        # outside learning window are "thinking in circles" and should NOT
+        # prevent Maria from entering SLEEP mode.
+        _productive_actions = {
+            ActionType.LEARN, ActionType.EXAM, ActionType.REVIEW,
+            ActionType.FETCH, ActionType.ASK_EXPERT, ActionType.MAINTENANCE,
+            ActionType.EXPERIMENT, ActionType.EFFECTOR,
+        }
+        if plan.action_type in _productive_actions and self._homeostasis_core:
             try:
                 self._homeostasis_core.record_activity()
             except Exception:

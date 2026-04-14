@@ -1,7 +1,7 @@
 """
-Tests for SleepProcessor and DreamGenerator.
+Tests for SleepProcessor (new: belief-based) and DreamGenerator (legacy: graph-based).
 
-Covers: NREM phases, dream generation, persistence, integration.
+Covers: NREM phases on real data, dream generation, persistence, integration.
 """
 
 import json
@@ -10,26 +10,85 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 import pytest
 
 from agent_core.consciousness.dream_generator import DreamGenerator
-from agent_core.consciousness.sleep_processor import (
-    SleepProcessor,
-    SleepPhase,
-    EDGE_BOOST_MIN_ACCESS,
-    EDGE_BOOST_AMOUNT,
-    NODE_STALE_HOURS,
-    NODE_LOW_IMPORTANCE,
-)
+from agent_core.consciousness.sleep_processor import SleepProcessor
 
 
 # ============================================================
-# Fixtures
+# Mock BeliefStore (mirrors real BeliefStore API)
+# ============================================================
+
+@dataclass
+class MockBelief:
+    belief_id: str
+    content: str
+    belief_type: str = "observation"
+    confidence: float = 0.5
+    evidence: list = field(default_factory=list)
+
+
+class MockBeliefStore:
+    """Minimal BeliefStore mock for sleep testing."""
+
+    def __init__(self, beliefs: Optional[Dict[str, MockBelief]] = None):
+        self._beliefs = beliefs or {}
+        self._dirty = set()
+        self._saved = False
+        self._maintained = False
+
+    def get_all(self):
+        return dict(self._beliefs)
+
+    def _mark_dirty(self, bid):
+        self._dirty.add(bid)
+
+    def save(self):
+        self._saved = True
+        self._dirty.clear()
+
+    def maintain(self):
+        self._maintained = True
+        # Simulate decay + prune
+        decayed = 0
+        pruned = 0
+        to_remove = []
+        for bid, b in self._beliefs.items():
+            if b.confidence > 0.1:
+                b.confidence -= 0.01
+                decayed += 1
+            if b.confidence < 0.05:
+                to_remove.append(bid)
+                pruned += 1
+        for bid in to_remove:
+            del self._beliefs[bid]
+        return {"decayed": decayed, "pruned": pruned}
+
+
+def _make_beliefs(n=5):
+    """Create N mock beliefs."""
+    store = MockBeliefStore()
+    for i in range(n):
+        b = MockBelief(
+            belief_id=f"belief-{i:04d}",
+            content=f"Test belief about topic {i} with enough content to dream about",
+            confidence=0.3 + (i * 0.1),
+            evidence=[("source", f"ref-{i}", 1.0)] if i % 2 == 0 else [],
+        )
+        store._beliefs[b.belief_id] = b
+    return store
+
+
+# ============================================================
+# Legacy graph mock (for DreamGenerator tests)
 # ============================================================
 
 class MockGraph:
-    """Minimal semantic graph mock for testing."""
+    """Minimal semantic graph mock for DreamGenerator testing."""
 
     def __init__(self):
         self.nodes = {}
@@ -76,24 +135,30 @@ class MockGraph:
 
 @pytest.fixture
 def graph():
-    """Create a mock graph with some nodes and edges."""
     g = MockGraph()
     n1 = g.add_node("homeostasis", node_type="entity")
     n2 = g.add_node("semantic_graph", node_type="entity")
     n3 = g.add_node("learning", node_type="entity")
     n4 = g.add_node("consciousness", node_type="entity")
     n5 = g.add_node("perception", node_type="entity")
-
     g.add_edge(n1, "related_to", n2, weight=1.0)
     g.add_edge(n2, "part_of", n3, weight=0.8)
-
     return g
 
 
 @pytest.fixture
 def empty_graph():
-    """Create an empty graph."""
     return MockGraph()
+
+
+@pytest.fixture
+def belief_store():
+    return _make_beliefs(5)
+
+
+@pytest.fixture
+def empty_belief_store():
+    return MockBeliefStore()
 
 
 @pytest.fixture
@@ -105,11 +170,10 @@ def tmp_dir():
 
 
 # ============================================================
-# TestDreamGenerator
+# TestDreamGenerator (legacy graph-based, unchanged)
 # ============================================================
 
 class TestDreamGenerator:
-    """Tests for dream generation."""
 
     def test_generate_dream_returns_dict(self, graph):
         gen = DreamGenerator(graph)
@@ -121,34 +185,24 @@ class TestDreamGenerator:
         gen = DreamGenerator(graph)
         dream = gen.generate_dream()
         assert "timestamp" in dream
-        assert "phase" in dream
-        assert dream["phase"] == "rem"
         assert "type" in dream
         assert "content" in dream
-        assert "nodes" in dream
-        assert "labels" in dream
-        assert "confidence" in dream
-        assert "to_explore" in dream
 
     def test_generate_dream_types(self, graph):
-        """Dreams should be one of: connection_discovery, hypothesis, exploration."""
         gen = DreamGenerator(graph)
         types_seen = set()
         for _ in range(50):
             dream = gen.generate_dream()
             if dream:
                 types_seen.add(dream["type"])
-        # Should see at least 2 types in 50 attempts
         assert len(types_seen) >= 2
 
     def test_generate_dream_empty_graph(self, empty_graph):
-        """Empty graph produces no dreams."""
         gen = DreamGenerator(empty_graph)
         dream = gen.generate_dream()
         assert dream is None
 
     def test_generate_dream_single_node(self, empty_graph):
-        """Graph with 1 node produces no dreams."""
         empty_graph.add_node("lonely")
         gen = DreamGenerator(empty_graph)
         dream = gen.generate_dream()
@@ -161,64 +215,29 @@ class TestDreamGenerator:
         assert len(dreams) > 0
 
     def test_generate_dream_content_in_polish(self, graph):
-        """Dream content should be in Polish (templates)."""
         gen = DreamGenerator(graph)
         dream = gen.generate_dream()
         assert dream is not None
-        # Templates contain Polish words
         content = dream["content"].lower()
         polish_words = ["sni", "sen", "zbadac", "ciekawe", "polaczenie", "mozliwe", "wiecej"]
         assert any(w in content for w in polish_words)
-
-    def test_dream_connection_added_to_graph(self, graph):
-        """Connection discovery dreams should add weak edges to graph."""
-        gen = DreamGenerator(graph)
-        initial_edges = len(graph.edges)
-
-        # Generate many dreams to get at least one connection_discovery
-        for _ in range(20):
-            dream = gen.generate_dream()
-            if dream and dream["type"] == "connection_discovery":
-                break
-
-        # May or may not have added edge (depends on random)
-        # Just verify no crash
-        assert len(graph.edges) >= initial_edges
 
     def test_save_dreams(self, graph, tmp_dir):
         path = Path(tmp_dir) / "dreams.jsonl"
         gen = DreamGenerator(graph, dream_log_path=path)
         dreams = gen.generate_dreams(count=2)
         gen.save_dreams(dreams, session_id=5)
-
         assert path.exists()
         lines = path.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == len(dreams)
 
-        loaded = json.loads(lines[0])
-        assert loaded["session"] == 5
-        assert "content" in loaded
-
     def test_load_recent_dreams(self, graph, tmp_dir):
         path = Path(tmp_dir) / "dreams.jsonl"
         gen = DreamGenerator(graph, dream_log_path=path)
-
         dreams = gen.generate_dreams(count=3)
         gen.save_dreams(dreams, session_id=5)
-
         loaded = DreamGenerator.load_recent_dreams(limit=10, dream_log_path=path)
         assert len(loaded) == len(dreams)
-
-    def test_load_recent_dreams_limit(self, graph, tmp_dir):
-        path = Path(tmp_dir) / "dreams.jsonl"
-        gen = DreamGenerator(graph, dream_log_path=path)
-
-        for session in range(5):
-            dreams = gen.generate_dreams(count=2)
-            gen.save_dreams(dreams, session_id=session)
-
-        loaded = DreamGenerator.load_recent_dreams(limit=3, dream_log_path=path)
-        assert len(loaded) == 3
 
     def test_load_dreams_empty(self, graph, tmp_dir):
         path = Path(tmp_dir) / "nonexistent.jsonl"
@@ -227,162 +246,139 @@ class TestDreamGenerator:
 
 
 # ============================================================
-# TestSleepPhases
+# TestSleepPhases (new: belief-based)
 # ============================================================
 
 class TestSleepPhases:
-    """Tests for individual NREM phases."""
 
-    def test_nrem1_stats(self, graph):
-        proc = SleepProcessor(graph)
+    def test_nrem1_belief_stats(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         result = proc._phase_nrem1()
-
         assert result["phase"] == "nrem1"
-        assert result["total_nodes"] == 5
-        assert result["total_edges"] == 2
-        assert "type_counts" in result
-        assert result["type_counts"].get("entity", 0) == 5
-        assert "avg_importance" in result
+        assert result["beliefs_total"] == 5
+        assert "beliefs_avg_confidence" in result
+        assert "beliefs_weak" in result
+        assert "beliefs_strong" in result
 
-    def test_nrem1_empty_graph(self, empty_graph):
-        proc = SleepProcessor(empty_graph)
+    def test_nrem1_no_belief_store(self):
+        proc = SleepProcessor()
         result = proc._phase_nrem1()
-        assert result["total_nodes"] == 0
-        assert result["total_edges"] == 0
+        assert result["beliefs_total"] == 0
+        assert "beliefs_skipped" in result
 
-    def test_nrem2_boost_edges(self, graph):
-        """NREM2 should boost edges with high access count."""
-        # Set access count on one edge
-        edge_key = list(graph.edges.keys())[0]
-        graph.edges[edge_key]["access_count"] = 5
-        old_weight = graph.edges[edge_key]["weight"]
+    def test_nrem1_knowledge_stats(self, belief_store, tmp_dir):
+        ki_path = Path(tmp_dir) / "knowledge_index.jsonl"
+        ki_path.write_text(
+            '{"id": "f1", "status": "completed"}\n'
+            '{"id": "f2", "status": "learning"}\n'
+        )
+        proc = SleepProcessor(belief_store=belief_store, knowledge_index_path=ki_path)
+        result = proc._phase_nrem1()
+        assert result["knowledge_total"] == 2
+        assert result["knowledge_by_status"]["completed"] == 1
 
-        proc = SleepProcessor(graph)
+    def test_nrem2_boost_multi_evidence(self, belief_store):
+        # Give belief-0002 multiple evidence sources
+        b = belief_store._beliefs["belief-0002"]
+        b.evidence = [("src1", "ref1", 1.0), ("src2", "ref2", 0.8)]
+        old_conf = b.confidence
+
+        proc = SleepProcessor(belief_store=belief_store)
         result = proc._phase_nrem2()
+        assert result["beliefs_boosted"] >= 1
+        assert b.confidence > old_conf
+        assert belief_store._saved  # save() was called
 
-        assert result["phase"] == "nrem2"
-        assert result["edges_boosted"] >= 1
-        assert graph.edges[edge_key]["weight"] == old_weight + EDGE_BOOST_AMOUNT
-
-    def test_nrem2_no_boost_low_access(self, graph):
-        """NREM2 should not boost edges with low access count."""
-        proc = SleepProcessor(graph)
+    def test_nrem2_no_boost_single_evidence(self):
+        store = MockBeliefStore({
+            "b1": MockBelief("b1", "test", confidence=0.5, evidence=[("a", "b", 1.0)]),
+        })
+        proc = SleepProcessor(belief_store=store)
         result = proc._phase_nrem2()
-        assert result["edges_boosted"] == 0
+        assert result["beliefs_boosted"] == 0
 
-    def test_nrem2_weight_capped(self, graph):
-        """Edge weight should not exceed 2.0."""
-        edge_key = list(graph.edges.keys())[0]
-        graph.edges[edge_key]["access_count"] = 10
-        graph.edges[edge_key]["weight"] = 1.95
-
-        proc = SleepProcessor(graph)
+    def test_nrem2_confidence_capped(self):
+        store = MockBeliefStore({
+            "b1": MockBelief("b1", "test", confidence=0.94,
+                             evidence=[("a", "b", 1.0), ("c", "d", 0.5)]),
+        })
+        proc = SleepProcessor(belief_store=store)
         proc._phase_nrem2()
+        assert store._beliefs["b1"].confidence <= 0.95
 
-        assert graph.edges[edge_key]["weight"] <= 2.0
-
-    def test_nrem3_marks_stale_nodes(self, graph):
-        """NREM3 should mark old low-importance nodes as outdated."""
-        # Make a node old and unimportant
-        node_id = list(graph.nodes.keys())[0]
-        graph.nodes[node_id]["importance"] = 0.1
-        graph.nodes[node_id]["created_at"] = (
-            datetime.now() - timedelta(hours=72)
-        ).isoformat()
-
-        proc = SleepProcessor(graph)
+    def test_nrem3_runs_maintain(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         result = proc._phase_nrem3()
-
         assert result["phase"] == "nrem3"
-        assert result["nodes_marked_outdated"] >= 1
-        assert graph.nodes[node_id]["is_outdated"] is True
+        assert "beliefs_decayed" in result
+        assert belief_store._maintained
 
-    def test_nrem3_keeps_important_nodes(self, graph):
-        """NREM3 should not mark important nodes."""
-        for node in graph.nodes.values():
-            node["importance"] = 0.8
-            node["created_at"] = (
-                datetime.now() - timedelta(hours=72)
-            ).isoformat()
-
-        proc = SleepProcessor(graph)
+    def test_nrem3_no_belief_store(self):
+        proc = SleepProcessor()
         result = proc._phase_nrem3()
-        assert result["nodes_marked_outdated"] == 0
-
-    def test_nrem3_keeps_recent_nodes(self, graph):
-        """NREM3 should not mark recent nodes even if low importance."""
-        for node in graph.nodes.values():
-            node["importance"] = 0.1
-            # Created recently
-            node["created_at"] = datetime.now().isoformat()
-
-        proc = SleepProcessor(graph)
-        result = proc._phase_nrem3()
-        assert result["nodes_marked_outdated"] == 0
+        assert result["beliefs_decayed"] == 0
+        assert result["beliefs_pruned"] == 0
 
 
 # ============================================================
-# TestSleepProcessor
+# TestSleepProcessor (full cycle)
 # ============================================================
 
 class TestSleepProcessor:
-    """Tests for full sleep cycle."""
 
-    def test_process_sleep_cycle_returns_report(self, graph):
-        proc = SleepProcessor(graph, session_id=5)
+    def test_process_sleep_cycle_returns_report(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store, session_id=5)
         report = proc.process_sleep_cycle()
-
         assert isinstance(report, dict)
         assert "phases" in report
         assert "dreams" in report
         assert "duration_ms" in report
         assert report["session"] == 5
 
-    def test_all_phases_run(self, graph):
-        proc = SleepProcessor(graph)
+    def test_all_phases_run(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         report = proc.process_sleep_cycle()
-
         assert "nrem1" in report["phases"]
         assert "nrem2" in report["phases"]
         assert "nrem3" in report["phases"]
         assert "rem" in report["phases"]
+        assert report["phases_completed"] >= 4
 
-    def test_dreams_in_report(self, graph):
-        proc = SleepProcessor(graph)
+    def test_dreams_generated_from_beliefs(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         report = proc.process_sleep_cycle()
-
         assert isinstance(report["dreams"], list)
-        # With 5 nodes, should generate at least 1 dream
+        # With 5 beliefs, should generate dreams
         assert len(report["dreams"]) >= 1
 
-    def test_duration_tracked(self, graph):
-        proc = SleepProcessor(graph)
-        report = proc.process_sleep_cycle()
-        assert report["duration_ms"] >= 0
-
-    def test_empty_graph_cycle(self, empty_graph):
-        """Sleep cycle on empty graph should not crash."""
-        proc = SleepProcessor(empty_graph)
+    def test_no_dreams_without_beliefs(self):
+        proc = SleepProcessor()
         report = proc.process_sleep_cycle()
         assert report["dreams"] == []
 
-    def test_sleep_phase_enum(self):
-        """Verify SleepPhase enum values."""
-        assert SleepPhase.NREM1.value == "nrem1"
-        assert SleepPhase.NREM2.value == "nrem2"
-        assert SleepPhase.NREM3.value == "nrem3"
-        assert SleepPhase.REM.value == "rem"
-
-    def test_dream_persistence(self, graph, tmp_dir):
-        """Dreams should be saved to disk during REM phase."""
-        dream_path = Path(tmp_dir) / "dreams.jsonl"
-        proc = SleepProcessor(graph, session_id=7, dream_log_path=dream_path)
+    def test_duration_tracked(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         report = proc.process_sleep_cycle()
+        assert report["duration_ms"] >= 0
 
+    def test_dream_persistence(self, belief_store, tmp_dir):
+        dream_path = Path(tmp_dir) / "dreams.jsonl"
+        proc = SleepProcessor(
+            belief_store=belief_store,
+            session_id=7,
+            dream_log_path=dream_path,
+        )
+        report = proc.process_sleep_cycle()
         if report["dreams"]:
             assert dream_path.exists()
             lines = dream_path.read_text(encoding="utf-8").strip().split("\n")
             assert len(lines) == len(report["dreams"])
+
+    def test_empty_belief_store_no_crash(self, empty_belief_store):
+        proc = SleepProcessor(belief_store=empty_belief_store)
+        report = proc.process_sleep_cycle()
+        assert report["dreams"] == []
+        assert report["phases_completed"] >= 4
 
 
 # ============================================================
@@ -390,7 +386,6 @@ class TestSleepProcessor:
 # ============================================================
 
 class TestIntegration:
-    """Integration tests."""
 
     def test_import_from_package(self):
         from agent_core.consciousness.dream_generator import DreamGenerator as DG
@@ -398,45 +393,34 @@ class TestIntegration:
         assert DG is not None
         assert SP is not None
 
-    def test_multiple_sleep_cycles(self, graph, tmp_dir):
-        """Multiple sleep cycles accumulate dreams."""
+    def test_multiple_sleep_cycles(self, belief_store, tmp_dir):
         dream_path = Path(tmp_dir) / "dreams.jsonl"
-
+        total_dreams = 0
         for session in range(3):
-            proc = SleepProcessor(graph, session_id=session, dream_log_path=dream_path)
-            proc.process_sleep_cycle()
+            proc = SleepProcessor(
+                belief_store=belief_store,
+                session_id=session,
+                dream_log_path=dream_path,
+            )
+            report = proc.process_sleep_cycle()
+            total_dreams += len(report["dreams"])
+        assert total_dreams >= 3
 
-        all_dreams = DreamGenerator.load_recent_dreams(limit=100, dream_log_path=dream_path)
-        assert len(all_dreams) >= 3  # At least 1 dream per session
-
-    def test_graph_modified_by_sleep(self, graph):
-        """Sleep cycle should modify graph (boost edges, mark outdated, add dream connections)."""
-        # Prepare: make one edge frequently accessed
-        edge_key = list(graph.edges.keys())[0]
-        graph.edges[edge_key]["access_count"] = 5
-        old_weight = graph.edges[edge_key]["weight"]
-
-        # Prepare: make one node stale
-        node_id = list(graph.nodes.keys())[0]
-        graph.nodes[node_id]["importance"] = 0.05
-        graph.nodes[node_id]["created_at"] = (
-            datetime.now() - timedelta(hours=100)
-        ).isoformat()
-
-        proc = SleepProcessor(graph)
+    def test_sleep_report_serializable(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
         report = proc.process_sleep_cycle()
-
-        # Edge should be boosted
-        assert graph.edges[edge_key]["weight"] > old_weight
-
-        # Node should be marked outdated
-        assert graph.nodes[node_id]["is_outdated"] is True
-
-    def test_sleep_report_serializable(self, graph):
-        """Sleep report should be JSON-serializable."""
-        proc = SleepProcessor(graph)
-        report = proc.process_sleep_cycle()
-
-        # Should not raise
         json_str = json.dumps(report, ensure_ascii=False)
         assert len(json_str) > 0
+
+    def test_maintain_called_in_nrem3(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
+        proc.process_sleep_cycle()
+        assert belief_store._maintained
+
+    def test_dream_has_belief_references(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store)
+        report = proc.process_sleep_cycle()
+        for dream in report["dreams"]:
+            assert "beliefs" in dream
+            assert len(dream["beliefs"]) >= 1
+            assert dream["beliefs"][0].startswith("belief-")

@@ -245,6 +245,13 @@ class HomeostasisModule(MariaModule):
                 experience_tracker=experience_tracker,
             )
 
+        # Wire BeliefStore for sleep consolidation (NREM2/NREM3)
+        if core and ctx.world_model:
+            try:
+                core.set_belief_store(ctx.world_model.store)
+            except Exception:
+                pass
+
         # Wire teacher agent for autonomous learning during idle
         if core and ctx.brain and hasattr(ctx.brain, '_ask_once'):
             try:
@@ -1313,6 +1320,13 @@ class HomeostasisModule(MariaModule):
                 goal_store=ctx.goal_store if ctx.goal_store else None,
             )
             ctx.auto_promotion = auto_promotion
+
+            # Wire Telegram notifications for promotion events
+            if ctx.telegram_bridge:
+                try:
+                    auto_promotion.set_notify_fn(ctx.telegram_bridge.bot.send_message)
+                except Exception:
+                    pass
 
             avg_trust = trust_scorer.get_average_trust()
             inc_count = incident_memory.count()

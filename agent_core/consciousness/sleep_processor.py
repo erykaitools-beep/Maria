@@ -1,27 +1,56 @@
 """
-SleepProcessor - Processes sleep phases for Maria's consciousness.
+SleepProcessor - Memory consolidation during SLEEP mode.
 
 When Maria enters SLEEP mode, this processor runs through 4 phases:
-- NREM1: Short-term consolidation (gather stats)
-- NREM2: Strengthen important connections (boost edge weights)
-- NREM3: Garbage collection (mark stale nodes as outdated)
-- REM: Dreams - creative concept linking (DreamGenerator)
+- NREM1: Gather stats about knowledge and beliefs (observation)
+- NREM2: Strengthen high-confidence beliefs, re-index semantic vectors
+- NREM3: Decay old beliefs, prune weak ones, mark stale knowledge (FORGETTING)
+- REM: Generate dreams from beliefs (creative connections)
+- Archival: Compress old JSONL logs to /mnt/storage
 
+Works on REAL data: BeliefStore, knowledge_index, SemanticMemory.
 Pure logic, no LLM calls. Runs once when SLEEP mode is entered.
 """
 
+import json
 import time
+import random
 import logging
-from enum import Enum
+from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
-
-from agent_core.consciousness.dream_generator import DreamGenerator
 
 logger = logging.getLogger(__name__)
 
-# Storage archival (lazy import to avoid circular deps)
+# Storage archival (lazy import)
 _log_archiver = None
+
+DEFAULT_DREAM_LOG = Path("meta_data/dream_log.jsonl")
+KNOWLEDGE_INDEX_PATH = Path("memory/knowledge_index.jsonl")
+
+# Thresholds
+BELIEF_STALE_DAYS = 30          # Observations older than this get extra decay
+BELIEF_PRUNE_FLOOR = 0.05       # Below this confidence = candidate for removal
+KNOWLEDGE_STALE_DAYS = 60       # Knowledge not reviewed in this many days
+MAX_DREAMS_PER_CYCLE = 3
+
+# Dream templates (Polish)
+CONNECTION_TEMPLATES = [
+    "Snilo mi sie, ze {a} laczy sie z {b} - moze sa ze soba powiazane?",
+    "Przysnilo mi sie, ze {a} i {b} maja cos wspolnego. Ciekawe...",
+    "We snie zobaczyalam polaczenie miedzy {a} a {b}. Warto zbadac.",
+    "Snilo mi sie o {a}. Nagle pojawialo sie {b} - dziwne, ale intrygujace.",
+]
+
+HYPOTHESIS_TEMPLATES = [
+    "A co jesli {a} wplywa na {b}? We snie to mialo sens.",
+    "Moze {a} i {b} to dwa aspekty tego samego? Tak mi sie snilo.",
+    "Sen podpowiedzial mi: zbadaj zwiazek miedzy {a} a {b}.",
+]
+
+EXPLORATION_TEMPLATES = [
+    "Snilo mi sie o {a}. Chcialabym wiedziec o tym wiecej.",
+    "We snie gleboko myslalam o {a}. Moze warto do tego wrocic.",
+]
 
 
 def _get_archiver():
@@ -36,269 +65,279 @@ def _get_archiver():
         return _log_archiver
     return None
 
-# Thresholds for NREM phases
-EDGE_BOOST_MIN_ACCESS = 2       # Boost edges accessed 2+ times
-EDGE_BOOST_AMOUNT = 0.1         # Weight increase per boost
-NODE_STALE_HOURS = 48           # Mark nodes older than this if low importance
-NODE_LOW_IMPORTANCE = 0.2       # Below this importance = candidate for cleanup
-MAX_DREAMS_PER_CYCLE = 3        # Dreams generated in REM phase
-
-
-class SleepPhase(Enum):
-    """Sleep cycle phases."""
-    NREM1 = "nrem1"
-    NREM2 = "nrem2"
-    NREM3 = "nrem3"
-    REM = "rem"
-
 
 class SleepProcessor:
     """
-    Processes a full sleep cycle through 4 phases.
+    Processes a full sleep cycle on Maria's real memory systems.
 
     Usage:
-        processor = SleepProcessor(semantic_memory)
+        processor = SleepProcessor(
+            belief_store=ctx.world_model.store,
+            knowledge_index_path=Path("memory/knowledge_index.jsonl"),
+            session_id=42,
+        )
         report = processor.process_sleep_cycle()
-        # report = {"phases": {...}, "dreams": [...], "duration_ms": 42}
     """
 
     def __init__(
         self,
-        semantic_memory,
+        belief_store=None,
+        knowledge_index_path: Optional[Path] = None,
         session_id: int = 0,
-        dream_log_path=None,
+        dream_log_path: Optional[Path] = None,
+        # Legacy compat: accept semantic_memory but ignore internals
+        semantic_memory=None,
     ):
-        """
-        Initialize sleep processor.
-
-        Args:
-            semantic_memory: SemanticGraph instance
-            session_id: Current session number
-            dream_log_path: Optional path for dream persistence
-        """
-        self.graph = semantic_memory
+        self._belief_store = belief_store
+        self._ki_path = Path(knowledge_index_path or KNOWLEDGE_INDEX_PATH)
         self.session_id = session_id
-        self.dream_generator = DreamGenerator(
-            semantic_memory,
-            dream_log_path=dream_log_path,
-        )
+        self._dream_log_path = Path(dream_log_path or DEFAULT_DREAM_LOG)
 
     def process_sleep_cycle(self) -> Dict[str, Any]:
-        """
-        Run full sleep cycle through all 4 phases.
-
-        Returns:
-            Report dict with phase results, dreams, and duration
-        """
+        """Run full sleep cycle through all phases."""
         start = time.time()
 
         report = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "session": self.session_id,
             "phases": {},
+            "phases_completed": 0,
             "dreams": [],
             "duration_ms": 0,
         }
 
-        # Phase 1: NREM1 - Consolidation (gather stats)
-        try:
-            report["phases"]["nrem1"] = self._phase_nrem1()
-        except Exception as e:
-            logger.warning(f"NREM1 failed: {e}")
-            report["phases"]["nrem1"] = {"error": str(e)}
+        phases = [
+            ("nrem1", self._phase_nrem1),
+            ("nrem2", self._phase_nrem2),
+            ("nrem3", self._phase_nrem3),
+            ("archival", self._phase_archival),
+            ("rem", self._phase_rem),
+        ]
 
-        # Phase 2: NREM2 - Strengthen connections
-        try:
-            report["phases"]["nrem2"] = self._phase_nrem2()
-        except Exception as e:
-            logger.warning(f"NREM2 failed: {e}")
-            report["phases"]["nrem2"] = {"error": str(e)}
-
-        # Phase 3: NREM3 - Garbage collection
-        try:
-            report["phases"]["nrem3"] = self._phase_nrem3()
-        except Exception as e:
-            logger.warning(f"NREM3 failed: {e}")
-            report["phases"]["nrem3"] = {"error": str(e)}
-
-        # Phase 3.5: Log archival (if storage available)
-        try:
-            report["phases"]["archival"] = self._phase_archival()
-        except Exception as e:
-            logger.warning(f"Archival failed: {e}")
-            report["phases"]["archival"] = {"error": str(e)}
-
-        # Phase 4: REM - Dreams
-        try:
-            rem_result = self._phase_rem()
-            report["phases"]["rem"] = rem_result
-            report["dreams"] = rem_result.get("dreams", [])
-        except Exception as e:
-            logger.warning(f"REM failed: {e}")
-            report["phases"]["rem"] = {"error": str(e)}
+        for name, fn in phases:
+            try:
+                result = fn()
+                report["phases"][name] = result
+                report["phases_completed"] += 1
+                if name == "rem":
+                    report["dreams"] = result.get("dreams", [])
+            except Exception as e:
+                logger.warning(f"Sleep {name} failed: {e}")
+                report["phases"][name] = {"error": str(e)}
 
         report["duration_ms"] = round((time.time() - start) * 1000, 1)
 
         logger.info(
-            f"Sleep cycle complete: {len(report['dreams'])} dreams, "
-            f"{report['duration_ms']}ms"
+            f"Sleep cycle complete: {report['phases_completed']} phases, "
+            f"{len(report['dreams'])} dreams, {report['duration_ms']}ms"
         )
 
         return report
 
+    # -- NREM1: Observation (stats gathering) --
+
     def _phase_nrem1(self) -> Dict[str, Any]:
-        """
-        NREM1 - Short-term consolidation.
+        """NREM1 - Gather stats about beliefs and knowledge."""
+        result = {"phase": "nrem1"}
 
-        Gathers statistics about the current state of semantic memory.
-        Light sleep phase - just observation.
-        """
-        total_nodes = len(self.graph.nodes)
-        total_edges = len(self.graph.edges)
+        # Belief stats
+        if self._belief_store:
+            beliefs = list(self._belief_store.get_all().values())
+            confs = [b.confidence for b in beliefs]
+            result["beliefs_total"] = len(beliefs)
+            result["beliefs_avg_confidence"] = round(
+                sum(confs) / max(len(confs), 1), 3
+            )
+            result["beliefs_weak"] = sum(1 for c in confs if c < 0.3)
+            result["beliefs_strong"] = sum(1 for c in confs if c >= 0.7)
 
-        # Count by type
-        type_counts = {}
-        for node in self.graph.nodes.values():
-            ntype = node.get("type", "unknown")
-            type_counts[ntype] = type_counts.get(ntype, 0) + 1
+            # By type
+            from collections import Counter
+            types = Counter(b.belief_type for b in beliefs)
+            result["beliefs_by_type"] = dict(types)
+        else:
+            result["beliefs_total"] = 0
+            result["beliefs_skipped"] = "no belief_store"
 
-        # Count outdated
-        outdated = sum(
-            1 for n in self.graph.nodes.values()
-            if n.get("is_outdated", False)
+        # Knowledge stats
+        ki = self._load_knowledge_index()
+        result["knowledge_total"] = len(ki)
+        from collections import Counter
+        statuses = Counter(f.get("status", "?") for f in ki.values())
+        result["knowledge_by_status"] = dict(statuses)
+
+        logger.debug(
+            f"NREM1: {result.get('beliefs_total', 0)} beliefs, "
+            f"{result.get('knowledge_total', 0)} knowledge files"
         )
-
-        # Average importance
-        importances = [
-            n.get("importance", 0.5)
-            for n in self.graph.nodes.values()
-        ]
-        avg_importance = sum(importances) / max(len(importances), 1)
-
-        result = {
-            "phase": "nrem1",
-            "total_nodes": total_nodes,
-            "total_edges": total_edges,
-            "type_counts": type_counts,
-            "outdated_nodes": outdated,
-            "avg_importance": round(avg_importance, 3),
-        }
-
-        logger.debug(f"NREM1: {total_nodes} nodes, {total_edges} edges")
         return result
 
-    def _phase_nrem2(self) -> Dict[str, Any]:
-        """
-        NREM2 - Strengthen important connections.
+    # -- NREM2: Strengthen (reinforce good memories) --
 
-        Boosts edge weights for frequently accessed edges.
-        Deep sleep phase - reinforcing memories.
-        """
+    def _phase_nrem2(self) -> Dict[str, Any]:
+        """NREM2 - Boost confidence of well-evidenced beliefs."""
         boosted = 0
 
-        for edge_key, edge in self.graph.edges.items():
-            access_count = edge.get("access_count", 0)
-            if access_count >= EDGE_BOOST_MIN_ACCESS:
-                old_weight = edge.get("weight", 1.0)
-                new_weight = min(2.0, old_weight + EDGE_BOOST_AMOUNT)
-                edge["weight"] = new_weight
-                boosted += 1
+        if self._belief_store:
+            beliefs = self._belief_store.get_all()
+            for bid, belief in beliefs.items():
+                # Beliefs with evidence from multiple sources get a small boost
+                evidence = getattr(belief, 'evidence', []) or []
+                if len(evidence) >= 2 and belief.confidence < 0.95:
+                    old = belief.confidence
+                    belief.confidence = min(0.95, belief.confidence + 0.02)
+                    self._belief_store._mark_dirty(bid)
+                    boosted += 1
+
+            if boosted > 0:
+                self._belief_store.save()
 
         result = {
             "phase": "nrem2",
-            "edges_boosted": boosted,
-            "boost_amount": EDGE_BOOST_AMOUNT,
+            "beliefs_boosted": boosted,
         }
-
-        logger.debug(f"NREM2: boosted {boosted} edges")
+        logger.debug(f"NREM2: boosted {boosted} beliefs")
         return result
 
+    # -- NREM3: Forgetting (decay, prune, cleanup) --
+
     def _phase_nrem3(self) -> Dict[str, Any]:
-        """
-        NREM3 - Garbage collection.
+        """NREM3 - Decay old beliefs, prune weak ones. THIS IS FORGETTING."""
+        decayed = 0
+        pruned = 0
 
-        Marks old, low-importance nodes as outdated.
-        Very deep sleep - forgetting unimportant things.
-        """
-        marked = 0
-        now = datetime.now()
-        stale_threshold = now - timedelta(hours=NODE_STALE_HOURS)
-
-        for node in self.graph.nodes.values():
-            if node.get("is_outdated", False):
-                continue
-
-            importance = node.get("importance", 0.5)
-            if importance >= NODE_LOW_IMPORTANCE:
-                continue
-
-            # Check age
-            created_str = node.get("created_at", "")
-            if not created_str:
-                continue
-
+        if self._belief_store:
+            # Run the existing maintain() which does:
+            # 1. Confidence decay (FACT 90d, OBSERVATION 30d, HYPOTHESIS 14d)
+            # 2. Dedup (exact matching)
+            # 3. Smart prune (removes weakest when over limit)
+            # 4. Compaction (JSONL cleanup)
             try:
-                created = datetime.fromisoformat(created_str)
-                if created < stale_threshold:
-                    node["is_outdated"] = True
-                    marked += 1
-            except (ValueError, TypeError):
-                continue
+                stats = self._belief_store.maintain()
+                decayed = stats.get("decayed", 0)
+                pruned = stats.get("pruned", 0)
+            except Exception as e:
+                logger.warning(f"NREM3 belief maintain failed: {e}")
 
         result = {
             "phase": "nrem3",
-            "nodes_marked_outdated": marked,
-            "stale_threshold_hours": NODE_STALE_HOURS,
-            "importance_threshold": NODE_LOW_IMPORTANCE,
+            "beliefs_decayed": decayed,
+            "beliefs_pruned": pruned,
         }
-
-        logger.debug(f"NREM3: marked {marked} nodes as outdated")
+        logger.debug(f"NREM3: decayed {decayed}, pruned {pruned}")
         return result
 
-    def _phase_archival(self) -> Dict[str, Any]:
-        """
-        Log archival phase - compact old logs to external storage.
+    # -- Archival: Log compression --
 
-        Runs only if /mnt/storage is available.
-        Moves old JSONL records to archive, creates daily summaries.
-        """
+    def _phase_archival(self) -> Dict[str, Any]:
+        """Compress old JSONL logs to /mnt/storage."""
         archiver = _get_archiver()
         if archiver is None:
             return {"phase": "archival", "skipped": True, "reason": "no storage"}
 
         result = archiver.run_archival()
-        logger.info(
-            f"Archival: {result.get('total_archived', 0)} records archived, "
-            f"{result.get('total_kept', 0)} kept"
-        )
+        archived = result.get("total_archived", 0)
+        kept = result.get("total_kept", 0)
+        logger.info(f"Archival: {archived} archived, {kept} kept")
         return {
             "phase": "archival",
-            "total_archived": result.get("total_archived", 0),
-            "total_kept": result.get("total_kept", 0),
-            "files": {
-                k: v for k, v in result.get("files", {}).items()
-                if not v.get("skipped")
-            },
+            "total_archived": archived,
+            "total_kept": kept,
         }
 
+    # -- REM: Dreams (creative connections from beliefs) --
+
     def _phase_rem(self) -> Dict[str, Any]:
-        """
-        REM - Dream phase.
+        """REM - Generate dreams from beliefs (creative connections)."""
+        dreams = []
 
-        Generates creative connections between concepts.
-        Uses DreamGenerator for rule-based dream creation.
-        """
-        dreams = self.dream_generator.generate_dreams(count=MAX_DREAMS_PER_CYCLE)
+        if self._belief_store:
+            beliefs = list(self._belief_store.get_all().values())
+            # Filter: only beliefs with meaningful content
+            dreamable = [
+                b for b in beliefs
+                if b.confidence >= 0.2 and len(b.content) > 10
+            ]
 
-        # Save dreams to disk
+            attempts = 0
+            while len(dreams) < MAX_DREAMS_PER_CYCLE and attempts < MAX_DREAMS_PER_CYCLE * 3:
+                attempts += 1
+                dream = self._generate_dream(dreamable)
+                if dream:
+                    dreams.append(dream)
+
+        # Save dreams
         if dreams:
-            self.dream_generator.save_dreams(dreams, session_id=self.session_id)
+            self._save_dreams(dreams)
 
         result = {
             "phase": "rem",
             "dreams_generated": len(dreams),
             "dreams": dreams,
         }
-
         logger.debug(f"REM: generated {len(dreams)} dreams")
+        return result
+
+    def _generate_dream(self, beliefs: list) -> Optional[Dict[str, Any]]:
+        """Generate a single dream from two random beliefs."""
+        if len(beliefs) < 2:
+            return None
+
+        a, b = random.sample(beliefs, 2)
+        label_a = a.content[:50].strip()
+        label_b = b.content[:50].strip()
+
+        # Choose dream type
+        if random.random() < 0.3:
+            template = random.choice(HYPOTHESIS_TEMPLATES)
+            dream_type = "hypothesis"
+        elif random.random() < 0.5:
+            template = random.choice(EXPLORATION_TEMPLATES)
+            dream_type = "exploration"
+            content = template.format(a=label_a)
+            return {
+                "type": dream_type,
+                "content": content,
+                "beliefs": [a.belief_id],
+                "timestamp": time.time(),
+            }
+        else:
+            template = random.choice(CONNECTION_TEMPLATES)
+            dream_type = "connection"
+
+        content = template.format(a=label_a, b=label_b)
+        return {
+            "type": dream_type,
+            "content": content,
+            "beliefs": [a.belief_id, b.belief_id],
+            "timestamp": time.time(),
+        }
+
+    def _save_dreams(self, dreams: List[Dict]) -> None:
+        """Append dreams to dream_log.jsonl."""
+        try:
+            self._dream_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._dream_log_path, "a", encoding="utf-8") as f:
+                for dream in dreams:
+                    f.write(json.dumps(dream, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to save dreams: {e}")
+
+    # -- Helpers --
+
+    def _load_knowledge_index(self) -> Dict[str, dict]:
+        """Load knowledge_index.jsonl (MERGE by id)."""
+        result = {}
+        if not self._ki_path.exists():
+            return result
+        try:
+            with open(self._ki_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        r = json.loads(line.strip())
+                        result[r.get("id", "")] = r
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except Exception:
+            pass
         return result

@@ -109,6 +109,13 @@ class RecommendationApplier:
         report.goals_created = result["goals_created"]
         report.beliefs_updated = result["beliefs_updated"]
 
+        # Persist goals to JSONL (propose() only marks dirty, save() flushes)
+        if goals_created > 0 and self._goal_store is not None:
+            try:
+                self._goal_store.save()
+            except Exception as e:
+                logger.warning(f"[K12] Failed to persist goals: {e}")
+
         logger.info(
             f"[K12] Applied {len(sorted_recs)} recommendations: "
             f"{goals_created} goals, {result['hints_written']} hints, "

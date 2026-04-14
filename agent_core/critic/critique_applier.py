@@ -87,6 +87,13 @@ class CritiqueApplier:
         # Update report
         report.goals_created = result["goals_created"]
 
+        # Persist goals to JSONL
+        if goals_created > 0 and self._goal_store is not None:
+            try:
+                self._goal_store.save()
+            except Exception as e:
+                logger.warning("[Critic] Failed to persist goals: %s", e)
+
         # LLM summary (decoration only, failure does not break apply)
         try:
             if self._llm_fn and report.findings:

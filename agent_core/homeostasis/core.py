@@ -122,8 +122,9 @@ class HomeostasisCore:
         self._running = False
         self._tick_count = 0
 
-        # Sleep processing (set via set_semantic_memory)
-        self._semantic_memory = None
+        # Sleep processing
+        self._semantic_memory = None  # Legacy (kept for compat)
+        self._belief_store = None     # Real data for sleep consolidation
         self._session_id = 0
         self._last_sleep_report = None
         self._experience_tracker = None
@@ -172,18 +173,17 @@ class HomeostasisCore:
 
     def set_semantic_memory(self, semantic_memory, session_id: int = 0, experience_tracker=None) -> None:
         """
-        Set semantic memory reference for sleep processing.
+        Set semantic memory reference for sleep processing (legacy compat).
 
         Called from HomeostasisModule after init.
-
-        Args:
-            semantic_memory: SemanticGraph instance
-            session_id: Current session number
-            experience_tracker: ExperienceTracker for recording sleep events
         """
         self._semantic_memory = semantic_memory
         self._session_id = session_id
         self._experience_tracker = experience_tracker
+
+    def set_belief_store(self, belief_store) -> None:
+        """Set BeliefStore for sleep consolidation (NREM2 strengthen, NREM3 forgetting)."""
+        self._belief_store = belief_store
 
     def set_teacher_agent(self, teacher_agent) -> None:
         """
@@ -781,24 +781,21 @@ class HomeostasisCore:
         """
         Run sleep processing when entering SLEEP mode.
 
-        Phases: NREM1 (stats) -> NREM2 (strengthen) -> NREM3 (cleanup) -> REM (dreams).
+        Phases: NREM1 (stats) -> NREM2 (strengthen) -> NREM3 (forgetting) -> Archival -> REM (dreams).
+        Works on real data: BeliefStore + knowledge_index.
         """
-        if not self._semantic_memory:
-            logger.info("Sleep cycle skipped: no semantic_memory set")
-            return
-
         try:
             from agent_core.consciousness.sleep_processor import SleepProcessor
 
             processor = SleepProcessor(
-                semantic_memory=self._semantic_memory,
+                belief_store=self._belief_store,
                 session_id=self._session_id,
             )
             report = processor.process_sleep_cycle()
             self._last_sleep_report = report
 
             # Log sleep cycle event
-            dream_count = report.get("rem", {}).get("dreams_generated", 0)
+            dream_count = len(report.get("dreams", []))
             self.event_logger._write_event({
                 "timestamp": time.time(),
                 "event": "sleep_cycle",
