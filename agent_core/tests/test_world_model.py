@@ -270,6 +270,43 @@ class TestBeliefStore:
         assert loaded.confidence == 0.9
         assert loaded.belief_type == BeliefType.FACT
 
+    def test_compact_beliefs(self, tmp_path):
+        path = tmp_path / "beliefs.jsonl"
+        store = BeliefStore(path)
+
+        beliefs = [
+            self._make_belief("topic-a", confidence=0.5),
+            self._make_belief("topic-b", confidence=0.6),
+            self._make_belief("topic-c", confidence=0.7),
+        ]
+        for belief in beliefs:
+            store.add(belief)
+        store.save()
+
+        current_ids = [belief.belief_id for belief in beliefs]
+        for i in range(10):
+            next_ids = []
+            for belief_id in current_ids:
+                revised = store.revise(
+                    belief_id,
+                    min(1.0, 0.1 + i * 0.05),
+                    BeliefType.FACT,
+                )
+                if revised is not None:
+                    next_ids.append(revised.belief_id)
+                else:
+                    next_ids.append(belief_id)
+                store.save()
+            current_ids = next_ids
+
+        lines_before = len([line for line in path.read_text().splitlines() if line.strip()])
+        assert lines_before > len(store._beliefs)
+
+        store.compact()
+
+        lines_after = len([line for line in path.read_text().splitlines() if line.strip()])
+        assert lines_after == len(store._beliefs)
+
     def test_get_by_entity(self, tmp_path):
         store = self._make_store(tmp_path)
         store.add(self._make_belief("python"))

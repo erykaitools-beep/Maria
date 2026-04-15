@@ -79,8 +79,56 @@ class GoalStore:
                         line = json.dumps(goal.to_dict(), ensure_ascii=False)
                         f.write(line + "\n")
             self._dirty_ids.clear()
+            self._compact_if_needed()
         except OSError as e:
             logger.error(f"Cannot write goals.jsonl: {e}")
+
+    def compact(self) -> None:
+        """Rewrite goals.jsonl to one latest record per goal id."""
+        if not self._goals_path.exists():
+            return
+
+        line_count = self._count_nonempty_lines()
+        unique_count = len(self._goals)
+        tmp_path = self._goals_path.with_suffix(self._goals_path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for goal in self._goals.values():
+                    line = json.dumps(goal.to_dict(), ensure_ascii=False)
+                    f.write(line + "\n")
+            tmp_path.replace(self._goals_path)
+            logger.info(
+                "Compacted goals.jsonl: %s lines -> %s unique goals",
+                line_count,
+                unique_count,
+            )
+        except OSError as e:
+            logger.error(f"Cannot compact goals.jsonl: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
+    def _count_nonempty_lines(self) -> int:
+        """Count non-empty JSONL rows in goals file."""
+        if not self._goals_path.exists():
+            return 0
+        try:
+            with open(self._goals_path, "r", encoding="utf-8") as f:
+                return sum(1 for line in f if line.strip())
+        except OSError as e:
+            logger.error(f"Cannot inspect goals.jsonl for compaction: {e}")
+            return 0
+
+    def _compact_if_needed(self) -> None:
+        """Run compaction when lines exceed 2x unique in-memory records."""
+        unique_count = len(self._goals)
+        if unique_count == 0:
+            return
+        line_count = self._count_nonempty_lines()
+        if line_count > (2 * unique_count):
+            self.compact()
 
     def _mark_dirty(self, goal_id: str) -> None:
         self._dirty_ids.add(goal_id)

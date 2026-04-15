@@ -89,6 +89,7 @@ class BeliefStore:
                     if belief:
                         f.write(json.dumps(belief.to_dict(), ensure_ascii=False) + "\n")
             self._dirty.clear()
+            self._compact_if_needed()
         except IOError as e:
             logger.warning(f"Could not save beliefs: {e}")
 
@@ -254,9 +255,47 @@ class BeliefStore:
                 self._by_tag[tag].append(bid)
 
     def compact(self) -> int:
-        """Compact beliefs.jsonl by removing superseded records. v2."""
-        from agent_core.world_model.belief_maintenance import compact_jsonl
-        return compact_jsonl(self)
+        """Rewrite beliefs.jsonl to one latest record per belief_id."""
+        if not self._path.exists():
+            return 0
+
+        line_count = self._count_nonempty_lines()
+        unique_count = len(self._beliefs)
+        if unique_count == 0:
+            return 0
+
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for belief in self._beliefs.values():
+                    f.write(json.dumps(belief.to_dict(), ensure_ascii=False) + "\n")
+            tmp_path.replace(self._path)
+            return max(0, line_count - unique_count)
+        except IOError as e:
+            logger.warning(f"Could not compact beliefs: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            return 0
+
+    def _count_nonempty_lines(self) -> int:
+        if not self._path.exists():
+            return 0
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                return sum(1 for line in f if line.strip())
+        except IOError as e:
+            logger.warning(f"Could not inspect beliefs: {e}")
+            return 0
+
+    def _compact_if_needed(self) -> None:
+        unique_count = len(self._beliefs)
+        if unique_count == 0:
+            return
+        if self._count_nonempty_lines() > (2 * unique_count):
+            self.compact()
 
     def _enforce_cap(self) -> None:
         """Prune lowest-scored beliefs if over cap. v2: uses smart_prune."""
