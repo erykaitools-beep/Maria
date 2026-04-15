@@ -44,6 +44,7 @@ class TestGoalStatus:
         assert GoalStatus.ACHIEVED.value == "achieved"
         assert GoalStatus.FAILED.value == "failed"
         assert GoalStatus.ABANDONED.value == "abandoned"
+        assert GoalStatus.CANCELLED.value == "cancelled"
 
     def test_active_statuses(self):
         assert GoalStatus.PENDING in ACTIVE_STATUSES
@@ -55,7 +56,11 @@ class TestGoalStatus:
         assert GoalStatus.ACHIEVED in TERMINAL_STATUSES
         assert GoalStatus.FAILED in TERMINAL_STATUSES
         assert GoalStatus.ABANDONED in TERMINAL_STATUSES
+        assert GoalStatus.CANCELLED in TERMINAL_STATUSES
         assert GoalStatus.ACTIVE not in TERMINAL_STATUSES
+
+    def test_cancelled_status_in_enum(self):
+        assert GoalStatus("cancelled") == GoalStatus.CANCELLED
 
 
 class TestAuditEntry:

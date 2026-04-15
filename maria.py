@@ -232,6 +232,25 @@ def graceful_shutdown(ctx, registry):
 # ====================================================================
 
 def main():
+    def _thread_excepthook(args):
+        logger.critical(
+            "Unhandled exception in thread %s: %s",
+            getattr(args.thread, "name", "unknown"),
+            args.exc_value,
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _thread_excepthook
+
+    def _sys_excepthook(exc_type, exc_value, exc_tb):
+        logger.critical(
+            "Unhandled exception: %s",
+            exc_value,
+            exc_info=(exc_type, exc_value, exc_tb),
+        )
+
+    sys.excepthook = _sys_excepthook
+
     parser = argparse.ArgumentParser(description="M.A.R.I.A. - Unified Launcher")
     parser.add_argument("--daemon", action="store_true", help="Daemon only (no Web UI)")
     parser.add_argument("--ui", action="store_true", help="Web UI only (no daemon)")

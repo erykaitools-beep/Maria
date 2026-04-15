@@ -376,6 +376,25 @@ class TestBulletinStorePersistence:
         loaded = store2.get(e.entry_id)
         assert loaded.status == EntryStatus.IN_PROGRESS
 
+    def test_load_corrupted_jsonl_line(self, tmp_path):
+        path = tmp_path / "bulletin.jsonl"
+        store = BulletinStore(path=path)
+        entry = store.create_and_post(
+            entry_type=EntryType.NEED_MATERIAL,
+            topic="valid topic",
+            reason_code="ok",
+            summary="ok",
+            requested_by="test",
+        )
+
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("{bad json\n")
+
+        store2 = BulletinStore(path=path)
+        loaded = store2.get(entry.entry_id)
+        assert loaded is not None
+        assert loaded.topic == "valid topic"
+
 
 class TestBulletinStoreMaintenance:
     def test_prune_stale(self, store):

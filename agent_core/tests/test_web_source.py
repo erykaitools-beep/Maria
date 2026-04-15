@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch, Mock
 
 import pytest
 
-from agent_core.web_source.fetch_registry import FetchRegistry
+from agent_core.web_source.fetch_registry import FetchRegistry, MAX_ENTRIES
 from agent_core.web_source.wiki_client import WikiClient
 from agent_core.web_source.rss_client import RSSClient
 from agent_core.web_source.content_writer import ContentWriter
@@ -122,6 +122,25 @@ class TestFetchRegistry:
         reg = FetchRegistry(registry_path=path)
         reg.register("https://x.com", "X", "wikipedia", "x.txt", 100)
         assert path.exists()
+
+    def test_prunes_registry_to_max_entries(self, tmp_path):
+        path = tmp_path / "reg.jsonl"
+        reg = FetchRegistry(registry_path=path)
+
+        for i in range(MAX_ENTRIES + 10):
+            reg.register(
+                url=f"https://example.com/{i}",
+                title=f"Title {i}",
+                source_type="wikipedia",
+                output_file=f"{i}.txt",
+                char_count=100 + i,
+                topic=f"topic-{i}",
+            )
+
+        all_records = reg.get_all()
+        assert len(all_records) == MAX_ENTRIES
+        assert "https://example.com/0" not in all_records
+        assert f"https://example.com/{MAX_ENTRIES + 9}" in all_records
 
 
 # ══════════════════════════════════════════════════════

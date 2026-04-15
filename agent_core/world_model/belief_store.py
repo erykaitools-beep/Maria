@@ -59,7 +59,7 @@ class BeliefStore:
 
         try:
             with open(self._path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_no, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
@@ -68,6 +68,11 @@ class BeliefStore:
                         belief = Belief.from_dict(data)
                         self._beliefs[belief.belief_id] = belief
                     except (json.JSONDecodeError, KeyError, ValueError):
+                        logger.warning(
+                            "Skipping corrupted JSONL line in %s (line %s)",
+                            self._path,
+                            line_no,
+                        )
                         continue
         except IOError as e:
             logger.warning(f"Could not load beliefs: {e}")

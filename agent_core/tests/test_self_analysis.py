@@ -25,7 +25,7 @@ from agent_core.self_analysis.recommendation_model import (
 )
 from agent_core.self_analysis.state_collector import StateCollector
 from agent_core.self_analysis.external_analyzer import ExternalAnalyzer
-from agent_core.self_analysis.recommendation_applier import RecommendationApplier
+from agent_core.self_analysis.recommendation_applier import RecommendationApplier, MAX_HINTS
 from agent_core.self_analysis import SelfAnalysis
 from agent_core.planner.planner_model import Plan, ActionType, PlanStatus
 
@@ -504,6 +504,26 @@ class TestRecommendationApplier:
         applier.set_world_model(mock_wm)
         assert applier._goal_store is mock_store
         assert applier._world_model is mock_wm
+
+    def test_topic_hints_pruned_to_max(self, tmp_project):
+        applier = RecommendationApplier(project_root=str(tmp_project))
+
+        for i in range(MAX_HINTS + 25):
+            rec = AnalysisRecommendation(
+                rec_id=f"r{i}",
+                category="knowledge_gap",
+                topic=f"topic_{i}",
+                description="desc",
+                priority=0.5,
+                suggested_action="fetch",
+            )
+            report = AnalysisReport(report_id=f"rep-{i}", recommendations=[rec])
+            applier.apply(report)
+
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        lines = [line for line in hints_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(lines) == MAX_HINTS
+        assert all('"topic_0"' not in line for line in lines)
 
 
 # =============================================================================

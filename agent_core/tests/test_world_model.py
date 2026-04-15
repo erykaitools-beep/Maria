@@ -307,6 +307,19 @@ class TestBeliefStore:
         lines_after = len([line for line in path.read_text().splitlines() if line.strip()])
         assert lines_after == len(store._beliefs)
 
+    def test_load_corrupted_jsonl_line(self, tmp_path):
+        path = tmp_path / "beliefs.jsonl"
+        good = self._make_belief("good-topic", confidence=0.8)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(good.to_dict()) + "\n")
+            f.write("{bad json\n")
+            f.write(json.dumps(good.to_dict()) + "\n")
+
+        store = BeliefStore(path)
+        count = store.load()
+        assert count == 1
+        assert store.get(good.belief_id) is not None
+
     def test_get_by_entity(self, tmp_path):
         store = self._make_store(tmp_path)
         store.add(self._make_belief("python"))

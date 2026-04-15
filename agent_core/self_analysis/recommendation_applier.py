@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Topic hints file (read by TopicSuggester in Phase 2)
 _DEFAULT_HINTS_PATH = "meta_data/topic_hints.jsonl"
+MAX_HINTS = 200
 
 
 class RecommendationApplier:
@@ -215,8 +216,37 @@ class RecommendationApplier:
             self._hints_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._hints_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(hint, ensure_ascii=False) + "\n")
+            self._prune_hints_if_needed()
         except IOError as e:
             logger.warning(f"[K12] Could not write topic hint: {e}")
+
+    def _prune_hints_if_needed(self) -> None:
+        """Rotate hints file to latest MAX_HINTS entries when over limit."""
+        if not self._hints_path.exists():
+            return
+        try:
+            with open(self._hints_path, "r", encoding="utf-8") as f:
+                lines = [line for line in f if line.strip()]
+        except IOError as e:
+            logger.warning(f"[K12] Could not read topic hints for prune: {e}")
+            return
+
+        if len(lines) <= MAX_HINTS:
+            return
+
+        latest = lines[-MAX_HINTS:]
+        tmp_path = self._hints_path.with_suffix(self._hints_path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.writelines(latest)
+            tmp_path.replace(self._hints_path)
+        except IOError as e:
+            logger.warning(f"[K12] Could not prune topic hints: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
     def _update_belief(self, rec: AnalysisRecommendation):
         """Add external observation as K6 belief."""

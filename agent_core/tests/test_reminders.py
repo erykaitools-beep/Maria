@@ -180,6 +180,16 @@ class TestReminderStore:
         assert c["triggered"] == 1
         assert c["total"] == 2
 
+    def test_load_corrupted_jsonl_line(self, tmp_path):
+        path = tmp_path / "rem.jsonl"
+        valid = Reminder(text="valid reminder")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(valid.to_dict()) + "\n")
+            f.write("{bad json\n")
+
+        store = ReminderStore(path=path)
+        assert store.get(valid.id) is not None
+
 
 # ========== TodoStore ==========
 
@@ -231,6 +241,16 @@ class TestTodoStore:
         c = store.count()
         assert c["pending"] == 1
         assert c["done"] == 1
+
+    def test_load_corrupted_jsonl_line(self, tmp_path):
+        path = tmp_path / "todo.jsonl"
+        valid = Todo(text="valid todo")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(valid.to_dict()) + "\n")
+            f.write("{bad json\n")
+
+        store = TodoStore(path=path)
+        assert store.get(valid.id) is not None
 
 
 # ========== ReminderScheduler ==========

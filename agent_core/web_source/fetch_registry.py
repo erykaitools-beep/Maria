@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
 _DEFAULT_REGISTRY_PATH = _META_DIR / "web_fetch_registry.jsonl"
+MAX_ENTRIES = 500
 
 
 class FetchRegistry:
@@ -125,5 +126,35 @@ class FetchRegistry:
         except IOError as e:
             logger.warning(f"Could not read fetch registry: {e}")
 
+        if len(result) > MAX_ENTRIES:
+            result = self._prune_to_latest(result, max_entries=MAX_ENTRIES)
+
         self._cache = result
         return result
+
+    def _prune_to_latest(self, result: Dict[str, Dict], max_entries: int) -> Dict[str, Dict]:
+        """Keep only latest max_entries records and rewrite JSONL."""
+        sorted_items = sorted(
+            result.items(),
+            key=lambda item: item[1].get("ts", 0),
+            reverse=True,
+        )
+        pruned = dict(sorted_items[:max_entries])
+        self._rewrite_registry(pruned)
+        return pruned
+
+    def _rewrite_registry(self, data: Dict[str, Dict]) -> None:
+        """Atomically rewrite registry file from merged in-memory data."""
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for record in data.values():
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            tmp_path.replace(self._path)
+        except IOError as e:
+            logger.warning(f"Could not prune fetch registry: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass

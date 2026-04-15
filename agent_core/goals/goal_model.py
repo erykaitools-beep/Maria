@@ -27,13 +27,19 @@ class GoalStatus(Enum):
     ACHIEVED = "achieved"        # Zrealizowany
     FAILED = "failed"            # Nie udalo sie
     ABANDONED = "abandoned"      # Swiadomie porzucony
+    CANCELLED = "cancelled"      # Anulowany przez uzytkownika/operatora
 
 
 # Statusy ktore licza sie jako "aktywne" (wliczane do limitu 20)
 ACTIVE_STATUSES = {GoalStatus.PENDING, GoalStatus.ACTIVE}
 
 # Statusy terminalne (cel zakonczony)
-TERMINAL_STATUSES = {GoalStatus.ACHIEVED, GoalStatus.FAILED, GoalStatus.ABANDONED}
+TERMINAL_STATUSES = {
+    GoalStatus.ACHIEVED,
+    GoalStatus.FAILED,
+    GoalStatus.ABANDONED,
+    GoalStatus.CANCELLED,
+}
 
 # Limity
 MAX_ACTIVE_GOALS = 20

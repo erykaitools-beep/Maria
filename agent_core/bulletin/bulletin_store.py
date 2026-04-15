@@ -43,7 +43,7 @@ class BulletinStore:
             return
         try:
             with open(self._path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_no, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
@@ -52,7 +52,12 @@ class BulletinStore:
                         entry = BulletinEntry.from_dict(d)
                         self._entries[entry.entry_id] = entry  # MERGE
                     except (json.JSONDecodeError, KeyError, ValueError) as e:
-                        logger.warning(f"[BULLETIN] Skipping bad line: {e}")
+                        logger.warning(
+                            "Skipping corrupted JSONL line in %s (line %s): %s",
+                            self._path,
+                            line_no,
+                            e,
+                        )
         except OSError as e:
             logger.error(f"[BULLETIN] Cannot read {self._path}: {e}")
 
