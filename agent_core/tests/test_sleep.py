@@ -33,40 +33,31 @@ class MockBelief:
 
 
 class MockBeliefStore:
-    """Minimal BeliefStore mock for sleep testing."""
+    """Minimal BeliefStore mock for sleep testing (matches real API)."""
 
     def __init__(self, beliefs: Optional[Dict[str, MockBelief]] = None):
         self._beliefs = beliefs or {}
-        self._dirty = set()
         self._saved = False
-        self._maintained = False
+        self._compacted = False
 
-    def get_all(self):
-        return dict(self._beliefs)
+    def get_current(self):
+        return list(self._beliefs.values())
 
-    def _mark_dirty(self, bid):
-        self._dirty.add(bid)
+    def revise(self, belief_id, new_confidence, **kwargs):
+        if belief_id in self._beliefs:
+            self._beliefs[belief_id].confidence = new_confidence
+
+    def compact(self):
+        self._compacted = True
+
+    def _enforce_cap(self):
+        # Simulate pruning beliefs below floor
+        to_remove = [bid for bid, b in self._beliefs.items() if b.confidence < 0.05]
+        for bid in to_remove:
+            del self._beliefs[bid]
 
     def save(self):
         self._saved = True
-        self._dirty.clear()
-
-    def maintain(self):
-        self._maintained = True
-        # Simulate decay + prune
-        decayed = 0
-        pruned = 0
-        to_remove = []
-        for bid, b in self._beliefs.items():
-            if b.confidence > 0.1:
-                b.confidence -= 0.01
-                decayed += 1
-            if b.confidence < 0.05:
-                to_remove.append(bid)
-                pruned += 1
-        for bid in to_remove:
-            del self._beliefs[bid]
-        return {"decayed": decayed, "pruned": pruned}
 
 
 def _make_beliefs(n=5):
@@ -287,7 +278,6 @@ class TestSleepPhases:
         result = proc._phase_nrem2()
         assert result["beliefs_boosted"] >= 1
         assert b.confidence > old_conf
-        assert belief_store._saved  # save() was called
 
     def test_nrem2_no_boost_single_evidence(self):
         store = MockBeliefStore({
@@ -306,17 +296,16 @@ class TestSleepPhases:
         proc._phase_nrem2()
         assert store._beliefs["b1"].confidence <= 0.95
 
-    def test_nrem3_runs_maintain(self, belief_store):
+    def test_nrem3_runs_compact(self, belief_store):
         proc = SleepProcessor(belief_store=belief_store)
         result = proc._phase_nrem3()
         assert result["phase"] == "nrem3"
-        assert "beliefs_decayed" in result
-        assert belief_store._maintained
+        assert "beliefs_pruned" in result
+        assert belief_store._compacted
 
     def test_nrem3_no_belief_store(self):
         proc = SleepProcessor()
         result = proc._phase_nrem3()
-        assert result["beliefs_decayed"] == 0
         assert result["beliefs_pruned"] == 0
 
 
@@ -412,10 +401,10 @@ class TestIntegration:
         json_str = json.dumps(report, ensure_ascii=False)
         assert len(json_str) > 0
 
-    def test_maintain_called_in_nrem3(self, belief_store):
+    def test_compact_called_in_nrem3(self, belief_store):
         proc = SleepProcessor(belief_store=belief_store)
         proc.process_sleep_cycle()
-        assert belief_store._maintained
+        assert belief_store._compacted
 
     def test_dream_has_belief_references(self, belief_store):
         proc = SleepProcessor(belief_store=belief_store)

@@ -228,16 +228,25 @@ class PlannerCore:
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:
         """
-        Quick check if action would be blocked by K7 (rate limit or consecutive failures).
+        Quick check if action would be blocked by K7 (rate limit, mode, or consecutive failures).
 
         Used to avoid creating plans we know will be blocked.
         """
         if not getattr(self, '_autonomy_policy', None):
             return False
         try:
+            # Pass current mode so K7 can block GUARDED actions in SLEEP/REDUCED
+            mode = "active"
+            health = 1.0
+            if self._homeostasis_core:
+                state = self._homeostasis_core.get_state()
+                mode = state.mode.value
+                health = state.health_score
             check = self._autonomy_policy.check(
                 action_type=action_type_value,
                 action_params={},
+                mode=mode,
+                health_score=health,
             )
             return not check.allowed
         except Exception:

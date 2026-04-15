@@ -142,7 +142,7 @@ class SleepProcessor:
 
         # Belief stats
         if self._belief_store:
-            beliefs = list(self._belief_store.get_all().values())
+            beliefs = self._belief_store.get_current()
             confs = [b.confidence for b in beliefs]
             result["beliefs_total"] = len(beliefs)
             result["beliefs_avg_confidence"] = round(
@@ -179,18 +179,14 @@ class SleepProcessor:
         boosted = 0
 
         if self._belief_store:
-            beliefs = self._belief_store.get_all()
-            for bid, belief in beliefs.items():
+            beliefs = self._belief_store.get_current()
+            for belief in beliefs:
                 # Beliefs with evidence from multiple sources get a small boost
                 evidence = getattr(belief, 'evidence', []) or []
                 if len(evidence) >= 2 and belief.confidence < 0.95:
-                    old = belief.confidence
-                    belief.confidence = min(0.95, belief.confidence + 0.02)
-                    self._belief_store._mark_dirty(bid)
+                    new_conf = min(0.95, belief.confidence + 0.02)
+                    self._belief_store.revise(belief.belief_id, new_conf)
                     boosted += 1
-
-            if boosted > 0:
-                self._belief_store.save()
 
         result = {
             "phase": "nrem2",
@@ -202,29 +198,26 @@ class SleepProcessor:
     # -- NREM3: Forgetting (decay, prune, cleanup) --
 
     def _phase_nrem3(self) -> Dict[str, Any]:
-        """NREM3 - Decay old beliefs, prune weak ones. THIS IS FORGETTING."""
-        decayed = 0
+        """NREM3 - Compact and prune weak beliefs. THIS IS FORGETTING."""
+        before = 0
         pruned = 0
 
         if self._belief_store:
-            # Run the existing maintain() which does:
-            # 1. Confidence decay (FACT 90d, OBSERVATION 30d, HYPOTHESIS 14d)
-            # 2. Dedup (exact matching)
-            # 3. Smart prune (removes weakest when over limit)
-            # 4. Compaction (JSONL cleanup)
             try:
-                stats = self._belief_store.maintain()
-                decayed = stats.get("decayed", 0)
-                pruned = stats.get("pruned", 0)
+                before = len(self._belief_store.get_current())
+                self._belief_store.compact()
+                self._belief_store._enforce_cap()
+                after = len(self._belief_store.get_current())
+                pruned = max(0, before - after)
             except Exception as e:
-                logger.warning(f"NREM3 belief maintain failed: {e}")
+                logger.warning(f"NREM3 belief compact failed: {e}")
 
         result = {
             "phase": "nrem3",
-            "beliefs_decayed": decayed,
+            "beliefs_before": before if self._belief_store else 0,
             "beliefs_pruned": pruned,
         }
-        logger.debug(f"NREM3: decayed {decayed}, pruned {pruned}")
+        logger.debug(f"NREM3: pruned {pruned}")
         return result
 
     # -- Archival: Log compression --
@@ -252,7 +245,7 @@ class SleepProcessor:
         dreams = []
 
         if self._belief_store:
-            beliefs = list(self._belief_store.get_all().values())
+            beliefs = self._belief_store.get_current()
             # Filter: only beliefs with meaningful content
             dreamable = [
                 b for b in beliefs

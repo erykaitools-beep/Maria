@@ -15,11 +15,14 @@ Handles mode transitions with:
 Spec reference: homeostasis_spec.md section 3 (lines 239-361)
 """
 
+import logging
 import time
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 
 from .state_model import Mode
+
+logger = logging.getLogger(__name__)
 
 
 class TransitionResult(Enum):
@@ -111,8 +114,16 @@ class ModeRegulator:
         cpu_load = state.get("cpu_load", 0)
         idle_time = state.get("idle_seconds", 0)
 
+        # WAKE UP: If in SLEEP but it's learning window time, wake up
+        if self.current_mode == Mode.SLEEP and self._is_learning_window():
+            logger.info("Auto-wake: learning window active, transitioning SLEEP -> ACTIVE")
+            return Mode.ACTIVE
+
         # SLEEP: If idle long enough and resources OK
         if idle_time > self.IDLE_FOR_SLEEP_SEC and ram_available_pct > 60:
+            # Don't go to sleep during learning windows
+            if self._is_learning_window():
+                return self.current_mode  # Stay in current mode
             return Mode.SLEEP
 
         # REDUCED: If resource pressure
@@ -138,6 +149,15 @@ class ModeRegulator:
 
         # Fallback: stay in current mode if borderline
         return self.current_mode
+
+    @staticmethod
+    def _is_learning_window() -> bool:
+        """Check if current time is within a learning window (reuses environment config)."""
+        try:
+            from agent_core.environment.environment_model import is_learning_window
+            return is_learning_window()
+        except Exception:
+            return False
 
     def _can_transition_to(
         self,

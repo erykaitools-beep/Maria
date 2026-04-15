@@ -6,6 +6,7 @@ Spec reference: homeostasis_spec.md section 5 (lines 550-700)
 
 import pytest
 import time
+from unittest.mock import patch
 
 from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 from agent_core.homeostasis.state_model import Mode
@@ -177,9 +178,33 @@ class TestModeDecision:
         }
         alerts = []
 
-        mode = regulator.decide_mode(state, alerts)
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=False):
+            mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.SLEEP
+
+    def test_learning_window_prevents_sleep(self, regulator):
+        """Maria should not go to SLEEP during learning windows."""
+        state = {
+            "idle_seconds": 5000,
+            "ram_available_pct": 80,
+            "cpu_load": 20,
+        }
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=True):
+            mode = regulator.decide_mode(state, [])
+        assert mode == Mode.ACTIVE
+
+    def test_learning_window_wakes_from_sleep(self, regulator):
+        """Maria should auto-wake from SLEEP when learning window starts."""
+        regulator.transition_to(Mode.SLEEP)
+        state = {
+            "idle_seconds": 50000,
+            "ram_available_pct": 80,
+            "cpu_load": 20,
+        }
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=True):
+            mode = regulator.decide_mode(state, [])
+        assert mode == Mode.ACTIVE
 
     def test_user_override_respected(self, regulator):
         """User override should be respected if not critical."""
