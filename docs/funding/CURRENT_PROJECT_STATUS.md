@@ -81,8 +81,8 @@ enough data to train them — and, in practice, until there is hardware headroom
 to run them alongside the 1.0 loop. They are **not** presented as working
 features.
 
-The homeostasis loop runs **19 phases at 1 Hz**; the phase map is in
-[`docs/SYSTEM_STATUS.md`](../SYSTEM_STATUS.md).
+The homeostasis loop runs **19 phases at 1 Hz**; the loop is described in
+[`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ---
 
@@ -111,7 +111,7 @@ for the hardware-research program in
 
 | Component | Value | How verified (on host) |
 |---|---|---|
-| CPU | **AMD Ryzen 5 7430U** — 6 cores / 12 threads (Zen 3 "Barcelo") | `lscpu` |
+| CPU | **AMD Ryzen 5 7430U** — 6 cores / 12 threads (Zen 3) | `lscpu` |
 | AI acceleration | **none in use** — no on-die NPU; integrated Radeon (Vega) iGPU not used for inference | `lscpu`, `lspci`; 7430U has no XDNA/NPU |
 | Inference | **CPU-only** | all local models run as Ollama GGUF on CPU |
 | RAM | **32 GB** (≈30 GiB usable) | `free -h` |
@@ -136,7 +136,7 @@ and documented in [`docs/MODEL_REGISTRY.md`](../MODEL_REGISTRY.md).
 | Executor (main) | `llama3.1:8b` (Q4_K_M) | ~5.0 GB | kept warm |
 | Planner | `qwen3:8b` (Q4_K_M) | ~5.5 GB | loaded on demand |
 | Coder | `qwen2.5-coder:7b` (Q4_K_M) | ~5.0 GB | loaded on demand |
-| Embeddings | `nomic-embed-text` (768-dim) | ~0.3 GB | semantic memory |
+| Embeddings | `nomic-embed-text` (768-dim, 274 MB) | ~0.5 GB | semantic memory |
 | Triage | rule-based classifier | 0 GB | no LLM |
 
 A **heavy-model mutex** guarantees the two heaviest models never run
