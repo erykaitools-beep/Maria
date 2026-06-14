@@ -8,7 +8,7 @@
   <p align="center">
     <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/tests-4500%2B-brightgreen" alt="4500+ tests">
+    <img src="https://img.shields.io/badge/tests-5700%2B-brightgreen" alt="5700+ tests">
     <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
     <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
   </p>
@@ -291,7 +291,7 @@ maria/
 │   ├── llm/              # LLM routing, model registry
 │   ├── reminders/        # Time-triggered notifications
 │   ├── web_source/       # Wikipedia + RSS content fetcher
-│   └── tests/            # 4200+ tests
+│   └── tests/            # 5700+ tests
 ├── maria_ui/             # Flask Web UI
 │   ├── templates/        # HTML (Jinja2)
 │   └── static/           # CSS + JS
