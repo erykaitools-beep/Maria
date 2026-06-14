@@ -33,17 +33,18 @@ single mini PC since **2026-02-22**.
 | `agent_core/` application Python | ~95,000 lines | same, scoped to `agent_core/` |
 | Test Python | **~77,000 lines** | `find agent_core/tests -name '*.py' \| xargs wc -l` |
 | Test files | **184** | `find agent_core/tests -name 'test_*.py' \| wc -l` |
-| Automated tests passing | **5,799** | clean-checkout CI run, commit `59b1ce2` (see below) |
+| Automated tests passing | **5,799** | clean checkout, commit `59b1ce2`; latest CI run on `main` green |
 | Continuous integration | **green on Python 3.10, 3.11, 3.12** | [`.github/workflows/test.yml`](../../.github/workflows/test.yml) |
 
 The CI workflow runs `pytest agent_core/tests/ -q --tb=short -x --timeout=60`
 across a three-version Python matrix. The `-x` flag stops on the first failure,
 so a green run means the **entire** collected suite passed on every supported
-Python version. All tests are mocked — no network, no live LLM calls — so the
+Python version. The latest run on `main` (for commit `59b1ce2`) is green on all
+three versions. All tests are mocked — no network, no live LLM calls — so the
 suite is reproducible by anyone who clones the repository.
 
 The README badge reads `tests-5700+` as a conservative public figure; the exact
-count from the last clean checkout was 5,799.
+count reported from the last clean checkout was 5,799.
 
 ---
 
@@ -93,7 +94,7 @@ The homeostasis loop runs **19 phases at 1 Hz**; the loop is described in
 | Process model | single `maria.py` daemon (cognitive loop + Flask/SocketIO Web UI) | one systemd service |
 | Service | `maria.service` under systemd, `Restart=on-failure` | [`scripts/maria.service`](../../scripts/maria.service) |
 | Running since | **2026-02-22** | production host; systemd journal |
-| Continuity | ~4 months of operation with automatic restart on failure; beliefs, logs and knowledge carried across restarts | *live host, not repo-derivable* |
+| Continuity | nearly four months of operation with automatic restart on failure; beliefs, logs and knowledge carried across restarts | *live host, not repo-derivable* |
 | Memory governance | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` | systemd drop-in (added after the 2026-04-17 incident) |
 
 "Continuity" here means continuous **operation of the service**, not zero
@@ -115,8 +116,8 @@ for the hardware-research program in
 | AI acceleration | **none in use** — no on-die NPU; integrated Radeon (Vega) iGPU not used for inference | `lscpu`, `lspci`; 7430U has no XDNA/NPU |
 | Inference | **CPU-only** | all local models run as Ollama GGUF on CPU |
 | RAM | **32 GB** (≈30 GiB usable) | `free -h` |
-| System disk | ~100 GB SSD (`/`) | `df -h /` |
-| Data volume | **6 TB** (5.5 TB usable, `/mnt/storage`) for log archival | `df -h /mnt/storage` |
+| System disk | **1 TB SSD**, ~100 GB provisioned to the live root volume (`/`) | `lsblk` + `df -h /` |
+| Archival volume | **6 TB external USB** (5.5 TB usable, `/mnt/storage`) | `lsblk` + `df -h /mnt/storage` |
 | OS | Ubuntu 22.04 LTS | — |
 
 This is the single most important fact for hardware partners: **M.A.R.I.A. does
@@ -140,9 +141,11 @@ and documented in [`docs/MODEL_REGISTRY.md`](../MODEL_REGISTRY.md).
 | Triage | rule-based classifier | 0 GB | no LLM |
 
 A **heavy-model mutex** guarantees the two heaviest models never run
-concurrently; the documented safe coexistence ceiling is ~17 GB, and models of
-24B parameters or larger are explicitly excluded as "too large for comfortable
-daily use on 32 GB". Latency budgets (CPU): planner 60 s, executor 20 s, coder
+concurrently; the documented safe coexistence ceiling is ~17 GB, and the model
+registry marks 24B-class models as "too large for comfortable daily use on
+32 GB". In practice the production baseline stays at 8B-class models — larger
+models are not operationally safe under the current memory, latency and
+concurrency budgets. Latency budgets (CPU): planner 60 s, executor 20 s, coder
 30 s, triage <1 s.
 
 **External (optional):** an NVIDIA NIM endpoint is used for heavier learning and
@@ -184,8 +187,8 @@ Safety and autonomy are designed together. Detail is in
   auto-promotion are disabled by default. Each capability is gated behind an
   explicit flag and/or operator approval. Filesystem writes, when enabled, are
   sandboxed and limited to <1 KB.
-- **Action safety (K10).** Every action is recorded to an immutable audit log
-  with before/after state and effect validation.
+- **Action safety (K10).** Every action is recorded to an append-only audit
+  trail with before/after state and effect validation.
 - **Self-repair is an alert, not an autonomous fix.** The failure monitor
   detects problems and creates a task that an operator must approve; approval
   closes the task rather than dispatching a fix (ADR-031).

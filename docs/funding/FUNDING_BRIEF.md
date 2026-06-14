@@ -25,18 +25,19 @@ level the operator has granted).
 
 ### Current state (verifiable)
 
-- **~109k lines** of application Python + **~77k lines** of tests; **5,799
-  automated tests passing** in CI on Python 3.10/3.11/3.12.
+- **~109k lines** of application Python and **~77k lines** of test code;
+  **5,799 tests passing** in a clean checkout, with CI green across
+  Python 3.10/3.11/3.12.
 - **K1–K13 cognitive contracts** plus a 19-phase, 1 Hz homeostasis loop, observed
   in live logs.
-- Sandbox-first learning, immutable action audit, operator-gated effectors,
-  alert-based (not autonomous) self-repair.
+- Sandbox-first learning, append-only action audit trails, operator-gated
+  effectors, alert-based (not autonomous) self-repair.
 - Full numbers, with sources, in [`CURRENT_PROJECT_STATUS.md`](./CURRENT_PROJECT_STATUS.md).
 
 ### Evidence of maturity
 
-Four months of continuous production operation; a public history of **real
-incidents with root-cause analysis, fixes and regression tests** (memory leaks,
+Nearly four months of continuous production operation; a public history of
+**real incidents with root-cause analysis, fixes and regression tests** (memory leaks,
 deadlocks, OOM loops, an OS-level suspend masquerading as a freeze). This is an
 operated system, not a demo.
 
@@ -45,7 +46,8 @@ operated system, not a demo.
 The production host is an **AMD Ryzen 5 7430U, 32 GB RAM, CPU-only** — no NPU, no
 discrete GPU. Concrete consequences:
 
-- Local models are capped at ~8B parameters; models ≥24B are excluded.
+- The production baseline is limited to 8B-class models; larger models are not
+  operationally safe under the current memory, latency and concurrency budgets.
 - A **heavy-model mutex** serialises cognition — the planner and the coder cannot
   run at the same time.
 - Embeddings, vision and knowledge synthesis all compete for the same CPU.
@@ -58,17 +60,24 @@ This is a specific, measured bottleneck — not a wish for "a faster computer".
 
 Access to **stronger and more varied compute** to run a defined, reproducible
 benchmark and integration program — see
-[`HARDWARE_BENCHMARK_PLAN.md`](./HARDWARE_BENCHMARK_PLAN.md). Useful forms:
-modern CPU platforms with more memory bandwidth and RAM; unified-memory systems;
-GPU acceleration; and NPU-class edge platforms (e.g. Ryzen AI / ROCm targets) for
-on-device inference experiments.
+[`HARDWARE_BENCHMARK_PLAN.md`](./HARDWARE_BENCHMARK_PLAN.md). Useful forms, by
+distinct role:
+
+- **more RAM / memory bandwidth** → larger local models;
+- **unified-memory systems and discrete GPUs** → larger models and concurrent
+  multi-model operation;
+- **ROCm** → GPU acceleration on AMD hardware;
+- **NPU-class platforms** (e.g. Ryzen AI / XDNA) → experiments with smaller
+  models, embeddings, classification or perception — *contingent on the
+  inference tool stack actually supporting the NPU* (we do not assume Ollama uses
+  a Ryzen AI NPU automatically today).
 
 ### What stronger hardware would enable
 
-- A larger local planner (20B+) and **concurrent multi-model cognition** instead
-  of serialised single-model steps.
-- On-device acceleration for embeddings and vision, freeing the CPU for reasoning.
-- **Activating the frozen 2.0 research tracks** on real data.
+- Evaluation of **20B+ planner-class models** and **concurrent multi-model
+  operation** instead of serialised single-model steps.
+- Accelerated embeddings and vision workloads, freeing the CPU for reasoning.
+- A path to **re-evaluating the frozen 2.0 research tracks** on real data.
 - A published reference for "an efficient, safety-governed local agent across CPU
   / GPU / NPU hardware classes" — each claim measured, not assumed.
 

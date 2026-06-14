@@ -17,7 +17,8 @@ M.A.R.I.A. runs today entirely on CPU on a single 32 GB mini PC
 (see [`CURRENT_PROJECT_STATUS.md`](./CURRENT_PROJECT_STATUS.md) §5). That host
 imposes hard limits:
 
-- local models capped at ~8B; models ≥24B excluded;
+- a production baseline limited to 8B-class models (larger models are not
+  operationally safe under the current memory/latency/concurrency budgets);
 - a heavy-model mutex that serialises planning and coding;
 - embeddings, vision and synthesis competing for the same cores;
 - no NPU and no discrete GPU, so no on-device acceleration path.
@@ -40,7 +41,7 @@ The baseline is the reference every other platform is compared against.
 | RAM | 32 GB |
 | Inference runtime | Ollama (llama.cpp), GGUF Q4_K_M, CPU |
 | Models | `llama3.1:8b` (executor, warm), `qwen3:8b` (planner), `qwen2.5-coder:7b`, `nomic-embed-text` (768-dim), rule-based triage |
-| Known limits | heavy-model mutex; ~17 GB safe coexistence ceiling; ≥24B excluded |
+| Known limits | heavy-model mutex; ~17 GB safe coexistence ceiling; 8B-class baseline (larger models not operationally safe today) |
 
 The baseline measurement (Stage 1) captures, on this exact machine, the metrics
 in §4 — so that "improvement" is always stated relative to a published number,
@@ -63,7 +64,9 @@ Not every model is expected to run on every platform; that is itself a result.
    time-to-first-token, and running planner + coder concurrently.
 4. **NPU-class edge platforms** — e.g. Ryzen AI (XDNA) or comparable NPUs. Tests
    on-device acceleration for embeddings and vision specifically, where an NPU is
-   well-matched, at low power.
+   well-matched, at low power. This is **contingent on the inference tool stack
+   actually supporting the NPU** — we do not assume Ollama uses a Ryzen AI NPU
+   automatically; establishing what the toolchain supports is part of the test.
 
 For each class we record what *did not* run (and why) as carefully as what did.
 

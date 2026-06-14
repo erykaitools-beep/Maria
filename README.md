@@ -222,10 +222,10 @@ Maria has been running continuously on a single mini PC since 2026-02-22. This i
 
 | | |
 |---|---|
-| **Hardware** | AMD Ryzen 5 7430U (6c/12t, CPU-only — no NPU, no discrete GPU) · 32 GB RAM · ~100 GB system SSD + 6 TB archival volume · Ubuntu 22.04 |
+| **Hardware** | AMD Ryzen 5 7430U (6c/12t, CPU-only — no NPU, no discrete GPU) · 32 GB RAM · 1 TB system SSD (~100 GB provisioned) + 6 TB external archival · Ubuntu 22.04 |
 | **Deployment** | `maria.service` under systemd, auto-restart on failure |
 | **Resource ceiling** | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` (systemd drop-in, hard-capped after an incident — see below) |
-| **Archival storage** | 6 TB ext4 disk for rotated logs and daily summaries |
+| **Archival storage** | 6 TB external USB disk (ext4) for rotated logs and daily summaries |
 
 Live counters as of 2026-04-18 (~8 weeks in):
 
