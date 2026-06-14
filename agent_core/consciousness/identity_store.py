@@ -108,14 +108,29 @@ class IdentityStore:
         return data
 
     def _save(self, data: Optional[Dict[str, Any]] = None) -> None:
-        """Save identity to disk."""
+        """Save identity to disk atomically (Klocek 9c).
+
+        Identity is a single JSON document with no per-line salvage, so an
+        in-place overwrite interrupted mid-write (indent=2 = several writes)
+        would corrupt the WHOLE file -> total identity loss on next load.
+        Write to a tmp file, fsync, then os.replace so a crash leaves either
+        the old file or the new one intact, never a torn one."""
         if data is None:
             data = self._data
+        tmp = f"{self._file_path}.tmp"
         try:
-            with open(self._file_path, "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self._file_path)
         except IOError as e:
             print(f"[Identity] [ERROR] Could not save identity: {e}")
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
 
     # -------------------------------------------------
     # SESSION LIFECYCLE

@@ -5,8 +5,10 @@ Kontrakt: docs/CONTRACTS.md - Kontrakt 3: Goal System
 Persistence: meta_data/goals.jsonl (append-only, last record per id wins).
 """
 
+import functools
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -27,8 +29,25 @@ from agent_core.goals.goal_model import (
 logger = logging.getLogger(__name__)
 
 
+def _synchronized(method):
+    """Serialize a GoalStore method on the shared class-level I/O lock.
+
+    The Web UI creates its own GoalStore instance per request in the same
+    process as the daemon, so the lock is class-level (shared by all
+    instances) to serialize concurrent access to goals.jsonl.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._io_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class GoalStore:
     """CRUD + persistence for goals."""
+
+    # Shared across all instances in this process (daemon + per-request UI).
+    _io_lock = threading.RLock()
 
     def __init__(self, goals_path: Path):
         """
@@ -41,6 +60,7 @@ class GoalStore:
 
     # ---- Load / Save ----
 
+    @_synchronized
     def load(self) -> None:
         """Load goals from JSONL. Last record per id wins."""
         self._goals.clear()
@@ -64,6 +84,7 @@ class GoalStore:
 
         self._dirty_ids.clear()
 
+    @_synchronized
     def save(self) -> None:
         """Append dirty goals to JSONL."""
         if not self._dirty_ids:
@@ -79,14 +100,93 @@ class GoalStore:
                         line = json.dumps(goal.to_dict(), ensure_ascii=False)
                         f.write(line + "\n")
             self._dirty_ids.clear()
+            self._compact_if_needed()
         except OSError as e:
             logger.error(f"Cannot write goals.jsonl: {e}")
+
+    @_synchronized
+    def compact(self) -> None:
+        """Rewrite goals.jsonl to one latest record per goal id.
+
+        Merges records from disk first so a rewrite from our (possibly stale)
+        cache never drops goals another in-process instance appended.
+        """
+        if not self._goals_path.exists():
+            return
+
+        self._merge_from_disk()
+        line_count = self._count_nonempty_lines()
+        unique_count = len(self._goals)
+        tmp_path = self._goals_path.with_suffix(self._goals_path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for goal in self._goals.values():
+                    line = json.dumps(goal.to_dict(), ensure_ascii=False)
+                    f.write(line + "\n")
+            tmp_path.replace(self._goals_path)
+            logger.info(
+                "Compacted goals.jsonl: %s lines -> %s unique goals",
+                line_count,
+                unique_count,
+            )
+        except OSError as e:
+            logger.error(f"Cannot compact goals.jsonl: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
+    def _merge_from_disk(self) -> None:
+        """Merge file records into the cache; newer updated_at wins.
+
+        Guards against another in-process GoalStore (the Web UI builds one
+        per request) having appended status changes our cache predates.
+        """
+        if not self._goals_path.exists():
+            return
+        try:
+            with open(self._goals_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        goal = Goal.from_dict(json.loads(line))
+                    except (json.JSONDecodeError, KeyError, ValueError):
+                        continue
+                    cached = self._goals.get(goal.id)
+                    if cached is None or goal.updated_at >= cached.updated_at:
+                        self._goals[goal.id] = goal
+        except OSError as e:
+            logger.error(f"Cannot merge goals.jsonl: {e}")
+
+    def _count_nonempty_lines(self) -> int:
+        """Count non-empty JSONL rows in goals file."""
+        if not self._goals_path.exists():
+            return 0
+        try:
+            with open(self._goals_path, "r", encoding="utf-8") as f:
+                return sum(1 for line in f if line.strip())
+        except OSError as e:
+            logger.error(f"Cannot inspect goals.jsonl for compaction: {e}")
+            return 0
+
+    def _compact_if_needed(self) -> None:
+        """Run compaction when lines exceed 2x unique in-memory records."""
+        unique_count = len(self._goals)
+        if unique_count == 0:
+            return
+        line_count = self._count_nonempty_lines()
+        if line_count > (2 * unique_count):
+            self.compact()
 
     def _mark_dirty(self, goal_id: str) -> None:
         self._dirty_ids.add(goal_id)
 
     # ---- Create ----
 
+    @_synchronized
     def create(self, goal: Goal) -> str:
         """Add a goal (PENDING or ACTIVE). Returns id.
 
@@ -106,6 +206,7 @@ class GoalStore:
     # Sources whose PROPOSED goals are auto-confirmed (low risk learning)
     AUTO_CONFIRM_SOURCES = {"creative", "critic", "self_analysis"}
 
+    @_synchronized
     def propose(self, goal: Goal) -> Optional[str]:
         """Create a PROPOSED goal (awaiting user confirmation).
 
@@ -189,14 +290,17 @@ class GoalStore:
 
     # ---- Read ----
 
+    @_synchronized
     def get(self, goal_id: str) -> Optional[Goal]:
         """Get goal by id."""
         return self._goals.get(goal_id)
 
+    @_synchronized
     def get_all(self) -> List[Goal]:
         """Get all goals (including terminal)."""
         return list(self._goals.values())
 
+    @_synchronized
     def get_active(self, goal_type: Optional[GoalType] = None) -> List[Goal]:
         """Get active goals (PENDING + ACTIVE), optionally filtered by type."""
         result = [g for g in self._goals.values() if g.is_active]
@@ -204,6 +308,7 @@ class GoalStore:
             result = [g for g in result if g.type == goal_type]
         return sorted(result, key=lambda g: g.priority, reverse=True)
 
+    @_synchronized
     def get_proposed(self) -> List[Goal]:
         """Get goals awaiting user confirmation (PROPOSED)."""
         return [
@@ -211,6 +316,7 @@ class GoalStore:
             if g.status == GoalStatus.PROPOSED
         ]
 
+    @_synchronized
     def get_children(self, parent_goal_id: str) -> List[Goal]:
         """Get child goals of a parent."""
         return [
@@ -218,6 +324,7 @@ class GoalStore:
             if g.parent_goal_id == parent_goal_id
         ]
 
+    @_synchronized
     def find_by_topic(self, topic: str) -> List[Goal]:
         """Find LEARNING goals matching a topic (case-insensitive substring)."""
         topic_lower = topic.lower()
@@ -234,6 +341,7 @@ class GoalStore:
                 results.append(g)
         return sorted(results, key=lambda g: g.created_at, reverse=True)
 
+    @_synchronized
     def set_outcome(self, goal_id: str, outcome: dict) -> bool:
         """Set outcome dict on a goal (typically on completion)."""
         goal = self._goals.get(goal_id)
@@ -246,6 +354,7 @@ class GoalStore:
 
     # ---- Update ----
 
+    @_synchronized
     def confirm(self, goal_id: str) -> bool:
         """User confirms PROPOSED goal -> PENDING."""
         goal = self._goals.get(goal_id)
@@ -253,6 +362,7 @@ class GoalStore:
             return False
         return self.update_status(goal_id, GoalStatus.PENDING, "user confirmed", "user")
 
+    @_synchronized
     def reject(self, goal_id: str) -> bool:
         """User rejects PROPOSED goal -> ABANDONED."""
         goal = self._goals.get(goal_id)
@@ -260,6 +370,7 @@ class GoalStore:
             return False
         return self.update_status(goal_id, GoalStatus.ABANDONED, "user rejected", "user")
 
+    @_synchronized
     def update_status(
         self, goal_id: str, status: GoalStatus, reason: str, actor: str
     ) -> bool:
@@ -283,6 +394,7 @@ class GoalStore:
         self._mark_dirty(goal_id)
         return True
 
+    @_synchronized
     def update_progress(self, goal_id: str, progress: float) -> bool:
         """Update progress. Auto-ACHIEVED at >= 1.0 for ACTIVE goals."""
         goal = self._goals.get(goal_id)
@@ -306,6 +418,7 @@ class GoalStore:
 
     # ---- Cleanup ----
 
+    @_synchronized
     def abandon_lowest(self) -> Optional[str]:
         """Abandon lowest priority PENDING goal. Returns id or None."""
         pending = [
@@ -322,6 +435,7 @@ class GoalStore:
         )
         return lowest.id
 
+    @_synchronized
     def expire_proposed(self) -> int:
         """Auto-ABANDON PROPOSED goals older than 24h. Returns count."""
         now = time.time()
@@ -337,6 +451,7 @@ class GoalStore:
                     count += 1
         return count
 
+    @_synchronized
     def reset_maintenance(self) -> int:
         """Reset MAINTENANCE goals for new session. Returns count."""
         count = 0
@@ -350,6 +465,7 @@ class GoalStore:
 
     # ---- Seed Goals ----
 
+    @_synchronized
     def seed_if_empty(self) -> int:
         """Create seed goals (META + MAINTENANCE) if store is empty. Returns count."""
         if self._goals:
@@ -415,6 +531,7 @@ class GoalStore:
 
     # ---- Stats ----
 
+    @_synchronized
     def stats(self) -> dict:
         """Return summary statistics."""
         by_status = {}

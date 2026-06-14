@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.tests.spec_helpers import specced
 from agent_core.registry import (
     MariaModule,
     CommandInfo,
@@ -167,7 +169,7 @@ class TestHomeostasisModule:
         # Need to init first for get_commands to work
         ctx = make_ctx()
         # Provide a mock homeostasis_core
-        mock_core = MagicMock()
+        mock_core = specced(HomeostasisCore, state=MagicMock())
         mock_core.state.mode.value = "active"
         mock_core.state.health_score = 0.95
         mock_core.state.mode_duration_seconds = 100
@@ -184,7 +186,7 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        mock_core = MagicMock()
+        mock_core = specced(HomeostasisCore, state=MagicMock())
         mock_core.state.mode.value = "active"
         mock_core.state.health_score = 0.95
         mock_core.state.mode_duration_seconds = 100
@@ -202,17 +204,45 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        ctx.homeostasis_core = MagicMock()
+        ctx.homeostasis_core = specced(HomeostasisCore, state=MagicMock())
         m.init(ctx)
         m._cmd_homeostasis(["xyz"])
         output = capsys.readouterr().out
         assert "Unknown subcommand" in output
 
+    def test_llm_tape_init_does_not_use_nonexistent_ctx_config(self):
+        """Regression: ctx.config.BASE_DIR silently failed 2026-04-13 → 17.
+
+        SharedContext has no `config` attribute. The LLM Tape init block
+        once tried `Path(ctx.config.BASE_DIR) / "meta_data" / "llm_tape.jsonl"`
+        which raised AttributeError — swallowed by `except Exception:
+        logger.debug(...)`. Net effect: LLM Tape never wired, zero writes
+        for 4 days. Guard against the typo returning.
+        """
+        from pathlib import Path
+        import agent_core.modules.homeostasis_module as hm
+        src = Path(hm.__file__).read_text(encoding="utf-8")
+        assert "ctx.config.BASE_DIR" not in src, (
+            "Regression: ctx.config.BASE_DIR is back in homeostasis_module.py. "
+            "SharedContext has no `config` attribute — this pattern fails "
+            "silently. Use `from maria_core.sys.config import BASE_DIR` instead."
+        )
+
+    def test_shared_context_has_no_config_attribute(self):
+        """If someone adds `config` to SharedContext, reconsider the LLM
+        Tape guard above — but make the intent explicit."""
+        from agent_core.registry.shared_context import SharedContext
+        ctx = SharedContext()
+        assert not hasattr(ctx, "config"), (
+            "SharedContext.config was added. Update test_llm_tape_init_* and "
+            "related regression guards — previous assumption no longer holds."
+        )
+
     def test_stop_not_running(self, capsys):
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        ctx.homeostasis_core = MagicMock()
+        ctx.homeostasis_core = specced(HomeostasisCore, state=MagicMock())
         m.init(ctx)
         m._cmd_homeostasis(["stop"])
         output = capsys.readouterr().out

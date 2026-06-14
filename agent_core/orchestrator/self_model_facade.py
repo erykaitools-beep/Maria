@@ -215,7 +215,7 @@ class UserFacingSelfModel:
         """
         core = self._get_homeostasis()
         if core:
-            mode = getattr(core, "_current_mode", None)
+            mode = getattr(getattr(core, "state", None), "mode", None)
             if mode:
                 return str(mode.name) if hasattr(mode, "name") else str(mode)
         return "UNKNOWN"
@@ -237,14 +237,32 @@ class UserFacingSelfModel:
         if not self._ctx.openclaw_client:
             base.append("OpenClaw efektor niedostepny")
 
-        # Check NIM availability
-        try:
-            from agent_core.llm.nim_client import NIMClient
-            nim = NIMClient()
-            if not nim.is_available():
-                base.append("NIM API niedostepne (brak zewnetrznego LLM)")
-        except Exception:
-            pass
+        # Check NIM availability. NIMClient.__init__ requires api_key as
+        # a positional arg; the previous `NIMClient()` call always raised
+        # TypeError, the bare except swallowed it, and Maria could never
+        # truthfully report whether NIM was reachable. Read credentials
+        # from env (same source main.py + maria_ui/app.py use) so the
+        # check actually runs.
+        import os
+        api_key = (os.environ.get("NVIDIA_NIM_API_KEY") or "").strip()
+        if not api_key:
+            base.append("NIM API niedostepne (brak klucza)")
+        else:
+            try:
+                from agent_core.llm.nim_client import NIMClient
+                from maria_core.sys.config import DEFAULT_NIM_MODEL
+                nim = NIMClient(
+                    api_key=api_key,
+                    model=os.environ.get("NVIDIA_NIM_MODEL", DEFAULT_NIM_MODEL),
+                    base_url=os.environ.get("NVIDIA_NIM_BASE_URL"),
+                )
+                if not nim.is_available():
+                    base.append("NIM API niedostepne (brak zewnetrznego LLM)")
+            except Exception as e:
+                logger.warning(
+                    f"[SelfModel] NIM availability check failed: {e}"
+                )
+                base.append("NIM API status nieznany (blad sprawdzenia)")
 
         return base
 

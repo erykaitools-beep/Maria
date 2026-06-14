@@ -6,6 +6,17 @@ from io import StringIO
 
 from agent_core.orchestrator.product_shell import ProductShell
 from agent_core.routing.capability_spec import CapabilitySpec
+from agent_core.tests.spec_helpers import specced
+from agent_core.registry.shared_context import SharedContext
+from agent_core.homeostasis.core import HomeostasisCore
+from types import SimpleNamespace
+from agent_core.homeostasis.state_model import Mode
+from agent_core.consciousness.identity_store import IdentityStore
+from agent_core.consciousness.core import ConsciousnessCore
+from agent_core.consciousness.self_model import SelfModelBuilder
+from agent_core.routing.capability_router import CapabilityRouter
+from agent_core.awareness.context_builder import ContextBuilder
+from agent_core.goals.store import GoalStore
 
 
 # ===========================================================================
@@ -25,26 +36,25 @@ def _make_specs():
 
 @pytest.fixture
 def mock_ctx():
-    ctx = MagicMock()
-    mode = MagicMock()
-    mode.name = "ACTIVE"
-    ctx.homeostasis_core = MagicMock()
-    ctx.homeostasis_core._current_mode = mode
-    ctx.autonomy_policy = None
-    ctx.meta_cognition = None
-    ctx.openclaw_client = None
-    ctx.codex_client = None
-    ctx.telegram_bridge = None
-    ctx.brain = None
-    ctx.llm_router = None
-    ctx.planner_core = None
-    ctx.trace_store = None
-    ctx.llm_tape = None
-    ctx.brain_model = "llama3.1:8b"
+    # HomeostasisCore exposes the live mode at core.state.mode (real Mode enum);
+    # attach a state stand-in via specced kwargs (state is an instance attr).
+    hcore = specced(HomeostasisCore, state=SimpleNamespace(mode=Mode.ACTIVE))
+    ctx = specced(SharedContext,
+                  homeostasis_core=hcore,
+                  autonomy_policy=None,
+                  meta_cognition=None,
+                  openclaw_client=None,
+                  codex_client=None,
+                  telegram_bridge=None,
+                  brain=None,
+                  llm_router=None,
+                  planner_core=None,
+                  trace_store=None,
+                  llm_tape=None,
+                  brain_model="llama3.1:8b")
 
     # Identity store
-    identity = MagicMock()
-    identity._data = {"onboarding_completed": True}
+    identity = specced(IdentityStore, _data={"onboarding_completed": True})
     identity.get_identity_dict.return_value = {
         "session_count": 42, "total_uptime_hours": 100,
         "birth_date": "2025-11-14", "age_string": "5 miesiecy",
@@ -52,21 +62,22 @@ def mock_ctx():
     }
     ctx.identity_store = identity
 
-    # Consciousness
-    consciousness = MagicMock()
-    consciousness.self_model.get_traits.return_value = ["ciekawska"]
-    consciousness.self_model.get_trait_scores.return_value = {}
+    # Consciousness — self_model is an instance attr set in __init__, attach via specced
+    self_model = specced(SelfModelBuilder)
+    self_model.get_traits.return_value = ["ciekawska"]
+    self_model.get_trait_scores.return_value = {}
+    consciousness = specced(ConsciousnessCore, self_model=self_model)
     ctx.consciousness = consciousness
 
     # Capability router
-    router = MagicMock()
+    router = specced(CapabilityRouter)
     router.list_capabilities.return_value = _make_specs()
     router.is_available.return_value = True
     router.dispatch.return_value = {"success": True}
     ctx.capability_router = router
 
     # Context builder
-    builder = MagicMock()
+    builder = specced(ContextBuilder)
     builder.get_detailed_file_list.return_value = [
         {"file": "fizyka.txt", "status": "learned"},
     ]
@@ -74,7 +85,7 @@ def mock_ctx():
     ctx.context_builder = builder
 
     # Goal store
-    goal_store = MagicMock()
+    goal_store = specced(GoalStore)
     goal_store.create.return_value = "goal-test"
     goal_store.get.return_value = None
     goal_store.get_active.return_value = []

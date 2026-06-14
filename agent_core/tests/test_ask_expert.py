@@ -10,6 +10,12 @@ from unittest.mock import MagicMock, patch
 
 from agent_core.planner.planner_model import ActionType
 from agent_core.planner.action_executor import ActionExecutor
+from agent_core.tests.spec_helpers import specced
+from agent_core.llm.router import LLMRouter
+from agent_core.autonomy import AutonomyPolicy, CheckResult
+from agent_core.world_model import WorldModel
+from agent_core.world_model.query import WorldModelQuery
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
 
 
 class TestActionTypeAskExpert:
@@ -46,8 +52,8 @@ class TestExecAskExpert:
 
     def _make_executor(self, encyclopedia_response="Expert answer"):
         executor = ActionExecutor()
-        router = MagicMock()
-        router.ask_encyclopedia = MagicMock(return_value=encyclopedia_response)
+        router = specced(LLMRouter)
+        router.ask_encyclopedia.return_value = encyclopedia_response
         executor.set_llm_router(router)
         return executor, router
 
@@ -128,11 +134,9 @@ class TestPlannerAskExpertTrigger:
         planner = PlannerCore()
 
         # Mock K7 to block fetch but allow ask_expert
-        policy = MagicMock()
-        fetch_blocked = MagicMock()
-        fetch_blocked.allowed = False
-        expert_allowed = MagicMock()
-        expert_allowed.allowed = True
+        policy = specced(AutonomyPolicy)
+        fetch_blocked = CheckResult(allowed=False, decision="blocked", classification="guarded")
+        expert_allowed = CheckResult(allowed=True, decision="allowed", classification="guarded")
 
         def _check_mock(action_type, **kwargs):
             if action_type == "fetch":
@@ -141,14 +145,13 @@ class TestPlannerAskExpertTrigger:
                 return expert_allowed
             return expert_allowed
 
-        policy.check = _check_mock
+        policy.check.side_effect = _check_mock
         planner._autonomy_policy = policy
 
         # Mock world model with a gap
-        world_model = MagicMock()
-        world_model.query.get_knowledge_gaps.return_value = [
-            {"topic": "kwantowa fizyka"}
-        ]
+        wm_query = specced(WorldModelQuery)
+        wm_query.get_knowledge_gaps.return_value = [{"topic": "kwantowa fizyka"}]
+        world_model = specced(WorldModel, query=wm_query)
         planner._world_model = world_model
 
         snapshot = {
@@ -163,10 +166,9 @@ class TestPlannerAskExpertTrigger:
         planner = PlannerCore()
 
         # Block everything
-        policy = MagicMock()
-        blocked = MagicMock()
-        blocked.allowed = False
-        policy.check = MagicMock(return_value=blocked)
+        policy = specced(AutonomyPolicy)
+        blocked = CheckResult(allowed=False, decision="blocked", classification="guarded")
+        policy.check.return_value = blocked
         planner._autonomy_policy = policy
 
         snapshot = {
@@ -180,10 +182,9 @@ class TestPlannerAskExpertTrigger:
         from agent_core.planner.planner_core import PlannerCore
         planner = PlannerCore()
 
-        world_model = MagicMock()
-        world_model.query.get_knowledge_gaps.return_value = [
-            {"topic": "biologia molekularna"}
-        ]
+        wm_query = specced(WorldModelQuery)
+        wm_query.get_knowledge_gaps.return_value = [{"topic": "biologia molekularna"}]
+        world_model = specced(WorldModel, query=wm_query)
         planner._world_model = world_model
 
         topic = planner._pick_expert_topic()
@@ -194,7 +195,7 @@ class TestPlannerAskExpertTrigger:
         planner = PlannerCore()
         planner._world_model = None
 
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_topic_file_map.return_value = {"chemia": ["f1", "f2"]}
         planner._knowledge_analyzer = analyzer
 
@@ -342,8 +343,8 @@ class TestExecAskExpertWithBridge:
     def test_no_bridge_no_topic_still_works_legacy(self):
         """Without bridge, falls through to legacy path."""
         executor = ActionExecutor()
-        router = MagicMock()
-        router.ask_encyclopedia = MagicMock(return_value="Legacy answer")
+        router = specced(LLMRouter)
+        router.ask_encyclopedia.return_value = "Legacy answer"
         executor.set_llm_router(router)
         plan = self._make_plan(topic="chemia")
         result = executor.execute(plan)
@@ -358,9 +359,17 @@ class TestHandlerExpertBridgePath:
         from agent_core.bulletin.expert_bridge import ExpertBridge, ExpertResponse
 
         bridge = ExpertBridge()
+        # Realistic response — avoids repeated-char garbage guard added
+        # to save_expert_response (2026-04-21, see TestExpertResponseGuard).
         resp = ExpertResponse(
             success=True, topic="fizyka",
-            response="w" * 200,
+            response=(
+                "Fizyka to nauka o materii, energii i ich oddziaływaniach. "
+                "Bada zjawiska od mikroskali kwantowej po skale kosmiczne. "
+                "Kluczowe gałęzie to mechanika, termodynamika, elektromagnetyzm "
+                "i fizyka kwantowa. Współczesna fizyka łączy teorię względności "
+                "z mechaniką kwantową w modelu standardowym cząstek."
+            ),
             context_prompt="Maria potrzebuje...",
             gap_action="ask_expert",
             reason="no_knowledge_exists",
@@ -390,9 +399,17 @@ class TestHandlerExpertBridgePath:
         from agent_core.bulletin.bulletin_model import EntryType, EntryStatus, create_entry
 
         bridge = ExpertBridge()
+        # Realistic response — avoids repeated-char garbage guard added
+        # to save_expert_response (2026-04-21, see TestExpertResponseGuard).
         resp = ExpertResponse(
             success=True, topic="fizyka",
-            response="q" * 200,
+            response=(
+                "Fizyka opisuje prawa rządzące materią i energią. "
+                "Obejmuje mechanikę klasyczną, elektrodynamikę, termodynamikę "
+                "oraz fizykę kwantową. Badacze stosują eksperyment i model "
+                "matematyczny jako uzupełniające się narzędzia. Współczesna "
+                "fizyka cząstek opisuje oddziaływania fundamentalne."
+            ),
             context_prompt="test",
             gap_action="ask_expert",
         )

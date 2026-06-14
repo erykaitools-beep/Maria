@@ -7,6 +7,8 @@ import pytest
 
 from agent_core.weather.weather_sensor import WeatherData, WeatherSensor
 from agent_core.weather.salience import is_weather_salient, format_weather_line
+from agent_core.operator.operator_model import OperatorModel
+from agent_core.tests.spec_helpers import specced
 
 
 # --- Fixtures ---
@@ -208,13 +210,13 @@ class TestSalienceFilter:
 
     def test_preference_always_show(self):
         w = _make_weather(temp=20, icon="01d")  # normal weather
-        om = MagicMock()
+        om = specced(OperatorModel)
         om.get_preference.return_value = True
         assert is_weather_salient(w, operator_model=om) is True
 
     def test_preference_not_set(self):
         w = _make_weather(temp=20, icon="01d")
-        om = MagicMock()
+        om = specced(OperatorModel)
         om.get_preference.return_value = False
         assert is_weather_salient(w, operator_model=om) is False
 

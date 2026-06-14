@@ -2,6 +2,8 @@
 
 import pytest
 from unittest.mock import MagicMock
+from types import SimpleNamespace
+from agent_core.homeostasis.state_model import Mode
 
 from agent_core.orchestrator.cost_estimator import (
     CostEstimator,
@@ -21,6 +23,10 @@ from agent_core.orchestrator.free_vs_paid import (
     ActionRecommendation,
     PlanRecommendation,
 )
+from agent_core.orchestrator.execution_plan import ExecutionPlan, StepConstraint
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.registry.shared_context import SharedContext
+from agent_core.tests.spec_helpers import specced
 
 
 # ===========================================================================
@@ -29,16 +35,16 @@ from agent_core.orchestrator.free_vs_paid import (
 
 @pytest.fixture
 def mock_ctx():
-    ctx = MagicMock()
-    ctx.homeostasis_core = MagicMock()
-    mode = MagicMock()
-    mode.name = "ACTIVE"
-    ctx.homeostasis_core._current_mode = mode
-    ctx.brain = None
-    ctx.llm_router = None
-    ctx.codex_client = None
-    ctx.claude_client = None
-    ctx.llm_tape = None
+    hc = specced(HomeostasisCore, state=SimpleNamespace(mode=Mode.ACTIVE))
+    ctx = specced(
+        SharedContext,
+        homeostasis_core=hc,
+        brain=None,
+        llm_router=None,
+        codex_client=None,
+        claude_client=None,
+        llm_tape=None,
+    )
     return ctx
 
 
@@ -57,31 +63,42 @@ def fvp_planner(mock_ctx):
     return FreeVsPaidPlanner(mock_ctx)
 
 
+def _make_step(order: int, action: str) -> StepConstraint:
+    """Create a minimal real StepConstraint for plan fixtures."""
+    return StepConstraint(
+        step_order=order,
+        action=action,
+        description="",
+        estimated_llm_calls=0,
+        k7_classification="FREE",
+        is_available=True,
+        is_blocked=False,
+        block_reason="",
+        requires_approval=False,
+    )
+
+
 @pytest.fixture
 def mock_plan():
-    """Mock ExecutionPlan with a few steps."""
-    plan = MagicMock()
-    step1 = MagicMock()
-    step1.action = "learn"
-    step2 = MagicMock()
-    step2.action = "exam"
-    step3 = MagicMock()
-    step3.action = "self_analyze"
-    plan.steps = [step1, step2, step3]
+    """Specced ExecutionPlan with a few steps."""
+    plan = specced(ExecutionPlan)
+    plan.steps = [
+        _make_step(1, "learn"),
+        _make_step(2, "exam"),
+        _make_step(3, "self_analyze"),
+    ]
     return plan
 
 
 @pytest.fixture
 def free_plan():
-    """Mock plan with only free actions."""
-    plan = MagicMock()
-    step1 = MagicMock()
-    step1.action = "learn"
-    step2 = MagicMock()
-    step2.action = "exam"
-    step3 = MagicMock()
-    step3.action = "evaluate"
-    plan.steps = [step1, step2, step3]
+    """Specced plan with only free actions."""
+    plan = specced(ExecutionPlan)
+    plan.steps = [
+        _make_step(1, "learn"),
+        _make_step(2, "exam"),
+        _make_step(3, "evaluate"),
+    ]
     return plan
 
 

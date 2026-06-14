@@ -13,6 +13,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.bulletin.bulletin_model import BulletinEntry
+from agent_core.cross_validation.dispute_log import DisputeLog
+from agent_core.critic import CriticAgent
+from agent_core.goals.store import GoalStore
+from agent_core.goals.goal_model import Goal
+from agent_core.planner.planner_model import Plan
+from agent_core.world_model.belief_store import BeliefStore
+
 from agent_core.critic.critique_model import (
     CritiqueFinding,
     CritiqueReport,
@@ -31,7 +41,6 @@ from agent_core.critic.critique_model import (
 )
 from agent_core.critic.knowledge_critic import KnowledgeCritic
 from agent_core.critic.critique_applier import CritiqueApplier
-from agent_core.critic import CriticAgent
 
 
 # =============================================================================
@@ -71,7 +80,8 @@ def _make_belief(
         EXAM = "exam"
 
     now = time.time()
-    b = MagicMock()
+    from agent_core.world_model.belief_model import Belief as _BeliefCls
+    b = specced(_BeliefCls)
     b.belief_id = belief_id
     b.entity = entity
     b.entity_type = entity_type or _ET.TOPIC
@@ -92,8 +102,7 @@ def _make_belief(
 
 def _make_belief_store(beliefs):
     """Create mock BeliefStore with given beliefs."""
-    store = MagicMock()
-    store._beliefs = {b.belief_id: b for b in beliefs}
+    store = specced(BeliefStore, _beliefs={b.belief_id: b for b in beliefs})
     return store
 
 
@@ -528,7 +537,7 @@ class TestShallowKnowledge:
 class TestUnresolvedDisputes:
 
     def test_detects_high_severity_unresolved(self, tmp_project):
-        dispute_log = MagicMock()
+        dispute_log = specced(DisputeLog)
         dispute_log.get_unresolved.return_value = [
             {"file_id": "file_a", "severity": "high", "resolved": False},
             {"file_id": "file_a", "severity": "high", "resolved": False},
@@ -544,7 +553,7 @@ class TestUnresolvedDisputes:
         assert disputes[0].severity == "critical"
 
     def test_no_finding_when_resolved(self, tmp_project):
-        dispute_log = MagicMock()
+        dispute_log = specced(DisputeLog)
         dispute_log.get_unresolved.return_value = []
         dispute_log.get_stats.return_value = {}
         dispute_log.get_recent.return_value = []
@@ -561,7 +570,7 @@ class TestUnresolvedDisputes:
         assert len(disputes) == 0
 
     def test_dispute_medium_severity_warning(self, tmp_project):
-        dispute_log = MagicMock()
+        dispute_log = specced(DisputeLog)
         dispute_log.get_unresolved.return_value = [
             {"file_id": "file_b", "severity": "medium", "resolved": False},
             {"file_id": "file_b", "severity": "medium", "resolved": False},
@@ -830,7 +839,7 @@ class TestAnalyzeIntegration:
 
 class TestCritiqueApplier:
 
-    def test_creates_proposed_goals_for_critical(self):
+    def test_posts_advisory_for_critical(self):
         finding = create_finding(
             category=FindingCategory.CONTRADICTION,
             severity=FindingSeverity.CRITICAL,
@@ -840,16 +849,15 @@ class TestCritiqueApplier:
         )
         report = CritiqueReport(findings=[finding])
 
-        goal_store = MagicMock()
-        goal_store.get_active.return_value = []
-        goal_store.get_proposed.return_value = []
-        goal_store.propose.return_value = "goal-crit-xxx"
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = specced(BulletinEntry, entry_id="be-crit-1")
 
-        applier = CritiqueApplier(goal_store=goal_store)
+        applier = CritiqueApplier(bulletin_store=bulletin)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) == 1
-        goal_store.propose.assert_called_once()
+        assert result["bulletin_posted"] == ["be-crit-1"]
+        assert result["goals_created"] == []
+        bulletin.create_and_post.assert_called_once()
 
     def test_respects_max_goals_limit(self):
         findings = []
@@ -863,17 +871,17 @@ class TestCritiqueApplier:
             ))
         report = CritiqueReport(findings=findings)
 
-        goal_store = MagicMock()
-        goal_store.get_active.return_value = []
-        goal_store.get_proposed.return_value = []
-        goal_store.propose.return_value = "goal-xxx"
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.side_effect = (
+            lambda **kw: specced(BulletinEntry, entry_id=f"be-{kw['topic']}")
+        )
 
-        applier = CritiqueApplier(goal_store=goal_store)
+        applier = CritiqueApplier(bulletin_store=bulletin)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) <= MAX_PROPOSED_GOALS_FROM_CRITIQUE
+        assert len(result["bulletin_posted"]) <= MAX_PROPOSED_GOALS_FROM_CRITIQUE
 
-    def test_info_does_not_create_goal(self):
+    def test_info_does_not_post_advisory(self):
         finding = create_finding(
             category=FindingCategory.COVERAGE_GAP,
             severity=FindingSeverity.INFO,
@@ -883,14 +891,17 @@ class TestCritiqueApplier:
         )
         report = CritiqueReport(findings=[finding])
 
-        goal_store = MagicMock()
-        applier = CritiqueApplier(goal_store=goal_store)
+        bulletin = specced(BulletinStore)
+        applier = CritiqueApplier(bulletin_store=bulletin)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) == 0
-        goal_store.propose.assert_not_called()
+        assert result["bulletin_posted"] == []
+        bulletin.create_and_post.assert_not_called()
 
-    def test_no_duplicate_goals(self):
+    def test_dedup_delegated_to_bulletin(self):
+        # R1 (2026-05-29): the applier no longer does goal-store idempotency.
+        # It always calls create_and_post; BulletinStore dedups by topic+type.
+        # A goal_store full of "existing" goals must NOT suppress the advisory.
         finding = create_finding(
             category=FindingCategory.OVERCONFIDENT,
             severity=FindingSeverity.WARNING,
@@ -900,21 +911,22 @@ class TestCritiqueApplier:
         )
         report = CritiqueReport(findings=[finding])
 
-        # Simulate existing goal with same dedupe_key
-        existing_goal = MagicMock()
-        existing_goal.metadata = {
+        existing_goal = specced(Goal, metadata={
             "source": "critic",
             "dedupe_key": finding.dedupe_key,
-        }
-
-        goal_store = MagicMock()
+        })
+        goal_store = specced(GoalStore)
         goal_store.get_active.return_value = []
         goal_store.get_proposed.return_value = [existing_goal]
 
-        applier = CritiqueApplier(goal_store=goal_store)
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = specced(BulletinEntry, entry_id="be-w1")
+
+        applier = CritiqueApplier(goal_store=goal_store, bulletin_store=bulletin)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) == 0
+        assert result["bulletin_posted"] == ["be-w1"]
+        bulletin.create_and_post.assert_called_once()
 
     def test_llm_summary_called_when_set(self):
         finding = create_finding(
@@ -927,7 +939,7 @@ class TestCritiqueApplier:
         report = CritiqueReport(findings=[finding])
 
         llm_fn = MagicMock(return_value="Podsumowanie: wiedza jest stara.")
-        goal_store = MagicMock()
+        goal_store = specced(GoalStore)
         goal_store.get_active.return_value = []
         goal_store.get_proposed.return_value = []
         goal_store.propose.return_value = "g1"
@@ -950,19 +962,17 @@ class TestCritiqueApplier:
         report = CritiqueReport(findings=[finding])
 
         llm_fn = MagicMock(side_effect=Exception("LLM down"))
-        goal_store = MagicMock()
-        goal_store.get_active.return_value = []
-        goal_store.get_proposed.return_value = []
-        goal_store.propose.return_value = "g1"
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = specced(BulletinEntry, entry_id="be-1")
 
-        applier = CritiqueApplier(goal_store=goal_store, llm_fn=llm_fn)
+        applier = CritiqueApplier(bulletin_store=bulletin, llm_fn=llm_fn)
         result = applier.apply(report)
 
-        # Goals should still be created despite LLM failure
-        assert len(result["goals_created"]) == 1
+        # Advisory should still be posted despite LLM failure
+        assert len(result["bulletin_posted"]) == 1
         assert result["llm_summary_ok"] is False
 
-    def test_handles_goal_store_none(self):
+    def test_handles_bulletin_store_none(self):
         finding = create_finding(
             category=FindingCategory.CONTRADICTION,
             severity=FindingSeverity.CRITICAL,
@@ -972,12 +982,13 @@ class TestCritiqueApplier:
         )
         report = CritiqueReport(findings=[finding])
 
-        applier = CritiqueApplier(goal_store=None)
+        applier = CritiqueApplier(bulletin_store=None)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) == 0
+        assert result["bulletin_posted"] == []
+        assert result["goals_created"] == []
 
-    def test_warning_suppressed_if_existing_goal(self):
+    def test_warning_posts_advisory(self):
         finding = create_finding(
             category=FindingCategory.SHALLOW_KNOWLEDGE,
             severity=FindingSeverity.WARNING,
@@ -987,21 +998,14 @@ class TestCritiqueApplier:
         )
         report = CritiqueReport(findings=[finding])
 
-        existing = MagicMock()
-        existing.metadata = {
-            "source": "critic",
-            "topic_normalized": finding.topic_normalized,
-            "category": finding.category,
-        }
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = specced(BulletinEntry, entry_id="be-nano")
 
-        goal_store = MagicMock()
-        goal_store.get_active.return_value = [existing]
-        goal_store.get_proposed.return_value = []
-
-        applier = CritiqueApplier(goal_store=goal_store)
+        applier = CritiqueApplier(bulletin_store=bulletin)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) == 0
+        assert result["bulletin_posted"] == ["be-nano"]
+        bulletin.create_and_post.assert_called_once()
 
 
 # =============================================================================
@@ -1081,10 +1085,9 @@ class TestCriticAgentFacade:
         assert report.error is None
 
     def test_facade_wires_dependencies(self, tmp_project):
-        store = MagicMock()
-        store._beliefs = {}
-        dispute_log = MagicMock()
-        goal_store = MagicMock()
+        store = specced(BeliefStore, _beliefs={})
+        dispute_log = specced(DisputeLog)
+        goal_store = specced(GoalStore)
         llm_fn = MagicMock()
 
         agent = CriticAgent(project_root=str(tmp_project))
@@ -1132,13 +1135,12 @@ class TestIntegration:
     def test_make_critique_handler_success(self):
         from agent_core.routing.handlers import make_critique_handler
 
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         report = CritiqueReport(findings=[])
         critic.run_critique.return_value = report
 
         handler = make_critique_handler(critic)
-        plan = MagicMock()
-        plan.action_params = {"trigger": "test"}
+        plan = specced(Plan, action_params={"trigger": "test"})
 
         result = handler(plan)
         assert result["success"] is True
@@ -1148,8 +1150,7 @@ class TestIntegration:
         from agent_core.routing.handlers import make_critique_handler
 
         handler = make_critique_handler(None)
-        plan = MagicMock()
-        plan.action_params = {}
+        plan = specced(Plan, action_params={})
 
         result = handler(plan)
         assert result["success"] is False

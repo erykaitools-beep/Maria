@@ -6,6 +6,9 @@ import shutil
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass
+from types import SimpleNamespace
+
+from agent_core.homeostasis.state_model import Mode
 
 from agent_core.orchestrator.self_model_facade import (
     UserFacingSelfModel,
@@ -18,6 +21,14 @@ from agent_core.orchestrator.onboarding import (
     AUTONOMY_PRESETS,
 )
 from agent_core.routing.capability_spec import CapabilitySpec
+from agent_core.tests.spec_helpers import specced
+from agent_core.consciousness.identity_store import IdentityStore
+from agent_core.consciousness.core import ConsciousnessCore
+from agent_core.consciousness.self_model import SelfModelBuilder
+from agent_core.routing.capability_router import CapabilityRouter
+from agent_core.awareness.context_builder import ContextBuilder
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.registry.shared_context import SharedContext
 
 
 # ===========================================================================
@@ -27,8 +38,7 @@ from agent_core.routing.capability_spec import CapabilitySpec
 @pytest.fixture
 def mock_identity_store():
     """Mock IdentityStore with typical data."""
-    store = MagicMock()
-    store._data = {}
+    store = specced(IdentityStore, _data={})
     store.get_identity_dict.return_value = {
         "session_count": 42,
         "total_uptime_hours": 120.5,
@@ -44,22 +54,24 @@ def mock_identity_store():
 @pytest.fixture
 def mock_consciousness():
     """Mock ConsciousnessCore with self_model."""
-    consciousness = MagicMock()
-    consciousness.self_model.get_traits.return_value = [
+    consciousness = specced(ConsciousnessCore)
+    self_model = specced(SelfModelBuilder)
+    self_model.get_traits.return_value = [
         "ciekawska", "systematyczna", "pomocna"
     ]
-    consciousness.self_model.get_trait_scores.return_value = {
+    self_model.get_trait_scores.return_value = {
         "ciekawska": {"score": 0.85, "evidence_count": 12},
         "systematyczna": {"score": 0.78, "evidence_count": 8},
         "pomocna": {"score": 0.72, "evidence_count": 5},
     }
+    consciousness.self_model = self_model
     return consciousness
 
 
 @pytest.fixture
 def mock_capability_router():
     """Mock CapabilityRouter with a few capabilities."""
-    router = MagicMock()
+    router = specced(CapabilityRouter)
     specs = [
         CapabilitySpec(
             name="learn",
@@ -105,7 +117,7 @@ def mock_capability_router():
 @pytest.fixture
 def mock_context_builder():
     """Mock ContextBuilder."""
-    builder = MagicMock()
+    builder = specced(ContextBuilder)
     builder.get_detailed_file_list.return_value = [
         {"file": "fizyka.txt", "status": "learned"},
         {"file": "chemia.txt", "status": "completed"},
@@ -120,12 +132,8 @@ def mock_context_builder():
 
 @pytest.fixture
 def mock_homeostasis():
-    """Mock HomeostasisCore."""
-    core = MagicMock()
-    mode = MagicMock()
-    mode.name = "ACTIVE"
-    core._current_mode = mode
-    return core
+    """Mock HomeostasisCore. Mode lives at core.state.mode (real Mode enum)."""
+    return specced(HomeostasisCore, state=SimpleNamespace(mode=Mode.ACTIVE))
 
 
 @pytest.fixture
@@ -137,7 +145,7 @@ def mock_ctx(
     mock_homeostasis,
 ):
     """Full SharedContext mock."""
-    ctx = MagicMock()
+    ctx = specced(SharedContext)
     ctx.identity_store = mock_identity_store
     ctx.consciousness = mock_consciousness
     ctx.capability_router = mock_capability_router
@@ -328,6 +336,51 @@ class TestUserFacingSelfModelMode:
     def test_limitations_include_openclaw_missing(self, self_model):
         lims = self_model.get_limitations()
         assert any("OpenClaw" in l for l in lims)
+
+    def test_limitations_nim_no_key(self, self_model, monkeypatch):
+        """Empty NVIDIA_NIM_API_KEY -> 'brak klucza' entry."""
+        monkeypatch.delenv("NVIDIA_NIM_API_KEY", raising=False)
+        lims = self_model.get_limitations()
+        assert any("brak klucza" in l for l in lims), lims
+
+    def test_limitations_nim_unavailable(self, self_model, monkeypatch):
+        """API key set but NIM unreachable -> 'brak zewnetrznego LLM'."""
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "fake-key")
+        with patch(
+            "agent_core.llm.nim_client.NIMClient"
+        ) as MockNim:
+            instance = MagicMock()
+            instance.is_available.return_value = False
+            MockNim.return_value = instance
+            lims = self_model.get_limitations()
+        assert any("brak zewnetrznego LLM" in l for l in lims), lims
+
+    def test_limitations_nim_available(self, self_model, monkeypatch):
+        """API key set + NIM reachable -> NO NIM entry in limitations."""
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "fake-key")
+        with patch(
+            "agent_core.llm.nim_client.NIMClient"
+        ) as MockNim:
+            instance = MagicMock()
+            instance.is_available.return_value = True
+            MockNim.return_value = instance
+            lims = self_model.get_limitations()
+        assert not any("NIM" in l for l in lims), lims
+
+    def test_limitations_nim_check_error_surfaces(self, self_model, monkeypatch):
+        """Exception during NIM check -> 'status nieznany', not silent swallow.
+
+        Previously a bare except hid construction errors (TypeError on
+        the missing api_key arg). The fix replaces silence with an
+        explicit unknown-status entry plus a logger.warning.
+        """
+        monkeypatch.setenv("NVIDIA_NIM_API_KEY", "fake-key")
+        with patch(
+            "agent_core.llm.nim_client.NIMClient"
+        ) as MockNim:
+            MockNim.side_effect = RuntimeError("ollama down")
+            lims = self_model.get_limitations()
+        assert any("status nieznany" in l for l in lims), lims
 
 
 # ===========================================================================

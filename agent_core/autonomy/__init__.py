@@ -57,6 +57,10 @@ class CheckResult:
     reasons: List[str] = field(default_factory=list)
     rule_name: Optional[str] = None
     blocked_result: Optional[Dict[str, Any]] = None  # Ready-made action result
+    # AuthorityLevel.value for effector escalations -- carried structurally so
+    # the escalation handler routes on the enum value, not a token parsed out of
+    # a reason string (the BOUNDED reason had no token -> silent block).
+    authority_level: str = ""
 
 
 class AutonomyPolicy:
@@ -102,6 +106,7 @@ class AutonomyPolicy:
         health_score: float = 1.0,
         mode: str = "active",
         retention_rate: Optional[float] = None,
+        already_approved: bool = False,
     ) -> CheckResult:
         """
         Check if an action is allowed by autonomy policy.
@@ -186,6 +191,7 @@ class AutonomyPolicy:
             authority_level=authority_level,
             tool_name=tool_name,
             tool_dangerous=tool_dangerous,
+            already_approved=already_approved,
         )
 
         result = self._engine.evaluate(ctx)
@@ -210,6 +216,7 @@ class AutonomyPolicy:
                 reasons=result.reasons,
                 rule_name=result.rule_name,
                 blocked_result=blocked,
+                authority_level=authority_level,
             )
 
         return CheckResult(

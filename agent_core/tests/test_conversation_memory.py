@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent_core.consciousness.conversation_memory import ConversationMemory
+from agent_core.llm.router import LLMRouter
+from agent_core.tests.spec_helpers import specced
 
 
 @pytest.fixture
@@ -41,7 +43,7 @@ def memory(tmp_data_dir):
 @pytest.fixture
 def mock_brain():
     """Mock brain with _ask_once method."""
-    brain = MagicMock()
+    brain = specced(LLMRouter)
     brain._ask_once.return_value = json.dumps({
         "summary": "Rozmawialismy o testach",
         "facts": ["Testy przechodza", "Dodano nowy modul"],
@@ -268,7 +270,7 @@ class TestCondensation:
         memory.save_turn("user", "Test")
         memory.save_turn("assistant", "Reply")
 
-        brain = MagicMock()
+        brain = specced(LLMRouter)
         brain._ask_once.side_effect = Exception("LLM error")
 
         result = memory.condense_session(brain)
@@ -282,7 +284,7 @@ class TestCondensation:
         memory.save_turn("user", "Test")
         memory.save_turn("assistant", "Reply")
 
-        brain = MagicMock()
+        brain = specced(LLMRouter)
         brain._ask_once.return_value = "To nie jest JSON, tylko tekst"
 
         result = memory.condense_session(brain)

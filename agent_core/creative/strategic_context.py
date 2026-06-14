@@ -19,6 +19,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agent_core.planner.decision_filters import IDLE_ACTION_TYPES
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,8 +84,13 @@ class StrategicContext:
                         total += 1
                         action = record.get("action_type", "unknown")
                         dist[action] += 1
-                        if action == "noop":
+                        # T-LEARN-008: planner pisze "skip" (nie "noop") jako idle
+                        # marker -- liczenie samego "noop" raportowalo 0.4% przy
+                        # realnych ~84% idle i slepilo detekcje tensji K13.
+                        if action in IDLE_ACTION_TYPES:
                             noops += 1
+                        # T-LEARN-003: skipped attempts (status now SKIPPED at the
+                        # source) are not failures; only genuine failures count.
                         if record.get("status") == "failed":
                             failed += 1
                     except json.JSONDecodeError:

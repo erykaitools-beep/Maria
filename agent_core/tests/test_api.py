@@ -9,6 +9,9 @@ import time
 import threading
 from unittest.mock import Mock, MagicMock
 
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import SystemState
+from agent_core.tests.spec_helpers import specced
 from agent_core.homeostasis.api import (
     HomeostasisInterface,
     HomeostasisEventBus,
@@ -199,7 +202,7 @@ class TestHomeostasisInterface:
 
     def test_set_core(self, interface):
         """Should be able to set core reference."""
-        mock_core = Mock()
+        mock_core = specced(HomeostasisCore)
         interface.set_core(mock_core)
 
         assert interface._core == mock_core
@@ -213,17 +216,18 @@ class TestInterfaceWithCore:
         interface = HomeostasisInterface()
 
         # Create mock core
-        mock_core = Mock()
-        mock_core.state = Mock()
-        mock_core.state.mode = Mode.REDUCED
-        mock_core.state.health_score = 0.75
-        mock_core.state.alerts = ["WARNING: Test"]
-        mock_core.state.interpreted_state = {
-            "ram_available_pct": 30,
-            "cpu_load": 60,
-            "disk_used_pct": 50,
-            "thermal_stress": 0.2,
-        }
+        mock_state = specced(SystemState,
+            mode=Mode.REDUCED,
+            health_score=0.75,
+            alerts=["WARNING: Test"],
+            interpreted_state={
+                "ram_available_pct": 30,
+                "cpu_load": 60,
+                "disk_used_pct": 50,
+                "thermal_stress": 0.2,
+            },
+        )
+        mock_core = specced(HomeostasisCore, state=mock_state)
         mock_core.get_telemetry.return_value = {"mode": "reduced"}
 
         interface.set_core(mock_core)
@@ -265,13 +269,14 @@ class TestResourceAllocation:
         interface = HomeostasisInterface()
 
         # Set up with mock core in ACTIVE mode
-        mock_core = Mock()
-        mock_core.state = Mock()
-        mock_core.state.mode = Mode.ACTIVE
-        mock_core.state.interpreted_state = {
-            "ram_available_pct": 50,
-            "cpu_load": 30,
-        }
+        mock_state = specced(SystemState,
+            mode=Mode.ACTIVE,
+            interpreted_state={
+                "ram_available_pct": 50,
+                "cpu_load": 30,
+            },
+        )
+        mock_core = specced(HomeostasisCore, state=mock_state)
 
         interface.set_core(mock_core)
         return interface

@@ -79,6 +79,7 @@ class AnalysisReport:
     report_id: str = field(default_factory=lambda: _gen_id("sa"))
     timestamp: float = field(default_factory=time.time)
     analyzer: str = "local_planner"  # AnalyzerBackend value
+    model: Optional[str] = None       # Concrete model name used by analyzer
     input_summary_hash: str = ""
     recommendations: List[AnalysisRecommendation] = field(default_factory=list)
     goals_created: List[str] = field(default_factory=list)
@@ -102,6 +103,7 @@ class AnalysisReport:
             report_id=d.get("report_id", _gen_id("sa")),
             timestamp=d.get("timestamp", time.time()),
             analyzer=d.get("analyzer", "local_planner"),
+            model=d.get("model"),
             input_summary_hash=d.get("input_summary_hash", ""),
             recommendations=recs,
             goals_created=d.get("goals_created", []),

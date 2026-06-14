@@ -12,6 +12,10 @@ from agent_core.homeostasis.state_model import Mode
 from agent_core.homeostasis.event_logger import get_event_logger
 from agent_core.memory.manager import MemoryManager
 from agent_core.llm.manager import LLMManager
+from agent_core.modules.homeostasis_outbox import _propose_outbox_status_note
+from agent_core.modules.homeostasis_telegram_commands import (
+    register_telegram_commands,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,8 @@ class HomeostasisModule(MariaModule):
         # Initialize ModelScheduler (multi-organ model stack)
         core = ctx.homeostasis_core
         if core:
+            core._shared_context = ctx
+        if core:
             try:
                 from agent_core.llm.model_scheduler import ModelScheduler
                 from agent_core.llm.model_registry import ModelRole
@@ -67,7 +73,7 @@ class HomeostasisModule(MariaModule):
 
                 print("[Homeostasis] [OK] ModelScheduler initialized")
             except Exception as e:
-                logger.debug(f"ModelScheduler not initialized: {e}")
+                logger.warning(f"ModelScheduler not initialized: {e}")
 
         # Initialize SemanticMemory (nomic-embed-text vector store)
         if core:
@@ -95,12 +101,23 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"[Homeostasis] SemanticMemory failed: {e}")
 
+        # Warm-pin exam models (student=llama3.1, grader=qwen3) so the first
+        # exam after a restart doesn't pay the cold-start inference penalty
+        # (~8 min of 240s timeouts, 2026-06-04). Background thread, ENV-gated
+        # (MARIA_WARMUP=0 to disable). Runs even without SemanticMemory.
+        if core:
+            try:
+                from agent_core.llm.warmup import start_background_warmup
+                start_background_warmup()
+            except Exception as e:
+                logger.warning(f"[Homeostasis] Model warm-up failed to start: {e}")
+
         # Initialize LLM Tape (raw interaction logging)
         if core:
             try:
                 from agent_core.llm.llm_tape import LLMTape
-                from pathlib import Path
-                tape_path = Path(ctx.config.BASE_DIR) / "meta_data" / "llm_tape.jsonl"
+                from maria_core.sys.config import BASE_DIR
+                tape_path = BASE_DIR / "meta_data" / "llm_tape.jsonl"
                 tape = LLMTape(path=tape_path)
                 ctx.llm_tape = tape
 
@@ -114,13 +131,17 @@ class HomeostasisModule(MariaModule):
 
                 print("[Homeostasis] [OK] LLM Tape initialized")
             except Exception as e:
-                logger.debug(f"LLM Tape not initialized: {e}")
+                # Promoted from debug to warning — the previous silent
+                # debug() swallowed an AttributeError from a nonexistent
+                # SharedContext attribute, causing zero writes to
+                # llm_tape.jsonl from 2026-04-13 until 2026-04-17.
+                logger.warning(f"[Homeostasis] LLM Tape init failed: {e}")
 
         # Initialize OperatorModel (K14 - replaces UserProfile)
         try:
-            from agent_core.operator.operator_model import OperatorModel
+            from agent_core.operator.operator_model import get_operator_model
             from agent_core.operator.rhythm_detector import RhythmDetector
-            operator_model = OperatorModel()
+            operator_model = get_operator_model()
             ctx.user_profile = operator_model  # backward compat name in SharedContext
             ctx.operator_model = operator_model
             # RhythmDetector - seed from proactive contact history
@@ -160,7 +181,7 @@ class HomeostasisModule(MariaModule):
                 _brain.set_user_profile(operator_model)
             print(f"[Homeostasis] [OK] OperatorModel initialized (operator: {operator_model.get_name()}, rhythm samples: {rhythm_detector.sample_count})")
         except Exception as e:
-            logger.debug(f"OperatorModel not initialized: {e}")
+            logger.warning(f"OperatorModel not initialized: {e}")
 
         # Initialize PerceptionBuffer (Warstwa 1)
         if core:
@@ -171,7 +192,7 @@ class HomeostasisModule(MariaModule):
                 ctx.perception_buffer = perception_buffer
                 print("[Homeostasis] [OK] PerceptionBuffer initialized (maxlen=200)")
             except Exception as e:
-                logger.debug(f"PerceptionBuffer not initialized: {e}")
+                logger.warning(f"PerceptionBuffer not initialized: {e}")
 
         # Initialize SandboxManager (Kontrakt K2)
         if core:
@@ -191,7 +212,7 @@ class HomeostasisModule(MariaModule):
                 ctx.sandbox_manager = sandbox_mgr
                 print("[Homeostasis] [OK] SandboxManager initialized")
             except Exception as e:
-                logger.debug(f"SandboxManager not initialized: {e}")
+                logger.warning(f"SandboxManager not initialized: {e}")
 
         # Initialize GoalStore (Kontrakt K3)
         try:
@@ -209,7 +230,7 @@ class HomeostasisModule(MariaModule):
             ctx.goal_store = goal_store
             print(f"[Homeostasis] [OK] GoalStore initialized ({goal_store.stats()['total']} goals)")
         except Exception as e:
-            logger.debug(f"GoalStore not initialized: {e}")
+            logger.warning(f"GoalStore not initialized: {e}")
 
         # Initialize EvaluationObserver (Kontrakt K4, READ-ONLY)
         try:
@@ -228,7 +249,7 @@ class HomeostasisModule(MariaModule):
             ctx.evaluation_observer = eval_observer
             print("[Homeostasis] [OK] EvaluationObserver initialized (READ-ONLY)")
         except Exception as e:
-            logger.debug(f"EvaluationObserver not initialized: {e}")
+            logger.warning(f"EvaluationObserver not initialized: {e}")
 
         # Pass semantic_memory to core for sleep processing
         if core and ctx.semantic_memory:
@@ -244,6 +265,12 @@ class HomeostasisModule(MariaModule):
                 session_id=session_id,
                 experience_tracker=experience_tracker,
             )
+
+        # NOTE: BeliefStore wiring for sleep consolidation moved BELOW, right
+        # after `ctx.world_model = world_model` -- the old check here ran
+        # before ctx.world_model was assigned (line ~347 in this same init),
+        # so it never fired and NREM2/NREM3 were a silent no-op in production
+        # (wired-but-dead class, found 2026-06-10).
 
         # Wire teacher agent for autonomous learning during idle
         if core and ctx.brain and hasattr(ctx.brain, '_ask_once'):
@@ -264,7 +291,7 @@ class HomeostasisModule(MariaModule):
                 core.set_teacher_agent(teacher)
                 print("[Homeostasis] [OK] Teacher agent wired for auto-learning")
             except Exception as e:
-                logger.debug(f"Teacher agent not wired: {e}")
+                logger.warning(f"Teacher agent not wired: {e}")
 
         # Wire PlannerCore (Warstwa 2) - replaces teacher auto-trigger in Phase 10
         if core:
@@ -308,10 +335,33 @@ class HomeostasisModule(MariaModule):
                         print(f"[Homeostasis] [OK] WorldModel built ({total} beliefs)")
                     else:
                         print(f"[Homeostasis] [OK] WorldModel loaded ({loaded} beliefs)")
+                    # Self-healing trust gate (#2, 2026-06-01): a loaded store may
+                    # still hold file beliefs admitted before the gate on a
+                    # self-graded 'completed'. Reconcile once on every startup so
+                    # only independently-verified knowledge stays canonical.
+                    try:
+                        pruned = world_model.reconcile_trust()
+                        if pruned:
+                            print(f"[Homeostasis] [OK] WorldModel trust-reconciled "
+                                  f"({pruned} self-graded file beliefs pruned)")
+                    except Exception as _e:
+                        logger.warning(f"WorldModel trust reconcile skipped: {_e}")
                     planner.set_world_model(world_model)
                     ctx.world_model = world_model
+                    # Wire BeliefStore for sleep consolidation (NREM2/NREM3).
+                    # MUST happen after world_model exists -- see the note at
+                    # the old (dead) wiring site above. Own try: a wiring
+                    # failure must not be mislogged as "WorldModel not
+                    # initialized" by the outer except.
+                    try:
+                        core.set_belief_store(world_model.store)
+                        print("[Homeostasis] [OK] BeliefStore wired for "
+                              "sleep consolidation (NREM2/NREM3)")
+                    except Exception as _wire_e:
+                        logger.warning(
+                            f"Sleep consolidation wiring failed: {_wire_e}")
                 except Exception as e:
-                    logger.debug(f"WorldModel not initialized: {e}")
+                    logger.warning(f"WorldModel not initialized: {e}")
 
                 # Autonomy Policy (K7) for action governance
                 try:
@@ -345,7 +395,7 @@ class HomeostasisModule(MariaModule):
                     auth_level = authority_manager.get_level().value
                     print(f"[Homeostasis] [OK] AutonomyPolicy wired (K7, authority={auth_level})")
                 except Exception as e:
-                    logger.debug(f"AutonomyPolicy not initialized: {e}")
+                    logger.warning(f"AutonomyPolicy not initialized: {e}")
 
                 # Deliberation (K8) for multi-step strategies
                 try:
@@ -355,7 +405,7 @@ class HomeostasisModule(MariaModule):
                     ctx.deliberation = deliberation
                     print("[Homeostasis] [OK] Deliberation wired (K8)")
                 except Exception as e:
-                    logger.debug(f"Deliberation not initialized: {e}")
+                    logger.warning(f"Deliberation not initialized: {e}")
 
                 # Meta-Cognition (K9) for self-reflection
                 try:
@@ -365,7 +415,7 @@ class HomeostasisModule(MariaModule):
                     ctx.meta_cognition = meta_cognition
                     print("[Homeostasis] [OK] MetaCognition wired (K9)")
                 except Exception as e:
-                    logger.debug(f"MetaCognition not initialized: {e}")
+                    logger.warning(f"MetaCognition not initialized: {e}")
 
                 # Action Safety (K10) for unified action audit
                 try:
@@ -380,7 +430,7 @@ class HomeostasisModule(MariaModule):
                     ctx.action_safety = action_safety
                     print("[Homeostasis] [OK] ActionSafety wired (K10)")
                 except Exception as e:
-                    logger.debug(f"ActionSafety not initialized: {e}")
+                    logger.warning(f"ActionSafety not initialized: {e}")
 
                 # Experiment System (K11) for autonomous parameter tuning
                 try:
@@ -395,7 +445,7 @@ class HomeostasisModule(MariaModule):
                     ctx.experiment_system = experiment_system
                     print("[Homeostasis] [OK] ExperimentSystem wired (K11)")
                 except Exception as e:
-                    logger.debug(f"ExperimentSystem not initialized: {e}")
+                    logger.warning(f"ExperimentSystem not initialized: {e}")
 
                 # OpenClaw Effector (ADR-016) - optional, graceful fallback
                 # NOTE: Do NOT use openclaw.health_check() here - it triggers
@@ -413,10 +463,27 @@ class HomeostasisModule(MariaModule):
                         planner.set_openclaw_client(openclaw)
                         ctx.openclaw_client = openclaw
                         print("[Homeostasis] [OK] OpenClaw effector wired (gateway detected)")
+
+                        # EffectorCoordinator: preflight/prewarm/retry/diagnose
+                        try:
+                            from agent_core.effector.coordinator import EffectorCoordinator
+                            _bs = ctx.bulletin_store if hasattr(ctx, 'bulletin_store') else None
+                            _tg = ctx.telegram_notifier if hasattr(ctx, 'telegram_notifier') else None
+                            coord = EffectorCoordinator(
+                                openclaw_client=openclaw,
+                                bulletin_store=_bs,
+                                telegram_notifier=_tg,
+                                homeostasis_core=ctx.core if hasattr(ctx, 'core') else None,
+                            )
+                            ctx.effector_coordinator = coord
+                            planner.executor.set_effector_coordinator(coord)
+                            print("[Homeostasis] [OK] EffectorCoordinator wired (preflight+prewarm+retry)")
+                        except Exception as e:
+                            logger.warning(f"EffectorCoordinator init failed: {e}")
                     else:
-                        logger.debug("OpenClaw gateway not running, effector disabled")
+                        logger.warning("OpenClaw gateway not running, effector disabled")
                 except Exception as e:
-                    logger.debug(f"OpenClaw not initialized: {e}")
+                    logger.warning(f"OpenClaw not initialized: {e}")
 
                 # Cross-Validator (Faza F) - multi-source learning validation
                 # Uses NIM as secondary LLM to validate knowledge learned by Ollama
@@ -444,7 +511,7 @@ class HomeostasisModule(MariaModule):
                     ctx.cross_validator = cross_validator
                     ctx.dispute_log = dispute_log
                 except Exception as e:
-                    logger.debug(f"CrossValidator not initialized: {e}")
+                    logger.warning(f"CrossValidator not initialized: {e}")
 
                 # Codex CLI (ChatGPT encyclopedia) - optional, graceful fallback
                 try:
@@ -459,7 +526,7 @@ class HomeostasisModule(MariaModule):
                         ctx.codex_client = codex  # keep ref for later availability
                         print("[Homeostasis] [--] Codex CLI not installed (install: npm i -g @openai/codex)")
                 except Exception as e:
-                    logger.debug(f"Codex CLI not initialized: {e}")
+                    logger.warning(f"Codex CLI not initialized: {e}")
 
                 # K12 Self-Analysis (cognitive loop)
                 try:
@@ -493,20 +560,32 @@ class HomeostasisModule(MariaModule):
                         sa.set_world_model(ctx.world_model)
                     if hasattr(ctx, 'memory_query') and ctx.memory_query:
                         sa._collector.set_memory_query(ctx.memory_query)
+                    if ctx.consciousness:
+                        sa.set_consciousness(ctx.consciousness)
 
-                    # Wire Claude CLI client (K12 Phase 2)
-                    try:
-                        from agent_core.self_analysis.claude_cli_client import ClaudeCLIClient
-                        claude_cli = ClaudeCLIClient()
-                        if ctx.openclaw_client:
-                            claude_cli.set_openclaw_client(ctx.openclaw_client)
-                        sa._analyzer.set_claude_cli(claude_cli)
-                        if claude_cli.is_available():
-                            print("[Homeostasis] [OK] Claude CLI wired (K12 Phase 2)")
-                        else:
-                            print("[Homeostasis] [--] Claude CLI not available (fallback: local)")
-                    except Exception as e2:
-                        logger.debug(f"Claude CLI not wired: {e2}")
+                    # Wire Claude CLI client (K12 Phase 2) — gated to prevent
+                    # Anthropic account ban from autonomous subscription CLI usage.
+                    # Default: disabled. Operator-triggered paths (Telegram /claude)
+                    # are unaffected and keep working regardless.
+                    import os
+                    autonomous_claude = os.environ.get(
+                        "CLAUDE_CLI_AUTONOMOUS", ""
+                    ).lower() in ("true", "1", "yes")
+                    if autonomous_claude:
+                        try:
+                            from agent_core.self_analysis.claude_cli_client import ClaudeCLIClient
+                            claude_cli = ClaudeCLIClient()
+                            if ctx.openclaw_client:
+                                claude_cli.set_openclaw_client(ctx.openclaw_client)
+                            sa._analyzer.set_claude_cli(claude_cli)
+                            if claude_cli.is_available():
+                                print("[Homeostasis] [!!] Claude CLI AUTONOMOUS enabled (ban risk)")
+                            else:
+                                print("[Homeostasis] [--] Claude CLI not available (fallback: local)")
+                        except Exception as e2:
+                            logger.warning(f"Claude CLI not wired: {e2}")
+                    else:
+                        print("[Homeostasis] [--] Claude CLI autonomous DISABLED (safe mode)")
 
                     planner.set_self_analysis(sa)
                     ctx.self_analysis = sa
@@ -583,6 +662,132 @@ class HomeostasisModule(MariaModule):
                     planner.set_bulletin_store(bulletin_store)
                     ctx.bulletin_store = bulletin_store
 
+                    # Concept trust-gate observe scan (2026-06-13): the FILE/index
+                    # trust gate filters self-graded exams, but the CONCEPT path
+                    # (build_concept_beliefs) never did -- so concept-FACTs can
+                    # rest on a self-graded exam. Read-only census reported here
+                    # (NOT at WorldModel init -- bulletin_store does not exist that
+                    # early) so the standing gap is visible on the board BEFORE
+                    # arming CONCEPT_TRUST_GATE. Pure observe: scan mutates nothing.
+                    try:
+                        _wm = getattr(ctx, "world_model", None)
+                        census = _wm.scan_concept_trust() if _wm else {}
+                        if census and census.get("self_graded", 0) > 0:
+                            from agent_core.world_model.belief_builder import (
+                                _concept_trust_mode,
+                            )
+                            _mode = _concept_trust_mode()
+                            core.event_logger._write_event({
+                                "timestamp": time.time(),
+                                "event": "concept_trust_scan",
+                                "mode": _mode,
+                                "total_fact": census["total_fact"],
+                                "independent": census["independent"],
+                                "self_graded": census["self_graded"],
+                            })
+                            print(
+                                f"[Homeostasis] [OK] Concept trust scan: "
+                                f"{census['self_graded']}/{census['total_fact']} "
+                                f"concept-FACTs self-graded "
+                                f"({census['independent']} independent, "
+                                f"mode={_mode})"
+                            )
+                            from agent_core.bulletin.bulletin_model import EntryType
+                            bulletin_store.create_and_post(
+                                entry_type=EntryType.NEED_REVIEW,
+                                topic="Koncept trust-gate: FACT z samo-ocenionego egzaminu",
+                                reason_code="concept_trust_self_graded",
+                                summary=(
+                                    f"{census['self_graded']}/{census['total_fact']} "
+                                    f"koncept-FACTow opiera sie na egzaminie "
+                                    f"samo-ocenionym (nie niezaleznym); "
+                                    f"{census['independent']} niezaleznych. "
+                                    f"tryb={_mode}. Uzbrojenie: "
+                                    f"CONCEPT_TRUST_GATE=armed w .env + restart."
+                                ),
+                                requested_by="concept_trust_scan",
+                                metadata={
+                                    "total_fact": census["total_fact"],
+                                    "independent": census["independent"],
+                                    "self_graded": census["self_graded"],
+                                    "mode": _mode,
+                                },
+                            )
+                    except Exception as _e:
+                        logger.warning(f"Concept trust scan skipped: {_e}")
+
+                    # Late-bind bulletin into EffectorCoordinator if it was
+                    # created before this store existed (order-of-init).
+                    if hasattr(ctx, 'effector_coordinator') and ctx.effector_coordinator:
+                        ctx.effector_coordinator.set_bulletin_store(bulletin_store)
+
+                    # D2 (2026-04-26): late-bind into K12 SelfAnalysis so
+                    # strategic recs post IMPROVEMENT entries instead of
+                    # misrouted LEARNING goals. SelfAnalysis is wired earlier
+                    # in init, before this store exists.
+                    if hasattr(ctx, 'self_analysis') and ctx.self_analysis:
+                        ctx.self_analysis.set_bulletin_store(bulletin_store)
+
+                    # R1 (2026-05-29): late-bind into Critic so quality findings
+                    # post NEED_REVIEW advisories instead of PROPOSED goals
+                    # (260 critic goals aged to ABANDONED without being worked).
+                    if hasattr(ctx, 'critic_agent') and ctx.critic_agent:
+                        ctx.critic_agent.set_bulletin_store(bulletin_store)
+
+                    # Most #2 step 1 (2026-05-08): late-bind K11 ProposalEngine
+                    # into K12 SelfAnalysis. Recommendations with
+                    # suggested_action="experiment" are passed through
+                    # k12_to_k11_router heuristics; matches become K11 Proposals
+                    # (DRAFT or auto-approved by confidence).
+                    if (hasattr(ctx, 'self_analysis') and ctx.self_analysis
+                            and hasattr(ctx, 'experiment_system')
+                            and ctx.experiment_system):
+                        ctx.self_analysis.set_proposal_engine(
+                            ctx.experiment_system.proposal_engine
+                        )
+                        print("[Homeostasis] [OK] K12->K11 router wired (Most #2)")
+
+                    # D3 (2026-04-26): late-bind into K13 Creative so the
+                    # LoopDetector posts IMPROVEMENT entries when an abandoned
+                    # meta-goal pattern is suppressed.
+                    if hasattr(ctx, 'creative_module') and ctx.creative_module:
+                        ctx.creative_module.set_bulletin_store(bulletin_store)
+
+                    # D4 (2026-04-26): mode-aware learning — wire the
+                    # post-mortem recorder + analyzer so recurring REDUCED
+                    # root causes surface in the bulletin. Recorder feeds
+                    # JSONL; analyzer clusters and posts IMPROVEMENT entries
+                    # with mode_aware=True so the planner can soft-defer.
+                    try:
+                        from agent_core.self_analysis.mode_postmortem import (
+                            ModePostmortemRecorder,
+                        )
+                        from agent_core.self_analysis.mode_analyzer import (
+                            ModeAnalyzer,
+                        )
+                        from maria_core.sys.config import BASE_DIR as _BASE_DIR
+
+                        pm_recorder = ModePostmortemRecorder(
+                            postmortem_path=(
+                                _BASE_DIR / "meta_data" / "mode_postmortems.jsonl"
+                            ),
+                        )
+                        mode_analyzer = ModeAnalyzer(
+                            postmortem_recorder=pm_recorder,
+                            bulletin_store=bulletin_store,
+                        )
+                        pm_recorder.set_analyzer(mode_analyzer)
+
+                        if hasattr(ctx, 'homeostasis_core') and ctx.homeostasis_core:
+                            ctx.homeostasis_core.set_mode_postmortem_recorder(
+                                pm_recorder,
+                            )
+                        ctx.mode_postmortem_recorder = pm_recorder
+                        ctx.mode_analyzer = mode_analyzer
+                        print("[Homeostasis] [OK] D4 mode-aware learning wired")
+                    except Exception as e:
+                        logger.warning(f"D4 mode-aware not initialized: {e}")
+
                     # Phase 2: KnowledgeAuditor
                     from agent_core.bulletin import KnowledgeAuditor
                     auditor = KnowledgeAuditor()
@@ -601,6 +806,9 @@ class HomeostasisModule(MariaModule):
                     from agent_core.bulletin import GapPlanner
                     gap_planner = GapPlanner()
                     gap_planner.set_bulletin_store(bulletin_store)
+                    # Warstwa 3: cross-check audit claims against real material
+                    if hasattr(ctx, 'memory_query') and ctx.memory_query:
+                        gap_planner.set_memory_query(ctx.memory_query)
                     planner.set_gap_planner(gap_planner)
                     ctx.gap_planner = gap_planner
 
@@ -614,6 +822,13 @@ class HomeostasisModule(MariaModule):
                     planner.executor.set_expert_bridge(expert_bridge)
 
                     print("[Homeostasis] [OK] BulletinStore + Auditor + GapPlanner + ExpertBridge wired (Learning Upgrade)")
+
+                    # Wire critic + bulletin into TeacherAgent for gap-driven priorities
+                    if core._teacher_agent:
+                        if hasattr(ctx, 'critic_agent') and ctx.critic_agent:
+                            core._teacher_agent.set_critic_agent(ctx.critic_agent)
+                        core._teacher_agent.set_bulletin_store(bulletin_store)
+                        logger.info("[TEACHER] Critic + BulletinStore wired for gap-driven learning")
                 except Exception as e:
                     logger.warning(f"BulletinStore not initialized: {e}")
 
@@ -632,6 +847,12 @@ class HomeostasisModule(MariaModule):
                 # Wire SemanticMemory to executor for semantic-aware fetch
                 if ctx.semantic_search:
                     planner.executor.set_semantic_search(ctx.semantic_search)
+                    # ... and to the planner itself, so post-EVALUATE
+                    # maintain() can run SEMANTIC belief dedup (flag-gated,
+                    # SEMANTIC_DEDUP_ENABLED). NOTE: the live instance is
+                    # ctx.semantic_search -- ctx.semantic_memory is never
+                    # assigned anywhere (found 2026-06-10).
+                    planner.set_semantic_memory(ctx.semantic_search)
 
                 # Phase 1 Tracing: DecisionTrace store
                 try:
@@ -665,6 +886,7 @@ class HomeostasisModule(MariaModule):
                         make_self_analyze_handler, make_creative_handler,
                         make_ask_expert_handler, make_validate_handler,
                         make_critique_handler, make_noop_handler,
+                        make_fs_write_handler,
                     )
 
                     cap_router = CapabilityRouter()
@@ -678,11 +900,14 @@ class HomeostasisModule(MariaModule):
                     # as bridge (handlers read from it at call time)
                     _tg = lambda: getattr(planner.executor, '_telegram_notifier', None)
 
+                    _consc = ctx.consciousness if hasattr(ctx, 'consciousness') else None
                     cap_router.register("learn", make_learn_handler(
                         _teacher, _analyzer, _sem, _goals, _tg,
+                        consciousness=_consc,
                     ), DEFAULT_CAPABILITY_SPECS["learn"])
                     cap_router.register("exam", make_exam_handler(
                         _teacher, _analyzer, _goals, _tg,
+                        consciousness=_consc,
                     ), DEFAULT_CAPABILITY_SPECS["exam"])
                     cap_router.register("review", make_review_handler(
                         _teacher, _analyzer,
@@ -701,7 +926,7 @@ class HomeostasisModule(MariaModule):
 
                     # Fetch
                     cap_router.register("fetch", make_fetch_handler(
-                        _analyzer, _sem,
+                        _analyzer, _sem, _goals,
                     ), DEFAULT_CAPABILITY_SPECS["fetch"])
 
                     # Experiment (K11)
@@ -710,11 +935,19 @@ class HomeostasisModule(MariaModule):
                         _exp,
                     ), DEFAULT_CAPABILITY_SPECS["experiment"])
 
-                    # Effector (OpenClaw)
+                    # Effector (OpenClaw) — coordinator preferred, client fallback
                     _claw = ctx.openclaw_client if hasattr(ctx, 'openclaw_client') else None
+                    _coord = ctx.effector_coordinator if hasattr(ctx, 'effector_coordinator') else None
                     cap_router.register("effector", make_effector_handler(
-                        _claw,
+                        _claw, effector_coordinator=_coord,
                     ), DEFAULT_CAPABILITY_SPECS["effector"])
+
+                    # FS_WRITE (B2) -- first real effector primitive, sandboxed.
+                    # Inert unless FS_WRITE_ENABLED + a goal carries a file_exists
+                    # criterion; closes that goal on external evidence.
+                    cap_router.register("fs_write", make_fs_write_handler(
+                        _goals, telegram_notifier=_tg,
+                    ), DEFAULT_CAPABILITY_SPECS["fs_write"])
 
                     # Self-Analysis (K12)
                     _sa = ctx.self_analysis if hasattr(ctx, 'self_analysis') else None
@@ -778,7 +1011,7 @@ class HomeostasisModule(MariaModule):
                             ctx.honesty_protocol = honesty
                             print("[Homeostasis] [OK] HonestyProtocol (K15.2) wired")
                         except Exception as e:
-                            logger.debug(f"HonestyProtocol not initialized: {e}")
+                            logger.warning(f"HonestyProtocol not initialized: {e}")
 
                         # Wire StateReporter (K15.1) - structured self-status
                         try:
@@ -796,7 +1029,7 @@ class HomeostasisModule(MariaModule):
                             ctx.state_reporter = state_reporter
                             print("[Homeostasis] [OK] StateReporter (K15.1) wired")
                         except Exception as e:
-                            logger.debug(f"StateReporter not initialized: {e}")
+                            logger.warning(f"StateReporter not initialized: {e}")
 
                         # Wire GrowthAwareness (K15.3) - limitations as targets
                         try:
@@ -812,12 +1045,33 @@ class HomeostasisModule(MariaModule):
                             _target_count = len(growth.get_targets(status="identified"))
                             print(f"[Homeostasis] [OK] GrowthAwareness (K15.3) wired ({_target_count} targets)")
                         except Exception as e:
-                            logger.debug(f"GrowthAwareness not initialized: {e}")
+                            logger.warning(f"GrowthAwareness not initialized: {e}")
 
                     except Exception as e:
-                        logger.debug(f"CapabilityManifest not initialized: {e}")
+                        logger.warning(f"CapabilityManifest not initialized: {e}")
                 except Exception as e:
                     logger.warning(f"CapabilityRouter not initialized: {e}")
+
+                # Strategic Planner (v2 Phase B) - LLM-powered planning layer
+                try:
+                    from agent_core.planner.strategic_planner import StrategicPlanner
+                    strategic = StrategicPlanner()
+                    if ctx.goal_store:
+                        strategic.set_goal_store(ctx.goal_store)
+                    if ctx.knowledge_analyzer:
+                        strategic.set_knowledge_analyzer(ctx.knowledge_analyzer)
+                    if ctx.evaluation_observer:
+                        strategic.set_evaluation_observer(ctx.evaluation_observer)
+                    # Wire LLM via router ask_as_role
+                    if ctx.brain and hasattr(ctx.brain, 'ask_as_role'):
+                        strategic.set_llm_fn(ctx.brain.ask_as_role)
+                    elif ctx.brain and hasattr(ctx.brain, 'ollama') and hasattr(ctx.brain.ollama, 'ask_as_role'):
+                        strategic.set_llm_fn(ctx.brain.ollama.ask_as_role)
+                    planner.set_strategic_planner(strategic)
+                    ctx.strategic_planner = strategic
+                    print("[Homeostasis] [OK] StrategicPlanner wired (v2 Phase B)")
+                except Exception as e:
+                    logger.warning(f"StrategicPlanner not initialized: {e}")
 
                 core.set_planner_core(planner)
                 ctx.planner_core = planner
@@ -834,7 +1088,7 @@ class HomeostasisModule(MariaModule):
                     )
                     print("[Homeostasis] [OK] Work context wired to chat")
             except Exception as e:
-                logger.debug(f"PlannerCore not wired: {e}")
+                logger.warning(f"PlannerCore not wired: {e}")
 
         # Initialize Telegram bridge (operator notifications)
         if core:
@@ -846,12 +1100,19 @@ class HomeostasisModule(MariaModule):
                     ctx.telegram_bridge = telegram
 
                     # Register basic commands
-                    _register_telegram_commands(telegram, ctx)
+                    register_telegram_commands(telegram, ctx)
 
                     # Wire notifier to planner's action executor + Phase 5 approval flow
                     if ctx.planner_core:
                         ctx.planner_core.executor.set_telegram_notifier(telegram.notifier)
                         ctx.planner_core.set_telegram_notifier(telegram.notifier)
+
+                    # Late-bind Telegram notifier into EffectorCoordinator
+                    # so notify_effector_incident works (coordinator was
+                    # constructed before Telegram came up).
+                    ctx.telegram_notifier = telegram.notifier
+                    if hasattr(ctx, 'effector_coordinator') and ctx.effector_coordinator:
+                        ctx.effector_coordinator.set_telegram_notifier(telegram.notifier)
 
                     # Flush old messages to avoid re-processing (e.g. /restart loop)
                     telegram.bot.flush_pending()
@@ -876,13 +1137,13 @@ class HomeostasisModule(MariaModule):
                                 len(interrupted),
                             )
                     except Exception as e:
-                        logger.debug(f"TaskStore recovery skipped: {e}")
+                        logger.warning(f"TaskStore recovery skipped: {e}")
 
                     print("[Homeostasis] [OK] Telegram bridge wired (ClawBot)")
                 else:
                     print("[Homeostasis] [--] Telegram not configured (set TELEGRAM_BOT_TOKEN in .env)")
             except Exception as e:
-                logger.debug(f"Telegram bridge not initialized: {e}")
+                logger.warning(f"Telegram bridge not initialized: {e}")
 
         # Initialize Vision cortex (visual perception pipeline)
         if core:
@@ -934,13 +1195,13 @@ class HomeostasisModule(MariaModule):
                         vision_cortex.add_sensor(sensor)  # add anyway, health will show disconnected
                         print("[Homeostasis] [OK] VisionCortex initialized (sensor: not connected)")
                 except Exception as e:
-                    logger.debug(f"USB webcam not available: {e}")
+                    logger.warning(f"USB webcam not available: {e}")
                     print("[Homeostasis] [OK] VisionCortex initialized (no sensor)")
 
                 ctx.vision_cortex = vision_cortex
                 core.set_vision_cortex(vision_cortex)
             except Exception as e:
-                logger.debug(f"VisionCortex not initialized: {e}")
+                logger.warning(f"VisionCortex not initialized: {e}")
 
         # Initialize Code Agent (autonomous coding)
         try:
@@ -954,33 +1215,44 @@ class HomeostasisModule(MariaModule):
             elif hasattr(ctx, 'codex_client') and ctx.codex_client:
                 code_agent.set_codex_fn(ctx.codex_client.ask)
             # Wire Telegram notifications
+            # Audyt 2026-06-12: send_message bylo fantomem na TelegramNotifier
+            # -- AttributeError ubijal caly init w KAZDYM z ~290 bootow od
+            # deployu (02-22). Realne API: send_raw; parse_mode=None bo wyniki
+            # code-taskow niosa podkreslniki (sciezki, komendy checkpointow),
+            # ktore Markdown po cichu zjada (lekcja /approve_note 06-08).
             if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'notifier'):
-                code_agent.set_notify_fn(ctx.telegram_bridge.notifier.send_message)
+                _ca_notifier = ctx.telegram_bridge.notifier
+                code_agent.set_notify_fn(
+                    lambda text, _n=_ca_notifier: _n.send_raw(text, parse_mode=None)
+                )
             ctx.code_agent = code_agent
             print("[Homeostasis] [OK] Code Agent initialized")
         except Exception as e:
-            logger.debug(f"Code Agent not initialized: {e}")
+            logger.warning(f"Code Agent not initialized: {e}")
 
         # Start introspection scheduler (daily code self-model refresh)
         try:
             from agent_core.introspection.scheduler import IntrospectionScheduler
+            from maria_core.sys.config import BASE_DIR as _INTRO_BASE
             intro_sched = IntrospectionScheduler(
-                project_root=str(Path(ctx.config.BASE_DIR)),
+                project_root=str(_INTRO_BASE),
                 interval_sec=86400,  # 24h (AST scan is heavy)
             )
             intro_sched.start()
             print("[Homeostasis] [OK] Introspection scheduler started (24h)")
         except Exception as e:
-            logger.debug(f"Introspection scheduler not started: {e}")
+            # Promoted debug->warning — SharedContext.config bug 2026-04-13.
+            logger.warning(f"[Homeostasis] Introspection scheduler not started: {e}")
 
         # Wire state-grounded operator response pipeline (Phase 2)
         try:
             from agent_core.introspection.query_router import OperationalQueryRouter
             from agent_core.introspection.evidence_collector import EvidenceCollector
             from agent_core.introspection.response_builder import ResponseBuilder
+            from maria_core.sys.config import BASE_DIR as _EC_BASE
 
             qr = OperationalQueryRouter()
-            ec = EvidenceCollector(project_root=str(Path(ctx.config.BASE_DIR)))
+            ec = EvidenceCollector(project_root=str(_EC_BASE))
             rb = ResponseBuilder()
 
             # Wire runtime objects for full evidence access
@@ -1014,7 +1286,8 @@ class HomeostasisModule(MariaModule):
 
             print("[Homeostasis] [OK] Grounding pipeline wired (Phase 2)")
         except Exception as e:
-            logger.debug(f"Grounding pipeline not wired: {e}")
+            # Promoted debug->warning — SharedContext.config bug 2026-04-13.
+            logger.warning(f"[Homeostasis] Grounding pipeline not wired: {e}")
 
         # Initialize Reminders & Todos (Phase 12)
         try:
@@ -1038,7 +1311,7 @@ class HomeostasisModule(MariaModule):
             t_count = todo_store.count()
             print(f"[Homeostasis] [OK] Reminders ({r_count['pending']} pending) + Todos ({t_count['pending']} pending)")
         except Exception as e:
-            logger.debug(f"Reminders not initialized: {e}")
+            logger.warning(f"Reminders not initialized: {e}")
 
         # Initialize Proactive Contact (Phase 13)
         try:
@@ -1124,7 +1397,7 @@ class HomeostasisModule(MariaModule):
                 _holiday_info = f", dzis: {_holiday_today}" if _holiday_today else ""
                 print(f"[Homeostasis] [OK] PerceptionFusion (Faza 3){_holiday_info}")
             except Exception as e:
-                logger.debug(f"PerceptionFusion not initialized: {e}")
+                logger.warning(f"PerceptionFusion not initialized: {e}")
 
             # Wire Digital Hands (Faza 4)
             try:
@@ -1162,7 +1435,7 @@ class HomeostasisModule(MariaModule):
 
                 print(f"[Homeostasis] [OK] Digital Hands (Faza 4, {len(_task_exec.get_available_tools())} tools)")
             except Exception as e:
-                logger.debug(f"Digital Hands not initialized: {e}")
+                logger.warning(f"Digital Hands not initialized: {e}")
 
             # Wire Workflow Orchestration (Faza 5)
             try:
@@ -1210,7 +1483,7 @@ class HomeostasisModule(MariaModule):
                 _int_info = f", {len(_interrupted)} recovered" if _interrupted else ""
                 print(f"[Homeostasis] [OK] Workflow Engine (Faza 5, {_wf_count} workflows{_int_info})")
             except Exception as e:
-                logger.debug(f"Workflow Engine not initialized: {e}")
+                logger.warning(f"Workflow Engine not initialized: {e}")
 
             # Wire Environment Adaptation (Faza 6)
             try:
@@ -1228,7 +1501,7 @@ class HomeostasisModule(MariaModule):
                 _env_mode = _env_manager.get_active_mode().value
                 print(f"[Homeostasis] [OK] Environment Manager (Faza 6, mode={_env_mode})")
             except Exception as e:
-                logger.debug(f"Environment Manager not initialized: {e}")
+                logger.warning(f"Environment Manager not initialized: {e}")
 
             if ctx.evaluation_observer:
                 gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
@@ -1272,7 +1545,7 @@ class HomeostasisModule(MariaModule):
             status = "enabled" if proactive.enabled else "disabled"
             print(f"[Homeostasis] [OK] Proactive contact ({status}, {proactive.state.contacts_today} today)")
         except Exception as e:
-            logger.debug(f"Proactive contact not initialized: {e}")
+            logger.warning(f"Proactive contact not initialized: {e}")
 
         # Faza 7: Trust & Autonomy Graduation
         try:
@@ -1307,6 +1580,13 @@ class HomeostasisModule(MariaModule):
             )
             ctx.auto_promotion = auto_promotion
 
+            # Wire Telegram notifications for promotion events
+            if ctx.telegram_bridge:
+                try:
+                    auto_promotion.set_notify_fn(ctx.telegram_bridge.bot.send_message)
+                except Exception:
+                    pass
+
             avg_trust = trust_scorer.get_average_trust()
             inc_count = incident_memory.count()
             # Wire incident memory to planner executor
@@ -1315,9 +1595,28 @@ class HomeostasisModule(MariaModule):
 
             print(f"[Homeostasis] [OK] Faza 7 Trust & Autonomy (trust={avg_trust:.2f}, incidents={inc_count})")
         except Exception as e:
-            logger.debug(f"Faza 7 not initialized: {e}")
+            logger.warning(f"Faza 7 not initialized: {e}")
 
-        # Wire tick hooks for Faza 5+6+7
+        # Most #1: Bulletin Escalator (Phase 9.6 — k12 advisory -> PROPOSED goal)
+        try:
+            from agent_core.bulletin.escalator import BulletinEscalator
+            _bull_store = getattr(ctx, 'bulletin_store', None)
+            _goal_store = getattr(ctx, 'goal_store', None)
+            if _bull_store and _goal_store:
+                ctx.bulletin_escalator = BulletinEscalator(
+                    bulletin_store=_bull_store,
+                    goal_store=_goal_store,
+                )
+                print("[Homeostasis] [OK] BulletinEscalator wired (Most #1, Phase 9.6)")
+            else:
+                logger.warning(
+                    f"BulletinEscalator skipped: bulletin_store={_bull_store is not None}, "
+                    f"goal_store={_goal_store is not None}"
+                )
+        except Exception as e:
+            logger.warning(f"BulletinEscalator not initialized: {e}")
+
+        # Wire tick hooks for Faza 5+6+7 + Most #1
         if core:
             if ctx.workflow_engine:
                 core.set_workflow_engine(ctx.workflow_engine)
@@ -1325,6 +1624,185 @@ class HomeostasisModule(MariaModule):
                 core.set_environment_manager(ctx.environment_manager)
             if getattr(ctx, 'auto_promotion', None):
                 core.set_auto_promotion(ctx.auto_promotion)
+            if getattr(ctx, 'bulletin_escalator', None):
+                core.set_bulletin_escalator(ctx.bulletin_escalator)
+
+        # Self-Perception (Phase 18 — periodic self-state snapshots)
+        if core:
+            try:
+                from agent_core.self_perception import SelfPerception, SnapshotStore
+                self_perception = SelfPerception(
+                    ctx=ctx,
+                    snapshot_store=SnapshotStore(),
+                    bulletin_store=getattr(ctx, 'bulletin_store', None),
+                )
+                ctx.self_perception = self_perception
+                core.set_self_perception(self_perception)
+                print("[Homeostasis] [OK] SelfPerception wired (Phase 18)")
+            except Exception as e:
+                logger.warning(f"SelfPerception not initialized: {e}")
+
+        # Conductor (Phase 17 — delegated build orchestration, e.g. market_agent)
+        try:
+            from agent_core.conductor import Conductor
+            conductor = Conductor()
+            ctx.conductor = conductor
+            if core:
+                core.set_conductor(conductor)
+            print("[Homeostasis] [OK] Conductor wired (Phase 17)")
+
+        except Exception as e:
+            logger.warning(f"Conductor not initialized: {e}")
+
+        # Maria-repo conductor (T-SELF-003) — separate queue for self-repair
+        # and other maria-project tasks. Independent of market_agent.
+        try:
+            from agent_core.conductor import Conductor
+            from agent_core.conductor.task_queue import TaskQueue
+            from pathlib import Path
+
+            maria_queue_path = Path("meta_data/maria_task_queue.jsonl")
+            maria_conductor = Conductor(queue=TaskQueue(path=maria_queue_path))
+            ctx.maria_conductor = maria_conductor
+            if core:
+                core.set_maria_conductor(maria_conductor)
+            print("[Homeostasis] [OK] Maria conductor wired (project=maria)")
+        except Exception as e:
+            logger.warning(f"Maria conductor not initialized: {e}")
+
+        # Self-Repair (Phase 19 — systemic failure detection + STOP-AT-PENDING)
+        if (
+            core
+            and getattr(ctx, 'self_perception', None)
+            and getattr(ctx, 'maria_conductor', None)
+        ):
+            try:
+                from pathlib import Path
+                from agent_core.self_repair import (
+                    RepairTaskCreator,
+                    SystemFailureMonitor,
+                    TaskBoardWriter,
+                )
+
+                repair_creator = RepairTaskCreator(
+                    conductor=ctx.maria_conductor,
+                    bulletin_store=getattr(ctx, 'bulletin_store', None),
+                    task_board_writer=TaskBoardWriter(),
+                    notifier=getattr(ctx, 'telegram_notifier', None),
+                    self_perception=ctx.self_perception,
+                )
+                monitor = SystemFailureMonitor(
+                    self_perception=ctx.self_perception,
+                    conductor=ctx.maria_conductor,
+                    audit_path=Path("meta_data/action_audit.jsonl"),
+                    repair_task_creator=repair_creator,
+                    heartbeat_provider=core,  # 7b: per-thread liveness (flag-gated)
+                )
+                ctx.repair_task_creator = repair_creator
+                ctx.system_failure_monitor = monitor
+                core.set_system_failure_monitor(monitor)
+                core.set_bulletin_store(getattr(ctx, 'bulletin_store', None))
+                core.set_telegram_notifier(getattr(ctx, 'telegram_notifier', None))
+                print("[Homeostasis] [OK] SelfRepair wired (Phase 19)")
+            except Exception as e:
+                logger.warning(f"SelfRepair not initialized: {e}", exc_info=True)
+
+        # Outbox (TIER 2 hands, Rung 2) -- operator-visible artifact via a gated
+        # write. The autonomous side only PROPOSES (flag OUTBOX_WRITE_ENABLED);
+        # the write happens only on /approve_note. Wired with its own try/except.
+        if core is not None:
+            try:
+                from pathlib import Path as _Path
+                from agent_core.hands.outbox import OutboxProposalStore
+                try:
+                    from maria_core.sys.config import BASE_DIR as _base
+                    _base = str(_base)
+                except Exception:
+                    _base = "."  # CWD fallback (systemd WorkingDirectory + os.chdir)
+                ctx.outbox_store = OutboxProposalStore(
+                    path=_Path(_base) / "meta_data" / "outbox_proposals.jsonl",
+                    base_dir=_base,
+                )
+                core.set_outbox_proposer(
+                    lambda reason: _propose_outbox_status_note(ctx, reason)
+                )
+                print("[Homeostasis] [OK] Outbox wired (Rung 2 hands)")
+            except Exception as e:
+                logger.warning(f"Outbox not initialized: {e}", exc_info=True)
+
+        # Autonomous Codex dispatcher (Phase 17) — one per project.
+        # Wired AFTER Conductor with its own try/except so a telegram
+        # wiring glitch can't take Conductor down with it. Falls through
+        # silently if codex_client unavailable; manual /codex Telegram
+        # path stays operational regardless.
+        if core and getattr(ctx, 'conductor', None) and getattr(ctx, 'codex_client', None):
+            try:
+                from agent_core.conductor.dispatcher import (
+                    ConductorDispatcher,
+                )
+                notify = None
+                if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'bot'):
+                    notify = ctx.telegram_bridge.bot.send_message
+                dispatcher = ConductorDispatcher(
+                    conductor=ctx.conductor,
+                    codex_client=ctx.codex_client,
+                    project="market_agent",
+                    notify_fn=notify,
+                )
+                core.add_conductor_dispatcher(dispatcher)
+                print(
+                    "[Homeostasis] [OK] ConductorDispatcher wired "
+                    "(project=market_agent, autonomous Codex dispatch)"
+                )
+            except Exception as e:
+                logger.warning(f"ConductorDispatcher not wired: {e}")
+
+        # Maria-repo dispatcher (T-SELF-003). Workspace is the maria repo
+        # itself. Tasks are seeded by self_repair (T-SELF-002) or manually
+        # via Conductor.add_task. Inline mode — branch refactor/homeostasis.
+        if (
+            core
+            and getattr(ctx, 'maria_conductor', None)
+            and getattr(ctx, 'codex_client', None)
+        ):
+            try:
+                from agent_core.conductor.dispatcher import ConductorDispatcher
+                notify = None
+                if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'bot'):
+                    notify = ctx.telegram_bridge.bot.send_message
+                maria_dispatcher = ConductorDispatcher(
+                    conductor=ctx.maria_conductor,
+                    codex_client=ctx.codex_client,
+                    project="maria",
+                    notify_fn=notify,
+                )
+                core.add_conductor_dispatcher(maria_dispatcher)
+                print(
+                    "[Homeostasis] [OK] ConductorDispatcher wired "
+                    "(project=maria, autonomous Codex dispatch)"
+                )
+            except Exception as e:
+                logger.warning(f"Maria ConductorDispatcher not wired: {e}")
+
+        # IntentRouter (Faza K Deska #1 Phase 2 — T-IR-002 wire-up)
+        try:
+            from agent_core.routing import IntentRouter
+            from agent_core.homeostasis.time_awareness import TimeAwareness
+            ctx.intent_router = IntentRouter(
+                weather_sensor=getattr(ctx, 'weather_sensor', None),
+                time_awareness=TimeAwareness,
+                memory_query=getattr(ctx, 'memory_query', None),
+                self_model=None,
+                capability_router=getattr(ctx, 'capability_router', None),
+                effector_coordinator=getattr(ctx, 'effector_coordinator', None),
+                enabled=None,
+            )
+            print(
+                f"[Homeostasis] [OK] IntentRouter wired "
+                f"(enabled={ctx.intent_router._enabled})"
+            )
+        except Exception as e:
+            logger.warning(f"IntentRouter not initialized: {e}")
 
         return True
 
@@ -1750,1611 +2228,6 @@ class HomeostasisModule(MariaModule):
     def cleanup(self):
         if self._running:
             self._running = False
-
-
-def _register_telegram_commands(bridge, ctx):
-    """Register Telegram command handlers for operator interaction."""
-
-    def _cmd_status(args):
-        """Return system status summary."""
-        parts = []
-        if ctx.homeostasis_core:
-            state = ctx.homeostasis_core.get_state()
-            parts.append(f"Mode: {state.mode.value}")
-            parts.append(f"Health: {state.health_score:.0%}")
-            if state.alerts:
-                parts.append(f"Alerts: {len(state.alerts)}")
-
-        if ctx.planner_core:
-            status = ctx.planner_core.get_status()
-            parts.append(f"Planner cycles: {status['total_cycles']}")
-            parts.append(f"Plans executed: {status['total_plans_executed']}")
-
-        if ctx.knowledge_analyzer:
-            try:
-                snap = ctx.knowledge_analyzer.get_knowledge_snapshot()
-                if snap:
-                    by_status = snap.get("files_by_status", {})
-                    completed = len(by_status.get("completed", []))
-                    total = snap.get("total_files", 0)
-                    parts.append(f"Knowledge: {completed}/{total} completed")
-            except Exception:
-                pass
-
-        if ctx.goal_store:
-            try:
-                stats = ctx.goal_store.stats()
-                parts.append(f"Goals: {stats.get('active', 0)} active, {stats.get('proposed', 0)} proposed")
-            except Exception:
-                pass
-
-        return "\n".join(parts) if parts else "System OK"
-
-    def _cmd_goals(args):
-        """List active and proposed goals."""
-        if not ctx.goal_store:
-            return "GoalStore not available"
-
-        lines = []
-        active = ctx.goal_store.get_active()
-        if active:
-            lines.append(f"*Active ({len(active)}):*")
-            for g in active[:20]:
-                lines.append(f"  [{g.id[:8]}] pri={g.priority:.2f} {g.description[:65]}")
-
-        proposed = ctx.goal_store.get_proposed()
-        if proposed:
-            lines.append(f"\n*Proposed ({len(proposed)}):*")
-            for g in sorted(proposed, key=lambda x: x.priority, reverse=True)[:10]:
-                lines.append(f"  [{g.id[:8]}] pri={g.priority:.2f} {g.description[:65]}")
-
-        # Stats
-        stats = ctx.goal_store.stats()
-        abandoned = stats["by_status"].get("abandoned", 0)
-        achieved = stats["by_status"].get("achieved", 0)
-        if abandoned or achieved:
-            lines.append(f"\nZakonczone: {achieved} achieved, {abandoned} abandoned")
-
-        return "\n".join(lines) if lines else "Brak celow"
-
-    def _cmd_approve(args):
-        """Approve a proposed goal by ID prefix."""
-        if not ctx.goal_store or not args:
-            return "Uzycie: approve <id-prefix>"
-        prefix = args.strip()
-        proposed = ctx.goal_store.get_proposed()
-        match = [g for g in proposed if g.id.startswith(prefix)]
-        if not match:
-            return f"Nie znaleziono celu: {prefix}"
-        if len(match) > 1:
-            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
-        goal = match[0]
-        ctx.goal_store.confirm(goal.id)
-        ctx.goal_store.save()
-        return f"Zatwierdzono: {goal.description[:80]}"
-
-    def _cmd_reject(args):
-        """Reject a proposed goal by ID prefix."""
-        if not ctx.goal_store or not args:
-            return "Uzycie: reject <id-prefix>"
-        prefix = args.strip()
-        proposed = ctx.goal_store.get_proposed()
-        match = [g for g in proposed if g.id.startswith(prefix)]
-        if not match:
-            return f"Nie znaleziono celu: {prefix}"
-        if len(match) > 1:
-            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
-        goal = match[0]
-        ctx.goal_store.reject(goal.id, reason="operator_telegram")
-        ctx.goal_store.save()
-        return f"Odrzucono: {goal.description[:80]}"
-
-    def _cmd_restart(args):
-        """Restart Maria (systemd will bring her back in 10s)."""
-        import os
-
-        bridge.notifier.send_raw("Restarting M.A.R.I.A. ... (wraca za ~10s)")
-
-        # Give Telegram time to send the message, then exit
-        # sys.exit(1) = failure -> systemd Restart=on-failure kicks in
-        def _delayed_exit():
-            time.sleep(2)
-            os._exit(1)
-
-        t = threading.Thread(target=_delayed_exit, daemon=True)
-        t.start()
-        return None  # Message already sent via send_raw
-
-    def _cmd_priority(args):
-        """Set priority for a goal: /priority <id-prefix> <0.0-1.0>"""
-        from agent_core.goals.goal_model import AuditEntry
-        if not ctx.goal_store or not args:
-            return "Uzycie: /priority <id-prefix> <0.0-1.0>"
-        parts = args.strip().split(None, 1)
-        if len(parts) < 2:
-            return "Uzycie: /priority <id-prefix> <0.0-1.0>"
-        prefix = parts[0]
-        try:
-            new_pri = float(parts[1])
-        except ValueError:
-            return f"Nieprawidlowy priorytet: {parts[1]}"
-        if not (0.0 <= new_pri <= 1.0):
-            return "Priorytet musi byc 0.0-1.0"
-
-        # Search in proposed + active goals
-        candidates = ctx.goal_store.get_proposed() + ctx.goal_store.get_active()
-        match = [g for g in candidates if g.id.startswith(prefix)]
-        if not match:
-            return f"Nie znaleziono celu: {prefix}"
-        if len(match) > 1:
-            return f"Wiele dopasowani ({len(match)}), podaj dluzszy prefix"
-        goal = match[0]
-        old_pri = goal.priority
-        goal.priority = new_pri
-        goal.updated_at = time.time()
-        goal.audit_trail.append(AuditEntry(
-            timestamp=time.time(),
-            old_status=goal.status.value,
-            new_status=goal.status.value,
-            reason=f"priority {old_pri:.2f} -> {new_pri:.2f} (operator)",
-            actor="operator",
-        ))
-        ctx.goal_store._mark_dirty(goal.id)
-        ctx.goal_store.save()
-        return f"Priorytet {goal.description[:60]}: {old_pri:.2f} -> {new_pri:.2f}"
-
-    def _cmd_learn(args):
-        """Create a learning goal from Telegram: /learn <topic>"""
-        if not args or not args.strip():
-            return "Uzycie: /learn <temat>\nPrzyklad: /learn fizyka kwantowa"
-        topic = args.strip()
-        try:
-            from agent_core.perception.conversation_learning import process_user_message
-            result = process_user_message(f"naucz sie o {topic}", ctx, channel="telegram")
-            if result and result.get("goal_id"):
-                return f"Dodam do nauki: '{result['topic']}'"
-            else:
-                return f"Nie udalo sie utworzyc celu dla: '{topic}'"
-        except Exception as e:
-            return f"Blad: {e}"
-
-    def _cmd_trace(args):
-        """Show recent decision traces."""
-        trace_store = getattr(ctx, 'trace_store', None)
-        if not trace_store:
-            return "TraceStore niedostepny."
-
-        args = args.strip()
-        # /trace <episode_id> - show specific trace
-        if args and args.startswith("ep-"):
-            t = trace_store.get_by_episode_id(args)
-            if not t:
-                return f"Trace {args} nie znaleziony."
-            steps_text = ""
-            for s in t.get("steps", [])[:8]:
-                steps_text += f"  {s['subsystem']}: {s['action']} -> {s['result']}\n"
-            return (
-                f"*Trace {t['episode_id'][-8:]}*\n"
-                f"Action: {t.get('action_type', '?')}\n"
-                f"Goal: {t.get('goal_description', '-')[:40]}\n"
-                f"K7: {t.get('k7_decision', '-')}\n"
-                f"Success: {t.get('success')}\n"
-                f"Duration: {t.get('duration_ms', 0):.0f}ms\n"
-                f"LLM calls: {t.get('total_llm_calls', 0)}\n"
-                f"Steps:\n{steps_text}"
-            )
-
-        # /trace stats - aggregate stats
-        if args == "stats":
-            stats = trace_store.get_stats()
-            at = stats.get("action_types", {})
-            at_text = ", ".join(f"{k}:{v}" for k, v in sorted(at.items(), key=lambda x: -x[1])[:5])
-            return (
-                f"*Trace stats* (last {stats['total']})\n"
-                f"OK: {stats.get('success', 0)} | FAIL: {stats.get('failed', 0)}\n"
-                f"K7 blocks: {stats.get('k7_blocks', 0)}\n"
-                f"Avg: {stats.get('avg_duration_ms', 0):.0f}ms\n"
-                f"LLM: {stats.get('total_llm_calls', 0)} calls\n"
-                f"Actions: {at_text}"
-            )
-
-        # /trace failed - recent failures
-        if args == "failed":
-            failed = trace_store.get_failed(limit=5)
-            if not failed:
-                return "Brak ostatnich bledow."
-            lines = []
-            for t in failed:
-                eid = t.get("episode_id", "?")[-8:]
-                action = t.get("action_type", "?")
-                k7 = t.get("k7_decision", "")
-                summary = t.get("result_summary", "")[:40]
-                lines.append(f"[{eid}] {action} K7:{k7} - {summary}")
-            return "*Ostatnie bledy:*\n" + "\n".join(lines)
-
-        # /trace - show last N traces (default 5)
-        limit = 5
-        if args.isdigit():
-            limit = min(int(args), 10)
-        recent = trace_store.get_recent(limit=limit)
-        if not recent:
-            return "Brak traces."
-        lines = []
-        for t in recent:
-            eid = t.get("episode_id", "?")[-8:]
-            action = t.get("action_type", "?")
-            ok = "OK" if t.get("success") else "FAIL"
-            dur = t.get("duration_ms", 0)
-            goal = (t.get("goal_description") or "-")[:25]
-            lines.append(f"[{eid}] {action} {ok} {dur:.0f}ms - {goal}")
-        return "*Ostatnie trace:*\n" + "\n".join(lines)
-
-    def _cmd_memory(args):
-        """Query Maria's knowledge about a topic."""
-        topic = args.strip()
-        if not topic:
-            return "Uzycie: /memory <temat>\nNp. /memory fizyka\n/memory gaps"
-
-        memory_query = getattr(ctx, 'memory_query', None)
-        if not memory_query:
-            return "MemoryQuery niedostepny."
-
-        try:
-            # /memory gaps - knowledge gap analysis
-            if topic.lower() == "gaps":
-                gaps = memory_query.get_knowledge_gaps(top_k=5)
-                if not gaps:
-                    return "Brak luk w wiedzy."
-                lines = ["*Luki w wiedzy:*"]
-                for g in gaps:
-                    lines.append(f"- {g['topic']}: {g['confidence']:.0%} ({g['reason']})")
-                return "\n".join(lines)
-
-            # /memory <topic> - query knowledge
-            summary = memory_query.get_topic_summary(topic)
-            if not summary.get("known"):
-                return f"Nie mam wiedzy o: {topic}"
-
-            results = memory_query.query_topic(topic, top_k=5)
-            lines = [
-                f"*Wiedza o '{topic}':*",
-                f"Pliki: {summary.get('files_count', 0)}, przekonania: {summary.get('beliefs_count', 0)}",
-                f"Pewnosc: {summary.get('avg_confidence', 0):.0%}, swiezosc: {summary.get('freshness', 0):.0%}",
-                "",
-            ]
-            for r in results[:5]:
-                src = r.source.value[:4]
-                lines.append(f"[{src}] {r.content[:60]}")
-
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Blad: {e}"
-
-    # -- Phase 5: Effector commands --
-
-    def _cmd_efapprove(args):
-        """Approve a pending effector request."""
-        queue = getattr(ctx, 'approval_queue', None)
-        if not queue or not args:
-            return "Uzycie: /efapprove <request-id-prefix>"
-        prefix = args.strip()
-        approved = queue.approve(prefix)
-        if not approved:
-            return f"Nie znaleziono oczekujacego requestu: {prefix}"
-        return f"Zatwierdzono efektor: {approved.tool_name} ({approved.request_id[:12]})"
-
-    def _cmd_efreject(args):
-        """Reject a pending effector request."""
-        queue = getattr(ctx, 'approval_queue', None)
-        if not queue or not args:
-            return "Uzycie: /efreject <request-id-prefix>"
-        prefix = args.strip()
-        rejected = queue.reject(prefix)
-        if not rejected:
-            return f"Nie znaleziono oczekujacego requestu: {prefix}"
-        return f"Odrzucono efektor: {rejected.tool_name} ({rejected.request_id[:12]})"
-
-    def _cmd_efstatus(args):
-        """Show effector authority status and pending requests."""
-        parts = []
-
-        auth_mgr = getattr(ctx, 'authority_manager', None)
-        if auth_mgr:
-            status = auth_mgr.get_status()
-            parts.append(f"*Authority level:* {status['authority_level']}")
-
-        queue = getattr(ctx, 'approval_queue', None)
-        if queue:
-            stats = queue.get_stats()
-            parts.append(f"Pending: {stats['pending']}, Approved: {stats['approved']}")
-            pending = queue.get_pending()
-            for p in pending[:5]:
-                parts.append(f"  [{p.request_id[:8]}] {p.tool_name} - {p.goal_description[:40]}")
-
-        budget = getattr(ctx, 'tool_budget', None)
-        if budget:
-            bstats = budget.get_stats()
-            for tool, ts in bstats.items():
-                if ts['consecutive_failures'] > 0 or ts['locked']:
-                    parts.append(f"  {tool}: {ts['invocations_this_window']}/{ts['rate_limit']} "
-                                 f"fails={ts['consecutive_failures']} locked={ts['locked']}")
-
-        return "\n".join(parts) if parts else "Brak danych efektora"
-
-    def _cmd_authority(args):
-        """Change effector authority level."""
-        from agent_core.autonomy.authority_level import AuthorityLevel
-
-        auth_mgr = getattr(ctx, 'authority_manager', None)
-        if not auth_mgr:
-            return "AuthorityManager niedostepny"
-
-        arg = args.strip().lower()
-        if not arg:
-            level = auth_mgr.get_level()
-            return (
-                f"*Aktualny level:* {level.value}\n"
-                "Dostepne: observe, suggest, confirm, bounded\n"
-                "Uzycie: /authority <level>"
-            )
-
-        try:
-            new_level = AuthorityLevel(arg)
-        except ValueError:
-            return f"Nieznany level: {arg}. Dostepne: observe, suggest, confirm, bounded"
-
-        ok = auth_mgr.set_level(new_level)
-        if not ok:
-            return f"Nie mozna ustawic: {arg} (max: bounded)"
-
-        # On downgrade, reject pending approvals
-        queue = getattr(ctx, 'approval_queue', None)
-        if queue and new_level.value in ("observe", "suggest"):
-            rejected = queue.reject_all_pending("authority_downgrade")
-            if rejected > 0:
-                return f"Authority: {new_level.value} (odrzucono {rejected} oczekujacych)"
-
-        return f"Authority: {new_level.value}"
-
-    def _cmd_trust(args):
-        """Show trust scores and promotion status."""
-        scorer = getattr(ctx, 'trust_scorer', None)
-        if not scorer:
-            return "TrustScorer niedostepny"
-
-        arg = args.strip().lower()
-
-        if arg == "incidents":
-            mem = getattr(ctx, 'incident_memory', None)
-            if not mem:
-                return "IncidentMemory niedostepny"
-            stats = mem.get_stats()
-            recent = mem.get_recent(limit=5)
-            lines = [
-                f"*Incydenty:* {stats['total']} (nierozwiazane: {stats['unresolved']}, 7d: {stats['recent_7d']})",
-            ]
-            for inc in reversed(recent):
-                age = inc.age_days()
-                lines.append(f"  [{inc.severity}] {inc.action_type}: {inc.error_type} ({age:.1f}d ago)")
-            return "\n".join(lines)
-
-        if arg == "promotion":
-            promo = getattr(ctx, 'auto_promotion', None)
-            if not promo:
-                return "AutoPromotion niedostepny"
-            status = promo.get_status()
-            lines = [
-                f"*AutoPromotion:*",
-                f"Pending: {status['pending_goal_id'] or 'brak'}",
-                f"Probacja: {'tak' if status['in_probation'] else 'nie'}",
-            ]
-            if status['in_probation']:
-                lines.append(f"Pozostalo: {status['probation_remaining_days']:.1f} dni")
-            history = promo.get_history(limit=3)
-            if history:
-                lines.append("Ostatnie:")
-                for h in reversed(history):
-                    lines.append(f"  {h['event_type']}: {h['from_level']}->{h['to_level']} (trust:{h['trust_score']:.2f})")
-            return "\n".join(lines)
-
-        # Default: show dashboard
-        dash = scorer.get_dashboard()
-        lines = [
-            f"*Trust Dashboard:*",
-            f"Authority: {dash['current_authority']}",
-            f"Sredni trust: {dash['average_trust']:.3f}",
-            f"Probacja: {'tak' if dash['in_probation'] else 'nie'}",
-        ]
-        if dash['promotion_available'] and dash['promotion']:
-            p = dash['promotion']
-            lines.append(f"Awans dostepny: {p['current_level']}->{p['proposed_level']} (trust:{p['trust_score']:.2f})")
-
-        scores = dash.get('trust_scores', {})
-        if scores:
-            lines.append("Wyniki per typ:")
-            for at, ts in sorted(scores.items()):
-                marker = "+" if ts['has_enough_data'] else "?"
-                lines.append(f"  {marker} {at}: {ts['score']:.3f} ({ts['total_actions']} akcji)")
-
-        return "\n".join(lines)
-
-    def _cmd_validate(args):
-        """Show cross-validation stats and disputes."""
-        cv = getattr(ctx, 'cross_validator', None)
-        dl = getattr(ctx, 'dispute_log', None)
-
-        args = args.strip()
-
-        # /validate disputes - recent disputes
-        if args == "disputes":
-            if not dl:
-                return "DisputeLog niedostepny."
-            recent = dl.get_recent(limit=10)
-            if not recent:
-                return "Brak sporow."
-            lines = []
-            for d in recent:
-                rec = d if isinstance(d, dict) else d.to_dict()
-                fid = rec.get("file_id", "?")[:20]
-                dim = rec.get("dimension", "?")
-                sev = rec.get("severity", "?")
-                lines.append(f"  [{fid}] {dim} (sev={sev})")
-            return "*Ostatnie spory:*\n" + "\n".join(lines)
-
-        # /validate unresolved - unresolved disputes
-        if args == "unresolved":
-            if not dl:
-                return "DisputeLog niedostepny."
-            unresolved = dl.get_unresolved()
-            if not unresolved:
-                return "Brak nierozwiazanych sporow."
-            lines = []
-            for d in unresolved[:10]:
-                rec = d if isinstance(d, dict) else d.to_dict()
-                fid = rec.get("file_id", "?")[:20]
-                dim = rec.get("dimension", "?")
-                lines.append(f"  [{fid}] {dim}")
-            return f"*Nierozwiazane ({len(unresolved)}):*\n" + "\n".join(lines)
-
-        # /validate - stats overview (default)
-        parts = ["*Cross-Validation (Faza F):*"]
-        if cv:
-            stats = cv.get_stats()
-            parts.append(
-                f"Validated: {stats.get('chunks_validated', 0)} chunks\n"
-                f"Agreed: {stats.get('chunks_agreed', 0)}\n"
-                f"Disputed: {stats.get('chunks_disputed', 0)}\n"
-                f"Avg confidence: {stats.get('avg_confidence', 0):.2f}"
-            )
-        else:
-            parts.append("CrossValidator niedostepny (brak NIM?).")
-
-        if dl:
-            dl_stats = dl.get_stats()
-            parts.append(
-                f"\n*Disputes:*\n"
-                f"Total: {dl_stats.get('total', 0)}\n"
-                f"Unresolved: {dl_stats.get('unresolved', 0)}"
-            )
-
-        return "\n".join(parts)
-
-    def _cmd_nauka(args):
-        """Show learning goals and their progress."""
-        gs = getattr(ctx, 'goal_store', None)
-        if not gs:
-            return "GoalStore niedostepny."
-
-        args = args.strip()
-
-        # /nauka <topic> - search by topic
-        if args:
-            goals = gs.find_by_topic(args)
-            if not goals:
-                return f"Brak celow nauki o '{args}'."
-            lines = [f"*Nauka: {args}*"]
-            for g in goals[:5]:
-                status = g.status.value
-                progress = f"{g.progress:.0%}"
-                age = time.time() - g.created_at
-                age_str = f"{age/3600:.0f}h" if age < 86400 else f"{age/86400:.0f}d"
-                line = f"  [{g.id[:8]}] {status} | {progress} | {age_str} temu"
-                if g.outcome:
-                    score = g.outcome.get("final_score", 0)
-                    line += f" | wynik: {score:.0%}"
-                lines.append(line)
-            return "\n".join(lines)
-
-        # /nauka - list all LEARNING goals
-        from agent_core.goals.goal_model import GoalType
-        all_goals = [g for g in gs._goals.values() if g.type == GoalType.LEARNING]
-        if not all_goals:
-            return "Brak celow nauki."
-
-        active = [g for g in all_goals if g.is_active]
-        done = [g for g in all_goals if g.status.value == "achieved"]
-
-        lines = [f"*Cele nauki: {len(active)} aktywnych, {len(done)} ukonczonych*"]
-        for g in sorted(active, key=lambda x: x.priority, reverse=True)[:8]:
-            topic = g.metadata.get("topic", g.description[:25])
-            lines.append(f"  [{g.id[:8]}] {topic} | {g.progress:.0%} | pri={g.priority:.1f}")
-
-        if done:
-            lines.append(f"\n*Ukonczone ({len(done)}):*")
-            for g in sorted(done, key=lambda x: x.updated_at, reverse=True)[:5]:
-                topic = g.metadata.get("topic", g.description[:25])
-                score = ""
-                if g.outcome:
-                    score = f" | wynik: {g.outcome.get('final_score', 0):.0%}"
-                lines.append(f"  [{g.id[:8]}] {topic}{score}")
-
-        return "\n".join(lines)
-
-    def _cmd_beliefs(args):
-        """Show belief store stats and run maintenance."""
-        wm = getattr(ctx, 'world_model', None)
-        if not wm:
-            return "WorldModel niedostepny."
-
-        args = args.strip()
-
-        # /beliefs maintain - run full maintenance
-        if args == "maintain":
-            try:
-                results = wm.maintain()
-                parts = ["*Belief maintenance complete:*"]
-                for k, v in results.items():
-                    parts.append(f"  {k}: {v}")
-                return "\n".join(parts)
-            except Exception as e:
-                return f"Blad maintenance: {e}"
-
-        # /beliefs gaps - weakest topics
-        if args == "gaps":
-            try:
-                gaps = wm.query.get_knowledge_gaps()[:10]
-                if not gaps:
-                    return "Brak luk w wiedzy."
-                lines = ["*Najslabsze tematy:*"]
-                for g in gaps:
-                    lines.append(
-                        f"  {g['topic']}: {g['confidence']:.0%} "
-                        f"({g.get('belief_count', '?')} beliefs)"
-                    )
-                return "\n".join(lines)
-            except Exception as e:
-                return f"Blad: {e}"
-
-        # /beliefs - stats overview (default)
-        try:
-            stats = wm.stats()
-            by_type = stats.get("by_belief_type", {})
-            by_etype = stats.get("by_entity_type", {})
-            return (
-                f"*Belief Store v2:*\n"
-                f"Active: {stats.get('total', 0)} beliefs\n"
-                f"All records: {stats.get('total_all', 0)}\n"
-                f"Avg confidence: {stats.get('avg_confidence', 0):.0%}\n"
-                f"\n*By type:*\n"
-                f"  FACT: {by_type.get('fact', 0)}\n"
-                f"  OBSERVATION: {by_type.get('observation', 0)}\n"
-                f"  HYPOTHESIS: {by_type.get('hypothesis', 0)}\n"
-                f"\n*By entity:*\n"
-                f"  Topics: {by_etype.get('topic', 0)}\n"
-                f"  Files: {by_etype.get('file', 0)}\n"
-                f"  Concepts: {by_etype.get('concept', 0)}"
-            )
-        except Exception as e:
-            return f"Blad: {e}"
-
-    def _cmd_help(args):
-        """List available commands grouped by category."""
-        return (
-            "*ClawBot - Komendy*\n"
-            "\n*System:*\n"
-            "/status - stan systemu\n"
-            "/restart - restart Marii\n"
-            "/authority [level] - autoryzacja\n"
-            "/trust [incidents|promotion] - trust score i autonomia\n"
-            "\n*Cele i zatwierdzanie:*\n"
-            "/goals - lista celow\n"
-            "/approve <id> - zatwierdz cel\n"
-            "/reject <id> - odrzuc cel\n"
-            "/priority <id> <0-1> - priorytet\n"
-            "\n*Wiedza i nauka:*\n"
-            "/learn <temat> - naucz sie\n"
-            "/nauka [temat] - postep nauki\n"
-            "/memory <temat> - co Maria wie\n"
-            "/beliefs [gaps|maintain] - beliefs\n"
-            "/validate - cross-validation\n"
-            "/board - tablica potrzeb\n"
-            "\n*Kodowanie (Code Agent):*\n"
-            "/code <zadanie> - zlec kodowanie\n"
-            "/code approve - zatwierdz krok\n"
-            "/code status - aktywna sesja\n"
-            "/code history - historia\n"
-            "\n*AI asystenci:*\n"
-            "/claude <zadanie> - Claude (3/h)\n"
-            "/codex <zadanie> - Codex/ChatGPT\n"
-            "/analyze <modul> - analiza kodu\n"
-            "\n*Przypomnienia i zadania:*\n"
-            "/remind <tekst> <czas> - przypomnienie\n"
-            "/remind list - lista przypomnien\n"
-            "/remind dismiss <id> - usun\n"
-            "/todo <tekst> - nowe zadanie\n"
-            "/todo list - lista zadan\n"
-            "/todo done <id> - oznacz zrobione\n"
-            "\n*Proaktywnosc:*\n"
-            "/proactive - status proaktywnego kontaktu\n"
-            "/proactive on|off - wlacz/wylacz\n"
-            "/proactive history - historia kontaktow\n"
-            "/profile - profil operatora\n"
-            "\n*Workflow (Faza 5):*\n"
-            "/wf - lista aktywnych workflow\n"
-            "/wf start <szablon> [temat]\n"
-            "/wf pause|resume|cancel <id>\n"
-            "/wf templates - szablony\n"
-            "\n*Srodowisko (Faza 6):*\n"
-            "/env - aktualny tryb\n"
-            "/env switch <tryb> - przelacz\n"
-            "/env list - dostepne tryby\n"
-            "/env auto - auto-detekcja\n"
-            "\n*Diagnostyka:*\n"
-            "/tasks [N] - historia taskow Claude/Codex\n"
-            "/pdf <task_id> - wyslij wynik jako PDF\n"
-            "/trace [N|stats] - traces\n"
-            "/efapprove <id> - zatwierdz efektor\n"
-            "/efreject <id> - odrzuc efektor\n"
-            "/efstatus - status efektora"
-        )
-
-    def _cmd_board(args):
-        """Show cognitive bulletin board status."""
-        bs = getattr(ctx, 'bulletin_store', None)
-        if not bs:
-            return "BulletinStore niedostepny."
-
-        args = args.strip()
-
-        # /board stats
-        if not args or args == "stats":
-            s = bs.stats()
-            lines = [
-                "*Tablica potrzeb poznawczych:*",
-                f"Otwarte: {s['open']}",
-                f"Actionable: {s['actionable']}",
-                f"Total: {s['total']}",
-            ]
-            if s["by_type"]:
-                lines.append("\n*By type:*")
-                for t, c in sorted(s["by_type"].items()):
-                    lines.append(f"  {t}: {c}")
-            return "\n".join(lines)
-
-        # /board open - list open entries
-        if args == "open":
-            entries = bs.get_open()
-            if not entries:
-                return "Tablica pusta - brak otwartych potrzeb."
-            lines = ["*Otwarte potrzeby:*"]
-            for e in entries[:15]:
-                status_icon = {
-                    "open": "NEW", "in_progress": "WIP",
-                    "blocked": "BLK",
-                }.get(e.status.value, e.status.value)
-                lines.append(
-                    f"  [{status_icon}] {e.entry_type.value}: "
-                    f"{e.topic} (pri={e.priority:.1f})"
-                )
-                if e.goal_id:
-                    lines.append(f"    goal: {e.goal_id[:16]}")
-            return "\n".join(lines)
-
-        # /board prune - cleanup stale entries
-        if args == "prune":
-            pruned = bs.prune_stale()
-            return f"Pruned {pruned} stale entries."
-
-        return "Uzycie: /board [open|prune]"
-
-    def _send_result_pdf(task_id, backend, task_text, result, duration_ms=None, timestamp=None):
-        """Generate PDF from result and send via Telegram."""
-        try:
-            from agent_core.telegram.pdf_export import generate_task_pdf
-            pdf_path = generate_task_pdf(
-                task_id=task_id, backend=backend,
-                task_text=task_text, result=result,
-                duration_ms=duration_ms, timestamp=timestamp,
-            )
-            if pdf_path:
-                bridge.bot.send_document(
-                    pdf_path,
-                    caption=f"[{backend}] {task_text[:80]}",
-                )
-        except Exception as e:
-            logger.debug(f"PDF export failed: {e}")
-
-    def _cmd_codex(args):
-        """Execute code task via Codex CLI: /codex <task description>"""
-        if not args or not args.strip():
-            return (
-                "Uzycie: /codex <opis zadania>\n"
-                "Przyklad: /codex przeanalizuj modul critic i zaproponuj ulepszenia\n"
-                "Przyklad: /codex znajdz TODO i FIXME w agent_core/planner/\n"
-                "Przyklad: /codex napisz test dla funkcji compute_belief_score"
-            )
-        task = args.strip()
-
-        # Run async in background thread
-        import threading
-
-        def _run_codex_task():
-            from agent_core.llm.task_store import TaskStore
-            store = TaskStore()
-            task_id = store.create_task(
-                task_text=task, backend="codex",
-                source="telegram_codex", timeout_s=300,
-            )
-            try:
-                from agent_core.llm.codex_client import CodexClient
-                codex = CodexClient(timeout_s=300)
-                if not codex.is_available():
-                    store.mark_failed(task_id, "Codex CLI niedostepny")
-                    bridge.bot.send_message("[Code] Codex CLI niedostepny.")
-                    return
-
-                # Build prompt with project context
-                prompt = (
-                    f"Projekt M.A.R.I.A. (Python, agent_core/). "
-                    f"Zadanie od operatora: {task}"
-                )
-
-                store.mark_running(task_id)
-                bridge.bot.send_message(
-                    f"[Code] Pracuje nad: {task[:80]}...\n"
-                    f"(task: {task_id}, timeout: 5min)"
-                )
-
-                result = codex.ask(prompt, source="telegram_code", context={"task": task})
-                if result:
-                    store.mark_completed(task_id, result[:500])
-                    # Send full result as PDF
-                    task_rec = store.get_task(task_id)
-                    _send_result_pdf(
-                        task_id, "codex", task, result,
-                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
-                        timestamp=task_rec.get("created_at") if task_rec else None,
-                    )
-                    # Trim for Telegram (4096 char limit)
-                    if len(result) > 3800:
-                        result = result[:3800] + "\n...(obciete)"
-                    bridge.bot.send_message(f"[Code] Wynik:\n\n{result}")
-
-                    # Save to bulletin board
-                    bs = getattr(ctx, 'bulletin_store', None)
-                    if bs:
-                        try:
-                            from agent_core.bulletin.bulletin_model import EntryType
-                            bs.add_entry(
-                                entry_type=EntryType.CODE_TASK,
-                                topic=task[:100],
-                                content=result[:500],
-                                source="telegram_code",
-                                metadata={"full_result_length": len(result), "task_id": task_id},
-                            )
-                        except Exception:
-                            pass
-                else:
-                    # Check if it was a timeout (codex returns None on timeout)
-                    store.mark_timeout(task_id, 300)
-                    bridge.bot.send_message(
-                        f"[Code] Brak odpowiedzi (timeout 5min).\n"
-                        f"Task {task_id} zapisany - mozesz ponowic."
-                    )
-            except Exception as e:
-                store.mark_failed(task_id, str(e)[:300])
-                bridge.bot.send_message(f"[Code] Blad: {e}")
-
-        t = threading.Thread(target=_run_codex_task, daemon=True)
-        t.start()
-        return f"Przyjeto zadanie: '{task[:60]}'. Wynik za chwile..."
-
-    def _cmd_code(args):
-        """Code Agent: /code <task|status|approve|reject|cancel|history>"""
-        code_agent = getattr(ctx, 'code_agent', None)
-        if not code_agent:
-            return "Code Agent niedostepny."
-
-        if not args or not args.strip():
-            # Show status or help
-            active = code_agent.get_active()
-            if active:
-                return active.describe()
-            return (
-                "*Code Agent - autonomiczne kodowanie*\n\n"
-                "/code <zadanie> - zlec kodowanie\n"
-                "/code status - aktywna sesja\n"
-                "/code approve - zatwierdz krok\n"
-                "/code reject - odrzuc krok\n"
-                "/code cancel - anuluj sesje\n"
-                "/code history - historia sesji\n\n"
-                "Przyklad: /code zrob modul do glosu"
-            )
-
-        parts = args.strip().split(None, 1)
-        subcmd = parts[0].lower()
-        sub_args = parts[1] if len(parts) > 1 else ""
-
-        if subcmd == "status":
-            active = code_agent.get_active()
-            if not active:
-                return "Brak aktywnej sesji kodowania."
-            return active.describe()
-
-        elif subcmd == "approve":
-            active = code_agent.get_active()
-            if not active:
-                return "Brak sesji czekajacych na zatwierdzenie."
-            sid = sub_args.strip() if sub_args.strip() else active.session_id
-            if code_agent.approve_checkpoint(sid):
-                # Resume in background
-                import threading
-                def _resume():
-                    try:
-                        code_agent.resume(active.session_id)
-                    except Exception as e:
-                        bridge.bot.send_message(f"[Code] Blad przy wznowieniu: {e}")
-                threading.Thread(target=_resume, daemon=True).start()
-                return f"Zatwierdzono. Kontynuuje sesje {active.session_id[:8]}..."
-            return "Nie ma czekajacego checkpointu."
-
-        elif subcmd == "reject":
-            active = code_agent.get_active()
-            if not active:
-                return "Brak sesji do odrzucenia."
-            sid = sub_args.strip() if sub_args.strip() else active.session_id
-            if code_agent.reject_checkpoint(sid):
-                return f"Odrzucono - sesja anulowana."
-            return "Nie ma czekajacego checkpointu."
-
-        elif subcmd == "cancel":
-            active = code_agent.get_active()
-            if not active:
-                return "Brak aktywnej sesji."
-            if code_agent.cancel(active.session_id):
-                return f"Sesja {active.session_id[:8]} anulowana."
-            return "Nie mozna anulowac."
-
-        elif subcmd == "history":
-            sessions = code_agent.list_sessions(5)
-            if not sessions:
-                return "Brak sesji w historii."
-            lines = ["*Historia Code Agent:*"]
-            for s in sessions:
-                files = len(s.files_written)
-                lines.append(
-                    f"  {s.session_id[:8]} {s.status.value} "
-                    f"({files} plikow) {s.task_description[:40]}"
-                )
-            return "\n".join(lines)
-
-        else:
-            # Everything else is a task description
-            task = args.strip()
-            active = code_agent.get_active()
-            if active and not active.status.is_terminal:
-                return (
-                    f"Aktywna sesja: {active.session_id[:8]} ({active.status.value})\n"
-                    f"Uzyj /code cancel aby anulowac."
-                )
-
-            import threading
-            def _run_code():
-                try:
-                    session = code_agent.start(task)
-                    if session.status.value == "awaiting_approval":
-                        pass  # Notification already sent by agent
-                    elif session.status.value == "waiting_budget":
-                        bridge.bot.send_message(
-                            f"[Code] Brak budgetu LLM. Sesja {session.session_id[:8]} "
-                            f"wznowi sie automatycznie."
-                        )
-                    elif session.status.value == "failed":
-                        bridge.bot.send_message(
-                            f"[Code] Nie udalo sie: {session.result_summary}"
-                        )
-                except Exception as e:
-                    bridge.bot.send_message(f"[Code] Blad: {e}")
-
-            threading.Thread(target=_run_code, daemon=True).start()
-            return f"Rozpoczynam kodowanie: '{task[:60]}'. Plan za chwile..."
-
-    def _cmd_analyze(args):
-        """Analyze a module via Codex: /analyze <module_path>"""
-        if not args or not args.strip():
-            return (
-                "Uzycie: /analyze <sciezka modulu>\n"
-                "Przyklad: /analyze agent_core/critic\n"
-                "Przyklad: /analyze agent_core/planner/planner_core.py"
-            )
-        module_path = args.strip()
-
-        import threading
-
-        def _run_analysis():
-            from agent_core.llm.task_store import TaskStore
-            store = TaskStore()
-            task_id = store.create_task(
-                task_text=f"analyze: {module_path}", backend="codex",
-                source="telegram_analyze", timeout_s=300,
-                metadata={"module": module_path},
-            )
-            try:
-                from agent_core.llm.codex_client import CodexClient
-                codex = CodexClient(timeout_s=300)
-                if not codex.is_available():
-                    store.mark_failed(task_id, "Codex CLI niedostepny")
-                    bridge.bot.send_message("[Analyze] Codex CLI niedostepny.")
-                    return
-
-                prompt = (
-                    f"Przeanalizuj modul '{module_path}' w projekcie M.A.R.I.A. "
-                    f"(Python, katalog agent_core/). "
-                    f"Opisz: 1) Co robi modul 2) Jakie ma problemy/TODO "
-                    f"3) Propozycje ulepszen (max 3). "
-                    f"Odpowiedz zwiezle po polsku."
-                )
-
-                store.mark_running(task_id)
-                bridge.bot.send_message(
-                    f"[Analyze] Analizuje: {module_path}...\n"
-                    f"(task: {task_id}, timeout: 5min)"
-                )
-
-                result = codex.ask(prompt, source="telegram_analyze", context={"module": module_path})
-                if result:
-                    store.mark_completed(task_id, result[:500])
-                    task_rec = store.get_task(task_id)
-                    _send_result_pdf(
-                        task_id, "codex", f"analyze: {module_path}", result,
-                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
-                        timestamp=task_rec.get("created_at") if task_rec else None,
-                    )
-                    if len(result) > 3800:
-                        result = result[:3800] + "\n...(obciete)"
-                    bridge.bot.send_message(f"[Analyze] {module_path}:\n\n{result}")
-
-                    # Post improvement proposals to bulletin
-                    bs = getattr(ctx, 'bulletin_store', None)
-                    if bs:
-                        try:
-                            from agent_core.bulletin.bulletin_model import EntryType
-                            bs.add_entry(
-                                entry_type=EntryType.IMPROVEMENT,
-                                topic=f"Analiza: {module_path}",
-                                content=result[:500],
-                                source="telegram_analyze",
-                                metadata={"module": module_path, "task_id": task_id},
-                            )
-                        except Exception:
-                            pass
-                else:
-                    store.mark_timeout(task_id, 300)
-                    bridge.bot.send_message(
-                        f"[Analyze] Brak odpowiedzi (timeout 5min).\n"
-                        f"Task {task_id} zapisany - mozesz ponowic."
-                    )
-            except Exception as e:
-                store.mark_failed(task_id, str(e)[:300])
-                bridge.bot.send_message(f"[Analyze] Blad: {e}")
-
-        t = threading.Thread(target=_run_analysis, daemon=True)
-        t.start()
-        return f"Analizuje modul: '{module_path}'. Wynik za chwile..."
-
-    def _cmd_claude(args):
-        """Execute task via Claude Code CLI: /claude <task>"""
-        if not args or not args.strip():
-            return (
-                "Uzycie: /claude <opis zadania>\n"
-                "Przyklad: /claude przeanalizuj planner_core.py i znajdz potencjalne bugi\n"
-                "Przyklad: /claude zaproponuj refactor modulu critic\n"
-                "Limit: 3/h, 15/dzien (subskrypcja operatora)"
-            )
-        task = args.strip()
-
-        import threading
-
-        def _run_claude_task():
-            from agent_core.llm.task_store import TaskStore
-            store = TaskStore()
-            task_id = store.create_task(
-                task_text=task, backend="claude",
-                source="telegram_claude", timeout_s=300,
-            )
-            try:
-                from agent_core.llm.claude_client import ClaudeClient
-                client = ClaudeClient(timeout_s=300)
-                if not client.is_available():
-                    store.mark_failed(task_id, "Claude CLI niedostepny")
-                    bridge.bot.send_message("[Claude] CLI niedostepny.")
-                    return
-
-                stats = client.get_stats()
-                if stats["remaining_hour"] <= 0:
-                    store.mark_failed(task_id, "rate_limited")
-                    bridge.bot.send_message(
-                        f"[Claude] Limit godzinowy wyczerpany "
-                        f"({stats['calls_this_hour']}/{stats['max_per_hour']}). "
-                        f"Sprobuj pozniej."
-                    )
-                    return
-
-                store.mark_running(task_id)
-                bridge.bot.send_message(
-                    f"[Claude] Pracuje nad: {task[:80]}...\n"
-                    f"(task: {task_id}, timeout: 5min, "
-                    f"zostalo {stats['remaining_hour']}/{stats['max_per_hour']})"
-                )
-
-                result = client.ask(
-                    prompt=f"Projekt M.A.R.I.A. (Python, agent_core/). Zadanie: {task}",
-                    source="telegram_claude",
-                    context={"task": task},
-                )
-                if result:
-                    store.mark_completed(task_id, result[:500])
-                    task_rec = store.get_task(task_id)
-                    _send_result_pdf(
-                        task_id, "claude", task, result,
-                        duration_ms=task_rec.get("duration_ms") if task_rec else None,
-                        timestamp=task_rec.get("created_at") if task_rec else None,
-                    )
-                    if len(result) > 3800:
-                        result = result[:3800] + "\n...(obciete)"
-                    bridge.bot.send_message(f"[Claude] Wynik:\n\n{result}")
-
-                    bs = getattr(ctx, 'bulletin_store', None)
-                    if bs:
-                        try:
-                            from agent_core.bulletin.bulletin_model import EntryType
-                            bs.add_entry(
-                                entry_type=EntryType.CODE_TASK,
-                                topic=task[:100],
-                                content=result[:500],
-                                source="telegram_claude",
-                                metadata={"backend": "claude", "task_id": task_id},
-                            )
-                        except Exception:
-                            pass
-                else:
-                    store.mark_timeout(task_id, 300)
-                    bridge.bot.send_message(
-                        f"[Claude] Brak odpowiedzi (timeout 5min).\n"
-                        f"Task {task_id} zapisany - mozesz ponowic."
-                    )
-            except Exception as e:
-                store.mark_failed(task_id, str(e)[:300])
-                bridge.bot.send_message(f"[Claude] Blad: {e}")
-
-        t = threading.Thread(target=_run_claude_task, daemon=True)
-        t.start()
-        return f"Przyjeto (Claude): '{task[:60]}'. Wynik za chwile..."
-
-    def _cmd_tasks(args):
-        """Show recent tasks: /tasks [N]"""
-        from agent_core.llm.task_store import TaskStore
-        store = TaskStore()
-        limit = 5
-        if args and args.strip().isdigit():
-            limit = min(int(args.strip()), 20)
-        tasks = store.get_recent(limit)
-        if not tasks:
-            return "Brak zapisanych taskow."
-        lines = [f"*Ostatnie {len(tasks)} taskow:*"]
-        for t in reversed(tasks):
-            tid = t.get("task_id", "?")
-            status = t.get("status", "?")
-            backend = t.get("backend", "?")
-            text = t.get("task_text", "?")[:50]
-            dur = t.get("duration_ms")
-            dur_str = f" {dur/1000:.0f}s" if dur else ""
-            err = t.get("error", "")
-            err_str = f" | {err[:40]}" if err else ""
-            lines.append(f"  `{tid}` [{backend}] {status}{dur_str}{err_str}\n  {text}")
-        return "\n".join(lines)
-
-    def _cmd_pdf(args):
-        """Re-export a past task as PDF: /pdf <task_id>"""
-        if not args or not args.strip():
-            return (
-                "Uzycie: /pdf <task_id>\n"
-                "Uzyj /tasks aby zobaczyc dostepne taski."
-            )
-        task_id = args.strip()
-        from agent_core.llm.task_store import TaskStore
-        store = TaskStore()
-        # Support prefix matching
-        task = store.get_task(task_id)
-        if not task:
-            # Try prefix match
-            for t in reversed(store.get_recent(50)):
-                if t.get("task_id", "").startswith(task_id):
-                    task = t
-                    break
-        if not task:
-            return f"Task '{task_id}' nie znaleziony. Uzyj /tasks."
-        if task.get("status") != "COMPLETED":
-            return f"Task {task['task_id']} status: {task.get('status')} (PDF tylko dla COMPLETED)."
-        summary = task.get("result_summary", "")
-        if not summary:
-            return f"Task {task['task_id']} nie ma zapisanego wyniku."
-        _send_result_pdf(
-            task["task_id"], task.get("backend", "?"),
-            task.get("task_text", "?"), summary,
-            duration_ms=task.get("duration_ms"),
-            timestamp=task.get("created_at"),
-        )
-        return f"PDF wygenerowany dla task {task['task_id']}."
-
-    def _cmd_profile(args):
-        """Operator profile: /profile [set|rhythm|add_interest|remove_interest] <text>"""
-        om = getattr(ctx, 'operator_model', None) or getattr(ctx, 'user_profile', None)
-        if not om:
-            return "OperatorModel niedostepny."
-
-        if not args or not args.strip():
-            return om.get_summary()
-
-        parts = args.strip().split(None, 1)
-        subcmd = parts[0].lower()
-        text = parts[1] if len(parts) > 1 else ""
-
-        if subcmd == "set" and text:
-            # /profile set job plytkarz
-            kv = text.split(None, 1)
-            if len(kv) < 2:
-                return "Uzycie: /profile set <klucz> <wartosc>"
-            key, value = kv[0], kv[1]
-            om.set_fact(key, value, 1.0, "explicit:telegram")
-            return f"Ustawiono {key} = {value}"
-        elif subcmd == "rhythm":
-            r = om.rhythm
-            if r.confidence == 0:
-                return "Brak danych o rytmie dnia (za malo interakcji)."
-            return (
-                f"*Rytm dnia:*\n"
-                f"Wstaje: ~{r.typical_wake_hour}:00\n"
-                f"Praca: {r.work_hours[0]}:00-{r.work_hours[1]}:00\n"
-                f"Spi od: ~{r.typical_sleep_hour}:00\n"
-                f"Pewnosc: {r.confidence:.0%} (probek: {r.sample_count})"
-            )
-        elif subcmd == "add_interest" and text:
-            ok = om.add_interest(text)
-            return f"Dodano zainteresowanie: {text}" if ok else f"Juz znane: {text}"
-        elif subcmd == "add_fact" and text:
-            ok = om.add_fact(text)
-            return f"Dodano fakt: {text}" if ok else f"Juz znane: {text}"
-        elif subcmd == "remove_interest" and text:
-            ok = om.remove_interest(text)
-            return f"Usunieto: {text}" if ok else f"Nie znaleziono: {text}"
-        elif subcmd == "remove_fact" and text:
-            ok = om.remove_fact(text)
-            return f"Usunieto: {text}" if ok else f"Nie znaleziono: {text}"
-        else:
-            return (
-                "*Profil operatora:*\n"
-                "/profile - pokaz profil\n"
-                "/profile set <klucz> <wartosc>\n"
-                "/profile rhythm - rytm dnia\n"
-                "/profile add\\_interest <temat>\n"
-                "/profile add\\_fact <fakt>\n"
-                "/profile remove\\_interest <temat>\n"
-                "/profile remove\\_fact <klucz>"
-            )
-
-    def _cmd_remind(args):
-        """Telegram: /remind <text> <time> | /remind list | /remind dismiss <id>"""
-        rs = getattr(ctx, 'reminder_store', None)
-        if not rs:
-            return "Przypomnienia nie zainicjalizowane"
-        if not args:
-            return "Uzycie: /remind <tekst> <czas>\nNp: /remind spotkanie za 30min\n/remind list\n/remind dismiss <id>"
-
-        parts = args.split(None, 1) if isinstance(args, str) else [args]
-        sub = parts[0].lower() if parts else ""
-
-        if sub == "list":
-            pending = rs.get_pending()
-            if not pending:
-                return "Brak aktywnych przypomnien"
-            from agent_core.reminders import format_scheduled_time
-            lines = [f"*Przypomnienia ({len(pending)}):*"]
-            for r in sorted(pending, key=lambda x: x.scheduled_at):
-                when = format_scheduled_time(r.scheduled_at)
-                recur = f" [{r.recurrence.value}]" if r.recurrence.value != "ONCE" else ""
-                lines.append(f"  {r.id}: {r.text} - {when}{recur}")
-            return "\n".join(lines)
-
-        if sub == "dismiss" and len(parts) > 1:
-            rest = parts[1].strip()
-            rem = _find_by_prefix(rs.get_pending(), rest)
-            if not rem:
-                return f"Nie znaleziono: {rest}"
-            rs.dismiss(rem.id)
-            return f"Usunieto: {rem.id}"
-
-        if sub == "snooze" and len(parts) > 1:
-            rest = parts[1].strip().split()
-            id_pref = rest[0]
-            minutes = int(rest[1]) if len(rest) > 1 else 15
-            rem = _find_by_prefix(rs.get_pending(), id_pref)
-            if not rem:
-                return f"Nie znaleziono: {id_pref}"
-            rs.snooze(rem.id, minutes)
-            return f"Odlozono o {minutes}min: {rem.id}"
-
-        # Create reminder: /remind <text> <time>
-        from agent_core.reminders import Reminder, parse_time, format_scheduled_time
-        text = args if isinstance(args, str) else " ".join(args)
-        tokens = text.split()
-        scheduled = None
-        reminder_text = text
-
-        # Try last 2 tokens as time, then last 1
-        for n in (2, 1):
-            if len(tokens) >= n + 1:
-                candidate = " ".join(tokens[-n:])
-                ts = parse_time(candidate)
-                if ts is not None:
-                    scheduled = ts
-                    reminder_text = " ".join(tokens[:-n])
-                    break
-
-        if scheduled is None:
-            scheduled = time.time() + 1800  # default 30min
-
-        rem = Reminder(text=reminder_text, scheduled_at=scheduled)
-        rs.add(rem)
-        when = format_scheduled_time(scheduled)
-        return f"Przypomnienie: {rem.id}\n\"{reminder_text}\" - {when}"
-
-    def _cmd_todo(args):
-        """Telegram: /todo <text> | /todo list | /todo done <id>"""
-        ts = getattr(ctx, 'todo_store', None)
-        if not ts:
-            return "Zadania nie zainicjalizowane"
-        if not args:
-            # Show pending by default
-            pending = ts.get_pending()
-            if not pending:
-                return "Brak aktywnych zadan"
-            lines = [f"*Zadania ({len(pending)}):*"]
-            for t in pending:
-                prio = f" [{t.priority.value}]" if t.priority.value != "NORMAL" else ""
-                lines.append(f"  {t.id}: {t.text}{prio}")
-            return "\n".join(lines)
-
-        parts = args.split(None, 1) if isinstance(args, str) else [args]
-        sub = parts[0].lower() if parts else ""
-
-        if sub == "list":
-            pending = ts.get_pending()
-            if not pending:
-                return "Brak aktywnych zadan"
-            lines = [f"*Zadania ({len(pending)}):*"]
-            for t in pending:
-                prio = f" [{t.priority.value}]" if t.priority.value != "NORMAL" else ""
-                lines.append(f"  {t.id}: {t.text}{prio}")
-            return "\n".join(lines)
-
-        if sub == "done" and len(parts) > 1:
-            id_pref = parts[1].strip()
-            todo = _find_by_prefix(ts.get_pending(), id_pref)
-            if not todo:
-                return f"Nie znaleziono: {id_pref}"
-            ts.complete(todo.id)
-            return f"Zrobione: {todo.id} \"{todo.text}\""
-
-        if sub == "cancel" and len(parts) > 1:
-            id_pref = parts[1].strip()
-            todo = _find_by_prefix(ts.get_pending(), id_pref)
-            if not todo:
-                return f"Nie znaleziono: {id_pref}"
-            ts.cancel(todo.id)
-            return f"Anulowano: {todo.id}"
-
-        # Create: /todo <text>
-        from agent_core.reminders import Todo
-        text = args if isinstance(args, str) else " ".join(args)
-        todo = Todo(text=text)
-        ts.add(todo)
-        return f"Zadanie: {todo.id}\n\"{text}\""
-
-    def _find_by_prefix(items, prefix):
-        """Find item by ID or ID prefix."""
-        prefix = prefix.strip()
-        for item in items:
-            if item.id == prefix or item.id.startswith(prefix):
-                return item
-        return None
-
-    def _cmd_proactive(args):
-        """Handle /proactive [status|on|off|history]."""
-        sched = ctx.proactive_scheduler if hasattr(ctx, 'proactive_scheduler') else None
-        if not sched:
-            return "Proactive contact not initialized"
-
-        parts = args.split() if isinstance(args, str) else list(args)
-        sub = parts[0].lower() if parts else "status"
-
-        if sub == "on":
-            sched.set_enabled(True)
-            return "Proaktywny kontakt: WLACZONY"
-
-        if sub == "off":
-            sched.set_enabled(False)
-            return "Proaktywny kontakt: WYLACZONY"
-
-        if sub == "history":
-            limit = 5
-            if len(parts) > 1:
-                try:
-                    limit = int(parts[1])
-                except ValueError:
-                    pass
-            history = sched.get_history(limit)
-            if not history:
-                return "Brak historii kontaktow"
-            lines = [f"*Ostatnie kontakty ({len(history)}):*"]
-            for h in history:
-                from datetime import datetime
-                ts = h.get("timestamp", 0)
-                dt = datetime.fromtimestamp(ts).strftime("%m-%d %H:%M") if ts else "?"
-                reason = h.get("reason", "?")
-                lines.append(f"  [{dt}] {reason}")
-            return "\n".join(lines)
-
-        # Default: status
-        status = sched.get_status()
-        state = "WLACZONY" if status["enabled"] else "WYLACZONY"
-        lines = [
-            f"*Proaktywny kontakt: {state}*",
-            f"Dzisiaj: {status['contacts_today']}/{status['max_per_day']}",
-            f"Cisza nocna: {'tak' if status['quiet_hours'] else 'nie'}",
-            f"Idle operatora: {status['operator_idle_human']}",
-        ]
-        # Next possible contacts
-        for reason, info in status.get("cooldowns", {}).items():
-            remaining = info.get("remaining_sec", 0)
-            if remaining > 0:
-                from agent_core.homeostasis.time_awareness import TimeAwareness
-                lines.append(f"  {reason}: za {TimeAwareness.format_duration(remaining)}")
-        return "\n".join(lines)
-
-    def _cmd_privacy(args):
-        """Privacy boundaries: /privacy [add|remove|list] <topic>"""
-        om = getattr(ctx, 'operator_model', None)
-        if not om:
-            return "OperatorModel niedostepny."
-        if not args or not args.strip():
-            boundaries = om.get_boundaries()
-            if not boundaries:
-                return "Brak granic prywatnosci. Uzyj /privacy add <temat>"
-            lines = ["*Granice prywatnosci:*"]
-            for b in boundaries:
-                lines.append(f"  - {b}")
-            lines.append("\n/privacy add <temat> | /privacy remove <temat>")
-            return "\n".join(lines)
-
-        parts = args.strip().split(None, 1)
-        subcmd = parts[0].lower()
-        text = parts[1] if len(parts) > 1 else ""
-
-        if subcmd == "add" and text:
-            ok = om.add_boundary(text)
-            return f"Dodano granice: {text}" if ok else f"Juz istnieje: {text}"
-        elif subcmd == "remove" and text:
-            ok = om.remove_boundary(text)
-            return f"Usunieto granice: {text}" if ok else f"Nie znaleziono: {text}"
-        elif subcmd == "list":
-            return _cmd_privacy("")
-        else:
-            return "Uzycie: /privacy add <temat> | /privacy remove <temat> | /privacy list"
-
-    def _cmd_context(args):
-        """Current context: /context <text> [hours] | /context clear"""
-        om = getattr(ctx, 'operator_model', None)
-        if not om:
-            return "OperatorModel niedostepny."
-        if not args or not args.strip():
-            current = om.get_context()
-            if current:
-                return f"Aktualny kontekst: {current}"
-            return "Brak kontekstu. Uzyj /context <tekst> [godziny]"
-
-        text = args.strip()
-        if text.lower() == "clear":
-            om.clear_context()
-            return "Kontekst wyczyszczony."
-
-        # Parse optional hours at the end: "/context deadline today 8"
-        parts = text.rsplit(None, 1)
-        hours = 24
-        if len(parts) == 2:
-            try:
-                hours = int(parts[1])
-                text = parts[0]
-            except ValueError:
-                pass  # Last word wasn't a number, use full text
-
-        om.set_context(text, expires_hours=hours)
-        return f"Kontekst ustawiony: {text} (wygasa za {hours}h)"
-
-    def _cmd_capabilities(args):
-        """What can Maria do: /capabilities"""
-        manifest = getattr(ctx, 'capability_manifest', None)
-        if not manifest:
-            return "CapabilityManifest niedostepny."
-        return manifest.get_summary()
-
-    # --- Workflow commands (Faza 5) ---
-
-    def _cmd_wf(args):
-        """Telegram /wf - workflow management."""
-        engine = ctx.workflow_engine
-        if not engine:
-            return "Workflow Engine niedostepny."
-        sub = args[0].lower() if args else "list"
-
-        if sub == "list":
-            wfs = engine.list_workflows()
-            active = [w for w in wfs if w["status"] in ("running", "pending", "paused")]
-            if not active:
-                return "Brak aktywnych workflow."
-            lines = []
-            for w in active[:10]:
-                lines.append(f"{w['workflow_id'][:8]} {w['name']} [{w['status']}] {w['progress_pct']:.0f}%")
-            return "\n".join(lines)
-
-        if sub == "start" and len(args) >= 2:
-            try:
-                from agent_core.workflow.templates import WORKFLOW_TEMPLATES
-                tmpl_name = args[1]
-                if tmpl_name not in WORKFLOW_TEMPLATES:
-                    return f"Nieznany szablon. Dostepne: {', '.join(WORKFLOW_TEMPLATES.keys())}"
-                tmpl = WORKFLOW_TEMPLATES[tmpl_name]
-                topic = " ".join(args[2:]) if len(args) > 2 else None
-                if tmpl["needs_topic"] and not topic:
-                    return f"Podaj temat: /wf start {tmpl_name} <topic>"
-                steps = tmpl["factory"](topic) if tmpl["needs_topic"] else tmpl["factory"]()
-                desc = tmpl["description"] + (f": {topic}" if topic else "")
-                wf = engine.create(tmpl_name, desc, steps)
-                engine.start(wf.workflow_id)
-                return f"Workflow started: {wf.workflow_id[:8]} ({len(steps)} steps)"
-            except Exception as e:
-                return f"Error: {e}"
-
-        if sub == "pause" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
-            if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
-            ok = engine.pause(wf_obj["workflow_id"])
-            return f"Paused: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wstrzymac."
-
-        if sub == "resume" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
-            if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
-            ok = engine.resume(wf_obj["workflow_id"])
-            return f"Resumed: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wznowic."
-
-        if sub == "cancel" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
-            if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
-            ok = engine.cancel(wf_obj["workflow_id"], "operator via Telegram")
-            return f"Cancelled: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna anulowac."
-
-        if sub == "templates":
-            try:
-                from agent_core.workflow.templates import WORKFLOW_TEMPLATES
-                lines = []
-                for name, t in WORKFLOW_TEMPLATES.items():
-                    lines.append(f"{name} (~{t['estimated_minutes']}min): {t['description']}")
-                return "\n".join(lines)
-            except Exception:
-                return "Error loading templates."
-
-        return "Usage: /wf [list|start|pause|resume|cancel|templates]"
-
-    def _find_wf(engine, prefix):
-        for w in engine.list_workflows():
-            if w["workflow_id"].startswith(prefix) or w["workflow_id"][:8] == prefix:
-                return w
-        return None
-
-    def _cmd_env(args):
-        """Telegram /env - environment mode management."""
-        mgr = ctx.environment_manager
-        if not mgr:
-            return "Environment Manager niedostepny."
-        sub = args[0].lower() if args else "status"
-
-        if sub == "status":
-            status = mgr.get_status()
-            lines = [
-                f"Mode: {status['mode']}",
-                f"Auto: {'ON' if status['auto_detect_enabled'] else 'OFF'}",
-                f"LLM budget: {status['llm_budget_multiplier']:.1f}x",
-                f"Notifications: {status['notification_level']}",
-            ]
-            if status['blocked_actions']:
-                lines.append(f"Blocked: {', '.join(status['blocked_actions'])}")
-            return "\n".join(lines)
-
-        if sub in ("switch", "set") and len(args) >= 2:
-            try:
-                from agent_core.environment.environment_model import EnvironmentMode
-                mode = EnvironmentMode(args[1].lower())
-                ok = mgr.switch(mode, by="operator")
-                return f"Switched to: {mode.value}" if ok else f"Already in: {mode.value}"
-            except ValueError:
-                from agent_core.environment.environment_model import EnvironmentMode
-                valid = [m.value for m in EnvironmentMode]
-                return f"Nieznany tryb. Dostepne: {', '.join(valid)}"
-
-        if sub == "list":
-            modes = mgr.list_modes()
-            lines = []
-            for m in modes:
-                marker = " <--" if m['active'] else ""
-                lines.append(f"{m['mode']}: {m['description']}{marker}")
-            return "\n".join(lines)
-
-        if sub == "auto":
-            mgr._state.auto_detect_enabled = True
-            from agent_core.environment.environment_model import EnvironmentMode
-            mgr.switch(EnvironmentMode.DEFAULT, by="operator")
-            return "Auto-detection ON, mode: default"
-
-        return "Usage: /env [status|list|switch <mode>|auto]"
-
-    bridge.register_command("wf", _cmd_wf)
-    bridge.register_command("env", _cmd_env)
-    bridge.register_command("capabilities", _cmd_capabilities)
-    bridge.register_command("privacy", _cmd_privacy)
-    bridge.register_command("context", _cmd_context)
-    bridge.register_command("proactive", _cmd_proactive)
-    bridge.register_command("remind", _cmd_remind)
-    bridge.register_command("todo", _cmd_todo)
-    bridge.register_command("profile", _cmd_profile)
-    bridge.register_command("pdf", _cmd_pdf)
-    bridge.register_command("tasks", _cmd_tasks)
-    bridge.register_command("claude", _cmd_claude)
-    bridge.register_command("code", _cmd_code)
-    bridge.register_command("codex", _cmd_codex)
-    bridge.register_command("analyze", _cmd_analyze)
-    bridge.register_command("board", _cmd_board)
-    bridge.register_command("status", _cmd_status)
-    bridge.register_command("goals", _cmd_goals)
-    bridge.register_command("approve", _cmd_approve)
-    bridge.register_command("reject", _cmd_reject)
-    bridge.register_command("restart", _cmd_restart)
-    bridge.register_command("priority", _cmd_priority)
-    bridge.register_command("learn", _cmd_learn)
-    bridge.register_command("trace", _cmd_trace)
-    bridge.register_command("memory", _cmd_memory)
-    bridge.register_command("validate", _cmd_validate)
-    bridge.register_command("beliefs", _cmd_beliefs)
-    bridge.register_command("nauka", _cmd_nauka)
-    bridge.register_command("efapprove", _cmd_efapprove)
-    bridge.register_command("efreject", _cmd_efreject)
-    bridge.register_command("efstatus", _cmd_efstatus)
-    bridge.register_command("authority", _cmd_authority)
-    bridge.register_command("trust", _cmd_trust)
-    bridge.register_command("help", _cmd_help)
-    bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
 
 
 def _build_work_context(ctx) -> str:

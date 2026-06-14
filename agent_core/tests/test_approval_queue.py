@@ -22,6 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.telegram.bot import TelegramBot
+
 from agent_core.autonomy.approval_queue import (
     ApprovalRequest,
     ApprovalQueue,
@@ -352,8 +355,7 @@ class TestTelegramNotifierEffector:
 
     def test_notify_effector_request(self):
         from agent_core.telegram.notifier import TelegramNotifier
-        bot = MagicMock()
-        bot.configured = True
+        bot = specced(TelegramBot, configured=True)
         bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=bot)
 
@@ -373,7 +375,7 @@ class TestTelegramNotifierEffector:
 
     def test_notify_effector_request_no_request_id(self):
         from agent_core.telegram.notifier import TelegramNotifier
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=bot)
 
@@ -388,7 +390,7 @@ class TestTelegramNotifierEffector:
 
     def test_notify_effector_result_success(self):
         from agent_core.telegram.notifier import TelegramNotifier
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=bot)
 
@@ -404,7 +406,7 @@ class TestTelegramNotifierEffector:
 
     def test_notify_effector_result_failure(self):
         from agent_core.telegram.notifier import TelegramNotifier
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=bot)
 

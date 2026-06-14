@@ -76,9 +76,13 @@ class LimitationReporter:
         policy = self._ctx.autonomy_policy
         if policy:
             try:
-                classification = policy.classify_action(action)
-                level = getattr(classification, "level",
-                               getattr(classification, "value", str(classification)))
+                # classify_action is a module-level function (action_class.py), NOT a
+                # method on AutonomyPolicy -- the old policy.classify_action(action)
+                # raised AttributeError, swallowed below -> this K7 limitation report
+                # was silently empty (audyt 2026-06-13).
+                from agent_core.autonomy.action_class import classify_action
+                classification = classify_action(action)
+                level = getattr(classification, "value", str(classification))
                 if level == "forbidden":
                     reasons.append(f"Akcja '{action}' jest zabroniona (K7)")
                 elif level == "restricted":
@@ -279,7 +283,7 @@ class LimitationReporter:
     def _get_mode(self) -> str:
         core = self._ctx.homeostasis_core
         if core:
-            mode = getattr(core, "_current_mode", None)
+            mode = getattr(getattr(core, "state", None), "mode", None)
             if mode:
                 return mode.name if hasattr(mode, "name") else str(mode)
         return "UNKNOWN"

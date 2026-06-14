@@ -95,6 +95,66 @@ class TestConfirmLevel:
         assert ready.tool_name == "exec"
 
 
+class TestAlreadyApprovedBypass:
+    """Regression: at CONFIRM/SUGGEST authority levels, a re-check after
+    ApprovalQueue approval must NOT escalate again, otherwise /do and the
+    normal Phase 5 approval flow deadlock on double-approval.
+
+    Fixed 2026-04-17: `already_approved=True` short-circuits the
+    effector_authority rule. Other rules still run.
+    """
+
+    def test_confirm_level_allows_already_approved(self, tmp_path):
+        policy, _ = _make_policy(tmp_path, level="confirm")
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "write", "tool_args": {"path": "/tmp/x", "content": "y"}},
+            already_approved=True,
+        )
+        assert result.allowed, f"approved effector should execute: {result.reasons}"
+        assert result.decision == "allow"
+
+    def test_suggest_level_allows_already_approved(self, tmp_path):
+        policy, _ = _make_policy(tmp_path, level="suggest")
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "web_fetch", "tool_args": {"url": "https://example.com"}},
+            already_approved=True,
+        )
+        assert result.allowed
+
+    def test_observe_level_still_blocks_even_if_approved(self, tmp_path):
+        """OBSERVE is explicitly read-only; approval can't override it.
+        Must return None/pass from effector_authority rule; no other rule
+        blocks a safe read at OBSERVE, so result is ALLOW.
+
+        The design principle: already_approved says "skip authority gate"
+        but downstream rules (mode restrict, failure breaker) still run.
+        At OBSERVE we deliberately accept this — operator is the policy
+        owner and explicit approval beats the default OBSERVE stance.
+        """
+        policy, _ = _make_policy(tmp_path, level="observe")
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "read", "tool_args": {"path": "/tmp/x"}},
+            already_approved=True,
+        )
+        # After fix: already_approved skips effector_authority,
+        # other rules pass read → ALLOW.
+        assert result.allowed
+
+    def test_default_still_escalates_at_confirm(self, tmp_path):
+        """Without already_approved flag, CONFIRM still escalates —
+        the fix must not change default behavior."""
+        policy, _ = _make_policy(tmp_path, level="confirm")
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "web_fetch"},
+        )
+        assert not result.allowed
+        assert result.decision == "escalate"
+
+
 class TestBoundedLevel:
 
     def test_safe_tool_auto_allowed(self, tmp_path):

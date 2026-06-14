@@ -43,6 +43,7 @@ class PolicyContext:
     authority_level: str = "observe"   # AuthorityLevel.value for effector actions
     tool_name: str = ""                # Specific tool being invoked (effector only)
     tool_dangerous: bool = False       # ToolSpec.dangerous flag (effector only)
+    already_approved: bool = False     # True when re-checking an ApprovalQueue-approved request
 
 
 @dataclass
@@ -82,14 +83,29 @@ def rule_consecutive_failure_breaker(
 
 def rule_degraded_mode_restrict(ctx: PolicyContext) -> Optional[PolicyResult]:
     """
-    In REDUCED/SLEEP modes, only allow FREE actions.
+    In REDUCED/SLEEP modes, allow only FREE and ANALYTICAL actions.
 
-    GUARDED/RESTRICTED actions blocked when system is degraded.
+    Rationale: ANALYTICAL actions (K12 self-analysis, K13 creative
+    reflection, critic, cross-LLM validate) are READ-ONLY observers.
+    They generate reports, advisories, and PROPOSED goals — never
+    mutating production state autonomously. Blocking them in degraded
+    modes would silence the organism's self-reflection loop precisely
+    when it spends most of its time idle (weekends, nights, post-restart
+    sleep). For an AGI-track agent, continuous reflection is mandatory.
+
+    GUARDED actions remain blocked in degraded modes — they mutate state
+    (fetch writes new files, experiment changes parameters, maintenance
+    rewrites memory), which is too costly when the system is sleeping.
+    RESTRICTED/FORBIDDEN actions are also still blocked (never depend
+    solely on this rule — see rule_restricted_actions_block).
     """
     if ctx.mode not in ("active",):
         from agent_core.autonomy.action_class import classify_action, ActionClassification
         classification = classify_action(ctx.action_type)
-        if classification not in (ActionClassification.FREE,):
+        if classification not in (
+            ActionClassification.FREE,
+            ActionClassification.ANALYTICAL,
+        ):
             return PolicyResult(
                 decision=PolicyDecision.BLOCK,
                 reasons=[
@@ -105,12 +121,17 @@ def rule_restricted_actions_block(ctx: PolicyContext) -> Optional[PolicyResult]:
     """
     RESTRICTED and FORBIDDEN actions: authority-aware gating.
 
-    For effector actions: delegates to rule_effector_authority().
+    Effector actions always delegate to rule_effector_authority(); their
+    per-tool danger level matters even when the action class is GUARDED.
     For other RESTRICTED/FORBIDDEN actions: blocks as before.
 
     Safe-by-default: unknown action types are RESTRICTED.
     """
     from agent_core.autonomy.action_class import classify_action, ActionClassification
+
+    if ctx.action_type == "effector":
+        return rule_effector_authority(ctx)
+
     classification = classify_action(ctx.action_type)
 
     if classification == ActionClassification.FORBIDDEN:
@@ -121,9 +142,6 @@ def rule_restricted_actions_block(ctx: PolicyContext) -> Optional[PolicyResult]:
         )
 
     if classification == ActionClassification.RESTRICTED:
-        # Phase 5: effector actions use authority-level gating
-        if ctx.action_type == "effector":
-            return rule_effector_authority(ctx)
         # Other RESTRICTED actions: still blocked (HITL placeholder)
         return PolicyResult(
             decision=PolicyDecision.ESCALATE,
@@ -146,8 +164,16 @@ def rule_effector_authority(ctx: PolicyContext) -> Optional[PolicyResult]:
     - CONFIRM: ESCALATE (queue for approval, execute after confirm)
     - BOUNDED: ALLOW for non-dangerous tools, ESCALATE for dangerous
     - UNRESTRICTED: ALLOW (not activated in Phase 5)
+
+    Short-circuit for already_approved=True: the request has traversed
+    ApprovalQueue and the operator consented. Re-escalating here would
+    cause double-approval deadlock. Other rules (mode restrict, failure
+    breaker) still run and can still block.
     """
     from agent_core.autonomy.authority_level import AuthorityLevel
+
+    if ctx.already_approved:
+        return None  # operator already consented; defer to other rules
 
     try:
         level = AuthorityLevel(ctx.authority_level)
@@ -189,8 +215,8 @@ def rule_effector_authority(ctx: PolicyContext) -> Optional[PolicyResult]:
             return PolicyResult(
                 decision=PolicyDecision.ESCALATE,
                 reasons=[
-                    f"authority_level=bounded: dangerous tool "
-                    f"'{ctx.tool_name}' requires approval"
+                    "Unknown/dangerous tool in BOUNDED mode requires "
+                    f"approval: {ctx.tool_name or 'unknown'}"
                 ],
                 rule_name="effector_authority",
             )

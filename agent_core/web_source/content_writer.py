@@ -92,10 +92,17 @@ class ContentWriter:
             logger.debug(f"Already fetched: {url}")
             return None
 
-        # Generate filename
-        src_prefix = "wiki" if "wiki" in source_type.lower() else "rss"
+        # Generate filename. R1.3 added "codex" as a third writer source
+        # for ChatGPT-authored educational articles; the "web_" prefix
+        # remains for fetched web content (wiki/rss).
         slug = self._slugify(title)
-        filename = f"web_{src_prefix}_{slug}.txt"
+        st = source_type.lower()
+        if "codex" in st:
+            filename = f"codex_{slug}.txt"
+        elif "wiki" in st:
+            filename = f"web_wiki_{slug}.txt"
+        else:
+            filename = f"web_rss_{slug}.txt"
 
         # Check file exists on disk
         filepath = self._input_dir / filename
@@ -167,5 +174,6 @@ class ContentWriter:
         labels = {
             "wikipedia": "Wikipedia (pl)",
             "rss": "RSS Feed",
+            "codex": "Codex (ChatGPT) — operator-approved",
         }
         return labels.get(source_type.lower(), source_type)

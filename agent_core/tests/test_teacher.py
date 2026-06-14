@@ -17,6 +17,11 @@ from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
 from agent_core.teacher.teacher_agent import TeacherAgent
 from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.homeostasis.state_model import Mode
+from agent_core.critic import CriticAgent
+from agent_core.critic.critique_model import CritiqueReport, CritiqueFinding
+from agent_core.environment.environment_manager import EnvironmentManager
+from agent_core.planner.planner_model import Plan, ActionType, PlanStatus
+from agent_core.tests.spec_helpers import specced
 
 
 # ── Fixtures ──────────────────────────────────────────
@@ -464,6 +469,7 @@ def _make_teacher(tmp_path, index_records=None, exam_records=None):
         router=router,
         knowledge_analyzer=analyzer,
         plans_path=plans_path,
+        exam_cooldown_path=tmp_path / "teacher_exam_cooldown.json",
     )
     return agent
 
@@ -503,6 +509,40 @@ class TestTeacherDecisions:
         assert strategy.strategy_type == TeachingStrategy.REVIEW
         assert strategy.target_file_id == "ready.txt"
         assert strategy.params["reason"] == "exam_ready"
+
+    def test_p2_skipped_when_file_in_exam_cooldown(self, tmp_path):
+        """BUG B (2026-05-25): a learned file in exam cooldown must NOT be
+        picked by P2. Fresh new files should win instead so the queue moves."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("ready.txt", status="learned"),
+            _make_index_record("new.txt", status="new", priority=80),
+        ])
+        # Simulate prior pipeline failure
+        agent._mark_exam_cooldown("ready.txt")
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.strategy_type == TeachingStrategy.LEARN_NEW
+        assert strategy.target_file_id == "new.txt"
+        assert strategy.params["reason"] == "new_file"
+
+    def test_p2_still_runs_when_only_some_learned_in_cooldown(self, tmp_path):
+        """If one learned file is in cooldown but another isn't, P2 picks the
+        non-cooldown one (don't accidentally skip P2 entirely)."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("stuck.txt", status="learned"),
+            _make_index_record("fresh.txt", status="learned"),
+        ])
+        agent._mark_exam_cooldown("stuck.txt")
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.strategy_type == TeachingStrategy.REVIEW
+        assert strategy.target_file_id == "fresh.txt"
 
     def test_p3_start_new_file(self, tmp_path):
         """P3: Start new file with highest priority."""
@@ -705,6 +745,78 @@ class TestTeacherExecution:
         assert result["passed"] is False
         assert agent._stats["exams_run"] == 1
         assert agent._stats["exams_passed"] == 0
+
+    def test_exec_review_pipeline_failure_tracks_attempt(self, tmp_path):
+        """BUG A (2026-05-25): when exam pipeline fails (success=False),
+        exams_run must NOT increment but exam_pipeline_failures must, so K9/K12
+        can see the true attempt count. Prior bug: parser truncation hid all
+        attempts and the planner looped 30+ times in a single window."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": False, "error": "parser truncated"})
+
+        strategy = TeachingStrategy(TeachingStrategy.REVIEW, "expert_fotosynteza.txt")
+        result = agent._execute_strategy(strategy)
+
+        assert result["success"] is False
+        assert result["error"] == "parser truncated"
+        assert agent._stats["exams_run"] == 0
+        assert agent._stats["exams_passed"] == 0
+        assert agent._stats["exam_pipeline_failures"] == 1
+
+    def test_exec_review_pipeline_failure_accumulates(self, tmp_path):
+        """exam_pipeline_failures accumulates across multiple failed attempts."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": False, "error": "LLM timeout"})
+
+        strategy = TeachingStrategy(TeachingStrategy.REVIEW, "file.txt")
+        for _ in range(3):
+            agent._execute_strategy(strategy)
+
+        assert agent._stats["exam_pipeline_failures"] == 3
+        assert agent._stats["exams_run"] == 0
+
+    def test_exec_review_none_result_tracks_failure(self, tmp_path):
+        """When run_exam_fn returns None entirely, still count as pipeline failure."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: None)
+
+        strategy = TeachingStrategy(TeachingStrategy.REVIEW, "file.txt")
+        result = agent._execute_strategy(strategy)
+
+        assert result["success"] is False
+        assert "None" in result["error"]
+        assert agent._stats["exam_pipeline_failures"] == 1
+
+    def test_exec_review_pipeline_failure_writes_cooldown(self, tmp_path):
+        """BUG B (2026-05-25): after pipeline failure, file enters exam cooldown
+        so the next P2 pass skips it and gives new files a chance."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": False, "error": "truncated"})
+
+        strategy = TeachingStrategy(TeachingStrategy.REVIEW, "expert_fotosynteza.txt")
+        agent._execute_strategy(strategy)
+
+        assert agent._is_in_exam_cooldown("expert_fotosynteza.txt") is True
+        assert agent._is_in_exam_cooldown("other_file.txt") is False
+        # Persistence: load fresh and verify
+        from agent_core.teacher.teacher_agent import TeacherAgent
+        agent2 = TeacherAgent(
+            router=agent.router,
+            knowledge_analyzer=agent.analyzer,
+            plans_path=agent.plans_path,
+            exam_cooldown_path=agent.exam_cooldown_path,
+        )
+        assert agent2._is_in_exam_cooldown("expert_fotosynteza.txt") is True
+
+    def test_exec_review_success_does_not_set_cooldown(self, tmp_path):
+        """Successful exam must NOT enter cooldown."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": True, "passed": True, "score": 0.85})
+
+        strategy = TeachingStrategy(TeachingStrategy.REVIEW, "file.txt")
+        agent._execute_strategy(strategy)
+
+        assert agent._is_in_exam_cooldown("file.txt") is False
 
     def test_exec_fill_gap(self, tmp_path):
         """Fill gap uses simple prompt."""
@@ -1095,12 +1207,10 @@ class MockPlannerCore:
         if self._cycle_delay > 0:
             _time.sleep(self._cycle_delay)
         self.cycles_run += 1
-        # Return a mock plan
-        mock_plan = MagicMock()
-        mock_plan.action_type = MagicMock()
-        mock_plan.action_type.value = "learn"
-        mock_plan.status = MagicMock()
-        mock_plan.status.value = "completed"
+        # Return a specced Plan stub
+        mock_plan = specced(Plan)
+        mock_plan.action_type = ActionType.LEARN
+        mock_plan.status = PlanStatus.COMPLETED
         mock_plan.duration_ms = self._cycle_delay * 1000
         return mock_plan
 
@@ -1479,3 +1589,194 @@ class TestTeacherTopicFilter:
         status = agent.run_session(max_iterations=1)
         stats = status.get("stats", {})
         assert stats["chunks_learned"] == 1
+
+
+# ======================================================
+# TestLearningWindow
+# ======================================================
+
+class TestLearningWindow:
+    """Tests for learning window and gap-driven priorities."""
+
+    def test_is_learning_window_inside(self):
+        """During learning hours (7-9, 12-14 UTC = 9-11, 14-16 Berlin) returns True."""
+        from agent_core.environment.environment_model import is_learning_window
+        # Monday 08:30 UTC = 10:30 Berlin
+        dt = datetime(2026, 4, 13, 8, 30)  # Monday
+        assert is_learning_window(dt) is True
+
+    def test_is_learning_window_outside(self):
+        """Outside learning hours returns False (test profile data directly)."""
+        from agent_core.environment.environment_model import PROFILE_LEARNING
+        # Monday 18:00 UTC - outside (7,8,9,12,13,14)
+        assert 18 not in PROFILE_LEARNING.auto_trigger_hours
+
+    def test_is_learning_window_weekend(self):
+        """Weekend not in learning days."""
+        from agent_core.environment.environment_model import PROFILE_LEARNING
+        # Saturday = weekday 5, not in (0,1,2,3,4)
+        assert 5 not in PROFILE_LEARNING.auto_trigger_days
+
+    def test_is_learning_window_afternoon(self):
+        """Afternoon window (12-14 UTC = 14-16 Berlin) returns True."""
+        from agent_core.environment.environment_model import is_learning_window
+        dt = datetime(2026, 4, 14, 13, 30)  # Tuesday 13:30 UTC = 15:30 Berlin
+        assert is_learning_window(dt) is True
+
+    def test_teacher_trigger_respects_learning_window(self, tmp_path):
+        """Idle teacher trigger is suppressed outside learning window."""
+        from unittest.mock import patch
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        # Outside learning window -> no session started
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=False,
+        ):
+            core._check_teacher_trigger()
+        assert core._teacher_thread is None or not core._teacher_thread.is_alive()
+
+    def test_teacher_trigger_allows_in_learning_window(self, tmp_path):
+        """Idle teacher trigger fires within learning window."""
+        from unittest.mock import patch
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=True,
+        ):
+            core._check_teacher_trigger()
+        # Session should have started
+        assert core._teacher_thread is not None
+
+    def test_teacher_trigger_allows_in_learning_mode(self, tmp_path):
+        """When EnvironmentManager is in LEARNING mode, always allow."""
+        from unittest.mock import patch
+        from agent_core.environment.environment_model import EnvironmentMode
+
+        core = HomeostasisCore()
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new"),
+        ])
+        agent._learn_chunk_fn = lambda fid, simple: {"success": True}
+        core.set_teacher_agent(agent)
+        core.state.mode = Mode.ACTIVE
+        core.state.idle_seconds = 9999
+        core._teacher_last_run = 0
+
+        # Mock environment manager in LEARNING mode
+        env_mgr = specced(EnvironmentManager)
+        env_mgr.get_active_mode.return_value = EnvironmentMode.LEARNING
+        core.set_environment_manager(env_mgr)
+
+        # Even if is_learning_window returns False, LEARNING mode overrides
+        with patch(
+            "agent_core.environment.environment_model.is_learning_window",
+            return_value=False,
+        ):
+            core._check_teacher_trigger()
+        assert core._teacher_thread is not None
+
+    def test_critic_gap_priority(self, tmp_path):
+        """Critic findings drive learning priority over random new files."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("random_physics.txt", status="new", priority=90),
+            _make_index_record("web_order_flow.txt", status="new", priority=50),
+        ])
+
+        # Mock Critic with finding about "order_flow"
+        mock_critic = specced(CriticAgent)
+        mock_report = specced(CritiqueReport)
+        mock_finding = specced(CritiqueFinding, suggested_action="learn_more", topic_normalized="order_flow")
+        mock_report.findings = [mock_finding]
+        mock_critic.get_last_report.return_value = mock_report
+        agent.set_critic_agent(mock_critic)
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        # Should pick order_flow file (critic gap) over physics (higher priority)
+        assert strategy is not None
+        assert strategy.target_file_id == "web_order_flow.txt"
+        assert strategy.params.get("reason") == "critic_gap"
+
+    def test_critic_gap_no_match_falls_through(self, tmp_path):
+        """When critic gap doesn't match any file, falls through to P3."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("physics.txt", status="new", priority=90),
+        ])
+
+        mock_critic = specced(CriticAgent)
+        mock_report = specced(CritiqueReport)
+        mock_finding = specced(CritiqueFinding, suggested_action="learn_more", topic_normalized="blockchain_consensus")
+        mock_report.findings = [mock_finding]
+        mock_critic.get_last_report.return_value = mock_report
+        agent.set_critic_agent(mock_critic)
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        # No match -> falls through to P3 (new file)
+        assert strategy is not None
+        assert strategy.target_file_id == "physics.txt"
+        assert strategy.params.get("reason") == "new_file"
+
+    def test_no_critic_backward_compatible(self, tmp_path):
+        """Without critic, P2.7 is skipped - same behavior as before."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("file.txt", status="new", priority=50),
+        ])
+        # No critic set
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.params.get("reason") == "new_file"
+
+    def test_bulletin_need_material_gap_real_store(self, tmp_path):
+        """Audyt 2026-06-12: galaz bulletin w _find_critic_gap byla podwojnie
+        zepsuta (fantom get_entries_by_type + .get() na dataclass) i martwa
+        od 04-13 -- wyjatek polykal bare except. Test na PRAWDZIWYM
+        BulletinStore pilnuje, ze NEED_MATERIAL steruje wyborem pliku."""
+        from agent_core.bulletin.bulletin_store import BulletinStore
+        from agent_core.bulletin.bulletin_model import EntryType
+
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("random_physics.txt", status="new", priority=90),
+            _make_index_record("web_order_flow.txt", status="new", priority=50),
+        ])
+
+        store = BulletinStore(path=tmp_path / "bulletin.jsonl")
+        store.create_and_post(
+            entry_type=EntryType.NEED_MATERIAL,
+            topic="order flow",
+            reason_code="no_material",
+            summary="Temat wazny, brak materialu",
+            requested_by="test",
+        )
+        agent.set_bulletin_store(store)
+
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.target_file_id == "web_order_flow.txt"
+        assert strategy.params.get("reason") == "critic_gap"

@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
 from agent_core.llm.model_registry import (
     ModelRole, ModelSpec, ConcurrencyClass, WarmState,
     get_model, list_models, get_warm_models, get_heavy_models,
@@ -161,10 +162,16 @@ def mock_psutil():
 
 @pytest.fixture
 def mock_ollama():
-    """Mock ollama library."""
-    with patch("agent_core.llm.model_scheduler.ollama_lib") as mock:
-        mock.generate.return_value = {"response": ""}
-        mock.ps.return_value = {"models": []}
+    """Mock the shared timeout-aware ollama client.
+
+    Scheduler load/unload/ps now route through execution_budget.get_ollama_client()
+    (a timeout-aware Client), not the bare module, so patch the helper. The yielded
+    mock stands in for the client, so existing .generate/.ps assertions still apply.
+    """
+    mock = MagicMock()
+    mock.generate.return_value = {"response": ""}
+    mock.ps.return_value = {"models": []}
+    with patch("agent_core.llm.model_scheduler.get_ollama_client", return_value=mock):
         yield mock
 
 
@@ -506,8 +513,8 @@ class TestModelSchedulerOllama:
         assert running == ["llama3.1:8b", "qwen3:8b"]
 
     def test_ollama_not_available(self, scheduler, mock_psutil):
-        """If ollama library is None, methods should handle gracefully."""
-        with patch("agent_core.llm.model_scheduler.ollama_lib", None):
+        """If the ollama library is absent (helper returns None), degrade gracefully."""
+        with patch("agent_core.llm.model_scheduler.get_ollama_client", return_value=None):
             assert scheduler._ollama_load("test") is False
             assert scheduler._ollama_unload("test") is False
             assert scheduler._ollama_list_running() == []
@@ -601,7 +608,7 @@ class TestLLMRouterWithScheduler:
         router = LLMRouter(ollama_brain=mock_brain)
         assert router._model_scheduler is None
 
-        mock_scheduler = Mock()
+        mock_scheduler = specced(ModelScheduler)
         router.set_model_scheduler(mock_scheduler)
         assert router._model_scheduler is mock_scheduler
 
@@ -623,7 +630,7 @@ class TestLLMRouterWithScheduler:
 
         mock_brain = Mock()
         mock_brain._ask_once.return_value = "fallback"
-        mock_scheduler = Mock()
+        mock_scheduler = specced(ModelScheduler)
         mock_scheduler.ensure_ready.return_value = EnsureResult(
             success=False, reason="RAM insufficient"
         )
@@ -633,18 +640,19 @@ class TestLLMRouterWithScheduler:
         result = router.ask_as_role(ModelRole.PLANNER, "test")
         assert result == "fallback"
 
-    @patch("agent_core.llm.router.ollama_lib")
-    def test_ask_as_role_success(self, mock_ollama_router):
+    @patch("agent_core.llm.router.get_ollama_client")
+    def test_ask_as_role_success(self, mock_get_client):
         """ask_as_role with successful ensure_ready uses scheduled model."""
         from agent_core.llm.router import LLMRouter
 
         mock_brain = Mock()
-        mock_scheduler = Mock()
+        mock_scheduler = specced(ModelScheduler)
         mock_scheduler.ensure_ready.return_value = EnsureResult(
             success=True, ollama_tag="qwen3:8b", role=ModelRole.PLANNER,
         )
 
-        mock_ollama_router.chat.return_value = {
+        # Router now calls the timeout-aware client from get_ollama_client().
+        mock_get_client.return_value.chat.return_value = {
             "message": {"content": "planned response"}
         }
 
@@ -662,7 +670,7 @@ class TestLLMRouterWithScheduler:
 
         mock_brain = Mock()
         mock_brain.model = "llama3.1:8b"
-        mock_scheduler = Mock()
+        mock_scheduler = specced(ModelScheduler)
         mock_scheduler.get_status.return_value = {"loaded_count": 1}
 
         router = LLMRouter(ollama_brain=mock_brain)

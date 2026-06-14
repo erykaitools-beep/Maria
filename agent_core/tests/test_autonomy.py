@@ -45,8 +45,13 @@ class TestActionClassification:
             assert classify_action(action) == ActionClassification.FREE
 
     def test_guarded_actions(self):
-        for action in ("fetch", "maintenance"):
+        for action in ("fetch", "maintenance", "experiment", "ask_expert"):
             assert classify_action(action) == ActionClassification.GUARDED
+
+    def test_analytical_actions(self):
+        # READ-ONLY self-reflection tier — must run in SLEEP/REDUCED.
+        for action in ("self_analyze", "creative", "critique", "validate"):
+            assert classify_action(action) == ActionClassification.ANALYTICAL
 
     def test_unknown_action_defaults_to_restricted(self):
         assert classify_action("smart_home") == ActionClassification.RESTRICTED
@@ -54,6 +59,7 @@ class TestActionClassification:
 
     def test_enum_values(self):
         assert ActionClassification.FREE.value == "free"
+        assert ActionClassification.ANALYTICAL.value == "analytical"
         assert ActionClassification.GUARDED.value == "guarded"
         assert ActionClassification.RESTRICTED.value == "restricted"
         assert ActionClassification.FORBIDDEN.value == "forbidden"
@@ -154,12 +160,34 @@ class TestPolicyRules:
         result = rule_degraded_mode_restrict(ctx)
         assert result is None  # FREE action, passes
 
+    def test_degraded_mode_allows_analytical_actions(self):
+        # Self-reflection loop must keep running in SLEEP/REDUCED so the
+        # organism keeps developing during idle/weekend windows.
+        for action in ("self_analyze", "creative", "critique", "validate"):
+            for mode in ("reduced", "sleep"):
+                ctx = PolicyContext(action_type=action, mode=mode)
+                result = rule_degraded_mode_restrict(ctx)
+                assert result is None, (
+                    f"{action} should be allowed in {mode} (ANALYTICAL tier)"
+                )
+
     def test_degraded_mode_blocks_guarded_actions(self):
         ctx = PolicyContext(action_type="fetch", mode="reduced")
         result = rule_degraded_mode_restrict(ctx)
         assert result is not None
         assert result.decision == PolicyDecision.BLOCK
         assert "mode_restrict" in result.reasons[0]
+
+    def test_degraded_mode_blocks_guarded_in_sleep(self):
+        # GUARDED actions still blocked in sleep — only ANALYTICAL gets the
+        # bypass. fetch/experiment/maintenance mutate state.
+        for action in ("fetch", "experiment", "maintenance"):
+            ctx = PolicyContext(action_type=action, mode="sleep")
+            result = rule_degraded_mode_restrict(ctx)
+            assert result is not None, (
+                f"{action} (GUARDED) must be blocked in sleep"
+            )
+            assert result.decision == PolicyDecision.BLOCK
 
     def test_active_mode_allows_everything(self):
         ctx = PolicyContext(action_type="fetch", mode="active")

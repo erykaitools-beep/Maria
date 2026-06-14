@@ -13,6 +13,8 @@ from agent_core.operator.operator_model import (
     DayRhythm,
     OperatorFact,
     OperatorModel,
+    get_operator_model,
+    reset_operator_model_singleton,
 )
 from agent_core.operator.privacy_guard import PrivacyGuard
 
@@ -388,6 +390,29 @@ class TestOperatorModel:
         assert "preferences" in data
         assert "day_rhythm" in data
 
+    def test_get_profile_card_shape(self, model):
+        # Plank 3 (split-brain #5): OM must serve the flat UserProfile shape the
+        # Web UI profile page (profile.js) reads, so the front-end is unchanged
+        # when _get_user_profile() switches from UserProfile() to the OM.
+        model.set_name("Eryk")
+        model.add_interest("spanie")
+        model.add_fact("mieszka w Berlinie")
+        model.set_preference("response_style", "direct")
+
+        card = model.get_profile_card()
+        # Exact top-level shape the front-end indexes into.
+        assert set(card.keys()) == {
+            "identity", "preferences", "interests", "schedule", "facts", "stats"
+        }
+        assert card["identity"]["name"] == "Eryk"
+        assert "language" in card["identity"]
+        assert "timezone" in card["identity"]
+        assert "spanie" in card["interests"]
+        assert card["preferences"].get("response_style") == "direct"
+        assert isinstance(card["schedule"]["notes"], list)
+        assert isinstance(card["facts"], list)
+        assert isinstance(card["stats"], dict)
+
 
 # ============================================================
 # Learn from message tests
@@ -578,3 +603,154 @@ class TestCrossProcess:
 
         # m1 should detect change and reload
         assert m1.get_fact_value("job") == "manager"
+
+
+class TestSharedSingleton:
+    """get_operator_model() must return one process-wide instance so the
+    daemon and Web UI share a single source of truth (split-brain fix #5)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        # Avoid migrating from the real user_profile.json + start clean.
+        monkeypatch.setattr(
+            "agent_core.operator.operator_model.LEGACY_PROFILE_PATH",
+            tmp_path / "nonexistent_legacy.json",
+        )
+        reset_operator_model_singleton()
+        yield
+        reset_operator_model_singleton()
+
+    def test_returns_same_instance(self, tmp_path):
+        a = get_operator_model(path=tmp_path / "om.json")
+        b = get_operator_model()  # path ignored after first creation
+        assert a is b
+
+    def test_mutation_is_shared(self, tmp_path):
+        a = get_operator_model(path=tmp_path / "om.json")
+        b = get_operator_model()
+        a.set_fact("city", "Berlin")
+        # b is the same object -> sees the fact without any file reload
+        assert b.get_fact_value("city") == "Berlin"
+
+    def test_reset_creates_new_instance(self, tmp_path):
+        a = get_operator_model(path=tmp_path / "om.json")
+        reset_operator_model_singleton()
+        c = get_operator_model(path=tmp_path / "om.json")
+        assert c is not a
+
+
+class TestScheduleNotes:
+    """E2 regression: schedule notes must accumulate as a capped list, not
+    overwrite each other. The b890e7b UI rewire collapsed every note onto a
+    single durable fact 'schedule_note', silently discarding all but the most
+    recent note."""
+
+    @pytest.fixture
+    def model(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "agent_core.operator.operator_model.LEGACY_PROFILE_PATH",
+            tmp_path / "nonexistent_legacy.json",
+        )
+        return OperatorModel(path=tmp_path / "operator_model.json")
+
+    def test_notes_accumulate(self, model):
+        model.add_schedule_note("pracuje 9-17")
+        model.add_schedule_note("piatek wolny")
+        assert model.get_schedule_notes() == ["pracuje 9-17", "piatek wolny"]
+
+    def test_notes_dedup(self, model):
+        model.add_schedule_note("pracuje 9-17")
+        model.add_schedule_note("pracuje 9-17")
+        assert model.get_schedule_notes() == ["pracuje 9-17"]
+
+    def test_notes_capped_at_30(self, model):
+        for i in range(35):
+            model.add_schedule_note(f"note {i}")
+        notes = model.get_schedule_notes()
+        assert len(notes) == 30
+        assert notes[-1] == "note 34"  # newest kept
+        assert "note 0" not in notes   # oldest dropped
+
+    def test_remove_note(self, model):
+        model.add_schedule_note("a")
+        model.add_schedule_note("b")
+        assert model.remove_schedule_note("a") is True
+        assert model.remove_schedule_note("missing") is False
+        assert model.get_schedule_notes() == ["b"]
+
+    def test_persists_as_list(self, model):
+        model.add_schedule_note("x")
+        model.add_schedule_note("y")
+        disk = json.loads(Path(model._path).read_text(encoding="utf-8"))
+        assert disk["schedule_notes"] == ["x", "y"]
+
+    def test_legacy_single_fact_migrates(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "agent_core.operator.operator_model.LEGACY_PROFILE_PATH",
+            tmp_path / "nonexistent_legacy.json",
+        )
+        path = tmp_path / "operator_model.json"
+        path.write_text(json.dumps({
+            "version": 2,
+            "durable_facts": {
+                "name": {"value": "Eryk", "confidence": 1.0,
+                         "source": "x", "updated_at": ""},
+                "schedule_note": {"value": "pracuje 7-16", "confidence": 0.8,
+                                  "source": "explicit:schedule", "updated_at": ""},
+            },
+            "preferences": {}, "interests": [], "stats": {},
+        }), encoding="utf-8")
+        m = OperatorModel(path=path)
+        assert m.get_schedule_notes() == ["pracuje 7-16"]
+        assert m.get_fact("schedule_note") is None  # legacy fact consumed
+
+
+class TestConcurrency:
+    """E1 regression: readers must not crash or tear when writers mutate the
+    shared model concurrently (one singleton shared by daemon + Flask +
+    Telegram threads). Before the RLock + locked-reload fix this raised
+    'dictionary changed size during iteration'."""
+
+    def test_concurrent_read_write_no_crash(self, tmp_path, monkeypatch):
+        import threading
+
+        monkeypatch.setattr(
+            "agent_core.operator.operator_model.LEGACY_PROFILE_PATH",
+            tmp_path / "nonexistent_legacy.json",
+        )
+        om = OperatorModel(path=tmp_path / "operator_model.json")
+        errors = []
+        stop = threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    om.get_all_facts()
+                    om.get_interests()
+                    om.get_preferences()
+                    om.get_full_data()
+                except Exception as e:  # noqa: BLE001
+                    errors.append(repr(e))
+                    return
+
+        def writer(n):
+            i = 0
+            while not stop.is_set():
+                try:
+                    om.set_fact(f"k{n}_{i % 5}", str(i), 1.0, "t")
+                    om.add_interest(f"i{n}_{i % 7}")
+                    om.remove_interest(f"i{n}_{(i + 2) % 7}")
+                    i += 1
+                except Exception as e:  # noqa: BLE001
+                    errors.append(repr(e))
+                    return
+
+        threads = [threading.Thread(target=reader) for _ in range(4)] + \
+                  [threading.Thread(target=writer, args=(n,)) for n in range(3)]
+        for t in threads:
+            t.start()
+        time.sleep(0.5)
+        stop.set()
+        for t in threads:
+            t.join(timeout=5)
+        assert not errors, errors[:3]

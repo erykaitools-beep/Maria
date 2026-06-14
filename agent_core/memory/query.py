@@ -247,22 +247,76 @@ class MemoryQuery:
     def get_knowledge_gaps(self, top_k: int = 5) -> List[Dict[str, Any]]:
         """Find topics with low confidence or missing coverage.
 
+        Aggregates evidence across sources before flagging a gap:
+        - Topic-level beliefs (observations) carry meta-info with fast decay
+        - Fact beliefs carry actual knowledge, linked to topics via `tags`
+        - knowledge_index files carry exam scores for files matching topic
+
+        A topic is flagged as gap only when ALL evidence sources are weak.
+        This prevents false positives when Maria has facts/exam passes on a
+        topic but the observation-belief's confidence decayed over time.
+
         Useful for K12 Self-Analysis and topic suggestion.
         """
         self._ensure_cache()
         gaps = []
 
+        # Partition beliefs: facts are evidence, others are gap candidates
+        facts: List[Dict[str, Any]] = []
+        candidates: Dict[str, Dict[str, Any]] = {}
         for entity, rec in (self._beliefs_cache or {}).items():
-            confidence = rec.get("confidence", 0.5)
-            if confidence < 0.5:
-                gaps.append({
-                    "topic": entity,
-                    "confidence": confidence,
-                    "source": rec.get("source", ""),
-                    "reason": "low_confidence_belief",
-                })
+            if rec.get("belief_type") == "fact":
+                facts.append(rec)
+            else:
+                candidates[entity] = rec
 
-        # Files with exam_failed status
+        for entity, rec in candidates.items():
+            obs_conf = rec.get("confidence", 0.5)
+            entity_lower = entity.lower()
+
+            # Supporting facts: tags match the topic (case-insensitive)
+            supporting_facts = [
+                f for f in facts
+                if any(t.lower() == entity_lower for t in f.get("tags", []))
+            ]
+            max_fact_conf = max(
+                (f.get("confidence", 0.0) for f in supporting_facts),
+                default=0.0,
+            )
+
+            # Supporting files: knowledge_index entry with matching filename + completed
+            topic_token = entity_lower.replace(" ", "_").replace("-", "_")
+            supporting_scores: List[float] = []
+            for _fid, krec in (self._knowledge_cache or {}).items():
+                fname = (krec.get("file") or "").lower()
+                name_match = (topic_token in fname) or (entity_lower in fname)
+                if name_match and krec.get("status") == "completed":
+                    scores = krec.get("last_scores", [])
+                    if scores:
+                        supporting_scores.append(max(scores))
+            max_file_score = max(supporting_scores, default=0.0)
+
+            # Effective confidence: best available evidence wins
+            effective = max(obs_conf, max_fact_conf, max_file_score)
+            if effective >= 0.5:
+                continue  # Not a gap — evidence exists
+
+            has_evidence = bool(supporting_facts or supporting_scores)
+            gaps.append({
+                "topic": entity,
+                "confidence": round(effective, 2),
+                "source": rec.get("source", ""),
+                "reason": "low_confidence_aggregate" if has_evidence else "low_confidence_belief",
+                "evidence": {
+                    "observation_conf": round(obs_conf, 2),
+                    "fact_count": len(supporting_facts),
+                    "max_fact_conf": round(max_fact_conf, 2),
+                    "file_count": len(supporting_scores),
+                    "max_file_score": round(max_file_score, 2),
+                } if has_evidence else {},
+            })
+
+        # Files with exam_failed status — independent signal
         for fid, rec in (self._knowledge_cache or {}).items():
             if rec.get("status") in ("exam_failed", "hard_topic"):
                 gaps.append({

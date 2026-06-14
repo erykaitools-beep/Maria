@@ -165,8 +165,14 @@ class ExecutionRouter:
         if not policy:
             return (False, "")
         try:
-            classification = policy.classify_action(action)
-            level = getattr(classification, "level", str(classification))
+            # classify_action is a module-level function (action_class.py), NOT a
+            # method on AutonomyPolicy. The old policy.classify_action(action) raised
+            # AttributeError -> swallowed -> K7 FORBIDDEN check failed OPEN. Also the
+            # old getattr(.., "level", str(..)) fell back to the enum repr, never
+            # matching "forbidden" even if called right (audyt 2026-06-13).
+            from agent_core.autonomy.action_class import classify_action
+            classification = classify_action(action)
+            level = getattr(classification, "value", str(classification))
             if level == "forbidden":
                 return (True, f"K7: {action} is FORBIDDEN")
         except Exception:

@@ -305,6 +305,148 @@ class TestReminderScheduler:
         assert len(repl) == 1
 
 
+# ========== On-fire command ==========
+
+class TestOnFireCommand:
+    @pytest.fixture
+    def setup(self, tmp_path):
+        rs = ReminderStore(path=tmp_path / "rem.jsonl")
+        ts = TodoStore(path=tmp_path / "todo.jsonl")
+        sched = ReminderScheduler(rs, ts)
+        return rs, ts, sched
+
+    def test_no_command_unchanged_behaviour(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(text="plain", scheduled_at=time.time() - 1))
+        sched.force_check()
+
+        # Only the original notification — no command output appended.
+        assert len(fired) == 1
+        assert "plain" in fired[0]
+
+    def test_command_executes_and_emits_output(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(
+            text="echo test",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {"argv": ["echo", "hello-world"]}},
+        ))
+        sched.force_check()
+
+        # First message: notification, second: command output.
+        assert len(fired) == 2
+        assert "echo test" in fired[0]
+        assert "exit=0" in fired[1]
+        assert "hello-world" in fired[1]
+
+    def test_command_nonzero_exit_in_output(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(
+            text="false",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {"argv": ["false"]}},
+        ))
+        sched.force_check()
+
+        assert len(fired) == 2
+        assert "exit=1" in fired[1]
+
+    def test_command_timeout_handled(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(
+            text="slow",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {
+                "argv": ["sleep", "5"],
+                "timeout": 0.2,
+            }},
+        ))
+        sched.force_check()
+
+        assert len(fired) == 2
+        assert "TIMEOUT" in fired[1]
+
+    def test_command_file_not_found(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(
+            text="missing",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {"argv": ["/nonexistent/binary-xyz"]}},
+        ))
+        sched.force_check()
+
+        assert len(fired) == 2
+        assert "FileNotFoundError" in fired[1]
+
+    def test_command_invalid_argv_skipped(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        rs.add(Reminder(
+            text="bad spec",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {"argv": "echo hi"}},  # str not list
+        ))
+        sched.force_check()
+
+        assert len(fired) == 2
+        assert "SKIPPED" in fired[1]
+        assert "invalid argv" in fired[1]
+
+    def test_command_output_truncated_to_tail(self, setup):
+        rs, _, sched = setup
+        fired = []
+        sched.set_notify_fn(lambda msg: fired.append(msg))
+
+        # Generate ~5000 chars of output via python -c — last chars must survive.
+        payload = (
+            "import sys; sys.stdout.write('A' * 4000 + 'TAIL_MARKER' + 'B' * 1000)"
+        )
+        rs.add(Reminder(
+            text="big",
+            scheduled_at=time.time() - 1,
+            metadata={"on_fire_command": {"argv": ["python3", "-c", payload]}},
+        ))
+        sched.force_check()
+
+        assert len(fired) == 2
+        # Tail should be preserved, head dropped.
+        assert "truncated" in fired[1]
+        assert "B" * 100 in fired[1]  # tail B's still there
+
+    def test_command_repl_fn_also_receives_output(self, setup):
+        rs, _, sched = setup
+        repl = []
+        sched.set_repl_fn(lambda msg: repl.append(msg))
+
+        rs.add(Reminder(
+            text="repl cmd",
+            scheduled_at=time.time() - 1,
+            notify_telegram=False,
+            metadata={"on_fire_command": {"argv": ["echo", "via-repl"]}},
+        ))
+        sched.force_check()
+
+        assert len(repl) == 2
+        assert "via-repl" in repl[1]
+
+
 # ========== Time Parser ==========
 
 class TestTimeParser:

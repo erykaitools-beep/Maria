@@ -69,6 +69,23 @@ def _short_response():
     return "Krotka."
 
 
+@pytest.fixture(autouse=True)
+def _isolate_expert_input(monkeypatch):
+    """Isolate ExpertBridge tests from local input/expert_*.txt state.
+
+    _expert_file_exists() hardcodes the real repo input/ dir, so a pre-existing
+    input/expert_fizyka.txt (real learning material on this box) makes
+    ask_about_topic short-circuit with expert_material_already_exists and the
+    LLM-pipeline tests fail -- a test-isolation gap, not a regression from any
+    commit. Default to "no local material" so tests exercise the pipeline
+    regardless of what input/ contains.
+    """
+    monkeypatch.setattr(
+        "agent_core.bulletin.expert_bridge.ExpertBridge._expert_file_exists",
+        staticmethod(lambda topic="": False),
+    )
+
+
 class FakeAuditor:
     def __init__(self, report):
         self._report = report

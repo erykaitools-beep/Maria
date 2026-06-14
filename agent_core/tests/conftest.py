@@ -170,3 +170,16 @@ def isolated_event_logger(tmp_path):
     yield logger_module._event_logger
     logger_module._event_logger = original
 
+
+@pytest.fixture(autouse=True)
+def always_learning_window(monkeypatch):
+    """Make is_learning_window() always return True in tests.
+
+    Without this, tests that exercise learn/exam/fetch actions
+    would fail depending on the time of day they run."""
+    try:
+        import agent_core.environment.environment_model as env_mod
+        monkeypatch.setattr(env_mod, "is_learning_window", lambda now=None: True)
+    except Exception:
+        pass
+

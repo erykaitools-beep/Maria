@@ -39,6 +39,36 @@ BROAD_TOPIC_THRESHOLD = 4
 # Max sub-topics to create when decomposing a broad topic
 MAX_SUBTOPICS = 3
 
+# Warstwa 2: topic-validity heuristics.
+# Topics should be nominal phrases like "logika formalna", "fizyka".
+# Prose descriptions ("Zwiekszenie pokrycia wiedzy do 100%") are strategies,
+# not learnable topics, and must not be handed to ASK_EXPERT or FETCH_MATERIAL.
+MAX_TOPIC_WORDS = 5
+MAX_TOPIC_CHARS = 60
+
+# Strategy / meta-level verbs and nouns that indicate prose, not a subject.
+# Polish + English. Lowercase match on any word in topic.
+_STRATEGY_KEYWORDS = {
+    # polish
+    "zmiana", "zmiany", "zmien", "zmienic",
+    "rozszerzenie", "rozszerz", "rozszerzyc",
+    "eksploracja", "eksploruj", "zbadaj",
+    "zwiekszenie", "zwieksz", "zwiekszyc",
+    "zmniejszenie", "zmniejsz",
+    "poprawa", "popraw", "poprawic",
+    "optymalizacja", "optymalizuj",
+    "wprowadzenie", "wprowadz",
+    "redukcja", "zredukuj",
+    "autonomiczna", "autonomiczne", "autonomiczny",
+    "strukturyzacja", "struktur",
+    "mechanizm", "mechanizmu",
+    "strategia", "strategii",
+    # english
+    "improve", "increase", "reduce", "expand", "explore",
+    "optimize", "implement", "introduce",
+    "strategy", "mechanism",
+}
+
 
 class GapAction(Enum):
     """What the gap planner recommends."""
@@ -80,6 +110,47 @@ class GapPlan:
         }
 
 
+def is_topic_learnable(topic: str) -> tuple:
+    """Check whether a string looks like a concrete topic vs. prose description.
+
+    Warstwa 2 backstop: even if Warstwa 1 (goal-type filter in planner_core)
+    lets a non-learnable topic through, this function catches prose like
+    'Zwiekszenie pokrycia wiedzy do 100%' or 'Zmiana mechanizmu uczenia'
+    before it becomes a template'd ASK_EXPERT bulletin.
+
+    Returns:
+        (True, None) if topic is learnable (short nominal phrase).
+        (False, reason) if topic looks like prose/strategy.
+    """
+    if not topic or not isinstance(topic, str):
+        return (False, "empty_topic")
+
+    stripped = topic.strip()
+    if not stripped:
+        return (False, "empty_topic")
+
+    if len(stripped) > MAX_TOPIC_CHARS:
+        return (False, "topic_too_long_chars")
+
+    words = stripped.split()
+    if len(words) > MAX_TOPIC_WORDS:
+        return (False, "topic_too_many_words")
+
+    # Check any word against strategy vocabulary (lowercase, no punctuation)
+    normalized_words = [
+        "".join(ch for ch in w.lower() if ch.isalpha())
+        for w in words
+    ]
+    if any(w in _STRATEGY_KEYWORDS for w in normalized_words if w):
+        return (False, "topic_contains_strategy_keyword")
+
+    # Ends with percent / digit target — e.g. "pokrycia wiedzy do 100%"
+    if stripped.endswith("%") or stripped.rstrip(".!").endswith(tuple("0123456789")):
+        return (False, "topic_contains_numeric_target")
+
+    return (True, None)
+
+
 class GapPlanner:
     """
     Decides what to do based on knowledge audit results.
@@ -89,9 +160,100 @@ class GapPlanner:
 
     def __init__(self):
         self._bulletin_store = None
+        self._memory_query = None
 
     def set_bulletin_store(self, store) -> None:
         self._bulletin_store = store
+
+    def set_memory_query(self, mq) -> None:
+        """Attach MemoryQuery for Warstwa 3 cross-check before ASK_EXPERT."""
+        self._memory_query = mq
+
+    @staticmethod
+    def _check_knowledge_index(slug: str, project_root) -> bool:
+        """Check memory/knowledge_index.jsonl for a completed file matching slug.
+
+        The index is authoritative: it reflects actual learned state, regardless
+        of filesystem byte-size quirks or cached bytecode. A topic is covered
+        when expert_<slug>.txt or web_wiki_<slug>.txt is status=completed with
+        chunks_learned > 0.
+
+        Slug match is exact to avoid false positives (e.g. 'fizyka' must not
+        match 'astrofizyka.txt').
+        """
+        if not slug:
+            return False
+        import json as _json
+        index_path = project_root / "memory" / "knowledge_index.jsonl"
+        if not index_path.exists():
+            return False
+        targets = {f"expert_{slug}.txt", f"web_wiki_{slug}.txt"}
+        try:
+            with index_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        entry = _json.loads(line)
+                    except Exception:
+                        continue
+                    fname = (entry.get("file") or entry.get("id") or "").lower()
+                    if fname not in targets:
+                        continue
+                    if entry.get("status") == "completed" and int(
+                        entry.get("chunks_learned") or 0
+                    ) > 0:
+                        return True
+        except Exception as e:
+            logger.debug(f"[GapPlanner] knowledge_index check failed: {e}")
+        return False
+
+    def _has_real_material(self, topic: str) -> bool:
+        """Cross-check whether Maria actually has material on this topic.
+
+        Warstwa 3: before accepting audit's NO_MATERIAL claim and generating
+        ASK_EXPERT, verify directly:
+        1. Filesystem: expert_<slug>.txt or web_wiki_<slug>.txt exists and
+           has substantial content (>5000 bytes).
+        2. knowledge_index.jsonl: authoritative record of completed material
+           (robust against filesystem byte-size quirks and pyc cache drift).
+        3. MemoryQuery (if wired): get_topic_summary reports known=True with
+           files_count > 0.
+
+        If any signal says "yes", audit was stale — don't ask expert.
+        """
+        import re
+        from pathlib import Path
+
+        if not topic:
+            return False
+
+        slug = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_")
+        if not slug:
+            return False
+
+        project_root = Path(__file__).resolve().parents[2]
+        input_dir = project_root / "input"
+        if input_dir.exists():
+            for name in (f"expert_{slug}.txt", f"web_wiki_{slug}.txt"):
+                fpath = input_dir / name
+                try:
+                    if fpath.exists() and fpath.stat().st_size > 5000:
+                        return True
+                except OSError:
+                    pass
+
+        if self._check_knowledge_index(slug, project_root):
+            return True
+
+        # MemoryQuery cross-check (if attached)
+        if self._memory_query is not None:
+            try:
+                summary = self._memory_query.get_topic_summary(topic)
+                if summary.get("known") and summary.get("files_count", 0) > 0:
+                    return True
+            except Exception as e:
+                logger.debug(f"[GapPlanner] MemoryQuery check failed: {e}")
+
+        return False
 
     def plan_for_topic(
         self,
@@ -116,6 +278,22 @@ class GapPlanner:
                 action=GapAction.NO_ACTION,
                 topic=topic,
                 reason="topic_well_covered",
+            )
+
+        # Warstwa 2: validate that topic looks like a learnable subject,
+        # not a prose strategy description. Backstop for Warstwa 1 in
+        # planner_core._is_gap_learnable_goal() in case some path feeds us
+        # a goal.description instead of a real topic.
+        learnable, reject_reason = is_topic_learnable(topic)
+        if not learnable:
+            logger.debug(
+                f"[GapPlanner] Skipping non-learnable topic "
+                f"({reject_reason}): {topic[:60]!r}"
+            )
+            return GapPlan(
+                action=GapAction.NO_ACTION,
+                topic=topic,
+                reason=f"topic_not_learnable:{reject_reason}",
             )
 
         # Check bulletin for existing NEED_REVIEW (critic flagged)
@@ -154,6 +332,21 @@ class GapPlanner:
 
         # No material at all -> need to fetch or ask expert
         if GapType.NO_MATERIAL in gap_types:
+            # Warstwa 3: cross-check audit claim. KnowledgeAuditor may miss
+            # material that exists on disk or in MemoryQuery (stale beliefs,
+            # audit timing). Don't ask expert if we already have the file.
+            if self._has_real_material(topic):
+                logger.info(
+                    f"[GapPlanner] Audit reported NO_MATERIAL for '{topic}' "
+                    f"but material exists — recommending REVIEW instead"
+                )
+                return GapPlan(
+                    action=GapAction.REVIEW,
+                    topic=topic,
+                    reason="material_exists_audit_stale",
+                    priority=0.4,
+                    metadata={"audit_mismatch": True},
+                )
             prompt = self._build_expert_prompt(audit, goal_description)
             return GapPlan(
                 action=GapAction.ASK_EXPERT,

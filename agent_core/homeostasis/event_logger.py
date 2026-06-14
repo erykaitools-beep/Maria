@@ -272,8 +272,8 @@ class HomeostasisEventLogger:
 
             if ram < 20:
                 return {"constraint": "ram_low", "value": ram, "threshold": 20}
-            if cpu > 80:
-                return {"constraint": "cpu_high", "value": cpu, "threshold": 80}
+            if cpu > 90:
+                return {"constraint": "cpu_high", "value": cpu, "threshold": 90}
             if temp > 85:
                 return {"constraint": "thermal_high", "value": temp, "threshold": 85}
 

@@ -11,6 +11,12 @@ from agent_core.planner.stuck_handler import (
     StuckCause,
     RepairAction,
 )
+from agent_core.tests.spec_helpers import specced
+from agent_core.goals.store import GoalStore
+from agent_core.goals.goal_model import Goal
+from agent_core.autonomy import AutonomyPolicy
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.telegram.bot import TelegramBot
 
 
 @pytest.fixture
@@ -22,9 +28,9 @@ def handler():
 def handler_with_deps():
     """StuckHandler with mock dependencies."""
     h = StuckHandler()
-    goal_store = MagicMock()
-    autonomy = MagicMock()
-    analyzer = MagicMock()
+    goal_store = specced(GoalStore)
+    autonomy = specced(AutonomyPolicy)
+    analyzer = specced(KnowledgeAnalyzer)
     h.set_goal_store(goal_store)
     h.set_autonomy_policy(autonomy)
     h.set_knowledge_analyzer(analyzer)
@@ -94,8 +100,7 @@ class TestDiagnosis:
 class TestRepair:
     def test_switch_to_learn_with_goal_store(self, handler_with_deps):
         h, goal_store, _, _ = handler_with_deps
-        mock_goal = MagicMock()
-        mock_goal.metadata = {}
+        mock_goal = specced(Goal, metadata={})
         goal_store.get.return_value = mock_goal
 
         diag = StuckDiagnosis(
@@ -147,8 +152,7 @@ class TestRepair:
 
     def test_trigger_fetch(self, handler_with_deps):
         h, goal_store, _, _ = handler_with_deps
-        mock_goal = MagicMock()
-        mock_goal.metadata = {}
+        mock_goal = specced(Goal, metadata={})
         goal_store.get.return_value = mock_goal
 
         diag = StuckDiagnosis(
@@ -253,7 +257,7 @@ class TestNotifierStuck:
     def test_notify_stuck_sends_raw_message(self):
         from agent_core.telegram.notifier import TelegramNotifier
 
-        mock_bot = MagicMock()
+        mock_bot = specced(TelegramBot)
         mock_bot.configured = True
         mock_bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=mock_bot)
@@ -268,7 +272,7 @@ class TestNotifierStuck:
         """notify_stuck and notify_stuck_planner share same cooldown."""
         from agent_core.telegram.notifier import TelegramNotifier
 
-        mock_bot = MagicMock()
+        mock_bot = specced(TelegramBot)
         mock_bot.configured = True
         mock_bot.send_message.return_value = True
         notifier = TelegramNotifier(bot=mock_bot)

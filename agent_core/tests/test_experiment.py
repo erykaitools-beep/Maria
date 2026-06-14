@@ -464,7 +464,7 @@ class TestExperimentRunner:
         exp = self._make_pending_experiment()
 
         # Mock teacher
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {"stats": {"chunks_learned": 1}}
         runner.set_teacher_agent(teacher)
 
@@ -481,7 +481,7 @@ class TestExperimentRunner:
         import agent_core.planner.planner_core as pc
         original = pc.ROUTINE_INTERVAL_TICKS
 
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {"stats": {}}
         runner.set_teacher_agent(teacher)
 
@@ -497,7 +497,7 @@ class TestExperimentRunner:
         import agent_core.planner.planner_core as pc
         original = pc.ROUTINE_INTERVAL_TICKS
 
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.side_effect = RuntimeError("boom")
         runner.set_teacher_agent(teacher)
 
@@ -536,7 +536,7 @@ class TestExperimentRunner:
         exp1 = self._make_pending_experiment()
         exp2 = self._make_pending_experiment()
 
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         # Make first experiment very slow
         def slow_session(**kwargs):
             import time
@@ -558,8 +558,8 @@ class TestExperimentRunner:
         exp = self._make_pending_experiment()
 
         # Mock unhealthy homeostasis
-        core = MagicMock()
-        state = MagicMock()
+        core = specced(HomeostasisCore)
+        state = specced(SystemState)
         state.health_score = 0.5
         core.get_state.return_value = state
         runner.set_homeostasis_core(core)
@@ -585,7 +585,7 @@ class TestExperimentRunner:
         exp = self._make_pending_experiment()
         exp.max_duration_sec = 0.0  # instant timeout
 
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {"stats": {}}
         runner.set_teacher_agent(teacher)
 
@@ -724,6 +724,10 @@ class TestReportGenerator:
 
 
 from agent_core.experiment import ExperimentSystem
+from agent_core.teacher.teacher_agent import TeacherAgent
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import SystemState
+from agent_core.tests.spec_helpers import specced
 
 
 class TestExperimentSystem:

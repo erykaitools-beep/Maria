@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from agent_core.planner.decision_filters import is_real_action
+
 logger = logging.getLogger(__name__)
 
 _DECISIONS_FILE = Path("meta_data/planner_decisions.jsonl")
@@ -175,6 +177,12 @@ class HonestyProtocol:
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+
+                # T-LEARN-003: capability evidence must come from real attempts.
+                # Planner idle markers and skipped actions are not attempts and
+                # would otherwise understate (or fabricate) capability history.
+                if not is_real_action(record):
                     continue
 
                 action = record.get("action_type", "")

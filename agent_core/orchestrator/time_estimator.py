@@ -233,7 +233,7 @@ class TimeEstimator:
     def _get_mode(self) -> str:
         core = self._ctx.homeostasis_core
         if core:
-            mode = getattr(core, "_current_mode", None)
+            mode = getattr(getattr(core, "state", None), "mode", None)
             if mode:
                 return mode.name if hasattr(mode, "name") else str(mode)
         return "UNKNOWN"

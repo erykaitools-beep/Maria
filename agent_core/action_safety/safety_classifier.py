@@ -59,6 +59,10 @@ DEFAULT_SAFETY_PROFILES: Dict[str, SafetyProfile] = {
         SafetyMode.AUDIT_ONLY, Reversibility.PARTIALLY_REVERSIBLE,
         EffectType.EXTERNAL_API, True, True,
     ),
+    "fs_write": SafetyProfile(
+        SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
+        EffectType.FILESYSTEM, True, True,  # B2: sandboxed write, file-exists validated
+    ),
     "self_analyze": SafetyProfile(
         SafetyMode.AUDIT_ONLY, Reversibility.REVERSIBLE,
         EffectType.CONFIGURATION, True, True,  # K12: creates goals + topic hints

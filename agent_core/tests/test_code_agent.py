@@ -26,6 +26,9 @@ from agent_core.code_agent.session import (
 )
 from agent_core.code_agent.prompt_builder import CodePromptBuilder
 from agent_core.code_agent.agent import CodeAgent
+from agent_core.effector.openclaw_client import OpenClawClient
+from agent_core.registry.shared_context import SharedContext
+from agent_core.tests.spec_helpers import specced
 
 
 # ============================================================
@@ -283,7 +286,7 @@ class TestCodePromptBuilder:
 
 class TestCodeAgent:
     def _make_agent(self):
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.openclaw_client = None
         ctx.claude_client = None
         ctx.codex_client = None
@@ -412,7 +415,7 @@ class TestCodeAgent:
         session.files_written.append(WrittenFile(path="/tmp/test.py", content_hash="x", size_bytes=4))
 
         # Mock OpenClaw to return failing tests
-        mock_claw = MagicMock()
+        mock_claw = specced(OpenClawClient)
         mock_claw.invoke_tool.return_value = {
             "ok": True, "result": "1 failed in 0.1s\nFAILED test.py::test_x", "exit_code": 1,
         }
@@ -432,7 +435,7 @@ class TestCodeAgent:
             GeneratedFile(path="agent_core/voice/core.py", content="pass")
         )
 
-        mock_claw = MagicMock()
+        mock_claw = specced(OpenClawClient)
         mock_claw.invoke_tool.return_value = {"ok": True, "result": ""}
         agent.set_openclaw(mock_claw)
 
@@ -477,7 +480,7 @@ class TestCodeAgent:
 class TestTaskDecomposerCode:
     def test_classify_code(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer, TaskCategory
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         ctx.knowledge_analyzer = None
         d = TaskDecomposer(ctx)
@@ -487,7 +490,7 @@ class TestTaskDecomposerCode:
 
     def test_classify_build(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer, TaskCategory
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         ctx.knowledge_analyzer = None
         d = TaskDecomposer(ctx)
@@ -496,7 +499,7 @@ class TestTaskDecomposerCode:
 
     def test_classify_implement(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer, TaskCategory
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         ctx.knowledge_analyzer = None
         d = TaskDecomposer(ctx)
@@ -505,7 +508,7 @@ class TestTaskDecomposerCode:
 
     def test_code_steps_structure(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer, TaskCategory
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         ctx.knowledge_analyzer = None
         d = TaskDecomposer(ctx)
@@ -520,7 +523,7 @@ class TestTaskDecomposerCode:
 
     def test_code_in_categories(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         d = TaskDecomposer(ctx)
         cats = d.get_available_categories()
@@ -529,7 +532,7 @@ class TestTaskDecomposerCode:
 
     def test_topic_extraction(self):
         from agent_core.orchestrator.task_decomposer import TaskDecomposer
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         ctx.homeostasis_core = None
         ctx.knowledge_analyzer = None
         d = TaskDecomposer(ctx)

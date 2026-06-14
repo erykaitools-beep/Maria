@@ -23,6 +23,7 @@ Usage:
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -69,6 +70,13 @@ class WorldModel:
             exam_results_path=exam_results_path or _DEFAULT_EXAM_RESULTS_PATH,
         )
         self.query = WorldModelQuery(self.store)
+        # Serializes maintain() across its callers (PlannerCycle thread
+        # post-EVALUATE, Telegram /beliefs maintain thread). The store is
+        # lock-free, and with semantic dedup a maintenance pass went from
+        # sub-second to potentially minutes -- two concurrent passes can
+        # lose merges (compact() swaps the dict from a stale snapshot and
+        # clears _dirty). Non-blocking: the loser skips, never queues.
+        self._maintenance_lock = threading.Lock()
 
     def load(self) -> int:
         """
@@ -79,14 +87,45 @@ class WorldModel:
         """
         return self.store.load()
 
-    def build(self) -> Dict[str, int]:
+    def build(self, force: bool = False) -> Dict[str, int]:
         """
         Build/refresh beliefs from JSONL sources. Idempotent.
+
+        Skipped entirely (zeros returned) when no source file changed
+        since the last completed build; force=True overrides.
 
         Returns:
             Stats dict: {"topics": N, "files": M, "concepts": K}
         """
-        return self.builder.build_all(self.store)
+        return self.builder.build_all(self.store, force=force)
+
+    def reconcile_trust(self) -> int:
+        """Drop file beliefs whose file is no longer independently verified
+        (self-healing trust gate, #2 2026-06-01) and persist on change.
+
+        Cheap, idempotent, and safe to run on every startup after load() so the
+        world model never keeps self-graded knowledge as canonical -- the
+        runtime rebuild (build_all) does the same, but rebuilds only fire after
+        learning activity, while a freshly-loaded store needs this once.
+
+        Returns the number of beliefs pruned.
+        """
+        pruned = self.builder.prune_unverified_file_beliefs(self.store)
+        if pruned:
+            # compact() (full rewrite), NOT save() (append-only): drop_belief
+            # removes from memory but the append log still has the record as
+            # "current", so without a rewrite the pruned beliefs reload on the
+            # next restart.
+            self.store.compact()
+        return pruned
+
+    def scan_concept_trust(self) -> Dict[str, int]:
+        """Read-only census of concept-FACT beliefs by exam independence
+        (observe telemetry for the concept trust gate). Never mutates the
+        store; returns {} when the exam data is missing/empty/untrustworthy.
+        See BeliefBuilder.scan_concept_trust for the guard rationale.
+        """
+        return self.builder.scan_concept_trust(self.store)
 
     def process_exam_result(self, exam_record: Dict[str, Any]) -> int:
         """
@@ -126,6 +165,15 @@ class WorldModel:
         """
         Run full maintenance cycle: decay -> dedup -> prune -> compact.
         Intended for SLEEP phase or periodic trigger.
+
+        Returns {"skipped": "maintenance_in_progress"} when another thread
+        is already maintaining (see _maintenance_lock comment in __init__).
         """
-        from agent_core.world_model.belief_maintenance import run_maintenance
-        return run_maintenance(self.store, semantic_memory)
+        if not self._maintenance_lock.acquire(blocking=False):
+            logger.info("[WorldModel] maintain() skipped: already running")
+            return {"skipped": "maintenance_in_progress"}
+        try:
+            from agent_core.world_model.belief_maintenance import run_maintenance
+            return run_maintenance(self.store, semantic_memory)
+        finally:
+            self._maintenance_lock.release()

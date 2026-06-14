@@ -13,6 +13,9 @@ import pytest
 from agent_core.memory.query import (
     MemoryQuery, MemoryResult, MemorySource, _freshness_score, _parse_ts,
 )
+from agent_core.semantic import SemanticMemory
+from agent_core.semantic.vector_store import VectorStore
+from agent_core.tests.spec_helpers import specced
 
 
 # -- Helpers --
@@ -264,15 +267,83 @@ class TestKnowledgeGaps:
         assert "exam_failed" in reasons
         assert "hard_topic" in reasons
 
+    def test_observation_with_supporting_facts_is_not_gap(self, tmp_path):
+        """Low-confidence observation must not be a gap when fact beliefs exist on the topic.
+
+        Regression: K12 flagged 'logika formalna' (observation conf=0.13) as a gap
+        while Maria already had 4 fact beliefs (conf 0.56) tagged 'logika formalna'
+        and a completed file with exam score 1.0.
+        """
+        bp = tmp_path / "b.jsonl"
+        _write_jsonl(bp, [
+            # Low-conf topic-level observation (decayed meta-belief)
+            {"belief_id": "b1", "entity": "logika formalna",
+             "belief_type": "observation", "confidence": 0.13,
+             "tags": ["logika formalna"], "source": "learning"},
+            # Fact with the topic in its tags — this is the real evidence
+            {"belief_id": "b2",
+             "entity": "Logika formalna jest wolniejsza ale bardziej precyzyjna",
+             "belief_type": "fact", "confidence": 0.56,
+             "tags": ["logika formalna", "decyzje"], "source": "learning"},
+        ])
+        mq = MemoryQuery(knowledge_path=tmp_path / "k.jsonl", beliefs_path=bp)
+        gaps = mq.get_knowledge_gaps(top_k=10)
+        assert all(g["topic"] != "logika formalna" for g in gaps), \
+            f"logika formalna should not be a gap (has supporting fact), got: {gaps}"
+
+    def test_observation_with_completed_file_is_not_gap(self, tmp_path):
+        """Low-confidence observation must not be a gap when a completed file covers the topic."""
+        bp = tmp_path / "b.jsonl"
+        kp = tmp_path / "k.jsonl"
+        _write_jsonl(bp, [
+            {"belief_id": "b1", "entity": "percepcja",
+             "belief_type": "observation", "confidence": 0.17,
+             "tags": ["percepcja"]},
+        ])
+        _write_jsonl(kp, [
+            {"id": "expert_percepcja.txt", "file": "expert_percepcja.txt",
+             "status": "completed", "last_scores": [0.9]},
+        ])
+        mq = MemoryQuery(knowledge_path=kp, beliefs_path=bp)
+        gaps = mq.get_knowledge_gaps(top_k=10)
+        assert all(g["topic"] != "percepcja" for g in gaps), \
+            f"percepcja should not be a gap (completed file 0.9), got: {gaps}"
+
+    def test_observation_with_no_evidence_stays_gap(self, tmp_path):
+        """Low-conf observation with no supporting facts and no completed files IS a gap."""
+        bp = tmp_path / "b.jsonl"
+        _write_jsonl(bp, [
+            {"belief_id": "b1", "entity": "nieznany_temat",
+             "belief_type": "observation", "confidence": 0.15, "tags": ["nieznany_temat"]},
+        ])
+        mq = MemoryQuery(knowledge_path=tmp_path / "k.jsonl", beliefs_path=bp)
+        gaps = mq.get_knowledge_gaps(top_k=10)
+        assert any(g["topic"] == "nieznany_temat" for g in gaps), \
+            "No-evidence topic should still be flagged"
+
+    def test_facts_are_not_gap_candidates(self, tmp_path):
+        """Fact beliefs (entity = statement content) must never appear as gaps themselves."""
+        bp = tmp_path / "b.jsonl"
+        _write_jsonl(bp, [
+            {"belief_id": "f1",
+             "entity": "Logika potoczna jest szybka ale nie zawsze poprawna",
+             "belief_type": "fact", "confidence": 0.4,
+             "tags": ["logika potoczna"]},
+        ])
+        mq = MemoryQuery(knowledge_path=tmp_path / "k.jsonl", beliefs_path=bp)
+        gaps = mq.get_knowledge_gaps(top_k=10)
+        # The fact itself is not a topic — must not be treated as a gap candidate
+        assert all("Logika potoczna jest szybka" not in g["topic"] for g in gaps)
+
 
 # -- Staleness fix A: vector cleanup --
 
 class TestVectorCleanup:
     def test_cleanup_stale_vectors(self, tmp_path):
         from agent_core.semantic.indexer import cleanup_stale_vectors
-        from unittest.mock import MagicMock
 
-        sm = MagicMock()
+        sm = specced(SemanticMemory)
+        sm.store = specced(VectorStore)
         # Store has 3 entries, but knowledge only has 2 files
         sm.store.list_ids_by_namespace.return_value = [
             "knowledge:file_a", "knowledge:file_b", "knowledge:file_c"
@@ -285,21 +356,45 @@ class TestVectorCleanup:
             # file_c is missing -> should be removed
         ])
 
-        removed = cleanup_stale_vectors(sm, str(kp))
+        # Inject the verified set (= all in-index files) to isolate the
+        # left-the-index behaviour from the trust filter.
+        removed = cleanup_stale_vectors(
+            sm, str(kp), verified_ids={"file_a", "file_b", "file_c"})
         assert removed == 1
         sm.remove.assert_called_once_with("knowledge:file_c")
         sm.store.save_full.assert_called_once()
 
     def test_cleanup_no_stale(self, tmp_path):
         from agent_core.semantic.indexer import cleanup_stale_vectors
-        from unittest.mock import MagicMock
 
-        sm = MagicMock()
+        sm = specced(SemanticMemory)
+        sm.store = specced(VectorStore)
         sm.store.list_ids_by_namespace.return_value = ["knowledge:file_a"]
 
         kp = tmp_path / "knowledge_index.jsonl"
         _write_jsonl(kp, [{"id": "file_a"}])
 
-        removed = cleanup_stale_vectors(sm, str(kp))
+        removed = cleanup_stale_vectors(sm, str(kp), verified_ids={"file_a"})
         assert removed == 0
         sm.remove.assert_not_called()
+
+    def test_cleanup_removes_unverified(self, tmp_path):
+        """Self-healing trust gate (#2, 2026-06-01): a knowledge vector for a
+        file that is in the index but NOT independently verified is removed."""
+        from agent_core.semantic.indexer import cleanup_stale_vectors
+
+        sm = specced(SemanticMemory)
+        sm.store = specced(VectorStore)
+        sm.store.list_ids_by_namespace.return_value = [
+            "knowledge:verified.txt", "knowledge:selfgraded.txt",
+        ]
+        kp = tmp_path / "knowledge_index.jsonl"
+        _write_jsonl(kp, [
+            {"id": "verified.txt", "status": "completed"},
+            {"id": "selfgraded.txt", "status": "completed"},
+        ])
+
+        # Only verified.txt has independent proof.
+        removed = cleanup_stale_vectors(sm, str(kp), verified_ids={"verified.txt"})
+        assert removed == 1
+        sm.remove.assert_called_once_with("knowledge:selfgraded.txt")

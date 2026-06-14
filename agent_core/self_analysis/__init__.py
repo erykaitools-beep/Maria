@@ -66,6 +66,7 @@ class SelfAnalysis:
         self._applier = RecommendationApplier(project_root=project_root)
 
         self._last_analysis_ts: float = 0.0
+        self._consciousness = None
         self._load_last_timestamp()
 
     # --- Dependency injection ---
@@ -81,6 +82,18 @@ class SelfAnalysis:
     def set_world_model(self, wm):
         """Set K6 WorldModel for belief updates."""
         self._applier.set_world_model(wm)
+
+    def set_bulletin_store(self, store):
+        """Set BulletinStore — strategic recs posted as IMPROVEMENT (D2)."""
+        self._applier.set_bulletin_store(store)
+
+    def set_proposal_engine(self, engine):
+        """Set K11 ProposalEngine — Most #2 K12->K11 routing (2026-05-08)."""
+        self._applier.set_proposal_engine(engine)
+
+    def set_consciousness(self, consciousness):
+        """Set ConsciousnessCore for personality signal emission (C6 fix)."""
+        self._consciousness = consciousness
 
     # --- Main API ---
 
@@ -125,6 +138,21 @@ class SelfAnalysis:
         # 4. Persist report
         self._save_report(report)
         self._last_analysis_ts = time.time()
+
+        # 5. Personality signal — feeds `refleksyjna` (C6 fix).
+        try:
+            from agent_core.consciousness import record_experience
+            record_experience(
+                self._consciousness,
+                "introspection_run",
+                {
+                    "recommendations": len(report.recommendations),
+                    "goals_created": len(report.goals_created),
+                    "had_error": bool(report.error),
+                },
+            )
+        except Exception:
+            pass
 
         report.duration_ms = (time.time() - start) * 1000
         logger.info(f"[K12] Self-analysis complete in {report.duration_ms:.0f}ms")

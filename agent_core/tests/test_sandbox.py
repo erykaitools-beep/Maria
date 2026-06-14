@@ -373,6 +373,58 @@ class TestSandboxManagerPromote:
         assert log[1]["marker"] == "COMMIT"
         assert log[0]["session_id"] == session.session_id
 
+    def test_failed_promote_leaves_production_index_untouched(self, sandbox_env):
+        """Audyt 2026-06-12: stara kolejnosc przepisywala produkcyjny indeks
+        PRZED appendami -- porazka appendu zostawiala indeks juz zmieniony,
+        a ROLLBACK marker niczego nie cofal. Teraz merge indeksu to punkt
+        commitu NA KONCU: porazka wczesniej = indeks bajt w bajt nietkniety."""
+        from unittest.mock import patch
+
+        manager, sandbox_base, memory_dir = sandbox_env
+        prod_index = memory_dir / "knowledge_index.jsonl"
+        _write_jsonl(prod_index, [
+            {"id": "istniejacy.txt", "status": "completed",
+             "updated_at": "2026-06-01T10:00:00"},
+        ])
+        before = prod_index.read_bytes()
+
+        session = manager.create_session()
+        self._prepare_for_promote(manager, session)
+
+        with patch.object(
+            manager, "_append_jsonl", side_effect=RuntimeError("disk full"),
+        ):
+            result = manager.promote()
+
+        assert result.success is False
+        assert prod_index.read_bytes() == before
+
+        log = _read_jsonl(sandbox_base / "promote_log.jsonl")
+        assert log[-1]["marker"] == "ROLLBACK"
+
+    def test_merged_index_written_atomically(self, sandbox_env):
+        """Merge idzie przez MemoryStore (tempfile + atomic replace):
+        po udanym promote nie ma plikow .tmp, a indeks to poprawny JSONL
+        z polaczonymi rekordami produkcji i sandboxa."""
+        manager, _, memory_dir = sandbox_env
+        prod_index = memory_dir / "knowledge_index.jsonl"
+        _write_jsonl(prod_index, [
+            {"id": "istniejacy.txt", "status": "completed",
+             "updated_at": "2026-06-01T10:00:00"},
+        ])
+
+        session = manager.create_session()
+        self._prepare_for_promote(manager, session)
+
+        result = manager.promote()
+        assert result.success is True
+
+        assert list(memory_dir.glob("*.tmp")) == []
+        merged = _read_jsonl(prod_index)
+        ids = {r.get("id") or r.get("file_id") for r in merged}
+        assert "istniejacy.txt" in ids  # produkcja przetrwala
+        assert "physics.txt" in ids     # sandbox dolaczyl
+
     def test_promote_criteria_not_met(self, sandbox_env):
         manager, _, _ = sandbox_env
         session = manager.create_session()
@@ -655,3 +707,86 @@ class TestSandboxEndToEnd:
         manager.discard(reason="score_too_low")
         assert not manager.has_active_session()
         assert not session.sandbox_dir.exists()
+
+
+class TestMergeIndexProductionFormat:
+    """Regression (2026-06-11): _merge_index keyed records by "file_id"
+    -- a key that exists ONLY in this test file's invented format. The
+    production knowledge_index keys by "id" (alias "file", ISO-string
+    updated_at; CLAUDE.md: MERGE on id), so the FIRST real promote()
+    caller (synthesis) watched every index record silently vanish at
+    the bridge. These tests speak the production format."""
+
+    def _session_with_index(self, manager, records):
+        session = manager.create_session()
+        with open(session.sandbox_index, "a", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        # Promote criteria: something learned + an exam passed.
+        session.chunks_learned = 1
+        session.exams_total = 1
+        session.exams_passed = 1
+        session.avg_score = 0.8
+        return session
+
+    def test_promote_merges_production_format_records(self, sandbox_env):
+        manager, _, memory_dir = sandbox_env
+        index_path = memory_dir / "knowledge_index.jsonl"
+        self._session_with_index(manager, [{
+            "id": "synthesis_temat_20260611",
+            "file": "synthesis_temat_20260611",
+            "status": "completed",
+            "updated_at": "2026-06-11T18:00:00Z",
+            "exam_attempts": 1,
+        }])
+
+        result = manager.promote()
+
+        assert result.success
+        lines = [
+            json.loads(l)
+            for l in index_path.read_text().splitlines() if l.strip()
+        ]
+        assert len(lines) == 1
+        assert lines[0]["id"] == "synthesis_temat_20260611"
+
+    def test_newer_iso_timestamp_wins_over_production(self, sandbox_env):
+        manager, _, memory_dir = sandbox_env
+        index_path = memory_dir / "knowledge_index.jsonl"
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "id": "f1.txt", "status": "learned",
+                "updated_at": "2026-06-10T10:00:00Z",
+            }) + "\n")
+        self._session_with_index(manager, [{
+            "id": "f1.txt", "status": "completed",
+            "updated_at": "2026-06-11T10:00:00Z",
+        }])
+
+        assert manager.promote().success
+        lines = [
+            json.loads(l)
+            for l in index_path.read_text().splitlines() if l.strip()
+        ]
+        assert len(lines) == 1
+        assert lines[0]["status"] == "completed"  # sandbox (newer) won
+
+    def test_older_sandbox_record_loses(self, sandbox_env):
+        manager, _, memory_dir = sandbox_env
+        index_path = memory_dir / "knowledge_index.jsonl"
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "id": "f1.txt", "status": "completed",
+                "updated_at": "2026-06-11T10:00:00Z",
+            }) + "\n")
+        self._session_with_index(manager, [{
+            "id": "f1.txt", "status": "learned",
+            "updated_at": "2026-06-01T10:00:00Z",
+        }])
+
+        assert manager.promote().success
+        lines = [
+            json.loads(l)
+            for l in index_path.read_text().splitlines() if l.strip()
+        ]
+        assert lines[0]["status"] == "completed"  # production kept

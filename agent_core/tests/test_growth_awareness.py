@@ -6,18 +6,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent_core.operator.capability_manifest import CapabilityManifest, CapabilityEntry
+from agent_core.operator.honesty_protocol import HonestyProtocol
 from agent_core.operator.growth_awareness import GrowthAwareness, GrowthTarget
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.tests.spec_helpers import specced
 
 
 def _make_manifest(unavailable=None):
     """Mock CapabilityManifest with unavailable capabilities."""
-    m = MagicMock()
+    m = specced(CapabilityManifest)
     caps = []
     for name, reason in (unavailable or []):
-        cap = MagicMock()
-        cap.name = name
-        cap.description = f"Test {name}"
-        cap.reason_unavailable = reason
+        cap = specced(CapabilityEntry, name=name, description=f"Test {name}", reason_unavailable=reason)
         caps.append(cap)
     m.get_unavailable.return_value = caps
     return m
@@ -25,14 +26,14 @@ def _make_manifest(unavailable=None):
 
 def _make_honesty(action_stats=None):
     """Mock HonestyProtocol with action stats."""
-    h = MagicMock()
+    h = specced(HonestyProtocol)
     h.get_action_stats.return_value = action_stats or {}
     return h
 
 
 def _make_knowledge(new_count=0, hard_count=0):
     """Mock KnowledgeAnalyzer."""
-    ka = MagicMock()
+    ka = specced(KnowledgeAnalyzer)
     ka.get_knowledge_snapshot.return_value = {
         "total_files": 30,
         "files_by_status": {

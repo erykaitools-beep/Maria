@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 from agent_core.creative.creative_model import (
     DetectedTension, TensionCategory,
 )
+from agent_core.planner.decision_filters import IDLE_ACTION_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,8 @@ class TensionDetector:
 
         # 7. OVER_RESTRICTION: actions blocked but not by resource limits
         dist = action_pattern.get("distribution", {})
-        noop_count = dist.get("noop", 0)
+        # T-LEARN-008: idle markery to "skip" i "noop" -- samo "noop" bylo zawsze ~0
+        noop_count = sum(dist.get(a, 0) for a in IDLE_ACTION_TYPES)
         # If lots of NOOPs and we have active goals, something is blocking
         if noop_count > 20 and active_goals > 1 and noop_ratio > 0.8:
             tensions.append(DetectedTension.create(

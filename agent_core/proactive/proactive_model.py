@@ -21,6 +21,7 @@ class ContactReason(Enum):
 
     # Event-based (triggered by system state)
     GOAL_ACHIEVED = "goal_achieved"          # A goal was completed
+    GOAL_PROPOSED = "goal_proposed"          # New PROPOSED goal needs operator approval
     LEARNING_MILESTONE = "learning_milestone"  # File completed / exam passed
     INTEREST_MATCH = "interest_match"        # New content matches user interests
 
@@ -34,6 +35,7 @@ CONTACT_COOLDOWNS: Dict[str, float] = {
     ContactReason.EVENING_RECAP.value: 72000,        # 20h
     ContactReason.WEEKLY_REVIEW.value: 604800,       # 7 days
     ContactReason.GOAL_ACHIEVED.value: 3600,         # 1h between goal notifications
+    ContactReason.GOAL_PROPOSED.value: 600,          # 10min between PROPOSED-goal alerts
     ContactReason.LEARNING_MILESTONE.value: 7200,    # 2h between milestones
     ContactReason.INTEREST_MATCH.value: 14400,       # 4h
     ContactReason.IDLE_CHECKIN.value: 172800,         # 48h
@@ -46,6 +48,7 @@ CONTACT_WINDOWS: Dict[str, Optional[tuple]] = {
     ContactReason.EVENING_RECAP.value: (20, 21),
     ContactReason.WEEKLY_REVIEW.value: (19, 20),
     ContactReason.GOAL_ACHIEVED.value: None,         # any time (but not late night)
+    ContactReason.GOAL_PROPOSED.value: None,         # any time (quiet hours still apply)
     ContactReason.LEARNING_MILESTONE.value: None,
     ContactReason.INTEREST_MATCH.value: None,
     ContactReason.IDLE_CHECKIN.value: (9, 21),       # only during day
@@ -79,6 +82,7 @@ class ProactiveState:
     contacts_today: int = 0
     last_day: str = ""  # YYYY-MM-DD for daily counter reset
     last_operator_contact: float = 0.0  # ts of last Telegram message from operator
+    seen_proposed_goal_ids: List[str] = field(default_factory=list)  # GOAL_PROPOSED dedup
 
     # Limits
     max_contacts_per_day: int = 8  # don't spam
@@ -90,6 +94,7 @@ class ProactiveState:
             "contacts_today": self.contacts_today,
             "last_day": self.last_day,
             "last_operator_contact": self.last_operator_contact,
+            "seen_proposed_goal_ids": list(self.seen_proposed_goal_ids),
             "max_contacts_per_day": self.max_contacts_per_day,
         }
 
@@ -101,5 +106,6 @@ class ProactiveState:
             contacts_today=data.get("contacts_today", 0),
             last_day=data.get("last_day", ""),
             last_operator_contact=data.get("last_operator_contact", 0.0),
+            seen_proposed_goal_ids=list(data.get("seen_proposed_goal_ids", [])),
             max_contacts_per_day=data.get("max_contacts_per_day", 8),
         )

@@ -136,9 +136,15 @@ class ClaudeClient:
         try:
             # Prepend context brief so Claude knows it's helping M.A.R.I.A.
             full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
+            # Audyt 2026-06-12: --dangerously-skip-permissions na zywym repo
+            # dawalo kazdemu, kto dosiegnie .ask() (webui /api/tasks za samym
+            # PIN-em, telegram), agenta z dowolnym exec/write. Wszyscy
+            # konsumenci .ask() (K12, code_agent, taski) chca CZYSTEGO TEKSTU
+            # -- --tools "" wylacza wszystkie narzedzia, wiec nie ma czego
+            # bypassowac i nic nie wisi na promptach uprawnien.
             cmd = [
                 self._claude_bin,
-                "--dangerously-skip-permissions",
+                "--tools", "",
                 "-p", full_prompt,
                 "--output-format", "text",
             ]

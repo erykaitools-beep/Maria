@@ -9,12 +9,13 @@ from agent_core.operator.capability_manifest import (
     CapabilityManifest,
     Limitation,
 )
+from agent_core.routing.capability_router import CapabilityRouter
 from agent_core.routing.capability_spec import CapabilitySpec
+from agent_core.tests.spec_helpers import specced
 
 
 def _make_router(specs_with_handlers=None):
     """Create a mock CapabilityRouter with specs and handlers."""
-    router = MagicMock()
     specs = {}
     handlers = {}
     for name, has_handler in (specs_with_handlers or {}).items():
@@ -27,8 +28,7 @@ def _make_router(specs_with_handlers=None):
         )
         if has_handler:
             handlers[name] = MagicMock()
-    router._specs = specs
-    router._handlers = handlers
+    router = specced(CapabilityRouter, _specs=specs, _handlers=handlers)
     return router
 
 

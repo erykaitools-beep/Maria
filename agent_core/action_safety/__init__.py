@@ -133,6 +133,9 @@ class ActionSafety:
             return {"validation": "skipped", "details": {}}
 
         record.success = success
+        # T-LEARN-003: preserve the "declined before any work" signal so
+        # self-repair can tell a skipped action apart from a real failure.
+        record.skipped = bool((result or {}).get("skipped"))
         record.duration_ms = duration_ms
 
         profile = get_safety_profile(record.action_type)

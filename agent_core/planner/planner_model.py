@@ -37,6 +37,7 @@ class ActionType(Enum):
     ASK_EXPERT = "ask_expert"    # Ask ChatGPT/Codex for knowledge (encyclopedia)
     VALIDATE = "validate"        # Cross-validate learned knowledge (Faza F)
     CRITIQUE = "critique"        # Faza G: Knowledge quality gate
+    FS_WRITE = "fs_write"        # B2: first real effector primitive (sandboxed file write)
 
 
 @dataclass
@@ -130,6 +131,7 @@ class PlannerState:
     last_validation_ts: float = 0.0       # Faza F: Last cross-validation cycle
     last_critique_ts: float = 0.0         # Faza G: Last knowledge critique
     last_experiment_scan_ts: float = 0.0  # K11: Last experiment proposal scan
+    last_belief_build_ts: float = 0.0     # K6: Throttle periodic rebuilds
     total_cycles: int = 0
     total_plans_executed: int = 0
     consecutive_noop_count: int = 0         # Backoff: NOOPs in a row
@@ -137,6 +139,24 @@ class PlannerState:
     # Stuck detection: track recent failure fingerprints
     stuck_history: List[Dict[str, str]] = field(default_factory=list)
     stuck_cooldowns: Dict[str, float] = field(default_factory=dict)  # goal_id -> until_ts
+    # Non-productive loop detection: same goal + same reflection action repeated
+    # without progress. COMPLETED doesn't touch stuck_history, so meta-goals
+    # without decomposable steps can lock in evaluate/critique loops unnoticed.
+    last_goal_action_key: Optional[str] = None   # f"{goal_id}:{action_type}"
+    goal_action_repeat_count: int = 0
+    # B4 (T-B4-001): track productive-action cycles per goal. Counter
+    # increments on every plan executed for a goal_id; resets on any plan
+    # that produces measurable progress. Triggers K12 IMPROVEMENT advisory
+    # when GOAL_CYCLE_THRESHOLD is reached.
+    actions_since_progress: Dict[str, int] = field(default_factory=dict)
+    last_creative_ts: float = 0.0    # K13 creative reflection cooldown
+    # 8b rhythm/budget: cap on learn-family actions executed OUTSIDE the
+    # learning window per day. Replaces the all-or-nothing window block so the
+    # organism still learns a little on weekends/nights, while the daily cap
+    # preserves the original throttle (the window stopped ~791 unproductive
+    # learn attempts in 72h, glm-5.1 test 2026-04-21).
+    off_window_learn_date: str = ""   # YYYY-MM-DD of the current budget day
+    off_window_learn_used: int = 0    # learn-family actions used off-window today
 
     def to_dict(self) -> dict:
         return {
@@ -147,12 +167,19 @@ class PlannerState:
             "last_validation_ts": self.last_validation_ts,
             "last_critique_ts": self.last_critique_ts,
             "last_experiment_scan_ts": self.last_experiment_scan_ts,
+            "last_belief_build_ts": self.last_belief_build_ts,
             "total_cycles": self.total_cycles,
             "total_plans_executed": self.total_plans_executed,
             "consecutive_noop_count": self.consecutive_noop_count,
             "current_plan_id": self.current_plan_id,
             "stuck_history": self.stuck_history,
             "stuck_cooldowns": self.stuck_cooldowns,
+            "last_goal_action_key": self.last_goal_action_key,
+            "goal_action_repeat_count": self.goal_action_repeat_count,
+            "actions_since_progress": dict(self.actions_since_progress),
+            "last_creative_ts": self.last_creative_ts,
+            "off_window_learn_date": self.off_window_learn_date,
+            "off_window_learn_used": self.off_window_learn_used,
         }
 
     @staticmethod
@@ -165,10 +192,17 @@ class PlannerState:
             last_validation_ts=d.get("last_validation_ts", 0.0),
             last_critique_ts=d.get("last_critique_ts", 0.0),
             last_experiment_scan_ts=d.get("last_experiment_scan_ts", 0.0),
+            last_belief_build_ts=d.get("last_belief_build_ts", 0.0),
             total_cycles=d.get("total_cycles", 0),
             total_plans_executed=d.get("total_plans_executed", 0),
             consecutive_noop_count=d.get("consecutive_noop_count", 0),
             current_plan_id=d.get("current_plan_id"),
             stuck_history=d.get("stuck_history", []),
             stuck_cooldowns=d.get("stuck_cooldowns", {}),
+            last_goal_action_key=d.get("last_goal_action_key"),
+            goal_action_repeat_count=d.get("goal_action_repeat_count", 0),
+            actions_since_progress=d.get("actions_since_progress", {}),
+            last_creative_ts=d.get("last_creative_ts", 0.0),
+            off_window_learn_date=d.get("off_window_learn_date", ""),
+            off_window_learn_used=d.get("off_window_learn_used", 0),
         )

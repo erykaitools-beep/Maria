@@ -14,6 +14,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.goals.store import GoalStore
+from agent_core.autonomy.approval_queue import ApprovalQueue
+from agent_core.meta_cognition.confidence_tracker import ConfidenceTracker
+
 from agent_core.autonomy.incident_memory import (
     IncidentMemory,
     IncidentRecord,
@@ -55,7 +60,7 @@ def tmp_incidents(tmp_path):
 @pytest.fixture
 def mock_goal_store():
     """Mock GoalStore with configurable goals."""
-    store = MagicMock()
+    store = specced(GoalStore)
     store.get_all.return_value = []
     store.get.return_value = None
     store.propose.return_value = "goal-promo-1"
@@ -65,7 +70,7 @@ def mock_goal_store():
 @pytest.fixture
 def mock_approval_queue():
     """Mock ApprovalQueue."""
-    queue = MagicMock()
+    queue = specced(ApprovalQueue)
     queue.get_stats.return_value = {"approved": 0, "rejected": 0, "pending": 0}
     return queue
 
@@ -73,7 +78,7 @@ def mock_approval_queue():
 @pytest.fixture
 def mock_confidence_tracker():
     """Mock ConfidenceTracker."""
-    tracker = MagicMock()
+    tracker = specced(ConfidenceTracker)
     tracker.get_action_confidence.return_value = 0.5
     tracker.get_confidence_map.return_value = {}
     return tracker
@@ -502,6 +507,14 @@ class TestTrustScorer:
 class TestAutoPromotion:
     """Tests for auto-promotion lifecycle."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_auto_promotion(self, monkeypatch):
+        """Auto-promotion is gated OFF by default (K7 reconciliation 2026-06-07).
+        These lifecycle tests exercise the promotion logic, so enable the gate for
+        the whole class. Hermetic -- monkeypatch reverts after each test. The
+        default-OFF behavior itself is locked by test_disabled_by_default."""
+        monkeypatch.setenv("AUTO_PROMOTION_ENABLED", "1")
+
     def test_tick_too_early(self, mock_authority):
         """Tick returns None if check interval not reached."""
         scorer = TrustScorer(authority_manager=mock_authority)
@@ -589,6 +602,15 @@ class TestAutoPromotion:
         assert result is not None
         assert result["action"] == "promotion_applied"
         assert mock_authority.get_level() == AuthorityLevel.SUGGEST
+        # Regression (audit 2026-06-01 #5): the tracking goal must be closed with
+        # the GoalStatus.ACHIEVED enum, not the raw string "achieved". The string
+        # raised AttributeError in update_status (status.value) and the old bare
+        # `except: pass` hid it, so the goal was never actually closed.
+        from agent_core.goals.goal_model import GoalStatus
+        mock_goal_store.update_status.assert_called_once_with(
+            "goal-promo-1", GoalStatus.ACHIEVED,
+            reason="Promotion applied", actor="auto_promotion",
+        )
 
     def test_tick_handles_rejected_proposal(
         self, mock_authority, mock_goal_store, tmp_path
@@ -755,6 +777,110 @@ class TestAutoPromotion:
 
         assert promo._scorer is scorer
         assert promo._authority is mock_authority
+
+    # -- K7 reconciliation 2026-06-07: gate + signature-fix locks ----------
+
+    def test_disabled_by_default(self, mock_authority, monkeypatch):
+        """With the env flag absent, the promoter is OFF and tick() is a no-op
+        even when trust would otherwise warrant a proposal. Locks the safe
+        default: authority stays operator-only until deliberately enabled."""
+        monkeypatch.delenv("AUTO_PROMOTION_ENABLED", raising=False)
+        scorer = TrustScorer(authority_manager=mock_authority)
+        promo = AutoPromotion(
+            trust_scorer=scorer,
+            authority_manager=mock_authority,
+        )
+        assert promo._enabled is False
+        promo._last_check_at = 0  # would force a check if enabled
+        assert promo.tick() is None
+
+    def test_tick_noop_when_disabled(
+        self, mock_authority, mock_goal_store, mock_confidence_tracker, tmp_path
+    ):
+        """Explicit enabled=False short-circuits before any work -- no proposal
+        even with a high-trust track record."""
+        @dataclass
+        class FakeGoal:
+            goal_type: MagicMock = None
+            status: MagicMock = None
+        goals = []
+        for _ in range(20):
+            g = FakeGoal()
+            g.goal_type = MagicMock(value="learning")
+            g.status = MagicMock(value="achieved")
+            goals.append(g)
+        mock_goal_store.get_all.return_value = goals
+        mock_confidence_tracker.get_action_confidence.return_value = 0.95
+        mock_confidence_tracker.get_confidence_map.return_value = {"learn": 0.95}
+
+        scorer = TrustScorer(
+            goal_store=mock_goal_store,
+            confidence_tracker=mock_confidence_tracker,
+            authority_manager=mock_authority,
+        )
+        promo = AutoPromotion(
+            trust_scorer=scorer,
+            authority_manager=mock_authority,
+            goal_store=mock_goal_store,
+            log_path=tmp_path / "promo.jsonl",
+            enabled=False,
+        )
+        promo._last_check_at = 0
+        assert promo.tick() is None
+        assert not mock_goal_store.propose.called
+
+    def test_propose_builds_real_goal_and_stays_proposed(
+        self, mock_authority, mock_goal_store, mock_confidence_tracker, tmp_path
+    ):
+        """Regression: the promotion proposal must build a real Goal via
+        create_goal() and persist as PROPOSED -- never auto-confirmed to PENDING
+        (authority cannot self-apply). The old kwargs propose(description=...)
+        call raised TypeError, which the mocked goal_store in sibling tests hid,
+        so auto-promotion silently never proposed (no promotion_history.jsonl)."""
+        from agent_core.goals.store import GoalStore
+        from agent_core.goals.goal_model import GoalStatus
+
+        @dataclass
+        class FakeGoal:
+            goal_type: MagicMock = None
+            status: MagicMock = None
+        goals = []
+        for _ in range(20):
+            g = FakeGoal()
+            g.goal_type = MagicMock(value="learning")
+            g.status = MagicMock(value="achieved")
+            goals.append(g)
+        mock_goal_store.get_all.return_value = goals
+        mock_confidence_tracker.get_action_confidence.return_value = 0.95
+        mock_confidence_tracker.get_confidence_map.return_value = {"learn": 0.95}
+
+        scorer = TrustScorer(
+            goal_store=mock_goal_store,
+            confidence_tracker=mock_confidence_tracker,
+            authority_manager=mock_authority,
+        )
+        # A REAL GoalStore as the propose target is what catches the signature bug.
+        real_store = GoalStore(tmp_path / "goals.jsonl")
+
+        promo = AutoPromotion(
+            trust_scorer=scorer,
+            authority_manager=mock_authority,
+            goal_store=real_store,
+            log_path=tmp_path / "promo.jsonl",
+            enabled=True,
+        )
+        promo._last_check_at = 0
+
+        result = promo.tick()
+        assert result is not None
+        assert result["action"] == "promotion_proposed"
+
+        goal_id = result["goal_id"]
+        assert goal_id is not None
+        goal = real_store.get(goal_id)
+        assert goal is not None
+        assert goal.status == GoalStatus.PROPOSED   # operator-gated, NOT pending
+        assert goal.created_by == "auto_promotion"
 
 
 # ---------------------------------------------------------------------------

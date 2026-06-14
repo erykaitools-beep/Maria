@@ -64,21 +64,25 @@ class WebResearcher:
             results = []
             saved = []
             for title in search_results:
-                article = self._wiki_client.fetch(title)
+                # WikiClient exposes fetch_article (not fetch) returning
+                # {title, content, url} -- the old fetch()/.get("extract") pair were
+                # both phantoms, so this wiki_search tool crashed/saved nothing
+                # (audyt 2026-06-13).
+                article = self._wiki_client.fetch_article(title)
                 if article:
                     results.append({
                         "title": article.get("title", title),
-                        "extract": article.get("extract", "")[:500],
+                        "extract": article.get("content", "")[:500],
                         "url": article.get("url", ""),
                     })
 
                     # Save to input/ if requested
                     if save and self._content_writer:
-                        path = self._content_writer.write(
-                            content=article.get("extract", ""),
+                        path = self._content_writer.write_article(
                             title=article.get("title", title),
-                            source="wikipedia",
+                            content=article.get("content", ""),
                             url=article.get("url", ""),
+                            source_type="wikipedia",
                         )
                         if path:
                             saved.append(str(path))

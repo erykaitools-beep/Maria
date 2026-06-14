@@ -20,6 +20,11 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.goals.store import GoalStore
+from agent_core.creative.facade import CreativeModule
+
 # --- Models ---
 
 from agent_core.creative.creative_model import (
@@ -373,6 +378,39 @@ class TestStrategicContext:
         ratio = result["action_pattern"]["noop_ratio"]
         assert ratio > 0.9  # 20/21 NOOPs
 
+    def test_skip_counts_as_idle_production_shape(self, tmp_path):
+        """T-LEARN-008: produkcyjny planner pisze action_type="skip" jako idle
+        marker (PlannerCore._log_skip), nie "noop". Liczenie samego "noop"
+        raportowalo 0.4% idle przy realnych ~84% i slepilo tensje K13."""
+        meta = tmp_path / "meta_data"
+        meta.mkdir()
+        memory = tmp_path / "memory"
+        memory.mkdir()
+        now = time.time()
+        with open(meta / "planner_decisions.jsonl", "w") as f:
+            for i in range(8):
+                f.write(json.dumps({
+                    "timestamp": now - 100 + i,
+                    "action_type": "skip",
+                    "status": "completed",
+                }) + "\n")
+            f.write(json.dumps({
+                "timestamp": now - 50,
+                "action_type": "learn",
+                "status": "completed",
+            }) + "\n")
+            f.write(json.dumps({
+                "timestamp": now - 40,
+                "action_type": "noop",
+                "status": "completed",
+            }) + "\n")
+
+        ctx = StrategicContext(str(meta), str(memory))
+        pattern = ctx.build(period_hours=24.0)["action_pattern"]
+
+        assert pattern["total"] == 10
+        assert pattern["noop_ratio"] == 0.9  # 8x skip + 1x noop z 10
+
     def test_learning_coverage(self, tmp_path):
         meta, memory = self._setup_files(tmp_path)
         ctx = StrategicContext(meta, memory)
@@ -428,6 +466,22 @@ class TestTensionDetector:
         tensions = detector.detect(context)
         categories = [t.category for t in tensions]
         assert TensionCategory.UNDER_EXPLORATION in categories
+
+    def test_over_restriction_counts_skip_markers(self):
+        """T-LEARN-008: noop_count w OVER_RESTRICTION musi widziec "skip"
+        (produkcyjny idle marker), nie tylko "noop"."""
+        detector = TensionDetector()
+        context = {
+            "action_pattern": {"noop_ratio": 0.9, "total": 30, "failed_ratio": 0,
+                               "distribution": {"skip": 27, "learn": 3}},
+            "learning_state": {"coverage": 0.5, "retention_rate": 0.9},
+            "goal_state": {"active": 3, "stale_goals": []},
+            "recent_meta_goals": [],
+            "period_hours": 24,
+        }
+        tensions = detector.detect(context)
+        categories = [t.category for t in tensions]
+        assert TensionCategory.OVER_RESTRICTION in categories
 
     def test_detect_stagnation(self):
         detector = TensionDetector()
@@ -725,8 +779,8 @@ from agent_core.creative.goal_adapter import GoalAdapter
 class TestGoalAdapter:
     """Test GoalStore integration."""
 
-    def test_adapt_with_no_store(self):
-        adapter = GoalAdapter(goal_store=None)
+    def test_adapt_with_no_bulletin(self):
+        adapter = GoalAdapter()  # no bulletin_store wired
         mg = MetaGoal.create(
             title="Test", goal_type=MetaGoalType.EXPLORATION_META,
             priority=0.5, why_now="test", evidence_refs=["e1"],
@@ -735,11 +789,11 @@ class TestGoalAdapter:
         result = adapter.adapt_and_propose(mg)
         assert result is None
 
-    def test_adapt_with_mock_store(self):
-        mock_store = MagicMock()
-        mock_store.propose.return_value = "goal-123"
+    def test_adapt_posts_to_bulletin(self):
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = MagicMock(entry_id="be-1")
 
-        adapter = GoalAdapter(goal_store=mock_store)
+        adapter = GoalAdapter(bulletin_store=bulletin)
         mg = MetaGoal.create(
             title="Test strategic goal",
             goal_type=MetaGoalType.EXPLORATION_META,
@@ -747,14 +801,14 @@ class TestGoalAdapter:
             expected_value="new knowledge",
         )
         result = adapter.adapt_and_propose(mg)
-        assert result == "goal-123"
-        mock_store.propose.assert_called_once()
+        assert result == "be-1"
+        bulletin.create_and_post.assert_called_once()
 
-    def test_adapt_store_full(self):
-        mock_store = MagicMock()
-        mock_store.propose.return_value = None  # At limit
+    def test_adapt_bulletin_failure_returns_none(self):
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.side_effect = Exception("bulletin down")
 
-        adapter = GoalAdapter(goal_store=mock_store)
+        adapter = GoalAdapter(bulletin_store=bulletin)
         mg = MetaGoal.create(
             title="Test", goal_type=MetaGoalType.EXPLORATION_META,
             priority=0.5, why_now="test", evidence_refs=["e1"],
@@ -764,10 +818,14 @@ class TestGoalAdapter:
         assert result is None
 
     def test_adapt_batch(self):
-        mock_store = MagicMock()
-        mock_store.propose.side_effect = ["id-1", None, "id-3"]
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.side_effect = [
+            MagicMock(entry_id="be-1"),
+            Exception("dedup conflict"),
+            MagicMock(entry_id="be-3"),
+        ]
 
-        adapter = GoalAdapter(goal_store=mock_store)
+        adapter = GoalAdapter(bulletin_store=bulletin)
         goals = [
             MetaGoal.create(
                 title=f"Goal {i}", goal_type=MetaGoalType.EXPLORATION_META,
@@ -896,7 +954,7 @@ class TestCreativeModuleFacade:
                     "status": "completed",
                 }) + "\n")
 
-        mock_store = MagicMock()
+        mock_store = specced(GoalStore)
         mock_store.propose.return_value = "goal-creative-1"
 
         module = CreativeModule(
@@ -904,6 +962,12 @@ class TestCreativeModuleFacade:
             memory_dir=str(memory),
             goal_store=mock_store,
         )
+        # R1 (2026-05-29): creative meta-goals post IMPROVEMENT advisories to
+        # the bulletin instead of creating goals - wire a bulletin mock so the
+        # reflect cycle can "promote" them.
+        bulletin = specced(BulletinStore)
+        bulletin.create_and_post.return_value = MagicMock(entry_id="be-creative-1")
+        module.set_bulletin_store(bulletin)
         return module
 
     def test_reflect_with_tensions(self, tmp_path):
@@ -996,7 +1060,7 @@ class TestPlannerCreativeIntegration:
     def test_k7_classification(self):
         from agent_core.autonomy.action_class import classify_action, ActionClassification
         cls = classify_action("creative")
-        assert cls == ActionClassification.GUARDED
+        assert cls == ActionClassification.ANALYTICAL
 
     def test_k10_safety_profile(self):
         from agent_core.action_safety.safety_classifier import get_safety_profile
@@ -1008,7 +1072,7 @@ class TestPlannerCreativeIntegration:
         from agent_core.planner.action_executor import ActionExecutor
         from agent_core.planner.planner_model import ActionType, create_plan
 
-        mock_creative = MagicMock()
+        mock_creative = specced(CreativeModule)
         mock_creative.reflect.return_value = {
             "success": True, "tensions": 2, "meta_goals_promoted": 1,
         }

@@ -18,6 +18,8 @@ from agent_core.web_source.rss_client import RSSClient
 from agent_core.web_source.content_writer import ContentWriter
 from agent_core.web_source.topic_suggester import TopicSuggester
 from agent_core.web_source import run_fetch_session, _build_topic_keywords, _is_rss_relevant
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.tests.spec_helpers import specced
 
 
 # ══════════════════════════════════════════════════════
@@ -516,7 +518,7 @@ def _make_mock_analyzer(
     tag_freq=None,
 ):
     """Create mock KnowledgeAnalyzer."""
-    analyzer = MagicMock()
+    analyzer = specced(KnowledgeAnalyzer)
     analyzer.get_topic_file_map.return_value = topic_map or {}
     analyzer.get_tag_frequency_map.return_value = tag_freq or {}
     return analyzer
@@ -675,8 +677,8 @@ class TestTopicSuggester:
         suggester = TopicSuggester(analyzer, project_root=str(tmp_path))
 
         # Simulate: registry says this topic was already fetched
-        mock_registry = MagicMock()
-        mock_registry.is_topic_fetched = MagicMock(return_value=True)
+        mock_registry = specced(FetchRegistry)
+        mock_registry.is_topic_fetched.return_value = True
 
         suggestions = suggester.suggest_topics(fetch_registry=mock_registry)
         hint_suggestions = [s for s in suggestions if s["strategy"] == "hint"]
@@ -686,6 +688,88 @@ class TestTopicSuggester:
         with open(hints_path) as f:
             h = json.loads(f.readline())
         assert h["consumed"] is True
+
+    # ─── R2.1 (2026-04-29): hint fail-and-skip lifecycle ───
+
+    def _seed_hint(self, tmp_path, topic="logika formalna", **extra):
+        """Helper: seed a single pending hint at the standard location."""
+        hints_path = tmp_path / "meta_data" / "topic_hints.jsonl"
+        hints_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "topic": topic,
+            "source": "self_analysis",
+            "priority": 0.9,
+            "consumed": False,
+        }
+        record.update(extra)
+        with open(hints_path, "w") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return hints_path
+
+    def test_mark_hint_unsuccessful_increments_counter(self, tmp_path):
+        """One unsuccessful call -> failed_attempts=1, still pending."""
+        hints_path = self._seed_hint(tmp_path)
+        suggester = TopicSuggester(_make_mock_analyzer(), project_root=str(tmp_path))
+
+        suggester.mark_hint_unsuccessful("logika formalna")
+
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["failed_attempts"] == 1
+        assert h["consumed"] is False
+
+    def test_mark_hint_unsuccessful_threshold_consumes(self, tmp_path):
+        """After threshold (3) unsuccessful calls -> consumed=True with reason."""
+        hints_path = self._seed_hint(tmp_path)
+        suggester = TopicSuggester(_make_mock_analyzer(), project_root=str(tmp_path))
+
+        for _ in range(3):
+            suggester.mark_hint_unsuccessful("logika formalna")
+
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["failed_attempts"] == 3
+        assert h["consumed"] is True
+        assert h["consumed_reason"] == "failed_3_attempts"
+
+    def test_mark_hint_unsuccessful_skips_already_consumed(self, tmp_path):
+        """Consumed hints stay consumed and don't increment further."""
+        hints_path = self._seed_hint(
+            tmp_path, consumed=True, failed_attempts=3,
+            consumed_reason="failed_3_attempts",
+        )
+        suggester = TopicSuggester(_make_mock_analyzer(), project_root=str(tmp_path))
+
+        suggester.mark_hint_unsuccessful("logika formalna")
+
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        # Still 3 — consumed entries are not touched
+        assert h["failed_attempts"] == 3
+        assert h["consumed"] is True
+
+    def test_mark_hint_unsuccessful_case_insensitive(self, tmp_path):
+        """Topic match is case-insensitive (mirrors RecommendationApplier dedup)."""
+        hints_path = self._seed_hint(tmp_path, topic="Logika Formalna")
+        suggester = TopicSuggester(_make_mock_analyzer(), project_root=str(tmp_path))
+
+        suggester.mark_hint_unsuccessful("LOGIKA FORMALNA")
+
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["failed_attempts"] == 1
+
+    def test_mark_hint_unsuccessful_custom_threshold(self, tmp_path):
+        """Threshold is parameterized — useful for tests and tunable in prod."""
+        hints_path = self._seed_hint(tmp_path)
+        suggester = TopicSuggester(_make_mock_analyzer(), project_root=str(tmp_path))
+
+        suggester.mark_hint_unsuccessful("logika formalna", threshold=1)
+
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["consumed"] is True
+        assert h["consumed_reason"] == "failed_1_attempts"
 
 
 # ══════════════════════════════════════════════════════
@@ -700,7 +784,7 @@ class TestRunFetchSession:
     @patch("agent_core.web_source.WikiClient")
     def test_full_session(self, mock_wiki_cls, mock_rss_cls, tmp_path):
         # Setup mock WikiClient
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
         mock_wiki.search.return_value = ["Logika"]
         mock_wiki.fetch_article.return_value = {
@@ -710,7 +794,7 @@ class TestRunFetchSession:
         }
 
         # Setup mock RSSClient
-        mock_rss = MagicMock()
+        mock_rss = specced(RSSClient)
         mock_rss_cls.return_value = mock_rss
         mock_rss.fetch_all.return_value = []
 
@@ -736,7 +820,7 @@ class TestRunFetchSession:
 
     @patch("agent_core.web_source.WikiClient")
     def test_session_empty_knowledge(self, mock_wiki_cls, tmp_path):
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
 
         analyzer = _make_mock_analyzer()  # empty topic map
@@ -754,7 +838,7 @@ class TestRunFetchSession:
     @patch("agent_core.web_source.RSSClient")
     @patch("agent_core.web_source.WikiClient")
     def test_session_respects_max_articles(self, mock_wiki_cls, mock_rss_cls, tmp_path):
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
 
         # Return different articles for different searches
@@ -770,7 +854,7 @@ class TestRunFetchSession:
             "url": f"https://pl.wikipedia.org/wiki/{title}",
         }
 
-        mock_rss = MagicMock()
+        mock_rss = specced(RSSClient)
         mock_rss_cls.return_value = mock_rss
         mock_rss.fetch_all.return_value = []
 
@@ -795,7 +879,7 @@ class TestRunFetchSession:
 
     @patch("agent_core.web_source.WikiClient")
     def test_session_handles_wiki_errors(self, mock_wiki_cls, tmp_path):
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
         mock_wiki.search.side_effect = Exception("network error")
 
@@ -816,11 +900,11 @@ class TestRunFetchSession:
     @patch("agent_core.web_source.RSSClient")
     @patch("agent_core.web_source.WikiClient")
     def test_session_returns_stats(self, mock_wiki_cls, mock_rss_cls, tmp_path):
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
         mock_wiki.search.return_value = []
 
-        mock_rss = MagicMock()
+        mock_rss = specced(RSSClient)
         mock_rss_cls.return_value = mock_rss
         mock_rss.fetch_all.return_value = []
 
@@ -842,6 +926,92 @@ class TestRunFetchSession:
         assert "rss_filtered" in result
         assert "errors" in result
         assert "skipped" in result
+        assert "unsuccessful_hints" in result  # R2.1
+
+    @patch("agent_core.web_source.RSSClient")
+    @patch("agent_core.web_source.WikiClient")
+    def test_session_marks_unsuccessful_hint(
+        self, mock_wiki_cls, mock_rss_cls, tmp_path,
+    ):
+        """R2.1: hint with no wiki results gets failed_attempts incremented
+        post-session, so it auto-consumes after threshold."""
+        # Seed a pending hint in tmp_path/meta_data/
+        meta = tmp_path / "meta_data"
+        meta.mkdir()
+        hints_path = meta / "topic_hints.jsonl"
+        with open(hints_path, "w") as f:
+            f.write(json.dumps({
+                "topic": "Meta-nauka",
+                "source": "self_analysis",
+                "priority": 1.0,
+                "consumed": False,
+            }, ensure_ascii=False) + "\n")
+
+        # Wiki returns nothing for any topic
+        mock_wiki = specced(WikiClient)
+        mock_wiki_cls.return_value = mock_wiki
+        mock_wiki.search.return_value = []
+
+        mock_rss = specced(RSSClient)
+        mock_rss_cls.return_value = mock_rss
+        mock_rss.fetch_all.return_value = []
+
+        # input_dir under tmp_path so suggester finds tmp_path/meta_data/
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        analyzer = _make_mock_analyzer()  # empty topic_map -> hint dominates
+
+        result = run_fetch_session(
+            knowledge_analyzer=analyzer,
+            input_dir=input_dir,
+            registry_path=tmp_path / "reg.jsonl",
+        )
+
+        assert result["articles_fetched"] == 0
+        assert result["unsuccessful_hints"] == 1
+
+        # Hint counter incremented
+        with open(hints_path) as f:
+            h = json.loads(f.readline())
+        assert h["failed_attempts"] == 1
+        assert h["consumed"] is False
+
+    @patch("agent_core.web_source.RSSClient")
+    @patch("agent_core.web_source.WikiClient")
+    def test_session_does_not_mark_expand_strategy(
+        self, mock_wiki_cls, mock_rss_cls, tmp_path,
+    ):
+        """R2.1: only hint-strategy suggestions trigger fail-and-skip.
+        EXPAND/EXPLORE topics derive from existing knowledge; the lifecycle
+        machinery is hint-only."""
+        meta = tmp_path / "meta_data"
+        meta.mkdir()
+
+        mock_wiki = specced(WikiClient)
+        mock_wiki_cls.return_value = mock_wiki
+        mock_wiki.search.return_value = []  # No results for anything
+
+        mock_rss = specced(RSSClient)
+        mock_rss_cls.return_value = mock_rss
+        mock_rss.fetch_all.return_value = []
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        # No hints file — only EXPAND topics from analyzer
+        analyzer = _make_mock_analyzer(topic_map={"logika": ["f1", "f2"]})
+
+        result = run_fetch_session(
+            knowledge_analyzer=analyzer,
+            input_dir=input_dir,
+            registry_path=tmp_path / "reg.jsonl",
+        )
+
+        # EXPAND tried wiki, got nothing — but unsuccessful_hints stays 0
+        # because expand isn't tracked by the hint lifecycle.
+        assert result["articles_fetched"] == 0
+        assert result["unsuccessful_hints"] == 0
 
 
 class TestRSSRelevanceFilter:
@@ -902,18 +1072,48 @@ class TestRSSRelevanceFilter:
         assert _is_rss_relevant(
             "FIZYKA Jadrowa",
             "",
-            {"fizy"},
+            {"fizyk"},
         ) is True
+
+    def test_requires_two_hits_when_three_or_more_keywords(self):
+        # R1.1: with rich keyword sets, demand 2 distinct matches to
+        # block accidental single-word hits like "system" appearing in
+        # an unrelated news headline.
+        assert _is_rss_relevant(
+            "System bankowy w Polsce",
+            "Krotki opis o bankach",
+            {"fizyk", "biolog", "kwant"},
+        ) is False
+        # Two hits in title+summary -> passes
+        assert _is_rss_relevant(
+            "Fizyka kwantowa i biologia molekularna",
+            "Najnowsze badania",
+            {"fizyk", "biolog", "kwant"},
+        ) is True
+
+    def test_stop_words_dropped(self):
+        from agent_core.web_source import _STOP_WORDS
+        suggestions = [
+            {"topic": "system poznawczy"},
+            {"topic": "model jezykowy"},
+        ]
+        kw = _build_topic_keywords(suggestions)
+        # "system" and "model" should not survive — they were tripping
+        # the filter on unrelated news (R1.1 audit).
+        assert all(stem not in _STOP_WORDS for stem in kw)
+        # The non-stop counterparts do survive
+        assert any(k.startswith("pozna") for k in kw)
+        assert any(k.startswith("jezyk") for k in kw)
 
     @patch("agent_core.web_source.RSSClient")
     @patch("agent_core.web_source.WikiClient")
     def test_session_filters_irrelevant_rss(self, mock_wiki_cls, mock_rss_cls, tmp_path):
         """Full session: irrelevant RSS entries get filtered out."""
-        mock_wiki = MagicMock()
+        mock_wiki = specced(WikiClient)
         mock_wiki_cls.return_value = mock_wiki
         mock_wiki.search.return_value = []
 
-        mock_rss = MagicMock()
+        mock_rss = specced(RSSClient)
         mock_rss_cls.return_value = mock_rss
         mock_rss.fetch_all.return_value = [
             {"title": "Fizyka jadrowa nowe odkrycie", "link": "http://a.pl/1", "summary": "N" * 300},

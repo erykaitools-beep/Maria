@@ -77,6 +77,9 @@ class CodexClient:
         prompt: str,
         source: str = "unknown",
         context: Optional[Dict[str, Any]] = None,
+        cwd: Optional[Path] = None,
+        timeout_s: Optional[float] = None,
+        impl_mode: bool = False,
     ) -> Optional[str]:
         """
         Send a knowledge query to ChatGPT via Codex CLI.
@@ -85,6 +88,19 @@ class CodexClient:
             prompt: Question or request for ChatGPT
             source: Which module is asking (creative, planner, k12, etc.)
             context: Optional metadata for logging
+            cwd: Working directory for the Codex subprocess. None = inherit
+                from Maria's process (typically /home/maria/maria). Set to
+                an external project root (e.g. ~/maria-market-agent) when
+                dispatching an implementation task on that codebase.
+            timeout_s: Per-call override for subprocess timeout. None uses
+                the instance default (120s). Pass a higher value (e.g.
+                1800s) when dispatching implementation briefs where Codex
+                may run for many minutes before committing.
+            impl_mode: When True, pass ``--sandbox workspace-write``
+                and ``--ask-for-approval never`` so Codex can edit files
+                and commit autonomously. Default False keeps Codex in
+                read-only Q&A mode (used by creative, web_source,
+                code_agent). Dispatcher sets True.
 
         Returns:
             Response text or None if unavailable/rate-limited/error.
@@ -106,7 +122,9 @@ class CodexClient:
             return None
 
         start = time.time()
-        result = self._invoke(prompt)
+        result = self._invoke(
+            prompt, cwd=cwd, timeout_s=timeout_s, impl_mode=impl_mode,
+        )
         duration_ms = (time.time() - start) * 1000
 
         self._total_calls += 1
@@ -129,8 +147,29 @@ class CodexClient:
 
         return result
 
-    def _invoke(self, prompt: str) -> Optional[str]:
-        """Execute Codex CLI as subprocess (non-interactive exec mode)."""
+    def _invoke(
+        self,
+        prompt: str,
+        cwd: Optional[Path] = None,
+        timeout_s: Optional[float] = None,
+        impl_mode: bool = False,
+    ) -> Optional[str]:
+        """Execute Codex CLI as subprocess (non-interactive exec mode).
+
+        ``cwd``: working directory for the subprocess. None inherits Maria's
+        CWD. Pass a project root when dispatching an implementation task
+        in an external repo (e.g. ~/maria-market-agent).
+
+        ``timeout_s``: override the instance default ``self._timeout_s``
+        for this call only. None = use instance default.
+
+        ``impl_mode``: True for autonomous implementation work (adds
+        ``--sandbox workspace-write --ask-for-approval never``). False
+        for Q&A reads (Codex stays read-only, never asks).
+        """
+        effective_timeout = (
+            timeout_s if timeout_s is not None else self._timeout_s
+        )
         try:
             # Prepend context brief so Codex knows it's helping M.A.R.I.A.
             full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
@@ -140,15 +179,28 @@ class CodexClient:
                 "exec",                   # non-interactive mode
                 "--skip-git-repo-check",  # Maria's context, not a repo question
                 "-o", str(out_file),      # write response to file
-                full_prompt,
             ]
+            if impl_mode:
+                # Autonomous implementation: let Codex write files and run
+                # commands without asking. Q&A path keeps the safer
+                # read-only default.
+                # Note: --ask-for-approval is a TOP-LEVEL flag, not a flag
+                # on the ``exec`` subcommand. Pass approval_policy via
+                # -c (TOML config override) instead. Value is a TOML
+                # string, so it needs to keep its quotes.
+                cmd.extend([
+                    "--sandbox", "workspace-write",
+                    "-c", 'approval_policy="never"',
+                ])
+            cmd.append(full_prompt)
 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout_s,
+                timeout=effective_timeout,
                 env=None,  # inherit environment (OAuth tokens)
+                cwd=str(cwd) if cwd is not None else None,
             )
 
             # Read response from output file (cleaner than parsing stdout)
@@ -168,7 +220,7 @@ class CodexClient:
 
             return None
         except subprocess.TimeoutExpired:
-            logger.warning("[Codex] Timeout after %ds", self._timeout_s)
+            logger.warning("[Codex] Timeout after %ds", effective_timeout)
             return None
         except Exception as e:
             logger.warning("[Codex] Invoke failed: %s", e)

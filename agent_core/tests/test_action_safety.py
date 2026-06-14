@@ -17,6 +17,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import SystemState
+from agent_core.goals.store import GoalStore
+
 from agent_core.action_safety.safety_model import (
     ActionRecord,
     EffectType,
@@ -299,9 +304,10 @@ class TestEffectValidator:
 
     def test_capture_state_with_homeostasis(self):
         v = EffectValidator()
-        core = MagicMock()
-        state = MagicMock()
+        core = specced(HomeostasisCore)
+        state = specced(SystemState)
         state.health_score = 0.8
+        state.mode = MagicMock()
         state.mode.value = "reduced"
         core.get_state.return_value = state
         v.set_homeostasis_core(core)
@@ -311,7 +317,7 @@ class TestEffectValidator:
 
     def test_capture_state_with_goal_store(self):
         v = EffectValidator()
-        store = MagicMock()
+        store = specced(GoalStore)
         store.get_active.return_value = [1, 2, 3]
         v.set_goal_store(store)
         s = v.capture_state()

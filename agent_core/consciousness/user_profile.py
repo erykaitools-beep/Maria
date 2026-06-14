@@ -148,8 +148,14 @@ class UserProfile:
                     data = json.load(f)
                 self._data = self._ensure_schema(data)
                 self._last_mtime = current_mtime
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                # Keep the in-memory copy and don't crash the caller, but
+                # surface it — a silently failed reload means we serve a
+                # stale profile while another process owns the truth.
+                logger.warning(
+                    "UserProfile reload from %s failed, keeping in-memory copy: %s",
+                    self._path, e,
+                )
 
     def _save(self, data: Optional[Dict[str, Any]] = None) -> None:
         """Atomic save to disk."""

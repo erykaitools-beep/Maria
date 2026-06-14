@@ -17,10 +17,11 @@ from agent_core.semantic.indexer import (
 )
 from agent_core.semantic import SemanticMemory
 from agent_core.semantic.embedding_model import EmbeddingModel
+from agent_core.tests.spec_helpers import specced
 
 
 def _mock_semantic_memory():
-    sm = MagicMock(spec=SemanticMemory)
+    sm = specced(SemanticMemory)
     sm.index_batch = MagicMock(side_effect=lambda ns, entries: len(entries))
     sm.save = MagicMock(return_value=0)
     return sm
@@ -68,25 +69,49 @@ class TestBuildKnowledgeEntries:
         input_dir.mkdir()
         (input_dir / "web_wiki_fizyka.txt").write_text("# Tytul: Fizyka\nContent\n")
 
-        entries = build_knowledge_entries(ki, input_dir)
+        entries = build_knowledge_entries(
+            ki, input_dir, verified_ids={"web_wiki_fizyka.txt"})
         assert len(entries) == 1
         assert entries[0][0] == "knowledge:web_wiki_fizyka.txt"
         assert "Fizyka" in entries[0][1]
 
     def test_missing_input_file(self, tmp_path):
+        # status 'completed' + independently verified so the trust gate (#2)
+        # lets it through; this covers the missing-input-file -> filename
+        # fallback path.
         ki = tmp_path / "knowledge_index.jsonl"
         ki.write_text(json.dumps({
             "id": "missing.txt",
             "file": "missing.txt",
-            "status": "new",
+            "status": "completed",
         }) + "\n")
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
 
-        entries = build_knowledge_entries(ki, input_dir)
+        entries = build_knowledge_entries(
+            ki, input_dir, verified_ids={"missing.txt"})
         assert len(entries) == 1
         assert "missing" in entries[0][1]
+
+    def test_skips_non_completed_and_unverified(self, tmp_path):
+        """Trust gate (#2, hardened 2026-06-01): a file is indexed only when it
+        is 'completed' AND independently verified. Un-examined statuses are
+        skipped -- and so is a 'completed' file with no independent pass
+        (self-graded), the bypass the audit flagged."""
+        ki = tmp_path / "knowledge_index.jsonl"
+        ki.write_text("\n".join(json.dumps(r) for r in [
+            {"id": "a.txt", "file": "a.txt", "status": "new"},
+            {"id": "b.txt", "file": "b.txt", "status": "learning"},
+            {"id": "c.txt", "file": "c.txt", "status": "learned"},
+            {"id": "d.txt", "file": "d.txt", "status": "completed"},
+            {"id": "self.txt", "file": "self.txt", "status": "completed"},
+        ]) + "\n")
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        # d.txt independently verified; self.txt 'completed' but self-graded.
+        entries = build_knowledge_entries(ki, input_dir, verified_ids={"d.txt"})
+        assert [e[0] for e in entries] == ["knowledge:d.txt"]  # only verified+completed
 
     def test_empty_index(self, tmp_path):
         ki = tmp_path / "knowledge_index.jsonl"
@@ -149,7 +174,14 @@ class TestBuildHintEntries:
 
 
 class TestRunInitialIndexing:
-    def test_indexes_all_sources(self, tmp_path):
+    def test_indexes_all_sources(self, tmp_path, monkeypatch):
+        # f1.txt is 'completed' AND independently verified -> passes the trust
+        # gate (the production path reads exam_results via config; here we pin
+        # the verified set directly).
+        monkeypatch.setattr(
+            "agent_core.goals.success_criteria.independently_verified_file_ids",
+            lambda *a, **k: {"f1.txt"},
+        )
         data_dir = tmp_path / "meta_data"
         data_dir.mkdir()
         memory_dir = tmp_path / "memory"
@@ -206,7 +238,7 @@ class TestBackgroundIndexing:
         assert not t.is_alive()
 
     def test_survives_error(self, tmp_path):
-        sm = MagicMock()
+        sm = specced(SemanticMemory)
         sm.index_batch = MagicMock(side_effect=RuntimeError("boom"))
         sm.save = MagicMock()
 

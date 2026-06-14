@@ -29,6 +29,22 @@ logger = logging.getLogger(__name__)
 SANDBOX_TIMEOUT_SEC = 86400
 
 
+def _index_record_id(record: dict) -> str:
+    """
+    Identifier of a knowledge-index record.
+
+    The PRODUCTION format keys records by "id" (with "file" as an
+    alias) -- see memory/knowledge_index.jsonl and CLAUDE.md ("MERGE on
+    id"). This module historically read "file_id", a key that exists
+    only in this module's own tests -- so the first real promote()
+    caller (synthesis, 2026-06-11) silently dropped every record at the
+    bridge. "file_id" stays as a legacy fallback.
+    """
+    return (
+        record.get("id") or record.get("file") or record.get("file_id") or ""
+    )
+
+
 class SandboxManager:
     """
     Zarzadza sandbox sesjami nauki.
@@ -137,7 +153,7 @@ class SandboxManager:
                     continue
                 try:
                     record = json.loads(line)
-                    if file_ids is None or record.get("file_id") in file_ids:
+                    if file_ids is None or _index_record_id(record) in file_ids:
                         with open(session.sandbox_index, "a", encoding="utf-8") as sf:
                             sf.write(json.dumps(record, ensure_ascii=False) + "\n")
                         seeded += 1
@@ -233,16 +249,22 @@ class SandboxManager:
             files_promoted = 0
             chunks_promoted = 0
 
-            # Merge index (nowszy updated_at wygrywa)
-            index_merged = self._merge_index(session.sandbox_index, self._prod_index)
-            if index_merged > 0:
-                files_promoted = index_merged
+            # Kolejnosc (audyt 2026-06-12): appendy NAJPIERW, merge indeksu
+            # jako punkt commitu NA KONCU. Porazka przed merge zostawia
+            # produkcyjny indeks nietkniety (osierocone appendy sa tolerowane
+            # -- brak wpisu w indeksie = wiedza nie istnieje); stara kolejnosc
+            # przepisywala indeks pierwsza, a ROLLBACK marker go nie cofal.
 
             # Append memory
             chunks_promoted = self._append_jsonl(session.sandbox_memory, self._prod_memory)
 
             # Append exams
             self._append_jsonl(session.sandbox_exams, self._prod_exams)
+
+            # Merge index (nowszy updated_at wygrywa) -- punkt commitu
+            index_merged = self._merge_index(session.sandbox_index, self._prod_index)
+            if index_merged > 0:
+                files_promoted = index_merged
 
             # Usun sandbox dir
             shutil.rmtree(session.sandbox_dir, ignore_errors=True)
@@ -474,7 +496,7 @@ class SandboxManager:
         if not source.exists():
             return 0
 
-        # Wczytaj istniejace rekordy z produkcji (po file_id)
+        # Wczytaj istniejace rekordy z produkcji (po id)
         prod_records: Dict[str, dict] = {}
         if target.exists():
             with open(target, "r", encoding="utf-8") as f:
@@ -484,7 +506,7 @@ class SandboxManager:
                         continue
                     try:
                         record = json.loads(line)
-                        fid = record.get("file_id")
+                        fid = _index_record_id(record)
                         if fid:
                             prod_records[fid] = record
                     except json.JSONDecodeError:
@@ -499,21 +521,28 @@ class SandboxManager:
                     continue
                 try:
                     record = json.loads(line)
-                    fid = record.get("file_id")
+                    fid = _index_record_id(record)
                     if not fid:
                         continue
                     existing = prod_records.get(fid)
-                    if existing is None or record.get("updated_at", 0) > existing.get("updated_at", 0):
+                    if existing is None or self._sandbox_is_newer(record, existing):
                         prod_records[fid] = record
                         merged += 1
                 except json.JSONDecodeError:
                     continue
 
-        # Zapisz zmergowany index
+        # Zapisz zmergowany index przez kanoniczny writer produkcji
+        # (audyt 2026-06-12): goly open(target, "w") na zywym indeksie =
+        # crash w polowie zapisu zostawia obciety plik, a rownolegly writer
+        # moze sie przeplatac. MemoryStore.save_all = tempfile + flock +
+        # atomic replace -- ta sama dyscyplina co reszta sciezki nauki
+        # (kontrakt K2: "uzywa istniejacego file locking z memory_store.py").
         target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            for record in prod_records.values():
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        from maria_core.memory_engine.memory_store import MemoryStore
+        if not MemoryStore(target).save_all(list(prod_records.values())):
+            # save_all polyka wyjatki i zwraca False -- eskaluj, zeby
+            # promote() poszedl w ROLLBACK zamiast klamac sukcesem.
+            raise RuntimeError(f"index save failed: {target}")
 
         return merged
 
@@ -544,8 +573,22 @@ class SandboxManager:
         with open(self._promote_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    @staticmethod
+    def _sandbox_is_newer(record: dict, existing: dict) -> bool:
+        """
+        updated_at comparison that survives mixed types: production
+        uses ISO-8601 STRINGS (lexicographically ordered), the legacy
+        test format used numbers. Incomparable or missing values ->
+        the sandbox record wins, because the active session is by
+        construction the fresher writer of the records it carries.
+        """
+        try:
+            return record.get("updated_at") > existing.get("updated_at")
+        except TypeError:
+            return True
+
     def _count_unique_files(self, index_path: Path) -> int:
-        """Zlicz unikalne file_id w pliku JSONL."""
+        """Zlicz unikalne identyfikatory plikow w pliku JSONL."""
         if not index_path.exists():
             return 0
         file_ids = set()
@@ -556,7 +599,7 @@ class SandboxManager:
                     continue
                 try:
                     record = json.loads(line)
-                    fid = record.get("file_id")
+                    fid = _index_record_id(record)
                     if fid:
                         file_ids.add(fid)
                 except json.JSONDecodeError:

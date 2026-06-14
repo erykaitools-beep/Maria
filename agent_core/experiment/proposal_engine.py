@@ -167,6 +167,51 @@ class ProposalEngine:
         self._rewrite_proposals()
         return True
 
+    def add_proposal(self, proposal: Proposal) -> bool:
+        """Externally-built Proposal entry point (Most #2, 2026-05-08).
+
+        For sources that don't fit the rule-based scan() flow — e.g. K12
+        strategic-change router converts bulletin recommendations into
+        Proposals via heuristics. Respects the same invariants as scan():
+        active limit, daily limit, per-parameter cooldown.
+
+        Returns True if accepted and persisted; False if blocked by limits
+        or cooldown.
+        """
+        self._ensure_loaded()
+
+        if self._count_today_proposals() >= MAX_PROPOSALS_PER_DAY:
+            logger.info(
+                f"[K11] add_proposal rejected: daily limit "
+                f"({MAX_PROPOSALS_PER_DAY}) reached"
+            )
+            return False
+
+        active = [p for p in self._proposals
+                  if p.status in (ProposalStatus.DRAFT, ProposalStatus.PROPOSED)]
+        if len(active) >= MAX_ACTIVE_PROPOSALS:
+            logger.info(
+                f"[K11] add_proposal rejected: active limit "
+                f"({MAX_ACTIVE_PROPOSALS}) reached"
+            )
+            return False
+
+        if self._is_on_cooldown(proposal.parameter_id):
+            logger.info(
+                f"[K11] add_proposal rejected: {proposal.parameter_id} "
+                f"on cooldown"
+            )
+            return False
+
+        self._proposals.append(proposal)
+        self._save_proposal(proposal)
+        logger.info(
+            f"[K11] External proposal: {proposal.proposal_id} "
+            f"({proposal.parameter_id}: {proposal.current_value} "
+            f"-> {proposal.proposed_value}) src={proposal.source.value}"
+        )
+        return True
+
     def get_status(self) -> Dict[str, Any]:
         """Status dict for REPL / Web UI."""
         self._ensure_loaded()

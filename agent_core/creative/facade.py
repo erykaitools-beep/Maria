@@ -42,6 +42,7 @@ from agent_core.creative.memory_summarizer import MemorySummarizer
 from agent_core.creative.meta_goal_engine import MetaGoalEngine
 from agent_core.creative.reframe_engine import ReframeEngine
 from agent_core.creative.exploration_engine import ExplorationEngine
+from agent_core.creative.loop_detector import LoopDetector  # D3
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,15 @@ class CreativeModule:
         self._reframe_engine = ReframeEngine(llm_fn)
         self._exploration_engine = ExplorationEngine(llm_fn)
 
+        # D3: LoopDetector — short-circuits abandoned-pattern regeneration.
+        self._loop_detector = LoopDetector(goal_store=goal_store)
+        self._bulletin_store = None
+
         # State
         self._last_reflection_ts: float = 0.0
         self._total_reflections: int = 0
         self._total_meta_goals_proposed: int = 0
+        self._total_meta_goals_suppressed: int = 0  # D3
         self._total_tensions_detected: int = 0
         self._total_reframes: int = 0
         self._total_explorations: int = 0
@@ -91,6 +97,13 @@ class CreativeModule:
     def set_goal_store(self, goal_store) -> None:
         """Wire GoalStore after initialization."""
         self._goal_adapter.set_goal_store(goal_store)
+        self._loop_detector.set_goal_store(goal_store)
+
+    def set_bulletin_store(self, store) -> None:
+        """Wire BulletinStore: creative meta-goals post IMPROVEMENT advisories
+        (R1) and suppressed loops are surfaced to operator (D3)."""
+        self._bulletin_store = store
+        self._goal_adapter.set_bulletin_store(store)
 
     def set_llm_fn(self, fn: Optional[Callable[[str], str]]) -> None:
         """Wire LLM function for Phase 2 engines (late wiring)."""
@@ -243,6 +256,14 @@ class CreativeModule:
                 "title": ep.title,
             })
 
+        # 5.7 LoopDetector — drop candidates whose meta_goal_type has been
+        # repeatedly abandoned in the recent window (D3, 2026-04-26).
+        candidates, suppressed_candidates = self._loop_detector.filter_candidates(
+            candidates,
+        )
+        if suppressed_candidates:
+            self._handle_suppressed_loop(suppressed_candidates)
+
         # 6. Filter for novelty
         accepted, rejected = self._novelty_filter.filter(candidates)
         for r in rejected:
@@ -358,6 +379,7 @@ class CreativeModule:
         return {
             "total_reflections": self._total_reflections,
             "total_meta_goals_proposed": self._total_meta_goals_proposed,
+            "total_meta_goals_suppressed": self._total_meta_goals_suppressed,
             "total_tensions_detected": self._total_tensions_detected,
             "total_reframes": self._total_reframes,
             "total_explorations": self._total_explorations,
@@ -366,6 +388,104 @@ class CreativeModule:
             "can_reflect": self.should_reflect(),
             "llm_enhanced": self._has_llm,
         }
+
+    # --- D3: loop suppression ---------------------------------
+
+    def _handle_suppressed_loop(self, suppressed_candidates: List[Any]) -> None:
+        """Persist + log + bulletin-post when LoopDetector kills candidates.
+
+        Each suppressed meta-goal candidate is saved to the creative store as
+        ``REJECTED`` (so it appears in the journal), one creative event is
+        emitted per candidate, and one bulletin ``IMPROVEMENT`` entry is
+        posted per distinct meta-goal type — operator visibility without
+        spamming the bulletin with one entry per candidate.
+        """
+        if not suppressed_candidates:
+            return
+
+        try:
+            report = self._loop_detector.detect()
+        except Exception as e:
+            logger.debug(f"[CREATIVE] loop detector report failed: {e}")
+            report = None
+
+        seen_types: set = set()
+        for mg in suppressed_candidates:
+            try:
+                gtype = mg.goal_type.value
+            except AttributeError:
+                gtype = "unknown"
+
+            try:
+                rejected_mg = mg.with_status(MetaGoalStatus.REJECTED)
+                self._store.save_meta_goal(rejected_mg)
+            except Exception as e:
+                logger.debug(f"[CREATIVE] could not persist suppressed mg: {e}")
+
+            try:
+                self._store.log_event(events.GOAL_SUPPRESSED_LOOP, {
+                    "goal_id": getattr(mg, "goal_id", "?"),
+                    "title": getattr(mg, "title", ""),
+                    "meta_goal_type": gtype,
+                })
+            except Exception:
+                pass
+
+            if gtype in seen_types:
+                continue
+            seen_types.add(gtype)
+
+            count = report.counts.get(gtype, 0) if report else 0
+            window_days = report.window_days if report else 7
+            self._post_loop_bulletin(gtype, count, window_days, mg)
+
+        self._total_meta_goals_suppressed += len(suppressed_candidates)
+        logger.info(
+            "[CREATIVE] LoopDetector suppressed %d candidate(s) across %d type(s): %s",
+            len(suppressed_candidates),
+            len(seen_types),
+            sorted(seen_types),
+        )
+
+    def _post_loop_bulletin(
+        self,
+        meta_goal_type: str,
+        count: int,
+        window_days: int,
+        sample_mg: Any,
+    ) -> None:
+        """Post one IMPROVEMENT bulletin entry per suppressed type per cycle."""
+        if self._bulletin_store is None:
+            return
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType
+        except Exception:
+            return
+
+        topic = f"creative_loop:{meta_goal_type}"
+        summary = (
+            f"LoopDetector: pattern '{meta_goal_type}' has {count} ABANDONED "
+            f"creative meta-goal(s) in {window_days}d. Suppressing "
+            f"regeneration until the streak ages out. Latest example: "
+            f"{getattr(sample_mg, 'title', '')[:80]}"
+        )
+        try:
+            self._bulletin_store.create_and_post(
+                entry_type=EntryType.IMPROVEMENT,
+                topic=topic,
+                reason_code="creative_loop_suppression",
+                summary=summary,
+                requested_by="creative",
+                priority=0.8,
+                metadata={
+                    "meta_goal_type": meta_goal_type,
+                    "abandon_count": count,
+                    "window_days": window_days,
+                    "sample_goal_id": getattr(sample_mg, "goal_id", None),
+                },
+            )
+        except Exception as e:
+            logger.debug(f"[CREATIVE] bulletin post failed: {e}")
 
     def _build_problem_statement(self, tensions, context) -> str:
         """Build problem statement from top tensions."""

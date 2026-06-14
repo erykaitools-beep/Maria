@@ -5,14 +5,20 @@ from unittest.mock import MagicMock, PropertyMock
 import pytest
 
 from agent_core.operator.state_reporter import StateReporter, StateSnapshot
+from agent_core.operator.capability_manifest import CapabilityManifest, CapabilityEntry
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.goals.store import GoalStore
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.consciousness.identity_store import IdentityStore
+from agent_core.tests.spec_helpers import specced
 
 
 def _make_manifest(available=5, total=8):
     """Mock CapabilityManifest."""
-    m = MagicMock()
+    m = specced(CapabilityManifest)
     caps = []
     for i in range(total):
-        cap = MagicMock()
+        cap = specced(CapabilityEntry)
         cap.available = i < available
         caps.append(cap)
     m.get_capabilities.return_value = caps
@@ -21,14 +27,14 @@ def _make_manifest(available=5, total=8):
 
 def _make_core(mode="ACTIVE", health=0.85):
     """Mock homeostasis core."""
-    c = MagicMock()
+    c = specced(HomeostasisCore)
     c.get_state.return_value = {"mode": mode, "health_score": health}
     return c
 
 
 def _make_goal_store(active=3, proposed=1):
     """Mock GoalStore."""
-    gs = MagicMock()
+    gs = specced(GoalStore)
     gs.get_active.return_value = [MagicMock() for _ in range(active)]
     gs.get_proposed.return_value = [MagicMock() for _ in range(proposed)]
     return gs
@@ -36,7 +42,7 @@ def _make_goal_store(active=3, proposed=1):
 
 def _make_knowledge(total=20, completed=15):
     """Mock KnowledgeAnalyzer."""
-    ka = MagicMock()
+    ka = specced(KnowledgeAnalyzer)
     ka.get_knowledge_snapshot.return_value = {
         "total_files": total,
         "files_by_status": {
@@ -137,8 +143,10 @@ class TestStateReporter:
 
     def test_uptime(self):
         r = StateReporter(cache_ttl=0)
-        identity = MagicMock()
-        identity.get_uptime_hours.return_value = 72.5
+        # Bug #6 guard: real API is get_total_uptime_hours. specced() makes a
+        # regression to the phantom get_uptime_hours go red.
+        identity = specced(IdentityStore)
+        identity.get_total_uptime_hours.return_value = 72.5
         r.set_identity_store(identity)
         r.set_homeostasis_core(_make_core())
         s = r.get_snapshot()
@@ -146,8 +154,8 @@ class TestStateReporter:
 
     def test_summary_with_uptime_days(self):
         r = StateReporter(cache_ttl=0)
-        identity = MagicMock()
-        identity.get_uptime_hours.return_value = 72.0
+        identity = specced(IdentityStore)
+        identity.get_total_uptime_hours.return_value = 72.0
         r.set_identity_store(identity)
         r.set_homeostasis_core(_make_core())
         text = r.get_summary_text()

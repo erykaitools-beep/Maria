@@ -10,11 +10,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
+
 from agent_core.hands.execution_journal import ExecutionJournal, JournalEntry
 from agent_core.hands.task_executor import TaskExecutor, TaskStep, TaskResult
 from agent_core.hands.result_validator import ResultValidator
 from agent_core.hands.web_researcher import WebResearcher
 from agent_core.hands.file_manager import FileManager
+from agent_core.web_source.wiki_client import WikiClient
+from agent_core.web_source.content_writer import ContentWriter
 
 
 # =============================================================================
@@ -307,11 +311,13 @@ class TestWebResearcher:
 
     def test_search_wikipedia_success(self):
         wr = WebResearcher()
-        wiki = MagicMock()
+        # Bug #5 guard: WikiClient exposes fetch_article (not fetch) returning
+        # {title, content, url}. specced() makes a phantom .fetch()/extract regress red.
+        wiki = specced(WikiClient)
         wiki.search.return_value = ["Python (jezyk)"]
-        wiki.fetch.return_value = {
+        wiki.fetch_article.return_value = {
             "title": "Python",
-            "extract": "Python to jezyk programowania" * 10,
+            "content": "Python to jezyk programowania" * 10,
             "url": "https://pl.wikipedia.org/wiki/Python",
         }
         wr.set_wiki_client(wiki)
@@ -323,11 +329,13 @@ class TestWebResearcher:
 
     def test_search_and_save(self):
         wr = WebResearcher()
-        wiki = MagicMock()
+        # Bug #5 guard: real API is fetch_article (key "content") + write_article
+        # (kwarg source_type). specced() makes the old fetch/extract/write regress red.
+        wiki = specced(WikiClient)
         wiki.search.return_value = ["AI"]
-        wiki.fetch.return_value = {"title": "AI", "extract": "Sztuczna inteligencja", "url": ""}
-        writer = MagicMock()
-        writer.write.return_value = "input/web_wiki_ai.txt"
+        wiki.fetch_article.return_value = {"title": "AI", "content": "Sztuczna inteligencja", "url": ""}
+        writer = specced(ContentWriter)
+        writer.write_article.return_value = "input/web_wiki_ai.txt"
         wr.set_wiki_client(wiki)
         wr.set_content_writer(writer)
 

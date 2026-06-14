@@ -11,6 +11,16 @@ from unittest.mock import Mock, patch, MagicMock
 
 from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.homeostasis.state_model import Mode, SystemState
+from agent_core.memory.manager import MemoryManager
+from agent_core.llm.manager import LLMManager
+from agent_core.executor.module_executor import ModuleExecutor
+from agent_core.telegram import TelegramBridge
+from agent_core.operator.operator_model import OperatorModel
+from agent_core.operator.rhythm_detector import RhythmDetector
+from agent_core.registry.shared_context import SharedContext
+from agent_core.proactive.scheduler import ProactiveScheduler
+from agent_core.reminders.scheduler import ReminderScheduler
+from agent_core.tests.spec_helpers import specced
 
 
 class TestHomeostasisCore:
@@ -20,8 +30,8 @@ class TestHomeostasisCore:
     def core(self):
         """Create core instance with mocked dependencies."""
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
         )
         return core
 
@@ -56,7 +66,7 @@ class TestTickExecution:
     def core(self):
         """Create core with properly configured mock managers."""
         # Create mock memory manager with required methods
-        memory_manager = Mock()
+        memory_manager = specced(MemoryManager)
         memory_manager.get_semantic_coherence.return_value = 0.95
         memory_manager.get_total_entries.return_value = 100
         memory_manager.get_contradiction_count.return_value = 0
@@ -64,7 +74,7 @@ class TestTickExecution:
         memory_manager.get_recent_errors_count.return_value = 0
 
         # Create mock LLM manager
-        llm_manager = Mock()
+        llm_manager = specced(LLMManager)
         llm_manager.get_last_latency_ms.return_value = 150.0
         llm_manager.get_context_tokens.return_value = 1000
 
@@ -112,8 +122,8 @@ class TestModeTransitions:
     @pytest.fixture
     def core(self):
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
         )
         return core
 
@@ -159,8 +169,8 @@ class TestAuditLogging:
     @pytest.fixture
     def core(self):
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
         )
         return core
 
@@ -202,14 +212,14 @@ class TestHealthScore:
     @pytest.fixture
     def core(self):
         """Create core with properly configured mock managers."""
-        memory_manager = Mock()
+        memory_manager = specced(MemoryManager)
         memory_manager.get_semantic_coherence.return_value = 0.95
         memory_manager.get_total_entries.return_value = 100
         memory_manager.get_contradiction_count.return_value = 0
         memory_manager.get_episodic_freshness.return_value = 60.0
         memory_manager.get_recent_errors_count.return_value = 0
 
-        llm_manager = Mock()
+        llm_manager = specced(LLMManager)
         llm_manager.get_last_latency_ms.return_value = 150.0
         llm_manager.get_context_tokens.return_value = 1000
 
@@ -273,8 +283,8 @@ class TestCoreTelemetry:
     @pytest.fixture
     def core(self):
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
         )
         return core
 
@@ -302,8 +312,8 @@ class TestCoreControl:
     @pytest.fixture
     def core(self):
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
         )
         return core
 
@@ -337,10 +347,10 @@ class TestCoreWithExecutor:
 
     @pytest.fixture
     def core_with_executor(self):
-        executor = Mock()
+        executor = specced(ModuleExecutor)
         core = HomeostasisCore(
-            memory_manager=Mock(),
-            llm_manager=Mock(),
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
             executor=executor,
         )
         return core
@@ -362,3 +372,174 @@ class TestCoreWithExecutor:
 
         # Should have called for llm and memory
         assert any("llm" in str(args) for args in call_args)
+
+
+class TestPhase11OperatorLearning:
+    """Regression for Phase 11 (_check_telegram) operator learning wiring.
+
+    Guards the self._ctx -> self._shared_context fix: operator_model and
+    rhythm_detector live on the shared context; the old code read a never-set
+    self._ctx, so the AttributeError was swallowed and learning never fired.
+    """
+
+    def test_telegram_poll_feeds_operator_model_and_rhythm(self):
+        core = HomeostasisCore(memory_manager=specced(MemoryManager), llm_manager=specced(LLMManager))
+
+        bridge = specced(TelegramBridge)
+        bridge.last_poll_message_count = 1
+        bridge.last_poll_texts = ["czesc maria, jak leci"]
+
+        operator_model = specced(OperatorModel)
+        rhythm_detector = specced(RhythmDetector)
+        shared_ctx = specced(SharedContext)
+        shared_ctx.operator_model = operator_model
+        shared_ctx.rhythm_detector = rhythm_detector
+
+        core._telegram_bridge = bridge
+        core._proactive_scheduler = specced(ProactiveScheduler)
+        core._shared_context = shared_ctx
+        core._planner_core = None  # skip K9 needs_human branch
+        core._telegram_last_poll = 0.0  # force poll to fire
+
+        core._check_telegram()
+        # Phase 11 now runs in a background thread (poll must never block the
+        # pulse); join before asserting the learning wiring fired.
+        if core._telegram_poll_thread is not None:
+            core._telegram_poll_thread.join(timeout=5)
+
+        operator_model.learn_from_message.assert_called_once_with(
+            "czesc maria, jak leci"
+        )
+        rhythm_detector.record_contact.assert_called_once()
+
+    def test_telegram_poll_no_shared_context_is_safe(self):
+        """Missing shared context must no-op, not raise (defensive getattr)."""
+        core = HomeostasisCore(memory_manager=specced(MemoryManager), llm_manager=specced(LLMManager))
+
+        bridge = specced(TelegramBridge)
+        bridge.last_poll_message_count = 1
+        bridge.last_poll_texts = ["hej"]
+
+        core._telegram_bridge = bridge
+        core._proactive_scheduler = specced(ProactiveScheduler)
+        core._planner_core = None
+        core._telegram_last_poll = 0.0
+        # _shared_context intentionally not set
+
+        core._check_telegram()  # must not raise
+        # Drain the background poll thread so its work (and any error) settles.
+        if core._telegram_poll_thread is not None:
+            core._telegram_poll_thread.join(timeout=5)
+
+
+class TestAutonomousSynthesisPhase:
+    """Phase 10.8: the tick paces the autonomous synthesis picker (cegla E).
+    Cadence + ACTIVE gate live here; cooldown/window/topic policy lives in
+    synthesis.picker (tested separately)."""
+
+    @pytest.fixture
+    def core(self):
+        mm = specced(MemoryManager)
+        mm.get_semantic_coherence.return_value = 0.95
+        mm.get_total_entries.return_value = 100
+        mm.get_contradiction_count.return_value = 0
+        mm.get_episodic_freshness.return_value = 60.0
+        mm.get_recent_errors_count.return_value = 0
+        llm = specced(LLMManager)
+        llm.get_last_latency_ms.return_value = 150.0
+        llm.get_context_tokens.return_value = 1000
+        return HomeostasisCore(memory_manager=mm, llm_manager=llm)
+
+    def test_trigger_fires_on_cadence_when_active(self, core):
+        calls = []
+        core.set_synthesis_trigger(lambda: calls.append(1))
+        core.state.mode = Mode.ACTIVE
+        core._tick_count = 30  # 30 % 600 == 30
+        core._execute_tick()
+        assert calls == [1]
+
+    def test_trigger_silent_off_cadence(self, core):
+        calls = []
+        core.set_synthesis_trigger(lambda: calls.append(1))
+        core.state.mode = Mode.ACTIVE
+        core._tick_count = 31  # wrong remainder
+        core._execute_tick()
+        assert calls == []
+
+    def test_trigger_exception_does_not_break_tick(self, core):
+        def boom():
+            raise RuntimeError("picker down")
+        core.set_synthesis_trigger(boom)
+        core.state.mode = Mode.ACTIVE
+        core._tick_count = 30
+        core._execute_tick()  # must not raise -- caught by _log_phase_error
+        assert "10.8 synthesis" in core._phase_error_state
+
+
+class TestPhaseErrorThrottle:
+    """_log_phase_error: tick-phase guards log at WARNING with throttling.
+
+    Audit 2026-06-12: guards used logger.debug, invisible at production INFO
+    level -- phases died silently for months (auto_promotion, code_agent).
+    """
+
+    @pytest.fixture
+    def core(self):
+        return HomeostasisCore(memory_manager=specced(MemoryManager), llm_manager=specced(LLMManager))
+
+    def test_first_error_logs_warning_immediately(self, core, caplog):
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            core._log_phase_error("12 reminder", ValueError("boom"))
+
+        assert len(caplog.records) == 1
+        rec = caplog.records[0]
+        assert rec.levelname == "WARNING"
+        assert "12 reminder" in rec.getMessage()
+        assert "boom" in rec.getMessage()
+
+    def test_repeats_within_interval_are_suppressed(self, core, caplog):
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            for _ in range(50):
+                core._log_phase_error("12 reminder", ValueError("boom"))
+
+        # Tylko pierwszy przechodzi; reszta zliczona w stanie tlumika.
+        assert len(caplog.records) == 1
+        _, suppressed = core._phase_error_state["12 reminder"]
+        assert suppressed == 49
+
+    def test_after_interval_logs_again_with_suppressed_count(self, core, caplog):
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            core._log_phase_error("13 proactive", ValueError("boom"))
+            for _ in range(7):
+                core._log_phase_error("13 proactive", ValueError("boom"))
+            # Cofnij zegar tlumika o wiecej niz interval.
+            last_ts, suppressed = core._phase_error_state["13 proactive"]
+            core._phase_error_state["13 proactive"] = (
+                last_ts - core.PHASE_ERROR_WARN_INTERVAL_SEC - 1, suppressed)
+            core._log_phase_error("13 proactive", ValueError("boom"))
+
+        assert len(caplog.records) == 2
+        assert "7 repeats suppressed" in caplog.records[1].getMessage()
+        # Licznik wyzerowany po emisji.
+        assert core._phase_error_state["13 proactive"][1] == 0
+
+    def test_labels_throttle_independently(self, core, caplog):
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            core._log_phase_error("12 reminder", ValueError("a"))
+            core._log_phase_error("14 workflow", RuntimeError("b"))
+
+        assert len(caplog.records) == 2
+
+    def test_failing_phase_goes_through_throttled_warning(self, core, caplog):
+        """Integration: a raising phase component logs WARNING, not debug."""
+        core._reminder_scheduler = specced(ReminderScheduler)
+        core._reminder_scheduler.tick.side_effect = RuntimeError("scheduler down")
+
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            # Wywolaj sam guard fazy 12 tak jak robi to tick.
+            try:
+                core._reminder_scheduler.tick()
+            except Exception as e:
+                core._log_phase_error("12 reminder", e)
+
+        assert any("scheduler down" in r.getMessage() for r in caplog.records)

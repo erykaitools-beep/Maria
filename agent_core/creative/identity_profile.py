@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import time
 
+from agent_core.planner.decision_filters import is_real_action
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,6 +138,10 @@ class IdentityProfile:
                         continue
                     try:
                         rec = json.loads(line)
+                        # T-LEARN-003: identity = what Maria actually does, so
+                        # exclude planner idle markers and skipped attempts.
+                        if not is_real_action(rec):
+                            continue
                         action = rec.get("action_type", "unknown")
                         dist[action] += 1
                     except json.JSONDecodeError:

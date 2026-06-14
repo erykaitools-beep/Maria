@@ -136,6 +136,11 @@ class ProactiveScheduler:
         # 3. Check idle checkin
         sent += self._check_idle()
 
+        # 4. Check for new PROPOSED goals (escalator / planner / etc.)
+        # Always runs — also syncs seen-set when no notify is needed,
+        # so seen_proposed_goal_ids reflects current goal_store snapshot.
+        sent += self._check_proposed_goals()
+
         if sent > 0:
             self._save_state()
 
@@ -207,6 +212,59 @@ class ProactiveScheduler:
             self._send(contact)
             return 1
         return 0
+
+    def _check_proposed_goals(self) -> int:
+        """Detect newly created PROPOSED goals and notify operator.
+
+        Compares the current PROPOSED goal IDs against seen_proposed_goal_ids
+        in state. If new ones appear and cooldown allows, sends one alert
+        (single or batch format chosen by the generator). The seen-set is
+        always synchronised to the current snapshot — confirmed/rejected
+        goals drop out, so a future re-PROPOSE with the same id (unlikely
+        in practice but possible) would re-notify only after re-creation.
+        """
+        accessor = self._generators._get_proposed_goals
+        if accessor is None:
+            return 0
+
+        try:
+            current = accessor() or []
+        except Exception as e:
+            logger.debug(f"Proposed-goals accessor failed: {e}")
+            return 0
+
+        seen = set(self._state.seen_proposed_goal_ids)
+        current_ids = [
+            g.get("id") for g in current if isinstance(g, dict) and g.get("id")
+        ]
+        current_id_set = set(current_ids)
+
+        new_ids = current_id_set - seen
+        if not new_ids:
+            # Sync seen-set to current (drop confirmed/rejected ids) but don't notify.
+            if seen != current_id_set:
+                self._state.seen_proposed_goal_ids = list(current_id_set)
+                self._save_state()
+            return 0
+
+        if not self._can_send(ContactReason.GOAL_PROPOSED):
+            # Cooldown active — don't notify and don't update seen-set,
+            # so the next eligible tick still sees these as new.
+            return 0
+
+        if not self._in_time_window(ContactReason.GOAL_PROPOSED):
+            return 0
+
+        new_goals = [g for g in current if g.get("id") in new_ids]
+        contact = self._generators.proposed_goal_alert(new_goals)
+        if contact is None:
+            return 0
+
+        self._send(contact)
+        # Mark all currently-PROPOSED ids as seen (covers both notified
+        # new ones and any pre-existing ones already in the set).
+        self._state.seen_proposed_goal_ids = list(current_id_set)
+        return 1
 
     def _can_send(self, reason: ContactReason) -> bool:
         """Check cooldown for this reason."""

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent_core.introspection.query_router import ResponseMode
+from maria_core.sys.config import DEFAULT_NIM_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +356,7 @@ class EvidenceCollector:
             key="identity_backend",
             value=(
                 "Backend LLM: Ollama llama3.1:8b (executor, lokalny), "
-                "qwen3:8b (planner), NIM z-ai/glm5 (cloud), "
+                f"qwen3:8b (planner), NIM {DEFAULT_NIM_MODEL} (cloud), "
                 "Claude Code CLI (3/h), Codex/ChatGPT (10/h). "
                 "Dzialaje offline-first na mini PC (AMD Ryzen 5, 32GB RAM, Ubuntu)."
             ),
@@ -783,17 +784,21 @@ class EvidenceCollector:
         """Learning progress: file counts."""
         evidence = []
 
-        # Try knowledge analyzer
+        # Try knowledge analyzer. Real API is get_knowledge_snapshot() (the old
+        # get_stats() was a phantom -> swallowed below -> learning evidence always
+        # empty, silently). Snapshot shape: {total_files, files_by_status: {status:
+        # [records]}, ...} -- "completed" count is len of that bucket (audyt 2026-06-13).
         if self._knowledge_analyzer:
             try:
-                stats = self._knowledge_analyzer.get_stats()
+                snap = self._knowledge_analyzer.get_knowledge_snapshot()
+                completed = len(snap.get("files_by_status", {}).get("completed", []))
                 evidence.append(Evidence(
-                    key="learning.total_files", value=str(stats.get("total_files", 0)),
+                    key="learning.total_files", value=str(snap.get("total_files", 0)),
                     source="knowledge_analyzer (runtime)",
                     confidence="high", timestamp=time.time(),
                 ))
                 evidence.append(Evidence(
-                    key="learning.completed", value=str(stats.get("completed", 0)),
+                    key="learning.completed", value=str(completed),
                     source="knowledge_analyzer (runtime)",
                     confidence="high", timestamp=time.time(),
                 ))

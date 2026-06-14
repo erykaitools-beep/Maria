@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 # Default configuration
-DEFAULT_TIMEOUT_S = 30
+DEFAULT_TIMEOUT_S = 30          # node tools (exec/read/write) — fast
+DEFAULT_AGENT_TIMEOUT_S = 180   # agent tools (web_search/web_fetch) —
+                                # qwen2.5:3b cold-start (~15-30s) + tool
+                                # call (~20-30s) + generation (~20-30s).
+                                # With coordinator pre-warm this rarely
+                                # needs the full budget.
 HEALTH_CHECK_TIMEOUT_S = 10
 MAX_RETRIES = 1
 
@@ -66,6 +71,7 @@ class OpenClawClient:
         self,
         node_name: Optional[str] = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
+        agent_timeout_s: float = DEFAULT_AGENT_TIMEOUT_S,
         openclaw_bin: Optional[str] = None,
         run_as_user: Optional[str] = None,
     ):
@@ -74,7 +80,10 @@ class OpenClawClient:
 
         Args:
             node_name: Node name for node tools (default: env OPENCLAW_NODE_NAME or "maria")
-            timeout_s: Command timeout in seconds
+            timeout_s: Timeout for node tools (exec/read/write) in seconds
+            agent_timeout_s: Timeout for agent tools (web_search/web_fetch) in
+                seconds — larger because qwen2.5:3b must cold-start and run
+                an LLM turn + tool invocation + generation
             openclaw_bin: Path to openclaw binary (auto-detected if None)
             run_as_user: Run openclaw as this user via sudo (default: env OPENCLAW_RUN_AS or "deployadmin")
         """
@@ -84,6 +93,7 @@ class OpenClawClient:
             or "maria"
         )
         self.timeout_s = timeout_s
+        self.agent_timeout_s = agent_timeout_s
         self.openclaw_bin = openclaw_bin or shutil.which("openclaw") or "openclaw"
         if run_as_user is not None:
             self.run_as_user = run_as_user
@@ -317,7 +327,7 @@ class OpenClawClient:
             "--session-id", "maria-effector",
             "--message", message,
             "--json",
-            "--timeout", str(int(self.timeout_s)),
+            "--timeout", str(int(self.agent_timeout_s)),
         ]
 
         logger.info(f"[OpenClaw] Agent invoke: {tool_name}")
@@ -326,7 +336,7 @@ class OpenClawClient:
             cli_args,
             capture_output=True,
             text=True,
-            timeout=self.timeout_s + 10,
+            timeout=self.agent_timeout_s + 10,
         )
 
         return self._parse_agent_result(result, tool_name)
@@ -369,11 +379,46 @@ class OpenClawClient:
             return {
                 "ok": True,
                 "result": result.stdout.strip(),
+                "status": "",
             }
 
+        # Openclaw's real format (verified 2026-04-18):
+        #   top-level `status` is often "ok" even when the agent aborted;
+        #   the ground truth lives at result.meta.aborted (bool).
+        # So we must look both places and extract the user-facing text
+        # from result.payloads[0].text when the nested result is a dict.
+        status = str(data.get("status", "")).lower()
+        result_obj = data.get("result")
+        meta = (
+            result_obj.get("meta", {})
+            if isinstance(result_obj, dict) else {}
+        )
+        inner_aborted = bool(meta.get("aborted"))
+        if inner_aborted and status not in (
+            "aborted", "error", "failed", "timeout",
+        ):
+            status = "aborted"
+
+        ok = (not data.get("error")) and status not in (
+            "aborted", "error", "failed", "timeout",
+        )
+
+        # Prefer the first payload's text — that's the actual agent reply.
+        response_text = None
+        if isinstance(result_obj, dict):
+            payloads = result_obj.get("payloads") or []
+            if payloads and isinstance(payloads[0], dict):
+                response_text = payloads[0].get("text")
+
         return {
-            "ok": not data.get("error"),
-            "result": data.get("response", data.get("result", result.stdout.strip())),
+            "ok": ok,
+            "result": (
+                response_text
+                or data.get("response")
+                or result_obj
+                or result.stdout.strip()
+            ),
+            "status": status,
         }
 
     # ------------------------------------------------------------------

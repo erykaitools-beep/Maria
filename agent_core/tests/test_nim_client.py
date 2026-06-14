@@ -14,6 +14,8 @@ from datetime import date
 from agent_core.llm.token_budget import TokenBudget
 from agent_core.llm.nim_client import NIMClient, NIMAPIError
 from agent_core.llm.router import LLMRouter
+from agent_core.introspection.query_router import OperationalQueryRouter
+from agent_core.tests.spec_helpers import specced
 
 
 # =============================================================
@@ -261,6 +263,85 @@ class TestNIMClient:
         assert client.last_total_tokens == 15
 
     @patch("agent_core.llm.nim_client.requests.post")
+    def test_chat_handles_null_content(self, mock_post, client):
+        """nemotron-49b can return content=null; coerce to empty string.
+
+        `.get("content", "")` returns the stored value when the key
+        exists, even if that value is None — only a missing key uses the
+        default. Without the explicit `or ""` guard in _chat(), this
+        would raise AttributeError on None.strip() and force an Ollama
+        fallback that the caller didn't ask for.
+        """
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "choices": [{"message": {"content": None}}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 0,
+                    "total_tokens": 10,
+                },
+            },
+        )
+        result = client._chat([{"role": "user", "content": "Hi"}])
+        assert result == ""
+
+    @patch("agent_core.llm.nim_client.requests.post")
+    def test_chat_raises_on_finish_reason_length(self, mock_post, client):
+        """BUG C (2026-05-25): when NIM truncates mid-stream (finish_reason
+        =length), raise instead of returning partial content. Previously the
+        partial JSON crashed downstream parsers silently and the planner
+        looped 30+ times on the same broken exam in a single window."""
+        from agent_core.llm.nim_client import NIMAPIError
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "choices": [{
+                    "message": {"content": '{"exam":[{"q":"partial'},
+                    "finish_reason": "length",
+                }],
+                "usage": {
+                    "prompt_tokens": 200,
+                    "completion_tokens": 127,
+                    "total_tokens": 327,
+                },
+            },
+        )
+        with pytest.raises(NIMAPIError, match="truncated"):
+            client._chat([{"role": "user", "content": "Hi"}], max_tokens=128)
+
+    @patch("agent_core.llm.nim_client.requests.post")
+    def test_chat_stop_finish_reason_returns_normally(self, mock_post, client):
+        """finish_reason='stop' is the normal case — must return content."""
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "choices": [{
+                    "message": {"content": "complete answer"},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13},
+            },
+        )
+        result = client._chat([{"role": "user", "content": "Hi"}])
+        assert result == "complete answer"
+
+    @patch("agent_core.llm.nim_client.requests.post")
+    def test_ask_once_passes_max_tokens(self, mock_post, client):
+        """BUG C (2026-05-25): _ask_once must propagate max_tokens to _chat
+        so callers can request larger budgets for exam/learn JSON output."""
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+            },
+        )
+        client._ask_once("hi", max_tokens=4096)
+        sent_payload = mock_post.call_args.kwargs["json"]
+        assert sent_payload["max_tokens"] == 4096
+
+    @patch("agent_core.llm.nim_client.requests.post")
     def test_chat_tracks_tokens(self, mock_post, client):
         """Token usage is tracked after each call."""
         mock_post.return_value = Mock(
@@ -478,9 +559,7 @@ class TestLLMRouter:
     @pytest.fixture
     def nim(self):
         """Create mock NIMClient."""
-        mock = Mock()
-        mock.api_key = "test-key"
-        mock.model = "nvidia/glm"
+        mock = specced(NIMClient, api_key="test-key", model="nvidia/glm", history=[])
         mock._ask_once.return_value = "NIM ask_once"
         mock.analyze_task.return_value = {
             "main_task": "test",
@@ -709,10 +788,9 @@ class TestLLMRouter:
 
     def test_think_nim_chat_grounded_uses_ollama(self, ollama, nim, budget):
         """Grounded queries (vision, status) bypass NIM and use Ollama."""
-        from unittest.mock import Mock as _Mock
         nim.think.return_value = "NIM response"
         # Wire a query router that detects grounded queries
-        qr = _Mock()
+        qr = specced(OperationalQueryRouter)
         qr.classify.return_value = "grounded_vision"
         qr.is_grounded.return_value = True
         ollama._query_router = qr
@@ -724,9 +802,8 @@ class TestLLMRouter:
 
     def test_think_nim_chat_normal_skips_grounding(self, ollama, nim, budget):
         """Normal chat goes through NIM even with query router wired."""
-        from unittest.mock import Mock as _Mock
         nim.think.return_value = "NIM response"
-        qr = _Mock()
+        qr = specced(OperationalQueryRouter)
         qr.classify.return_value = "normal"
         qr.is_grounded.return_value = False
         ollama._query_router = qr

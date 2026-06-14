@@ -271,7 +271,10 @@ class StateReporter:
         uptime_h = 0.0
         if self._identity_store:
             try:
-                uptime_h = self._identity_store.get_uptime_hours()
+                # IdentityStore exposes get_total_uptime_hours (the bare
+                # get_uptime_hours was a phantom -> swallowed -> uptime always
+                # 0.0 in the operator report) (audyt 2026-06-13).
+                uptime_h = self._identity_store.get_total_uptime_hours()
             except Exception:
                 pass
 

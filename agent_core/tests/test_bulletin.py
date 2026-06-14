@@ -16,6 +16,12 @@ from agent_core.bulletin.bulletin_model import (
     STALE_TIMEOUT_SEC,
 )
 from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.tests.spec_helpers import specced
+from agent_core.autonomy import AutonomyPolicy
+from agent_core.goals.store import GoalStore
+from agent_core.memory.query import MemoryQuery
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.teacher.teacher_agent import TeacherAgent
 from agent_core.bulletin.knowledge_auditor import (
     KnowledgeAuditor,
     AuditReport,
@@ -36,12 +42,12 @@ from agent_core.bulletin.gap_planner import (
 
 class TestEntryType:
     def test_all_types(self):
-        assert len(EntryType) == 7
+        assert len(EntryType) == 8
         values = {t.value for t in EntryType}
         assert values == {
             "need_material", "need_test", "need_review",
             "ready_to_learn", "waiting_human",
-            "code_task", "improvement",
+            "code_task", "improvement", "surprise",
         }
 
 
@@ -489,12 +495,9 @@ class TestBulletinPlannerIntegration:
         # But if we mock rate limiting:
         # For now just verify NOOP path posts to bulletin
         # Let's force the NOOP path by making fetch rate-limited
-        from unittest.mock import MagicMock
-        mock_policy = MagicMock()
-        mock_policy.classify_and_check.return_value = (
-            MagicMock(decision="deny", reason="rate_limit"),
-        )
-        planner._autonomy_policy = mock_policy
+        # (dawny stub classify_and_check byl fantomem -- metoda nie istnieje
+        # na AutonomyPolicy; rate-limit i tak wymusza lambda ponizej)
+        planner._autonomy_policy = specced(AutonomyPolicy)
 
         # Override to always rate-limit
         planner._is_action_rate_limited = lambda x: True
@@ -551,19 +554,21 @@ class TestBulletinExecutorIntegration:
 
         # Mock teacher
         from unittest.mock import MagicMock
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 3, "strategies_executed": 1}
         }
         executor.set_teacher_agent(teacher)
 
         # Mock goal store for _update_learning_goal
-        mock_gs = MagicMock()
+        mock_gs = specced(GoalStore)
         mock_gs.get.return_value = None
         executor.set_goal_store(mock_gs)
 
         plan = create_plan("goal-phys", "Fizyka", ActionType.LEARN)
-        executor._exec_learn(plan)
+        from unittest.mock import patch
+        with patch("agent_core.environment.environment_model.is_learning_window", return_value=True):
+            executor._exec_learn(plan)
 
         # Entry should be resolved
         assert store.get(entry.entry_id).status == EntryStatus.RESOLVED
@@ -588,7 +593,7 @@ class TestBulletinExecutorIntegration:
         executor.set_bulletin_store(store)
 
         # Mock knowledge analyzer
-        mock_ka = MagicMock()
+        mock_ka = specced(KnowledgeAnalyzer)
         executor.set_knowledge_analyzer(mock_ka)
 
         # Mock fetch session
@@ -650,7 +655,7 @@ class TestKnowledgeAuditorBasic:
         """Well-known topic with good confidence -> no gaps."""
         from unittest.mock import MagicMock
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 5,
@@ -669,7 +674,7 @@ class TestKnowledgeAuditorBasic:
         """Topic with low confidence -> LOW_CONFIDENCE gap."""
         from unittest.mock import MagicMock
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 2,
@@ -689,7 +694,7 @@ class TestKnowledgeAuditorBasic:
         """Files exist but few beliefs -> SHALLOW gap."""
         from unittest.mock import MagicMock
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 3,
@@ -708,7 +713,7 @@ class TestKnowledgeAuditorBasic:
         """Old knowledge -> STALE gap."""
         from unittest.mock import MagicMock
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 2,
@@ -728,7 +733,7 @@ class TestKnowledgeAuditorBasic:
         """Learned files without exam -> NO_EXAM gap."""
         from unittest.mock import MagicMock
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 2,
@@ -738,10 +743,13 @@ class TestKnowledgeAuditorBasic:
         }
         auditor.set_memory_query(mock_mq)
 
-        mock_ka = MagicMock()
-        mock_ka.get_snapshot.return_value = {
+        mock_ka = specced(KnowledgeAnalyzer)
+        mock_ka.get_knowledge_snapshot.return_value = {
             "files_by_status": {
-                "learned": ["fizyka_basics.txt", "fizyka_advanced.txt"],
+                "learned": [
+                    {"id": "fizyka_basics.txt", "file": "fizyka_basics.txt"},
+                    {"id": "fizyka_advanced.txt", "file": "fizyka_advanced.txt"},
+                ],
                 "completed": [],
             }
         }
@@ -772,7 +780,7 @@ class TestAuditorPlannerIntegration:
 
         # Set up auditor that finds low confidence + stale
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {
             "known": True,
             "files_count": 1,
@@ -885,6 +893,264 @@ class TestGapPlannerDecisions:
         plan = gp.plan_for_topic(report)
         assert plan.action == GapAction.RUN_EXAM
 
+
+class TestIsTopicLearnable:
+    """Warstwa 2: prose/strategy descriptions must not reach ASK_EXPERT."""
+
+    def _import(self):
+        from agent_core.bulletin.gap_planner import is_topic_learnable
+        return is_topic_learnable
+
+    def test_real_single_word_topic(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("fizyka")
+        assert ok and reason is None
+
+    def test_real_two_word_topic(self):
+        is_learnable = self._import()
+        ok, _ = is_learnable("logika formalna")
+        assert ok
+
+    def test_real_three_word_topic(self):
+        is_learnable = self._import()
+        ok, _ = is_learnable("teoria systemow zlozonych")
+        assert ok
+
+    def test_empty_string_rejected(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("")
+        assert not ok and reason == "empty_topic"
+
+    def test_whitespace_only_rejected(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("   ")
+        assert not ok and reason == "empty_topic"
+
+    def test_too_many_words_rejected(self):
+        """Eryk's bug case 1."""
+        is_learnable = self._import()
+        ok, reason = is_learnable("Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych")
+        assert not ok
+        # Either word-count or strategy keyword catches it
+        assert reason in ("topic_too_many_words", "topic_contains_strategy_keyword",
+                          "topic_too_long_chars")
+
+    def test_strategy_keyword_zmiana(self):
+        """Eryk's bug case 2."""
+        is_learnable = self._import()
+        ok, reason = is_learnable("Zmiana mechanizmu uczenia")
+        assert not ok
+        assert reason == "topic_contains_strategy_keyword"
+
+    def test_strategy_keyword_zwiekszenie(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("Zwiekszenie pokrycia")
+        assert not ok
+        assert reason == "topic_contains_strategy_keyword"
+
+    def test_numeric_target_rejected(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("pokrycia wiedzy do 100%")
+        assert not ok
+        # % or too-many-words or strategy keyword — any catches it
+        assert reason in ("topic_contains_numeric_target",
+                          "topic_contains_strategy_keyword",
+                          "topic_too_many_words")
+
+    def test_english_strategy_keyword(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable("improve coverage")
+        assert not ok
+        assert reason == "topic_contains_strategy_keyword"
+
+    def test_none_topic_rejected(self):
+        is_learnable = self._import()
+        ok, reason = is_learnable(None)
+        assert not ok
+
+    def test_very_long_single_phrase_rejected(self):
+        is_learnable = self._import()
+        very_long = "a" * 100
+        ok, reason = is_learnable(very_long)
+        assert not ok
+        assert reason == "topic_too_long_chars"
+
+
+class TestGapPlannerLayer2:
+    """Warstwa 2 wired into plan_for_topic."""
+
+    def test_prose_topic_returns_no_action(self):
+        """Zmiana mechanizmu uczenia' must not become ASK_EXPERT."""
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="Zmiana mechanizmu uczenia", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "Zmiana mechanizmu uczenia",
+                               0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.NO_ACTION
+        assert plan.reason.startswith("topic_not_learnable")
+
+    def test_long_prose_returns_no_action(self):
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="Autonomiczna nauka i strukturyzacja wiedzy z plikow",
+            known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "x", 0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.NO_ACTION
+
+    def test_real_topic_still_works(self):
+        """Regression guard — normal topics must not be blocked."""
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="kwanty", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "kwanty", 0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+
+
+class TestGapPlannerLayer3:
+    """Warstwa 3: cross-check filesystem/MemoryQuery before ASK_EXPERT.
+
+    If KnowledgeAuditor says NO_MATERIAL but the material actually exists
+    (stale audit, belief sync lag), recommend REVIEW instead of ASK_EXPERT.
+    """
+
+    def test_no_material_asks_expert_when_no_real_file(self, tmp_path, monkeypatch):
+        """Baseline: no file, no memory_query -> ASK_EXPERT."""
+        # Point project_root to tmp so input/ is guaranteed empty
+        import agent_core.bulletin.gap_planner as gp_mod
+        # Can't easily override project_root — just use an obscure topic
+        # that definitely has no expert/wiki file on disk
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="xyzzythisisnotreal", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "xyzzythisisnotreal",
+                               0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+
+    def test_memory_query_reports_known_flips_to_review(self):
+        """If MemoryQuery says topic is known, override NO_MATERIAL -> REVIEW."""
+        from unittest.mock import MagicMock
+        gp = GapPlanner()
+        mq = specced(MemoryQuery)
+        mq.get_topic_summary.return_value = {
+            "known": True,
+            "files_count": 2,
+            "avg_confidence": 0.83,
+        }
+        gp.set_memory_query(mq)
+        report = AuditReport(
+            topic="xyzzythisisnotreal", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "xyzzythisisnotreal",
+                               0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.REVIEW
+        assert plan.reason == "material_exists_audit_stale"
+        assert plan.metadata.get("audit_mismatch") is True
+
+    def test_memory_query_unknown_does_not_flip(self):
+        """MemoryQuery reports not-known -> ASK_EXPERT proceeds normally."""
+        from unittest.mock import MagicMock
+        gp = GapPlanner()
+        mq = specced(MemoryQuery)
+        mq.get_topic_summary.return_value = {"known": False, "topic": "x"}
+        gp.set_memory_query(mq)
+        report = AuditReport(
+            topic="xyzzynoreal", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "xyzzynoreal", 0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+
+    def test_memory_query_exception_does_not_break(self):
+        """If MemoryQuery throws, we don't crash — fall through to ASK_EXPERT."""
+        from unittest.mock import MagicMock
+        gp = GapPlanner()
+        mq = specced(MemoryQuery)
+        mq.get_topic_summary.side_effect = RuntimeError("boom")
+        gp.set_memory_query(mq)
+        report = AuditReport(
+            topic="xyzzynoreal", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "xyzzynoreal", 0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.ASK_EXPERT
+
+    def test_filesystem_check_flips_to_review(self, tmp_path, monkeypatch):
+        """If expert_<slug>.txt exists >5KB, override NO_MATERIAL -> REVIEW."""
+        # Create a fake input dir with the expected file
+        fake_input = tmp_path / "input"
+        fake_input.mkdir()
+        (fake_input / "expert_kwanty.txt").write_text("x" * 6000)
+        # Monkeypatch Path.resolve().parents[2] -> tmp_path
+        import agent_core.bulletin.gap_planner as gp_mod
+        from pathlib import Path as RealPath
+
+        class FakePath(RealPath.__class__ if False else type(RealPath(""))):
+            pass
+
+        # Simpler: patch the project_root computation via env — but gap_planner
+        # computes from __file__. We patch Path inside _has_real_material.
+        original_has = gp_mod.GapPlanner._has_real_material
+        def patched(self, topic):
+            # Simulate file existence check at our tmp location
+            import re
+            slug = re.sub(r"[^a-z0-9]+", "_", topic.lower()).strip("_")
+            if not slug:
+                return False
+            fpath = fake_input / f"expert_{slug}.txt"
+            if fpath.exists() and fpath.stat().st_size > 5000:
+                return True
+            return False
+        monkeypatch.setattr(gp_mod.GapPlanner, "_has_real_material", patched)
+
+        gp = GapPlanner()
+        report = AuditReport(
+            topic="kwanty", known=False,
+            gaps=[KnowledgeGap(GapType.NO_MATERIAL, "kwanty", 0.9, "brak")],
+        )
+        plan = gp.plan_for_topic(report)
+        assert plan.action == GapAction.REVIEW
+        assert plan.reason == "material_exists_audit_stale"
+
+    def test_knowledge_index_completed_entry_flips_to_review(self, tmp_path):
+        """Index says completed -> NO_MATERIAL audit is stale -> REVIEW."""
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "memory" / "knowledge_index.jsonl").write_text(
+            '{"id":"expert_fizyka.txt","file":"expert_fizyka.txt",'
+            '"status":"completed","chunks_learned":1}\n'
+        )
+        assert GapPlanner._check_knowledge_index("fizyka", tmp_path) is True
+
+    def test_knowledge_index_ignores_incomplete_or_no_chunks(self, tmp_path):
+        """status != completed OR chunks_learned == 0 must NOT flip."""
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "memory" / "knowledge_index.jsonl").write_text(
+            '{"id":"expert_x.txt","status":"pending","chunks_learned":5}\n'
+            '{"id":"web_wiki_x.txt","status":"completed","chunks_learned":0}\n'
+        )
+        assert GapPlanner._check_knowledge_index("x", tmp_path) is False
+
+    def test_knowledge_index_slug_is_exact(self, tmp_path):
+        """'fizyka' must not match 'astrofizyka.txt' or similar substrings."""
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "memory" / "knowledge_index.jsonl").write_text(
+            '{"id":"expert_astrofizyka.txt","status":"completed","chunks_learned":3}\n'
+            '{"id":"web_wiki_metafizyka.txt","status":"completed","chunks_learned":1}\n'
+        )
+        assert GapPlanner._check_knowledge_index("fizyka", tmp_path) is False
+
+    def test_knowledge_index_missing_file_is_noop(self, tmp_path):
+        """No index file -> False (not an error)."""
+        assert GapPlanner._check_knowledge_index("fizyka", tmp_path) is False
+
     def test_stale_reviews(self):
         gp = GapPlanner()
         report = AuditReport(
@@ -975,7 +1241,7 @@ class TestGapPlannerPlannerIntegration:
 
         # Auditor: topic unknown
         auditor = KnowledgeAuditor()
-        mock_mq = MagicMock()
+        mock_mq = specced(MemoryQuery)
         mock_mq.get_topic_summary.return_value = {"known": False, "topic": "AGI"}
         auditor.set_memory_query(mock_mq)
         planner.set_knowledge_auditor(auditor)

@@ -576,3 +576,82 @@ class TestIntegration:
         scores = builder.get_trait_scores()
         # But decay was applied
         assert scores["ciekawska"]["score"] < 0.7
+
+
+# ============================================================
+# C6 fix — last_updated stamp + record_experience helper
+# ============================================================
+
+class TestLastUpdatedOnDecay:
+    """Decay shifts the score, so last_updated must reflect that
+    (regression: ciekawska/pomocna had last_updated="" forever)."""
+
+    def test_decay_only_pass_refreshes_last_updated(self):
+        graph = MockGraph()
+        builder = SelfModelBuilder(graph)
+        builder.ensure_self_model()
+        initial = {
+            "ciekawska": {"score": 0.5, "evidence_count": 0, "last_updated": ""},
+        }
+        builder.update_trait_scores(initial)
+
+        tracker = ExperienceTracker()
+        evolver = TraitEvolver(builder, tracker)
+
+        evolver.evolve()
+        scores = builder.get_trait_scores()
+        # last_updated stamped even with delta=0 (pure decay pass)
+        assert scores["ciekawska"]["last_updated"] != ""
+        # evidence_count still 0 (no signals)
+        assert scores["ciekawska"]["evidence_count"] == 0
+
+
+class TestRecordExperienceHelper:
+    """None-safe wrapper + global consciousness accessor."""
+
+    def test_none_consciousness_is_noop(self):
+        from agent_core.consciousness import (
+            record_experience, set_global_consciousness,
+        )
+        # Ensure no leftover global from earlier tests
+        set_global_consciousness(None)
+        # Should not raise
+        record_experience(None, "learning_completed")
+
+    def test_dispatches_to_explicit_consciousness(self):
+        from agent_core.consciousness import record_experience
+        from agent_core.consciousness.core import ConsciousnessCore
+        from agent_core.tests.spec_helpers import specced
+
+        consc = specced(ConsciousnessCore)
+        record_experience(consc, "exam_passed", {"score": 0.9})
+        consc.record_experience.assert_called_once_with(
+            "exam_passed", {"score": 0.9},
+        )
+
+    def test_falls_back_to_global_when_no_explicit(self):
+        from agent_core.consciousness import (
+            record_experience, set_global_consciousness,
+        )
+        from agent_core.consciousness.core import ConsciousnessCore
+        from agent_core.tests.spec_helpers import specced
+
+        global_consc = specced(ConsciousnessCore)
+        set_global_consciousness(global_consc)
+        try:
+            record_experience(None, "conversation_turn", {"source": "web"})
+            global_consc.record_experience.assert_called_once_with(
+                "conversation_turn", {"source": "web"},
+            )
+        finally:
+            set_global_consciousness(None)
+
+    def test_swallows_exceptions_from_consciousness(self):
+        from agent_core.consciousness import record_experience
+        from agent_core.consciousness.core import ConsciousnessCore
+        from agent_core.tests.spec_helpers import specced
+
+        consc = specced(ConsciousnessCore)
+        consc.record_experience.side_effect = RuntimeError("boom")
+        # Must not raise — trait scoring is non-critical
+        record_experience(consc, "introspection_run")

@@ -89,10 +89,14 @@ class ModeDetector:
         if self._homeostasis_core is None:
             return None
         try:
-            mode = getattr(self._homeostasis_core, "_current_mode", None)
+            # HomeostasisCore holds the live mode at core.state.mode (Mode enum).
+            # The old getattr(core, "_current_mode") read a phantom attr -> always
+            # None -> this degradation->QUIET switch never fired (audyt 2026-06-13).
+            mode = getattr(getattr(self._homeostasis_core, "state", None), "mode", None)
             if mode is None:
                 return None
-            mode_name = mode if isinstance(mode, str) else mode.value
+            # Mode.value is lowercase; compare on uppercase name to match the set below.
+            mode_name = (mode if isinstance(mode, str) else mode.name).upper()
             if mode_name in ("REDUCED", "SLEEP", "SURVIVAL"):
                 return EnvironmentMode.QUIET
         except Exception:

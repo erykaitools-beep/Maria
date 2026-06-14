@@ -361,9 +361,33 @@ class TelegramNotifier:
         text = "\n".join(lines)
         return self._bot.send_message(text)
 
-    def send_raw(self, text: str) -> bool:
-        """Send arbitrary message (no cooldown)."""
-        return self._bot.send_message(text)
+    def notify_effector_incident(self, task, outcome) -> bool:
+        """Report persistent effector failure (coordinator: 3× retry exhausted)."""
+        n = len(outcome.attempts)
+        last_err = outcome.attempts[-1].error if outcome.attempts else "-"
+        lines = [
+            f"*Efektor INCIDENT: {task.tool_name}*",
+            f"Status: {outcome.status.value} po {n}× probach",
+            f"Czas laczny: {outcome.total_duration_s:.1f}s",
+            f"Ostatni blad: {last_err[:120]}",
+        ]
+        if task.tool_args:
+            args_s = str(task.tool_args)[:120]
+            lines.append(f"Argumenty: {args_s}")
+        return self._bot.send_message("\n".join(lines))
+
+    def send_raw(self, text: str, parse_mode: Optional[str] = "Markdown") -> bool:
+        """Send arbitrary message (no cooldown).
+
+        parse_mode defaults to Markdown (legacy behavior). Pass parse_mode=None
+        for operational pings that carry slash-commands or filenames with
+        underscores: Telegram Markdown treats '_' as italic and, when the
+        underscores happen to balance, silently EATS them (e.g. '/approve_note'
+        renders as '/approvenote' -> the command no longer works). Such a
+        message raises no API error, so the bot's markdown->plain fallback never
+        triggers.
+        """
+        return self._bot.send_message(text, parse_mode=parse_mode)
 
     def get_status(self) -> Dict[str, Any]:
         """Get notifier status for diagnostics."""

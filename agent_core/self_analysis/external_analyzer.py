@@ -4,16 +4,18 @@ K12 Self-Analysis: ExternalAnalyzer.
 Invokes a stronger AI model to analyze Maria's compressed state
 and return structured recommendations.
 
-Backend cascade: NIM API (z-ai/glm5) -> local_planner (qwen3:8b).
-NIM is stronger and faster (cloud, 40 RPM).
+Backend cascade: NIM API (cloud model, config.DEFAULT_NIM_MODEL)
+-> local_planner (qwen3:8b). NIM is stronger and faster (cloud, 40 RPM).
 Local planner is fallback when NIM unavailable or rate-limited.
 """
 
 import json
 import logging
+import os
 import time
 from typing import Dict, Any, List, Optional, Callable
 
+from maria_core.sys.config import DEFAULT_NIM_MODEL
 from .recommendation_model import (
     AnalysisRecommendation,
     AnalysisReport,
@@ -102,12 +104,13 @@ class ExternalAnalyzer:
         return self._analyze_with_local(state_summary)
 
     def _analyze_with_nim(self, state_summary: Dict[str, Any]) -> Optional[AnalysisReport]:
-        """Analyze using NIM API (z-ai/glm5, stronger cloud model)."""
+        """Analyze using NIM API (stronger cloud model, config.DEFAULT_NIM_MODEL)."""
         if self._nim_fn is None:
             return None
 
         report = AnalysisReport(
             analyzer="nim_api",
+            model=os.getenv("NVIDIA_NIM_MODEL", DEFAULT_NIM_MODEL),
             input_summary_hash=state_summary.get("input_hash", ""),
         )
 
@@ -138,6 +141,7 @@ class ExternalAnalyzer:
         """Analyze using local planner model (qwen3:8b)."""
         report = AnalysisReport(
             analyzer=self._backend,
+            model=os.getenv("OLLAMA_PLANNER_MODEL", "qwen3:8b"),
             input_summary_hash=state_summary.get("input_hash", ""),
         )
 
@@ -178,6 +182,7 @@ class ExternalAnalyzer:
 
         report = AnalysisReport(
             analyzer="claude_cli",
+            model="claude-code-cli",
             input_summary_hash=state_summary.get("input_hash", ""),
         )
 

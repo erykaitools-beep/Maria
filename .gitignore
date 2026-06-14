@@ -52,11 +52,15 @@ semantic_graph.json
 maria_learned_concepts.json
 maria_report.json
 
-# Meta data (runtime state, personal data, model outputs)
-meta_data/*.json
-meta_data/*.jpg
-meta_data/*.txt
-meta_data/audit_reports/
+# Meta data (runtime state, personal data, model outputs).
+# The whole dir is runtime-generated and nothing here is tracked. A whole-dir
+# ignore (instead of per-extension globs) prevents subdir leaks such as
+# meta_data/fs_sandbox/*.txt, which slipped past meta_data/*.txt, re-dirtied
+# the tree, and blocked the conductor's auto-commit safeguard (2026-06-04).
+meta_data/
+
+# Audit workspaces (lab-grade audit runs, local-only working artifacts)
+audit/
 
 # Input files (user-provided learning materials)
 input/*.txt
@@ -66,6 +70,7 @@ archive/
 
 # ── Secrets ──
 .env
+.env.bak*
 *.key
 *.pem
 credentials.json
@@ -79,11 +84,25 @@ CLAUDE.md
 MARIA_Project_Summary.pdf
 docs/archive/
 docs/SESSION_SUMMARY_*.md
+docs/SESSION_LOG.md
 docs/NEXT_SESSION_PLAN.md
 docs/PLANNER_BRIEF_FOR_REVIEW.md
 docs/CONTEXT_BRIEF.md
+docs/TEST_36H_LOG.md
+docs/test maria 01,02,2026.txt
+docs/raport. maria*.txt
+docs/CLAUDE_MD_SLIM_PROPOSAL.md
+docs/CODEX_TASKS.md
+docs/REFACTOR_PLAN.md
+docs/MAP_HOMEOSTASIS.md
 docs/plans/*.pdf
 docs/plans/*.docx
+docs/plans/DESIGN_*.md
+docs/incoming/
+maria_core/sys/memory/
 config/
 models/
 scripts/generate_project_summary_pdf.py
+
+# M.A.R.I.A. Mobile web preview (temporary ~41MB build artifact, served at :5000/static/mobile)
+maria_ui/static/mobile/

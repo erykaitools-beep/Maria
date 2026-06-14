@@ -23,6 +23,12 @@ from agent_core.world_model.belief_store import BeliefStore, MAX_CURRENT_BELIEFS
 from agent_core.world_model.belief_builder import BeliefBuilder, _normalize_tag
 from agent_core.world_model.query import WorldModelQuery
 from agent_core.world_model import WorldModel
+from agent_core.tests.spec_helpers import specced
+from agent_core.goals.store import GoalStore
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import SystemState
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.planner.action_executor import ActionExecutor
 
 
 # ============================================================
@@ -270,6 +276,57 @@ class TestBeliefStore:
         assert loaded.confidence == 0.9
         assert loaded.belief_type == BeliefType.FACT
 
+    def test_compact_beliefs(self, tmp_path):
+        path = tmp_path / "beliefs.jsonl"
+        store = BeliefStore(path)
+
+        beliefs = [
+            self._make_belief("topic-a", confidence=0.5),
+            self._make_belief("topic-b", confidence=0.6),
+            self._make_belief("topic-c", confidence=0.7),
+        ]
+        for belief in beliefs:
+            store.add(belief)
+        store.save()
+
+        current_ids = [belief.belief_id for belief in beliefs]
+        for i in range(10):
+            next_ids = []
+            for belief_id in current_ids:
+                revised = store.revise(
+                    belief_id,
+                    min(1.0, 0.1 + i * 0.05),
+                    BeliefType.FACT,
+                )
+                if revised is not None:
+                    next_ids.append(revised.belief_id)
+                else:
+                    next_ids.append(belief_id)
+                store.save()
+            current_ids = next_ids
+
+        # Final state: file and memory both hold only the 3 active revised
+        # beliefs — _compact_if_needed keeps them in sync during save().
+        # An explicit compact() is a no-op at this point.
+        store.compact()
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
+        current_count = sum(1 for b in store._beliefs.values() if b.superseded_by is None)
+        assert len(lines) == current_count
+        assert current_count == 3
+
+    def test_load_corrupted_jsonl_line(self, tmp_path):
+        path = tmp_path / "beliefs.jsonl"
+        good = self._make_belief("good-topic", confidence=0.8)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(good.to_dict()) + "\n")
+            f.write("{bad json\n")
+            f.write(json.dumps(good.to_dict()) + "\n")
+
+        store = BeliefStore(path)
+        count = store.load()
+        assert count == 1
+        assert store.get(good.belief_id) is not None
+
     def test_get_by_entity(self, tmp_path):
         store = self._make_store(tmp_path)
         store.add(self._make_belief("python"))
@@ -378,6 +435,277 @@ class TestBeliefStore:
         lines = path.read_text().strip().split("\n")
         assert len(lines) == 2
 
+    def test_bulk_mode_defers_enforce_cap(self, tmp_path):
+        """In bulk_mode, add() does not trigger _enforce_cap per call.
+
+        Regression guard: before this, BeliefBuilder.build_all() hung for
+        minutes on a cold rebuild (~22k concept beliefs) because each add()
+        ran an O(n) cap check — O(n²) overall.
+        """
+        store = self._make_store(tmp_path)
+        call_count = {"enforce": 0}
+        original_enforce = store._enforce_cap
+
+        def counting_enforce():
+            call_count["enforce"] += 1
+            original_enforce()
+
+        store._enforce_cap = counting_enforce
+
+        with store.bulk_mode():
+            for i in range(50):
+                store.add(self._make_belief(f"e_{i}", source_id=f"s:{i}"))
+            # Inside bulk_mode: no enforce calls
+            assert call_count["enforce"] == 0
+
+        # Exiting bulk_mode: exactly one enforce call
+        assert call_count["enforce"] == 1
+
+    def test_bulk_mode_restores_normal_behavior_on_exit(self, tmp_path):
+        """After bulk_mode exits, add() resumes per-call cap enforcement."""
+        store = self._make_store(tmp_path)
+        with store.bulk_mode():
+            store.add(self._make_belief("x", source_id="s:x"))
+
+        # After exit, subsequent add should enforce normally
+        count_before = {"enforce": 0}
+        original = store._enforce_cap
+        def counting():
+            count_before["enforce"] += 1
+            original()
+        store._enforce_cap = counting
+
+        store.add(self._make_belief("y", source_id="s:y"))
+        assert count_before["enforce"] == 1
+
+    def test_bulk_mode_cold_rebuild_is_fast(self, tmp_path):
+        """A mass insert that exceeds the cap should complete in bounded time.
+
+        Without bulk_mode: O(n²) prune-per-add makes this multi-second even
+        for small N. With bulk_mode: O(n) + one prune at exit.
+        """
+        import time as _time
+        store = self._make_store(tmp_path)
+        # Insert 2x the cap to force pruning on exit
+        n = MAX_CURRENT_BELIEFS * 2
+        t0 = _time.time()
+        with store.bulk_mode():
+            for i in range(n):
+                store.add(self._make_belief(
+                    f"e_{i}",
+                    confidence=i / n,
+                    source_id=f"s:{i}",
+                ))
+        elapsed = _time.time() - t0
+        # Generous bound — test environments vary. Without bulk_mode this
+        # would take tens of seconds or minutes.
+        assert elapsed < 10.0, f"Bulk insert of {n} too slow: {elapsed:.1f}s"
+        # Cap enforced exactly once at exit — count must not exceed limit
+        assert len(store.get_current()) <= MAX_CURRENT_BELIEFS
+
+    # --- 2026-04-17 regression: unbounded JSONL growth via prune tombstones ---
+
+    def test_enforce_cap_drops_from_memory(self, tmp_path):
+        """Pruned beliefs must be dropped from memory, not kept as tombstones.
+
+        Before fix: _enforce_cap marked excess beliefs with superseded_by="pruned"
+        and kept them in _beliefs. After N prune cycles, _beliefs grew unboundedly.
+        """
+        store = self._make_store(tmp_path)
+        for i in range(MAX_CURRENT_BELIEFS + 20):
+            store.add(self._make_belief(
+                f"e_{i}",
+                confidence=i / (MAX_CURRENT_BELIEFS + 20),
+                source_id=f"s:{i}",
+            ))
+
+        # After cap enforcement, in-memory dict must not contain tombstones.
+        tombstones = [b for b in store._beliefs.values() if b.superseded_by == "pruned"]
+        assert len(tombstones) == 0, f"Found {len(tombstones)} pruned tombstones in memory"
+        assert len(store._beliefs) <= MAX_CURRENT_BELIEFS
+
+    def test_enforce_cap_shrinks_jsonl(self, tmp_path):
+        """After cap enforcement, the JSONL file must not keep dropped records.
+
+        Regression: on restart, load() would read back all the pruned records
+        as "current" (no superseded marker was ever written for drops) → memory
+        bloat returns.
+        """
+        path = tmp_path / "beliefs.jsonl"
+        store = BeliefStore(path)
+        for i in range(MAX_CURRENT_BELIEFS + 50):
+            store.add(self._make_belief(
+                f"e_{i}",
+                confidence=i / (MAX_CURRENT_BELIEFS + 50),
+                source_id=f"s:{i}",
+            ))
+        store.save()
+
+        # On cold reload, memory matches disk and stays within cap.
+        store2 = BeliefStore(path)
+        count = store2.load()
+        assert count <= MAX_CURRENT_BELIEFS
+        assert len(store2._beliefs) <= MAX_CURRENT_BELIEFS
+
+    def test_repeated_prune_cycles_do_not_leak(self, tmp_path):
+        """Simulate the real-world failure mode: repeated build→prune cycles
+        must not cause unbounded in-memory or on-disk growth.
+
+        Reproduces the bug from 2026-04-17 where 1.58M tombstone records
+        accumulated in beliefs.jsonl over a single day of operation.
+        """
+        path = tmp_path / "beliefs.jsonl"
+        store = BeliefStore(path)
+
+        # 5 build cycles, each adding 2x cap worth of new concept beliefs.
+        for cycle in range(5):
+            with store.bulk_mode():
+                for i in range(MAX_CURRENT_BELIEFS * 2):
+                    store.add(self._make_belief(
+                        f"cycle{cycle}_e_{i}",
+                        confidence=i / (MAX_CURRENT_BELIEFS * 2),
+                        source_id=f"cycle{cycle}:s:{i}",
+                    ))
+            store.save()
+
+        # In-memory: bounded by cap.
+        current = store.get_current()
+        assert len(current) <= MAX_CURRENT_BELIEFS
+        # No tombstones accumulated.
+        tombstones = [b for b in store._beliefs.values() if b.superseded_by == "pruned"]
+        assert len(tombstones) == 0, f"Tombstone leak: {len(tombstones)} found"
+        # File must not hold 10x cap worth of records.
+        lines = sum(1 for line in path.read_text().splitlines() if line.strip())
+        assert lines <= MAX_CURRENT_BELIEFS * 3, \
+            f"JSONL leak: {lines} lines for cap={MAX_CURRENT_BELIEFS}"
+
+    def test_load_skips_pruned_tombstones(self, tmp_path):
+        """load() must skip records with superseded_by='pruned' to avoid
+        reloading forgotten beliefs into memory.
+
+        Defense-in-depth: even if a file is authored with pruned records
+        (e.g. pre-fix beliefs.jsonl from production), load stays clean.
+        """
+        path = tmp_path / "beliefs.jsonl"
+        active = self._make_belief("active", source_id="s:active")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(active.to_dict()) + "\n")
+            # 100 fake pruned tombstones
+            for i in range(100):
+                f.write(json.dumps({
+                    "belief_id": f"belief-fake{i}",
+                    "entity": f"entity_{i}",
+                    "entity_type": "concept",
+                    "belief_type": "observation",
+                    "content": "pruned content",
+                    "confidence": 0.1,
+                    "source": "learning",
+                    "source_id": f"s:{i}",
+                    "tags": [],
+                    "created_at": 0,
+                    "updated_at": 0,
+                    "revision": 1,
+                    "superseded_by": "pruned",
+                    "related_entities": [],
+                    "evidence": [],
+                }) + "\n")
+
+        store = BeliefStore(path)
+        count = store.load()
+        assert count == 1
+        assert store.get(active.belief_id) is not None
+        assert len(store._beliefs) == 1  # all 100 tombstones skipped
+
+    def test_compact_drops_all_superseded(self, tmp_path):
+        """compact() must write only non-superseded beliefs to disk
+        AND drop tombstones from memory (file and memory stay in sync).
+        """
+        store = self._make_store(tmp_path)
+        for name in ("a", "b", "c"):
+            store.add(self._make_belief(name, source_id=f"s:{name}"))
+        store.save()
+
+        # Revise "a" several times to accumulate superseded markers.
+        a_id = store.get_by_entity("a")[0].belief_id
+        for _ in range(5):
+            revised = store.revise(a_id, 0.9)
+            if revised is not None:
+                a_id = revised.belief_id
+            store.save()
+
+        # Before compact: memory holds superseded markers.
+        superseded_before = [b for b in store._beliefs.values() if b.superseded_by is not None]
+        assert len(superseded_before) > 0
+
+        removed = store.compact()
+        assert removed > 0
+
+        # After compact: no superseded in memory.
+        superseded_after = [b for b in store._beliefs.values() if b.superseded_by is not None]
+        assert len(superseded_after) == 0
+
+        # File line count matches in-memory non-superseded count.
+        path = tmp_path / "beliefs.jsonl"
+        lines = sum(1 for line in path.read_text().splitlines() if line.strip())
+        current_count = sum(1 for b in store._beliefs.values() if b.superseded_by is None)
+        assert lines == current_count
+
+    def test_drop_belief_removes_from_indexes(self, tmp_path):
+        """drop_belief must remove from _beliefs and all three indexes."""
+        store = self._make_store(tmp_path)
+        b = self._make_belief("python", entity_type=EntityType.TOPIC, tags=["lang", "py"])
+        store.add(b)
+
+        assert store.get(b.belief_id) is not None
+        assert b.belief_id in store._by_entity.get("python", [])
+        assert b.belief_id in store._by_entity_type.get(EntityType.TOPIC, [])
+        assert b.belief_id in store._by_tag.get("lang", [])
+
+        assert store.drop_belief(b.belief_id) is True
+        assert store.get(b.belief_id) is None
+        assert b.belief_id not in store._by_entity.get("python", [])
+        assert b.belief_id not in store._by_entity_type.get(EntityType.TOPIC, [])
+        assert b.belief_id not in store._by_tag.get("lang", [])
+
+        # Returning False for unknown id.
+        assert store.drop_belief("does-not-exist") is False
+
+    def test_load_autocompacts_when_heavily_pruned(self, tmp_path):
+        """If a loaded file is dominated by pruned tombstones, load() auto-compacts."""
+        path = tmp_path / "beliefs.jsonl"
+        active = self._make_belief("active", source_id="s:active")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(active.to_dict()) + "\n")
+            # Need > max(10*active, 1000) pruned to trigger auto-compact.
+            for i in range(1500):
+                f.write(json.dumps({
+                    "belief_id": f"belief-old{i}",
+                    "entity": "x",
+                    "entity_type": "concept",
+                    "belief_type": "observation",
+                    "content": "old",
+                    "confidence": 0.1,
+                    "source": "learning",
+                    "source_id": f"s:{i}",
+                    "tags": [],
+                    "created_at": 0,
+                    "updated_at": 0,
+                    "revision": 1,
+                    "superseded_by": "pruned",
+                    "related_entities": [],
+                    "evidence": [],
+                }) + "\n")
+
+        size_before = path.stat().st_size
+        store = BeliefStore(path)
+        store.load()
+        size_after = path.stat().st_size
+
+        assert size_after < size_before // 10, \
+            f"Auto-compact did not shrink file: {size_before} -> {size_after}"
+        lines_after = sum(1 for line in path.read_text().splitlines() if line.strip())
+        assert lines_after == 1
+
 
 # ============================================================
 # belief_builder.py
@@ -450,6 +778,11 @@ class TestBeliefBuilder:
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
             {"id": "file1.txt", "status": "completed", "last_scores": [0.8, 0.9]},
         ])
+        # Trust gate (#2, hardened 2026-06-01): a belief is created only for a
+        # 'completed' file that an INDEPENDENT examiner also verified.
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "file1.txt", "score": 0.85, "grader_independent": True},
+        ])
 
         store = BeliefStore(tmp_path / "beliefs.jsonl")
         count = builder.build_file_beliefs(store)
@@ -458,28 +791,100 @@ class TestBeliefBuilder:
         assert b.belief_type == BeliefType.FACT
         assert b.confidence == pytest.approx(0.85)
 
-    def test_build_file_beliefs_learning(self, tmp_path):
+    def test_build_file_beliefs_completed_weak(self, tmp_path):
+        """Completed but low score -> OBSERVATION belief (not FACT)."""
         builder = self._make_builder(tmp_path)
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
-            {"id": "file2.txt", "status": "learning", "chunks_learned": 3, "total_chunks": 10},
+            {"id": "weak.txt", "status": "completed", "last_scores": [0.5]},
         ])
-
+        # Independently verified (cleared the 0.6 bar) -> passes the trust gate;
+        # the OBSERVATION/weak-confidence comes from the low knowledge_index
+        # last_scores, not the gate.
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "weak.txt", "score": 0.6, "grader_independent": True},
+        ])
         store = BeliefStore(tmp_path / "beliefs.jsonl")
         builder.build_file_beliefs(store)
-        b = store.find_by_entity_and_source("file2.txt", "file:file2.txt")
+        b = store.find_by_entity_and_source("weak.txt", "file:weak.txt")
         assert b.belief_type == BeliefType.OBSERVATION
-        assert b.confidence == pytest.approx(0.15, abs=0.01)  # 3/10 * 0.5
+        assert b.confidence == pytest.approx(0.5)
 
-    def test_build_file_beliefs_new(self, tmp_path):
+    def test_build_file_beliefs_gated_non_completed(self, tmp_path):
+        """Sandbox-first gate (#2, 2026-05-30): only exam-passed ('completed')
+        knowledge becomes a canonical belief. Un-examined statuses (new /
+        learning / learned / exam_failed) produce NO belief."""
         builder = self._make_builder(tmp_path)
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
-            {"id": "file3.txt", "status": "new"},
+            {"id": "f_new.txt", "status": "new"},
+            {"id": "f_learning.txt", "status": "learning",
+             "chunks_learned": 3, "total_chunks": 10},
+            {"id": "f_learned.txt", "status": "learned"},
+            {"id": "f_failed.txt", "status": "exam_failed"},
         ])
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        count = builder.build_file_beliefs(store)
+        assert count == 0  # none are 'completed' -> no canonical belief
+        for fid in ("f_new.txt", "f_learning.txt", "f_learned.txt", "f_failed.txt"):
+            assert store.find_by_entity_and_source(fid, f"file:{fid}") is None
 
+    def test_build_file_beliefs_gated_self_graded(self, tmp_path):
+        """Audit 2026-06-01 #2: a 'completed' file with only a SELF-graded exam
+        (no independent pass) must NOT become a canonical belief -- self-assessed
+        knowledge stays provisional, out of the world model."""
+        builder = self._make_builder(tmp_path)
+        self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
+            {"id": "selfgraded.txt", "status": "completed", "last_scores": [0.99]},
+        ])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "selfgraded.txt", "score": 0.99,
+             "grader_independent": False, "grader_model": "llama3.1:8b"},
+        ])
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        count = builder.build_file_beliefs(store)
+        assert count == 0
+        assert store.find_by_entity_and_source(
+            "selfgraded.txt", "file:selfgraded.txt") is None
+
+    def test_prune_unverified_file_beliefs(self, tmp_path):
+        """Self-healing trust gate (#2, 2026-06-01): a file belief whose file
+        is no longer independently verified is dropped on prune -- the
+        existing-data half of the gate (build only stops NEW ones)."""
+        builder = self._make_builder(tmp_path)
+        self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
+            {"id": "f.txt", "status": "completed", "last_scores": [0.9]},
+        ])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f.txt", "score": 0.9, "grader_independent": True},
+        ])
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        assert builder.build_file_beliefs(store) == 1
+        assert store.find_by_entity_and_source("f.txt", "file:f.txt") is not None
+
+        # f.txt loses independent verification (latest record now self-graded)
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f.txt", "score": 0.99, "grader_independent": False,
+             "grader_model": "llama3.1:8b"},
+        ])
+        dropped = builder.prune_unverified_file_beliefs(store)
+        assert dropped == 1
+        assert store.find_by_entity_and_source("f.txt", "file:f.txt") is None
+
+    def test_prune_guard_skips_on_missing_results(self, tmp_path):
+        """Guard: if exam_results is missing the verified set is untrusted, so
+        prune is SKIPPED -- a transient read failure must never wipe the store."""
+        builder = self._make_builder(tmp_path)
+        self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
+            {"id": "f.txt", "status": "completed", "last_scores": [0.9]},
+        ])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f.txt", "score": 0.9, "grader_independent": True},
+        ])
         store = BeliefStore(tmp_path / "beliefs.jsonl")
         builder.build_file_beliefs(store)
-        b = store.find_by_entity_and_source("file3.txt", "file:file3.txt")
-        assert b.confidence == 0.1
+        (tmp_path / "exam_results.jsonl").unlink()   # results vanish
+        dropped = builder.prune_unverified_file_beliefs(store)
+        assert dropped == 0
+        assert store.find_by_entity_and_source("f.txt", "file:f.txt") is not None
 
     def test_build_file_beliefs_merge_semantics(self, tmp_path):
         """Last record per id wins."""
@@ -487,6 +892,9 @@ class TestBeliefBuilder:
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
             {"id": "file1.txt", "status": "new"},
             {"id": "file1.txt", "status": "completed", "last_scores": [0.9]},
+        ])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "file1.txt", "score": 0.9, "grader_independent": True},
         ])
 
         store = BeliefStore(tmp_path / "beliefs.jsonl")
@@ -543,7 +951,9 @@ class TestBeliefBuilder:
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
             {"id": "f1.txt", "status": "completed", "last_scores": [0.8]},
         ])
-        self._write_jsonl(tmp_path / "exam_results.jsonl", [])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f1.txt", "score": 0.8, "grader_independent": True},
+        ])
 
         store = BeliefStore(tmp_path / "beliefs.jsonl")
         stats = builder.build_all(store)
@@ -566,11 +976,73 @@ class TestBeliefBuilder:
         stats1 = builder.build_all(store)
         total1 = sum(stats1.values())
 
-        stats2 = builder.build_all(store)
+        # force=True bypasses the source watermark so this exercises the
+        # entity+source existence dedup, not the cheap skip path.
+        stats2 = builder.build_all(store, force=True)
         total2 = sum(stats2.values())
         assert total2 == 0  # All already exist
 
         assert store.stats()["total"] == total1
+
+    # -- build_all source watermark (anti-washing-machine, 2026-06-11) --
+    #
+    # The hourly post-EVALUATE rebuild re-created ~32k cap-pruned beliefs
+    # 24/7 with byte-identical sources ("Built beliefs: 11612 topics, 0
+    # files, 20342 concepts" every hour, all night). Unchanged sources =>
+    # identical candidate set => the only effect is resurrecting what the
+    # cap pruned an hour earlier.
+
+    def _watermark_fixture(self, tmp_path):
+        builder = self._make_builder(tmp_path)
+        self._write_jsonl(tmp_path / "longterm_memory.jsonl", [
+            {"source_file": "f1.txt", "tags": ["python"], "key_points": ["KP1"]},
+        ])
+        self._write_jsonl(tmp_path / "knowledge_index.jsonl", [])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [])
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        return builder, store
+
+    def test_build_all_skips_when_sources_unchanged(self, tmp_path):
+        builder, store = self._watermark_fixture(tmp_path)
+        builder.build_all(store)
+
+        # Simulate the cap pruning a belief between builds.
+        pruned = store.find_by_entity_and_source("python", "topic:python")
+        assert store.drop_belief(pruned.belief_id)
+
+        stats = builder.build_all(store)
+
+        # Type-stable zeros: planner gates its log on any(stats.values()).
+        assert stats == {"topics": 0, "files": 0, "concepts": 0}
+        assert not any(stats.values())
+        # The pruned belief was NOT resurrected -- no washing.
+        assert store.find_by_entity_and_source("python", "topic:python") is None
+
+    def test_build_all_reruns_when_a_source_changes(self, tmp_path):
+        builder, store = self._watermark_fixture(tmp_path)
+        builder.build_all(store)
+
+        # Real change: a new learning record lands in longterm memory.
+        self._write_jsonl(tmp_path / "longterm_memory.jsonl", [
+            {"source_file": "f1.txt", "tags": ["python"], "key_points": ["KP1"]},
+            {"source_file": "f2.txt", "tags": ["rust"], "key_points": []},
+        ])
+
+        stats = builder.build_all(store)
+
+        assert stats["topics"] >= 1  # 'rust' created -- pass really ran
+        assert store.find_by_entity_and_source("rust", "topic:rust") is not None
+
+    def test_build_all_force_overrides_watermark(self, tmp_path):
+        builder, store = self._watermark_fixture(tmp_path)
+        builder.build_all(store)
+        pruned = store.find_by_entity_and_source("python", "topic:python")
+        store.drop_belief(pruned.belief_id)
+
+        stats = builder.build_all(store, force=True)
+
+        assert stats["topics"] == 1  # manual rebuild resurrects
+        assert store.find_by_entity_and_source("python", "topic:python") is not None
 
     def test_update_from_exam_pass(self, tmp_path):
         builder = self._make_builder(tmp_path)
@@ -758,6 +1230,23 @@ class TestWorldModelFacade:
         count = wm.load()
         assert count == 0
 
+    def test_facade_exposes_build_not_build_all(self):
+        """Regression guard: planner calls wm.build(), not wm.build_all().
+
+        Historical bug: planner_core called self._world_model.build_all(),
+        which only exists on wm.builder. The call raised AttributeError
+        that was swallowed by try/except, silently preventing belief
+        rebuilds for a full month after LEARN/EVALUATE cycles.
+        """
+        wm = WorldModel()
+        assert hasattr(wm, "build"), "WorldModel facade must expose .build()"
+        assert not hasattr(wm, "build_all"), (
+            "WorldModel should NOT expose .build_all() — that's on .builder. "
+            "If you need it on the facade, add a real method; don't let "
+            "callers get AttributeError swallowed by try/except."
+        )
+        assert callable(wm.build)
+
     def test_build_and_stats(self, tmp_path):
         self._write_jsonl(tmp_path / "longterm_memory.jsonl", [
             {"source_file": "f1.txt", "tags": ["python"], "key_points": ["KP1", "KP2"]},
@@ -765,7 +1254,9 @@ class TestWorldModelFacade:
         self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
             {"id": "f1.txt", "status": "completed", "last_scores": [0.8]},
         ])
-        self._write_jsonl(tmp_path / "exam_results.jsonl", [])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f1.txt", "score": 0.8, "grader_independent": True},
+        ])
 
         wm = WorldModel(
             beliefs_path=tmp_path / "beliefs.jsonl",
@@ -777,6 +1268,34 @@ class TestWorldModelFacade:
         assert stats["topics"] >= 1
         assert stats["files"] >= 1
         assert wm.stats()["total"] > 0
+
+    def test_reconcile_trust_prunes_unverified(self, tmp_path):
+        """Facade reconcile_trust() drops a file belief that lost independent
+        verification and persists -- the startup self-heal (#2, 2026-06-01)."""
+        self._write_jsonl(tmp_path / "knowledge_index.jsonl", [
+            {"id": "f.txt", "status": "completed", "last_scores": [0.9]},
+        ])
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f.txt", "score": 0.9, "grader_independent": True},
+        ])
+        wm = WorldModel(
+            beliefs_path=tmp_path / "beliefs.jsonl",
+            knowledge_index_path=tmp_path / "knowledge_index.jsonl",
+            longterm_memory_path=tmp_path / "longterm_memory.jsonl",
+            exam_results_path=tmp_path / "exam_results.jsonl",
+        )
+        wm.build()
+        wm.save()
+        assert wm.store.find_by_entity_and_source("f.txt", "file:f.txt") is not None
+
+        # f.txt loses independent verification
+        self._write_jsonl(tmp_path / "exam_results.jsonl", [
+            {"file": "f.txt", "score": 0.99, "grader_independent": False,
+             "grader_model": "llama3.1:8b"},
+        ])
+        pruned = wm.reconcile_trust()
+        assert pruned == 1
+        assert wm.store.find_by_entity_and_source("f.txt", "file:f.txt") is None
 
     def test_save_and_reload(self, tmp_path):
         self._write_jsonl(tmp_path / "longterm_memory.jsonl", [
@@ -891,21 +1410,19 @@ class TestPlannerWorldModelIntegration:
         )
 
         # Mock goal store
-        goal_store = MagicMock()
+        goal_store = specced(GoalStore)
         goal_store.get_active.return_value = []
-        goal_store.create = MagicMock()
-        goal_store.save = MagicMock()
         planner.set_goal_store(goal_store)
 
         # Mock homeostasis - ACTIVE mode
-        hcore = MagicMock()
-        state_mock = MagicMock()
+        hcore = specced(HomeostasisCore)
+        state_mock = specced(SystemState, mode=MagicMock())
         state_mock.mode.value = "active"
         hcore.get_state.return_value = state_mock
         planner.set_homeostasis_core(hcore)
 
         # Mock knowledge analyzer with topics
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_topic_file_map.return_value = {
             "python": ["f1.txt", "f2.txt"],  # 2 unfinished
             "math": ["f3.txt"],               # 1 unfinished
@@ -918,7 +1435,7 @@ class TestPlannerWorldModelIntegration:
         planner.set_knowledge_analyzer(analyzer)
 
         # Mock world model - math has lower confidence
-        wm = MagicMock()
+        wm = specced(WorldModel, query=specced(WorldModelQuery))
         wm.query.get_topic_confidence_map.return_value = {
             "python": 0.8,
             "math": 0.2,
@@ -943,19 +1460,17 @@ class TestPlannerWorldModelIntegration:
             decisions_path=tmp_path / "decisions.jsonl",
         )
 
-        goal_store = MagicMock()
+        goal_store = specced(GoalStore)
         goal_store.get_active.return_value = []
-        goal_store.create = MagicMock()
-        goal_store.save = MagicMock()
         planner.set_goal_store(goal_store)
 
-        hcore = MagicMock()
-        state_mock = MagicMock()
+        hcore = specced(HomeostasisCore)
+        state_mock = specced(SystemState, mode=MagicMock())
         state_mock.mode.value = "active"
         hcore.get_state.return_value = state_mock
         planner.set_homeostasis_core(hcore)
 
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_topic_file_map.return_value = {
             "python": ["f1.txt", "f2.txt", "f3.txt"],  # 3 unfinished
             "math": ["f4.txt"],                          # 1 unfinished
@@ -978,7 +1493,7 @@ class TestPlannerWorldModelIntegration:
 
     def test_finalize_plan_updates_beliefs_after_exam(self, tmp_path):
         """After exam success, world model beliefs should be updated."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
         from agent_core.planner.planner_core import PlannerCore
         from agent_core.planner.planner_model import ActionType
 
@@ -987,11 +1502,11 @@ class TestPlannerWorldModelIntegration:
             decisions_path=tmp_path / "decisions.jsonl",
         )
 
-        wm = MagicMock()
+        wm = specced(WorldModel, query=specced(WorldModelQuery))
         planner.set_world_model(wm)
 
         # Mock executor to return exam success
-        planner.executor = MagicMock()
+        planner.executor = specced(ActionExecutor)
         planner.executor.execute.return_value = {
             "success": True,
             "file": "f1.txt",
@@ -1013,7 +1528,6 @@ class TestPlannerWorldModelIntegration:
 
     def test_finalize_plan_no_belief_update_on_noop(self, tmp_path):
         """NOOP actions don't trigger belief updates."""
-        from unittest.mock import MagicMock
         from agent_core.planner.planner_core import PlannerCore
         from agent_core.planner.planner_model import ActionType, create_plan
 
@@ -1022,10 +1536,10 @@ class TestPlannerWorldModelIntegration:
             decisions_path=tmp_path / "decisions.jsonl",
         )
 
-        wm = MagicMock()
+        wm = specced(WorldModel, query=specced(WorldModelQuery))
         planner.set_world_model(wm)
 
-        planner.executor = MagicMock()
+        planner.executor = specced(ActionExecutor)
         planner.executor.execute.return_value = {"success": True}
 
         plan = create_plan(
@@ -1170,20 +1684,24 @@ class TestCompaction:
         store.add(b1)
         store.save()
 
-        # Revise creates superseded record
+        # Revise creates superseded record. _compact_if_needed may fire
+        # automatically inside save() once the file grows past the
+        # current-count threshold — so we check the invariant rather
+        # than the exact transient line count.
         store.revise(b1.belief_id, 0.8)
         store.save()
 
-        # JSONL should have 3 lines (original + superseded + revised)
-        lines_before = len(open(tmp_path / "beliefs.jsonl").readlines())
-        assert lines_before == 3
+        # Final invariant: file holds only non-superseded records, and
+        # line count matches the in-memory current count.
+        lines = len(open(tmp_path / "beliefs.jsonl").readlines())
+        current = sum(1 for b in store._beliefs.values() if b.superseded_by is None)
+        assert lines == current
+        assert current == 1  # the revised belief
 
-        removed = store.compact()
-        assert removed > 0
-
-        # After compaction: only 2 records (superseded + revised in-memory)
+        # A further compact() is a no-op in this state (nothing to drop).
+        store.compact()
         lines_after = len(open(tmp_path / "beliefs.jsonl").readlines())
-        assert lines_after < lines_before
+        assert lines_after == 1
 
     def test_compact_preserves_current_beliefs(self, tmp_path):
         store = BeliefStore(tmp_path / "beliefs.jsonl")

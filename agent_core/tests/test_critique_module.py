@@ -7,6 +7,9 @@ import pytest
 
 from agent_core.modules.critique_module import CritiqueModule
 from agent_core.critic.critique_model import CritiqueReport, CritiqueFinding
+from agent_core.critic import CriticAgent
+from agent_core.registry.shared_context import SharedContext
+from agent_core.tests.spec_helpers import specced
 
 
 def _make_finding(**overrides):
@@ -48,8 +51,7 @@ def _make_report(**overrides):
 class TestCritiqueModule:
     def _make_module(self, critic=None):
         mod = CritiqueModule()
-        ctx = MagicMock()
-        ctx.critic_agent = critic
+        ctx = specced(SharedContext, critic_agent=critic)
         mod.init(ctx)
         return mod
 
@@ -70,7 +72,7 @@ class TestCritiqueModule:
         assert "Nie zainicjalizowano" in out
 
     def test_no_report_shows_message(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = None
         mod = self._make_module(critic=critic)
         mod._cmd_critique([])
@@ -78,7 +80,7 @@ class TestCritiqueModule:
         assert "Brak raportow" in out
 
     def test_show_last_report(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = _make_report()
         mod = self._make_module(critic=critic)
         mod._cmd_critique([])
@@ -89,7 +91,7 @@ class TestCritiqueModule:
         assert "verify" in out
 
     def test_show_report_with_error(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = _make_report(error="test error")
         mod = self._make_module(critic=critic)
         mod._cmd_critique([])
@@ -97,7 +99,7 @@ class TestCritiqueModule:
         assert "BLAD: test error" in out
 
     def test_show_report_with_summary(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = _make_report(
             llm_summary="Wiedza wymaga weryfikacji"
         )
@@ -107,7 +109,7 @@ class TestCritiqueModule:
         assert "Wiedza wymaga weryfikacji" in out
 
     def test_run_critique(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         report = _make_report()
         critic.run_critique.return_value = report
         mod = self._make_module(critic=critic)
@@ -118,7 +120,7 @@ class TestCritiqueModule:
         critic.run_critique.assert_called_once_with(trigger="manual")
 
     def test_run_critique_error(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.run_critique.return_value = _make_report(error="boom", findings=[])
         mod = self._make_module(critic=critic)
         mod._cmd_critique(["run"])
@@ -126,7 +128,7 @@ class TestCritiqueModule:
         assert "Blad: boom" in out
 
     def test_status(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_status.return_value = {
             "available": True,
             "last_critique_ts": time.time() - 3600,
@@ -143,7 +145,7 @@ class TestCritiqueModule:
         assert "8h" in out
 
     def test_status_never_run(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_status.return_value = {
             "available": True,
             "last_critique_ts": 0,
@@ -158,7 +160,7 @@ class TestCritiqueModule:
         assert "nigdy" in out
 
     def test_findings_detail(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = _make_report()
         mod = self._make_module(critic=critic)
         mod._cmd_critique(["findings"])
@@ -170,7 +172,7 @@ class TestCritiqueModule:
         assert "Zweryfikuj" in out
 
     def test_findings_empty(self, capsys):
-        critic = MagicMock()
+        critic = specced(CriticAgent)
         critic.get_last_report.return_value = None
         mod = self._make_module(critic=critic)
         mod._cmd_critique(["findings"])

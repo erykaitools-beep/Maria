@@ -22,6 +22,11 @@ EXPLORE_MIN_FREQ = 3    # minimum tag frequency for EXPLORE
 TAG_MIN_LEN = 3         # skip very short tags
 HINTS_FILENAME = "meta_data/topic_hints.jsonl"
 
+# R2.1 (2026-04-29): hint fail-and-skip threshold. After this many fetch
+# sessions returned 0 articles for a hint topic, mark it consumed so it
+# stops re-appearing at top of the suggester queue.
+DEFAULT_FAIL_THRESHOLD = 3
+
 
 class TopicSuggester:
     """
@@ -178,6 +183,58 @@ class TopicSuggester:
                     f.write(line + "\n")
         except IOError as e:
             logger.warning(f"Could not mark hint consumed: {e}")
+
+    def mark_hint_unsuccessful(
+        self, topic: str, threshold: int = DEFAULT_FAIL_THRESHOLD,
+    ) -> None:
+        """Increment failed_attempts for a hint; consume it after threshold.
+
+        R2.1 (2026-04-29): wikipedia search returns 0 titles for many K12
+        hints even after the searchable-shape filter. Without this lifecycle
+        the same top-priority hints came back every cycle wasting 17s each.
+
+        After `threshold` unsuccessful sessions, the hint is marked consumed
+        with reason `failed_<N>_attempts` and stops appearing in suggestions.
+        Topic match is case-insensitive lowercase-stripped, mirroring
+        deduplication in RecommendationApplier.
+        """
+        if not self._hints_path.exists():
+            return
+        target = (topic or "").lower().strip()
+        if not target:
+            return
+
+        try:
+            lines: List[str] = []
+            with open(self._hints_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        h = json.loads(line)
+                    except json.JSONDecodeError:
+                        lines.append(line)
+                        continue
+
+                    ht = (h.get("topic") or "").lower().strip()
+                    if ht == target and not h.get("consumed", False):
+                        fa = int(h.get("failed_attempts", 0)) + 1
+                        h["failed_attempts"] = fa
+                        if fa >= threshold:
+                            h["consumed"] = True
+                            h["consumed_reason"] = f"failed_{threshold}_attempts"
+                            logger.info(
+                                f"[TOPIC_SUGGEST] Hint exhausted after {fa} "
+                                f"unsuccessful attempts: {topic[:50]}"
+                            )
+                    lines.append(json.dumps(h, ensure_ascii=False))
+
+            with open(self._hints_path, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(line + "\n")
+        except IOError as e:
+            logger.warning(f"Could not mark hint unsuccessful: {e}")
 
     def _expand_topics(self) -> List[Dict[str, Any]]:
         """

@@ -11,14 +11,32 @@ Every NIM call updates token budget automatically.
 """
 
 import logging
+import os
 import re
 import time
+from contextlib import nullcontext
 from typing import Dict, Any, Optional
+
+from agent_core.llm.execution_budget import (
+    call_with_timeout,
+    get_timeout_for_role,
+    get_ollama_client,
+)
 
 try:
     import ollama as ollama_lib
 except ImportError:
     ollama_lib = None
+
+# httpx.TimeoutException is what the timeout-aware ollama client raises on a stall.
+# It is NOT a subclass of the builtin TimeoutError (only of Exception), so the
+# `except TimeoutError` guards below must name it explicitly or a real HTTP
+# read-timeout would escape past the freeze-degradation handlers.
+try:
+    import httpx as _httpx
+    _OLLAMA_TIMEOUT_EXC = (TimeoutError, _httpx.TimeoutException)
+except Exception:  # pragma: no cover - httpx ships with ollama
+    _OLLAMA_TIMEOUT_EXC = (TimeoutError,)
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +182,8 @@ class LLMRouter:
         return bool(self._PERSONAL_PATTERNS.search(prompt))
 
     def _ask_once(
-        self, prompt: str, temperature: float = 0.3, **kwargs
+        self, prompt: str, temperature: float = 0.3,
+        force_json: bool = False, **kwargs
     ) -> str:
         """
         One-shot question - uses NIM if available and budget OK.
@@ -172,6 +191,7 @@ class LLMRouter:
         Args:
             prompt: User prompt
             temperature: Sampling temperature
+            force_json: Request server-side JSON output (propagates to NIM/Ollama)
 
         Returns:
             Response text
@@ -180,7 +200,8 @@ class LLMRouter:
         if self._should_use_nim():
             try:
                 result = self.nim._ask_once(
-                    prompt, temperature=temperature, **kwargs
+                    prompt, temperature=temperature,
+                    force_json=force_json, **kwargs
                 )
                 self._record_nim_usage()
                 self._nim_calls += 1
@@ -191,12 +212,30 @@ class LLMRouter:
                 logger.warning(f"NIM _ask_once failed, falling back to Ollama: {e}")
                 self._nim_fallbacks += 1
 
-        # Fallback to Ollama
+        # Fallback to Ollama -- bounded so a wedged Ollama cannot hang the caller
+        # forever (the 2026-06-02 freeze went through unbounded _ask_once paths).
         reason = "nim_fallback" if self._nim_fallbacks > 0 else "nim_unavailable_or_budget"
         self._ollama_calls += 1
-        result = self.ollama._ask_once(
-            prompt, temperature=temperature, **kwargs
-        )
+        # This Ollama fallback runs a heavy LOCAL model (learn/gap-analysis).
+        # Serialize it on the scheduler's heavy mutex so it never overlaps the
+        # exam answer / K12 on the CPU. No-op until SCHEDULER_ENFORCE_MUTEX is set.
+        # getattr: bare/test routers built via __new__ may lack the attribute.
+        _scheduler = getattr(self, "_model_scheduler", None)
+        _guard = (_scheduler.heavy_lease("ask_once_ollama_fallback")
+                  if _scheduler is not None else nullcontext())
+        try:
+            with _guard:
+                result = call_with_timeout(
+                    lambda: self.ollama._ask_once(
+                        prompt, temperature=temperature,
+                        force_json=force_json, **kwargs
+                    ),
+                    timeout_sec=get_timeout_for_role("executor"),
+                    label="router._ask_once(ollama)",
+                )
+        except _OLLAMA_TIMEOUT_EXC:
+            logger.warning("[LLMRouter] _ask_once Ollama fallback timed out -> empty")
+            result = ""
         self._record_tape("learning", self.ollama.model, prompt, result, start,
                           route_reason=reason)
         return result
@@ -253,6 +292,23 @@ class LLMRouter:
             return False
 
         return True
+
+    def _is_nim_primary_role(self, role_name: str) -> bool:
+        """
+        Check if given role should route to NIM first (before local scheduler).
+
+        Controlled by env var NIM_PRIMARY_ROLES (comma-separated role names).
+        Empty/unset disables NIM-first routing for ask_as_role().
+
+        Why: thinking models (e.g. glm-5.1) give qualitatively better
+        reasoning for planner/learning/critic roles vs small local models.
+        Fallback to scheduler on NIM failure preserves resilience.
+        """
+        primary = os.environ.get("NIM_PRIMARY_ROLES", "").strip()
+        if not primary:
+            return False
+        roles = {r.strip() for r in primary.split(",") if r.strip()}
+        return role_name in roles and self._should_use_nim()
 
     def _record_nim_usage(self) -> None:
         """Record token usage and request timestamp from last NIM call."""
@@ -325,6 +381,42 @@ class LLMRouter:
         """
         self._model_scheduler = scheduler
 
+    def get_model_scheduler(self):
+        """Return the attached ModelScheduler (or None).
+
+        Lets heavy LOCAL paths that call Ollama directly (e.g. the exam student
+        answer in teacher_module) reach scheduler.heavy_lease() to serialize on
+        the shared heavy mutex instead of bypassing it.
+        """
+        return self._model_scheduler
+
+    def _bounded_ask_once(
+        self, prompt: str, temperature: float, role_name: str
+    ) -> str:
+        """Ollama fallback bounded by the role timeout.
+
+        ask_as_role() falls back to a direct ollama._ask_once() whenever the
+        model scheduler cannot serve a role. Those calls used to be unbounded:
+        on 2026-06-02 a wedged Ollama turned one into a permanent block that
+        froze the entire tick loop for 10.5h. call_with_timeout() cannot cancel
+        the underlying request, but it hands control back to the caller (and so
+        the tick loop) after the role deadline; the empty string then degrades
+        gracefully through the existing parse/fallback paths. Non-timeout errors
+        still propagate exactly as before.
+        """
+        try:
+            return call_with_timeout(
+                lambda: self.ollama._ask_once(prompt, temperature=temperature),
+                timeout_sec=get_timeout_for_role(role_name),
+                label=f"ask_as_role_fallback({role_name})",
+            )
+        except _OLLAMA_TIMEOUT_EXC:
+            logger.warning(
+                "[LLMRouter] Ollama fallback for %s exceeded deadline -> empty",
+                role_name,
+            )
+            return ""
+
     def ask_as_role(
         self, role, prompt: str, temperature: float = 0.3
     ) -> str:
@@ -347,6 +439,27 @@ class LLMRouter:
         """
         role_name = role.value if hasattr(role, "value") else str(role)
 
+        # NIM-first for primary cognitive roles (glm-5.1 test mode).
+        # On failure: fall through to existing scheduler/Ollama path.
+        if self._is_nim_primary_role(role_name):
+            try:
+                nim_start = time.time()
+                text = self.nim._ask_once(prompt, temperature=temperature)
+                self._record_nim_usage()
+                self._nim_calls += 1
+                self._record_tape(
+                    role_name, self.nim.model, prompt, text, nim_start,
+                    route_reason=f"nim_primary:{role_name}",
+                )
+                return text
+            except Exception as e:
+                logger.warning(
+                    f"[LLMRouter] NIM primary failed for {role_name}: {e}, "
+                    f"falling back to local scheduler"
+                )
+                self._nim_fallbacks += 1
+                # Continue to scheduler/Ollama path below
+
         # Normalize string role to ModelRole enum for scheduler
         if isinstance(role, str) and self._model_scheduler is not None:
             try:
@@ -359,7 +472,7 @@ class LLMRouter:
             # No scheduler - fall through to default Ollama
             self._ollama_calls += 1
             ask_start = time.time()
-            text = self.ollama._ask_once(prompt, temperature=temperature)
+            text = self._bounded_ask_once(prompt, temperature, role_name)
             self._record_tape(role_name, self.ollama.model, prompt, text, ask_start,
                               route_reason="no_scheduler_fallback_ollama")
             return text
@@ -373,7 +486,7 @@ class LLMRouter:
             )
             self._ollama_calls += 1
             ask_start = time.time()
-            text = self.ollama._ask_once(prompt, temperature=temperature)
+            text = self._bounded_ask_once(prompt, temperature, role_name)
             self._record_tape(role_name, self.ollama.model, prompt, text, ask_start,
                               route_reason=f"scheduler_fail:{result.reason}")
             return text
@@ -384,8 +497,15 @@ class LLMRouter:
             timeout = get_timeout_for_role(role_name)
 
             start = time.time()
+            # Timeout-aware client (NOT the bare ollama_lib): this scheduler-success
+            # branch is the PRIMARY live cognitive path on the tick thread. The bare
+            # module client has no socket timeout, so the 2026-06-02 wedge here left
+            # an immortal zombie holding a pool slot even though call_with_timeout
+            # unblocked the caller. The shared client's httpx read-timeout tears the
+            # socket down so the zombie actually dies and frees its slot.
+            _client = get_ollama_client()
             resp = call_with_timeout(
-                lambda: ollama_lib.chat(
+                lambda: _client.chat(
                     model=result.ollama_tag,
                     messages=[{"role": "user", "content": prompt}],
                     options={"temperature": temperature},
@@ -408,7 +528,7 @@ class LLMRouter:
             )
             self._ollama_calls += 1
             ask_start = time.time()
-            text = self.ollama._ask_once(prompt, temperature=temperature)
+            text = self._bounded_ask_once(prompt, temperature, role_name)
             self._record_tape(role_name, self.ollama.model, prompt, text, ask_start,
                               success=False, route_reason=f"scheduler_inference_fail:{e}")
             return text
@@ -463,9 +583,10 @@ class LLMRouter:
             except Exception:
                 self._nim_fallbacks += 1
 
-        # Fallback: Ollama
+        # Fallback: Ollama -- bounded (see _bounded_ask_once); a wedged Ollama
+        # must not hang an encyclopedia lookup that may run on the tick path.
         self._ollama_calls += 1
-        result = self.ollama._ask_once(prompt, temperature=0.3)
+        result = self._bounded_ask_once(prompt, 0.3, "encyclopedia")
         self._record_tape("encyclopedia", self.ollama.model, prompt, result, start)
         return result
 

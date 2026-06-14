@@ -11,6 +11,7 @@ ADR-013: Rule-based, zero LLM, deterministic
 import json
 import logging
 import math
+import re
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,12 +40,33 @@ SECONDS_PER_DAY = 86400.0
 
 def compact_jsonl(store) -> int:
     """
-    Rewrite beliefs.jsonl with only current in-memory state.
-    Removes all superseded and pruned records.
+    Rewrite beliefs.jsonl with only non-superseded beliefs.
+    Drops all tombstones (superseded_by set) from disk.
+
+    Delegates to BeliefStore.compact() when available: that path is ATOMIC
+    (tmp file + os.replace -- a crash mid-rewrite cannot truncate the live
+    beliefs.jsonl) and also drops tombstones from MEMORY, so stats() stops
+    counting revision-chain ghosts. The manual fallback below remains for
+    duck-typed stores without compact() (tests) and is atomic as well.
+
+    Edge note: store.compact() does NOT create the file when it never
+    existed (unsaved store) -- beliefs simply stay dirty until the next
+    save(). Production stores always have the file (load()/build()+save()
+    at startup), so this only shows up in tests.
 
     Returns: number of records removed.
     """
-    # Count before
+    compact = getattr(store, "compact", None)
+    if callable(compact):
+        removed = compact()
+        if removed > 0:
+            logger.info(
+                f"[BeliefStore] Compacted via store.compact(): "
+                f"{removed} records removed"
+            )
+        return removed
+
+    # Fallback: count before
     old_count = 0
     path = store._path
     if path.exists():
@@ -54,10 +76,12 @@ def compact_jsonl(store) -> int:
         except IOError:
             old_count = 0
 
-    # Rewrite with only current beliefs
+    # Rewrite with only current beliefs (drops tombstones)
     _rewrite_jsonl(store)
 
-    new_count = len(store._beliefs)
+    new_count = sum(
+        1 for b in store._beliefs.values() if b.superseded_by is None
+    )
     removed = max(0, old_count - new_count)
     if removed > 0:
         logger.info(f"[BeliefStore] Compacted: {old_count} -> {new_count} records ({removed} removed)")
@@ -65,12 +89,21 @@ def compact_jsonl(store) -> int:
 
 
 def _rewrite_jsonl(store) -> None:
-    """Rewrite JSONL from in-memory state."""
+    """Rewrite JSONL from in-memory state, excluding superseded records.
+
+    Atomic: writes to a tmp file then os.replace()s it over the live path,
+    so a crash mid-rewrite can never truncate beliefs.jsonl (the soul file).
+    Mirrors BeliefStore.compact(); kept only as the duck-typed fallback.
+    """
     path = store._path
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         for belief in store._beliefs.values():
+            if belief.superseded_by is not None:
+                continue
             f.write(json.dumps(belief.to_dict(), ensure_ascii=False) + "\n")
+    tmp_path.replace(path)
     store._dirty.clear()
 
 
@@ -175,32 +208,13 @@ def smart_prune(store, cap: int = 2000) -> int:
     ]
     scored.sort(key=lambda x: x[0])
 
-    # Prune lowest-scored
+    # Prune lowest-scored: drop from memory entirely (no tombstones).
+    # JSONL retains the historical records until the next compact().
     to_prune = len(current) - cap
     pruned = 0
     for score, belief in scored[:to_prune]:
-        # Mark as superseded with "pruned"
-        from agent_core.world_model.belief_model import Belief as _B
-        superseded = _B(
-            belief_id=belief.belief_id,
-            entity=belief.entity,
-            entity_type=belief.entity_type,
-            belief_type=belief.belief_type,
-            content=belief.content,
-            confidence=belief.confidence,
-            source=belief.source,
-            source_id=belief.source_id,
-            tags=belief.tags,
-            created_at=belief.created_at,
-            updated_at=belief.updated_at,
-            revision=belief.revision,
-            superseded_by="pruned",
-            related_entities=belief.related_entities,
-            evidence=belief.evidence,
-        )
-        store._beliefs[belief.belief_id] = superseded
-        store._dirty.add(belief.belief_id)
-        pruned += 1
+        if store.drop_belief(belief.belief_id):
+            pruned += 1
 
     if pruned > 0:
         logger.info(f"[BeliefStore] Smart-pruned {pruned} beliefs (cap={cap})")
@@ -302,14 +316,62 @@ def find_exact_duplicates(store) -> List[Tuple[str, str]]:
     return pairs
 
 
+_DIGIT_RUNS = re.compile(r"\d+")
+
+
+def _is_template_pair(a, b) -> bool:
+    """
+    True when the two contents collapse to the SAME text once each
+    belief's own entity is removed and digit runs are normalized --
+    builder-style stat records ("Temat 'X' wystepuje w N plikach",
+    "Plik 'Y' opanowany (score Z%)") where the entity IS the record
+    identity, so embedding similarity measures the shared template, not
+    duplicate knowledge. All 5 pairs in the first live OBSERVE batch
+    (2026-06-11) were these; merging would have deleted real records.
+
+    Both entities must actually occur in their own content: when they do
+    not, equal signatures mean the contents are genuinely near-identical
+    -- a real duplicate, which this guard must NOT block.
+    """
+    if not a.entity or not b.entity:
+        return False
+    if a.entity not in a.content or b.entity not in b.content:
+        return False
+    sig_a = _DIGIT_RUNS.sub("#", a.content.replace(a.entity, "\x00"))
+    sig_b = _DIGIT_RUNS.sub("#", b.content.replace(b.entity, "\x00"))
+    return sig_a == sig_b
+
+
 def find_semantic_duplicates(
     store,
     semantic_memory,
-    similarity_threshold: float = 0.85,
+    similarity_threshold: float = 0.95,
+    scan_limit: Optional[int] = None,
 ) -> List[Tuple[str, str, float]]:
     """
     Find pairs of beliefs with semantically similar content.
     Uses SemanticMemory search on the "beliefs" namespace.
+
+    Hit resolution goes via metadata["entity"] ONLY: entity and content are
+    revise-stable, while revise()/NREM2-boost/decay mint a NEW belief_id on
+    every revision -- an id-keyed index goes stale within one sleep cycle
+    AND re-dirties ~2000 vectors per restart (found 2026-06-10), which is
+    why belief_id is deliberately NOT part of the metadata contract.
+
+    Default threshold 0.95, NOT lower: measured on the live store
+    (2026-06-10), median pairwise cosine between belief vectors is 0.733
+    and p99 is 0.875 -- a 0.85 threshold would pair 97.8% of all beliefs.
+    At 0.95 the matched pairs are genuine paraphrases. Builder stat
+    records pairing only via their shared template are filtered out by
+    _is_template_pair regardless of similarity.
+
+    scan_limit caps how many beliefs are QUERIED per run. Candidate mix:
+    half newest-created (fresh beliefs from build_all are the likeliest
+    dups), half random from the rest -- revise() preserves created_at, so a
+    pure newest-first window would re-query the SAME beliefs forever and
+    96% of the old backlog would never be reached. Each query is a linear
+    scan of the namespace (~0.1-0.8s pure-Python), so an uncapped sweep
+    over ~2000 beliefs would take tens of minutes.
 
     Returns: List of (keep_id, remove_id, similarity) sorted by similarity desc.
     """
@@ -317,34 +379,123 @@ def find_semantic_duplicates(
     if not current or not semantic_memory:
         return []
 
+    if scan_limit is not None and scan_limit <= 0:
+        logger.info(
+            "[BeliefStore] Semantic dedup: scan_limit=%s -- sweep disabled",
+            scan_limit,
+        )
+        return []
+
+    # Entity -> current belief (highest confidence wins on collision).
+    by_entity = {}
+    for b in current:
+        prev = by_entity.get(b.entity)
+        if prev is None or b.confidence > prev.confidence:
+            by_entity[b.entity] = b
+
+    newest = sorted(current, key=lambda b: b.created_at, reverse=True)
+    if scan_limit is not None and scan_limit < len(newest):
+        import random
+        half = scan_limit // 2
+        head = newest[:half]
+        tail = newest[half:]
+        backlog = random.sample(tail, min(scan_limit - half, len(tail)))
+        candidates = head + backlog
+    else:
+        candidates = newest
+
     pairs = []
     seen_pairs = set()
+    total_hits = 0
+    resolved_hits = 0
+    search_errors = 0
+    template_skips = 0
 
-    for belief in current:
+    for belief in candidates:
         try:
             results = semantic_memory.search(
                 belief.content, namespace="beliefs", top_k=3
             )
+            total_hits += len(results)
             for result in results:
-                sim = result.get("score", 0.0)
-                other_id = result.get("metadata", {}).get("belief_id", "")
-                if (
-                    sim >= similarity_threshold
-                    and other_id
-                    and other_id != belief.belief_id
-                ):
-                    pair_key = tuple(sorted([belief.belief_id, other_id]))
-                    if pair_key not in seen_pairs:
-                        seen_pairs.add(pair_key)
-                        # Keep higher confidence
-                        other = store.get(other_id)
-                        if other and other.superseded_by is None:
-                            if belief.confidence >= other.confidence:
-                                pairs.append((belief.belief_id, other_id, sim))
-                            else:
-                                pairs.append((other_id, belief.belief_id, sim))
+                # Real SemanticMemory API: SearchResult is a __slots__ object
+                # (entry, score), entry.metadata is the dict. The old
+                # result.get(...) raised AttributeError on every hit and the
+                # except below swallowed it -> this function silently returned
+                # [] forever (wired-but-dead, found 2026-06-10).
+                sim = getattr(result, "score", 0.0)
+                entry = getattr(result, "entry", None)
+                metadata = getattr(entry, "metadata", None) or {}
+
+                # Resolve the hit to a CURRENT belief via its stable entity.
+                other = by_entity.get(metadata.get("entity", ""))
+                if other is None:
+                    continue
+                resolved_hits += 1
+
+                if sim < similarity_threshold:
+                    continue
+                if other.belief_id == belief.belief_id:
+                    continue  # the query belief's own vector
+                if other.entity == belief.entity:
+                    # Same-entity collision: the shared vector carries only
+                    # ONE of the contents (last-wins index), so the score
+                    # never compared these two texts -- merging on it would
+                    # destroy an uncompared belief. Exact dedup owns the
+                    # same-entity case.
+                    continue
+                if _is_template_pair(belief, other):
+                    # Same sentence about two different subjects: merging
+                    # would delete one subject's record outright.
+                    template_skips += 1
+                    continue
+                pair_key = tuple(sorted([belief.belief_id, other.belief_id]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                # Keep higher confidence
+                if belief.confidence >= other.confidence:
+                    pairs.append((belief.belief_id, other.belief_id, sim))
+                else:
+                    pairs.append((other.belief_id, belief.belief_id, sim))
         except Exception:
+            search_errors += 1
             continue
+
+    if total_hits == 0:
+        # Observability over silence. NOTE: a dead embedding backend does
+        # NOT raise -- embed() returns [] and search returns no hits -- so
+        # backend availability must be checked explicitly to avoid blaming
+        # an unpopulated namespace for an Ollama outage.
+        backend_up = bool(getattr(semantic_memory, "available", True))
+        if search_errors or not backend_up:
+            logger.info(
+                "[BeliefStore] Semantic dedup: 0 hits, backend_available=%s, "
+                "search_errors=%d/%d -- embedding backend problem likely",
+                backend_up, search_errors, len(candidates)
+            )
+        else:
+            logger.info(
+                "[BeliefStore] Semantic dedup: 0 hits across %d beliefs -- "
+                "'beliefs' namespace likely unpopulated", len(candidates)
+            )
+    elif resolved_hits == 0:
+        # Hits exist but none resolve to a current belief: the namespace
+        # predates the entity metadata contract (2026-06-10) or the index
+        # is fully stale. THIS was the silent killer before the contract:
+        # searches returned plenty, dedup matched nothing.
+        logger.info(
+            "[BeliefStore] Semantic dedup: %d hits but 0 resolvable to "
+            "current beliefs -- index lacks entity metadata "
+            "(re-index needed)", total_hits
+        )
+
+    if template_skips:
+        logger.info(
+            "[BeliefStore] Semantic dedup: %d template pair(s) skipped "
+            "(content differs only by own entity / digit runs)",
+            template_skips,
+        )
 
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs
@@ -434,15 +585,72 @@ def merge_duplicate_pair(store, keep_id: str, remove_id: str) -> bool:
     return True
 
 
+# Semantic dedup safety rails (2026-06-10). Rollout is three-step (house
+# flag->observe->cutover discipline), because merging by embedding
+# similarity rewrites the belief soul irreversibly (compact() drops the
+# tombstones in the same maintenance pass):
+#   unset/off       -> semantic phase skipped entirely
+#   =observe        -> find pairs and LOG them at INFO, merge NOTHING
+#                      (the calibration data the OBSERVE phase needs)
+#   =1/true/yes/on  -> merge for real, capped per run
+# Flags are read live from os.environ, but the daemon's environment comes
+# from systemd EnvironmentFile (.env) frozen at start -- arming requires a
+# .env edit PLUS a service restart; an SSH-shell export is a no-op.
+# Caps bound the blast radius of a bad threshold: at most
+# MAX_SEMANTIC_MERGES_PER_RUN merges and SEMANTIC_DEDUP_SCAN_LIMIT queried
+# beliefs per run; SEMANTIC_DEDUP_THRESHOLD overrides the 0.95 default.
+SEMANTIC_DEDUP_FLAG = "SEMANTIC_DEDUP_ENABLED"
+MAX_SEMANTIC_MERGES_PER_RUN = 20
+DEFAULT_SEMANTIC_SCAN_LIMIT = 150
+DEFAULT_SEMANTIC_THRESHOLD = 0.95
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _semantic_dedup_mode() -> str:
+    """Resolve the rollout mode: 'off' | 'observe' | 'merge'."""
+    import os
+    raw = os.environ.get(SEMANTIC_DEDUP_FLAG, "").strip().lower()
+    if raw in ("observe", "dry_run", "dry-run"):
+        return "observe"
+    if raw in _TRUTHY:
+        return "merge"
+    return "off"
+
+
+def _semantic_scan_limit() -> int:
+    import os
+    try:
+        value = int(os.environ.get(
+            "SEMANTIC_DEDUP_SCAN_LIMIT", DEFAULT_SEMANTIC_SCAN_LIMIT
+        ))
+    except (TypeError, ValueError):
+        return DEFAULT_SEMANTIC_SCAN_LIMIT
+    # Negative would mean an UNBOUNDED sweep (tens of minutes in the
+    # planner thread) -- clamp to 0 (= sweep disabled, logged as such).
+    return max(0, value)
+
+
+def _semantic_threshold() -> float:
+    import os
+    try:
+        return float(os.environ.get(
+            "SEMANTIC_DEDUP_THRESHOLD", DEFAULT_SEMANTIC_THRESHOLD
+        ))
+    except (TypeError, ValueError):
+        return DEFAULT_SEMANTIC_THRESHOLD
+
+
 def deduplicate(
     store,
     semantic_memory=None,
-    similarity_threshold: float = 0.85,
+    similarity_threshold: Optional[float] = None,
 ) -> int:
     """
     Full dedup pass: find duplicates and merge them.
 
-    If semantic_memory is available, uses embedding similarity.
+    If semantic_memory is available AND SEMANTIC_DEDUP_ENABLED is armed,
+    uses embedding similarity: =observe logs would-be pairs WITHOUT
+    merging; =1/true/yes/on merges (capped: scan limit + max merges/run).
     Always runs exact matching as baseline.
 
     Returns: number of beliefs merged (removed).
@@ -455,15 +663,59 @@ def deduplicate(
         if merge_duplicate_pair(store, keep_id, remove_id):
             merged += 1
 
-    # Phase 2: semantic duplicates (optional)
-    if semantic_memory:
+    # Phase 2: semantic duplicates (optional, flag-gated)
+    mode = _semantic_dedup_mode()
+    if semantic_memory and mode == "off":
+        logger.debug(
+            "[BeliefStore] Semantic dedup wired but disabled "
+            f"({SEMANTIC_DEDUP_FLAG} not armed)"
+        )
+    elif semantic_memory:
+        threshold = (
+            similarity_threshold if similarity_threshold is not None
+            else _semantic_threshold()
+        )
         try:
             sem_pairs = find_semantic_duplicates(
-                store, semantic_memory, similarity_threshold
+                store, semantic_memory, threshold,
+                scan_limit=_semantic_scan_limit(),
             )
-            for keep_id, remove_id, sim in sem_pairs:
-                if merge_duplicate_pair(store, keep_id, remove_id):
-                    merged += 1
+            if mode == "observe":
+                # OBSERVE rollout step: full visibility, zero mutation.
+                for keep_id, remove_id, sim in sem_pairs:
+                    keep = store.get(keep_id)
+                    remove = store.get(remove_id)
+                    logger.info(
+                        "[BeliefStore] Semantic dedup OBSERVE: would keep "
+                        f"{keep_id} ({getattr(keep, 'entity', '?')!r}), "
+                        f"remove {remove_id} "
+                        f"({getattr(remove, 'entity', '?')!r}), "
+                        f"sim={sim:.3f}"
+                    )
+                logger.info(
+                    "[BeliefStore] Semantic dedup OBSERVE: "
+                    f"{len(sem_pairs)} candidate pairs at "
+                    f"threshold {threshold} (0 merged, observe mode)"
+                )
+            else:
+                sem_merged = 0
+                attempted = 0
+                for keep_id, remove_id, sim in sem_pairs:
+                    if sem_merged >= MAX_SEMANTIC_MERGES_PER_RUN:
+                        logger.info(
+                            "[BeliefStore] Semantic dedup: merge cap reached "
+                            f"({MAX_SEMANTIC_MERGES_PER_RUN}), "
+                            f"{len(sem_pairs) - attempted} pairs deferred"
+                        )
+                        break
+                    attempted += 1
+                    if merge_duplicate_pair(store, keep_id, remove_id):
+                        sem_merged += 1
+                        logger.info(
+                            f"[BeliefStore] Semantic merge: kept {keep_id}, "
+                            f"removed {remove_id} (sim={sim:.3f})"
+                        )
+                merged += sem_merged
         except Exception as e:
             logger.debug(f"Semantic dedup skipped: {e}")
 

@@ -94,6 +94,13 @@ DEFAULT_CAPABILITY_SPECS = {
         k7_classification="restricted",
         tags=("external", "effector"),
     ),
+    "fs_write": CapabilitySpec(
+        name="fs_write",
+        description="B2: write one small file into the dedicated sandbox dir",
+        required_subsystems=("goal_store",),
+        k7_classification="guarded",
+        tags=("effector", "hands"),
+    ),
     "self_analyze": CapabilitySpec(
         name="self_analyze",
         description="K12 self-analysis cognitive loop",

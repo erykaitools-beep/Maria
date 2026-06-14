@@ -3,11 +3,11 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
 
 from agent_core.operator.honesty_protocol import HonestyProtocol, HonestyCheck
+from agent_core.operator.capability_manifest import CapabilityManifest
+from agent_core.tests.spec_helpers import specced
 
 
 def _write_decisions(path: Path, records: list):
@@ -55,7 +55,7 @@ class TestHonestyProtocol:
     # -- check_capability_claim --
 
     def test_no_handler_no_history(self, protocol):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = False
         protocol.set_capability_manifest(manifest)
 
@@ -65,7 +65,7 @@ class TestHonestyProtocol:
         assert check.qualifier == "nie wiem"
 
     def test_handler_no_history(self, protocol):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -75,7 +75,7 @@ class TestHonestyProtocol:
         assert check.qualifier == "prawdopodobnie"
 
     def test_handler_with_good_history(self, protocol, tmp_decisions):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -90,7 +90,7 @@ class TestHonestyProtocol:
         assert check.successes == 10
 
     def test_handler_with_bad_history(self, protocol, tmp_decisions):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -102,7 +102,7 @@ class TestHonestyProtocol:
         assert check.qualifier in ("nie jestem pewna, ale", "nie wiem")
 
     def test_mixed_history(self, protocol, tmp_decisions):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -118,7 +118,7 @@ class TestHonestyProtocol:
         assert check.successes == 7
 
     def test_no_decisions_file(self, protocol):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -134,7 +134,7 @@ class TestHonestyProtocol:
     # -- get_evidence_based_confidence --
 
     def test_evidence_based_confidence(self, protocol, tmp_decisions):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 
@@ -145,7 +145,7 @@ class TestHonestyProtocol:
         assert conf >= 0.9
 
     def test_evidence_based_confidence_no_handler(self, protocol):
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = False
         protocol.set_capability_manifest(manifest)
 
@@ -180,7 +180,7 @@ class TestHonestyProtocol:
         )
         _write_decisions(tmp_decisions, records)
 
-        manifest = MagicMock()
+        manifest = specced(CapabilityManifest)
         manifest.can_do.return_value = True
         protocol.set_capability_manifest(manifest)
 

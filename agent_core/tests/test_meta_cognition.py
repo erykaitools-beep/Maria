@@ -356,6 +356,22 @@ def _make_reflected(store, action_type, topic, success, n=1):
         store.append(r)
 
 
+def _make_unexpected_success(store, action_type, topic, n=1):
+    """Helper: reflection with expected_success=False + actual_success=True + outcome=mismatch.
+
+    This is the 'unexpected_success' pattern that caused the feedback loop:
+    K9 predicted failure (low confidence), action actually succeeded, but
+    outcome_match became 'mismatch' because expected != actual.
+    """
+    from agent_core.meta_cognition.reflection_model import OutcomeMatch
+    for _ in range(n):
+        r = create_reflection(plan_id=f"p-{time.time()}", action_type=action_type, topic=topic)
+        r.expected_success = False
+        r.actual_success = True
+        r.outcome_match = OutcomeMatch.MISMATCH
+        store.append(r)
+
+
 class TestConfidenceTracker:
     def test_default_confidence_no_data(self, tmp_path):
         store = ReflectionStore(path=tmp_path / "r.jsonl")
@@ -405,6 +421,61 @@ class TestConfidenceTracker:
         store = ReflectionStore(path=tmp_path / "r.jsonl")
         ct = ConfidenceTracker(store=store)
         assert ct.get_topic_confidence("") == DEFAULT_CONFIDENCE
+
+    def test_unexpected_success_does_not_drive_confidence_down(self, tmp_path):
+        """Regression: unexpected_success (expected=False, actual=True, outcome=mismatch)
+        must NOT be scored as 0.0 — the action succeeded.
+
+        Historical bug: K9 scored 'mismatch' as 0.0 regardless of actual_success.
+        Combined with empty topic (topic=''), learn actions spiraled into
+        confidence ≈ 0.01, then every new learn was another 'mismatch' (predicted
+        failure, got success), reinforcing the spiral. Over 100 live reflections
+        showed 0% match rate for learn despite exam scores 0.83-1.0.
+        """
+        store = ReflectionStore(path=tmp_path / "r.jsonl")
+        _make_unexpected_success(store, "learn", "", n=10)
+        ct = ConfidenceTracker(store=store)
+        conf = ct.get_action_confidence("learn")
+        # Should reflect actual success rate (100%), not outcome-match rate (0%)
+        assert conf > 0.9, (
+            f"10 unexpected-success records should yield high confidence, "
+            f"got {conf:.3f} (feedback loop regression)"
+        )
+
+    def test_mismatch_with_actual_failure_drives_confidence_down(self, tmp_path):
+        """Counterpart: expected=True, actual=False (optimism shattered) → low confidence.
+
+        Distinguishes from unexpected_success above. Both are outcome=mismatch
+        but only the failure-with-optimism should penalize confidence.
+        """
+        from agent_core.meta_cognition.reflection_model import OutcomeMatch
+        store = ReflectionStore(path=tmp_path / "r.jsonl")
+        for _ in range(10):
+            r = create_reflection(plan_id=f"p-{time.time()}", action_type="learn")
+            r.expected_success = True
+            r.actual_success = False
+            r.outcome_match = OutcomeMatch.MISMATCH
+            store.append(r)
+        ct = ConfidenceTracker(store=store)
+        conf = ct.get_action_confidence("learn")
+        assert conf < 0.1, (
+            f"10 real failures should yield low confidence, got {conf:.3f}"
+        )
+
+    def test_partial_outcome_dampens_success_score(self, tmp_path):
+        """'partial' with actual_success=True should contribute 0.5, not 1.0."""
+        from agent_core.meta_cognition.reflection_model import OutcomeMatch
+        store = ReflectionStore(path=tmp_path / "r.jsonl")
+        for _ in range(10):
+            r = create_reflection(plan_id=f"p-{time.time()}", action_type="learn")
+            r.expected_success = True
+            r.actual_success = True
+            r.outcome_match = OutcomeMatch.PARTIAL
+            store.append(r)
+        ct = ConfidenceTracker(store=store)
+        conf = ct.get_action_confidence("learn")
+        # Partial success → around 0.5
+        assert 0.35 < conf < 0.65, f"Partial should dampen to ~0.5, got {conf:.3f}"
 
     def test_topic_confidence_with_data(self, tmp_path):
         store = ReflectionStore(path=tmp_path / "r.jsonl")

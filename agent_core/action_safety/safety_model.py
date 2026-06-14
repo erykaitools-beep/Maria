@@ -120,6 +120,10 @@ class ActionRecord:
 
     # Outcome
     success: Optional[bool] = None
+    # T-LEARN-003: True when the executor declined the action before doing any
+    # work (outside window, no material). success is False but it is NOT a
+    # failure -- self-repair must not count it toward a failure storm.
+    skipped: bool = False
     validation: str = "skipped"    # ValidationResult.value
     validation_details: Dict[str, Any] = field(default_factory=dict)
     rollback_available: bool = False
@@ -143,6 +147,7 @@ class ActionRecord:
             "before_state": self.before_state,
             "after_state": self.after_state,
             "success": self.success,
+            "skipped": self.skipped,
             "validation": self.validation,
             "validation_details": self.validation_details,
             "rollback_available": self.rollback_available,
@@ -168,6 +173,7 @@ class ActionRecord:
             before_state=d.get("before_state"),
             after_state=d.get("after_state"),
             success=d.get("success"),
+            skipped=d.get("skipped", False),
             validation=d.get("validation", "skipped"),
             validation_details=d.get("validation_details", {}),
             rollback_available=d.get("rollback_available", False),

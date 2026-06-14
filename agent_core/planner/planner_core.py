@@ -10,6 +10,7 @@ ADR-013: Planner v1 rule-based (no LLM)
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ from agent_core.planner.planner_guard import PlannerGuard
 from agent_core.planner.goal_selector import GoalSelector
 from agent_core.planner.action_executor import ActionExecutor
 from agent_core.planner.stuck_handler import StuckHandler
+from agent_core.planner.time_context import TimeContext
 from agent_core.tracing.episode import (
     generate_episode_id, current_episode_id, clear_episode_id,
     set_current_trace,
@@ -53,11 +55,35 @@ MAX_HISTORY_SIZE = 100
 STUCK_THRESHOLD = 3              # consecutive identical failures -> stuck
 STUCK_COOLDOWN_SEC = 1800        # 30 min cooldown for stuck goal
 STUCK_HISTORY_SIZE = 10          # track last N failure fingerprints
+# Non-productive loop: same (goal, reflection action) repeated N times with
+# status=COMPLETED (not caught by stuck_history). Target: meta-goals that
+# lack decomposable steps and keep triggering evaluate/critique forever.
+NONPRODUCTIVE_REPEAT_THRESHOLD = 20
+GOAL_CYCLE_THRESHOLD = 5        # T-B4-001: goal attempts without progress
 
 # Auto-learning goal limits
 MAX_AUTO_LEARNING_GOALS = 3
 AUTO_GOAL_COOLDOWN_SEC = 3600  # 1 hour
 MIN_RETENTION_FOR_NEW_TOPICS = 0.6
+
+# Actions that require an open learning window. If K8 Deliberation suggests
+# one of these outside the window for a non-USER goal, the planner rewrites
+# the plan to NOOP instead of letting the executor reject it downstream
+# (848/889 learn fails observed during glm-5.1 test 2026-04-21).
+LEARNING_WINDOW_ACTIONS = frozenset({
+    ActionType.LEARN,
+    ActionType.EXAM,
+    ActionType.REVIEW,
+    ActionType.FETCH,
+    ActionType.ASK_EXPERT,
+})
+
+# 8b: max learn-family actions allowed OUTSIDE the learning window per day.
+# The window stays the *preferred* learning time; this daily budget lets the
+# planner still make a little progress off-window (weekends/nights) instead of
+# skipping 100% of cycles, while capping attempts so a failing learn loop can't
+# hammer the executor the way it did before the window existed (264+/day).
+OFF_WINDOW_LEARN_BUDGET = 8
 
 
 class PlannerCore:
@@ -88,6 +114,22 @@ class PlannerCore:
 
         self._state = PlannerState()
         self._last_plans: List[Plan] = []
+        # 8a: per-goal infeasibility reasons from the last goal-ranking pass,
+        # surfaced in the no_goals skip log instead of a bare empty list.
+        self._last_skip_reasons: list = []
+        # 8b: set by _enforce_learning_window when it approves a learn-family
+        # action off-window against the daily budget, so run_cycle can mark the
+        # plan and the executor's own window gate honors that decision.
+        self._last_off_window_approved: bool = False
+        self._time_ctx = TimeContext()
+
+        # Action failure memory: {action_key -> (fail_count, last_fail_ts)}
+        # action_key = "action_type:goal_id" or just "action_type"
+        self._action_failures: Dict[str, tuple] = {}
+        # Max failures before backoff (skip until conditions change)
+        self._MAX_ACTION_FAILURES = 3
+        # Backoff expiry: clear failure memory after this (conditions may have changed)
+        self._FAILURE_MEMORY_TTL = 3600  # 1 hour
 
         # External references (set via set_* methods)
         self._homeostasis_core = None
@@ -98,6 +140,7 @@ class PlannerCore:
         self._knowledge_analyzer = None
         self._sandbox_manager = None
         self._world_model = None
+        self._semantic_memory = None
         self._autonomy_policy = None
         self._deliberation = None
         self._meta_cognition = None
@@ -110,10 +153,39 @@ class PlannerCore:
         self._knowledge_auditor = None
         self._gap_planner = None
         self._trace_store = None
+        self._strategic_planner = None  # v2 Phase B
+        # #9: when true, the strategist's plan actually steers the tactical loop
+        # (blocked_goals filter, next_action focus, idle_strategy). Default OFF
+        # -> wired but dormant until observed in vivo, then flip the env var.
+        self._strategic_drives = os.environ.get(
+            "STRATEGIC_PLANNER_DRIVES", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        # B2: when true, the planner autonomously emits a sandboxed FS_WRITE to
+        # satisfy a goal's file_exists criterion (the first real effector action).
+        # Default OFF -> wired but dormant until observed in vivo, then flip.
+        self._fs_write_enabled = os.environ.get(
+            "FS_WRITE_ENABLED", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        # B4: when true, the planner autonomously emits an EXAM for a goal that
+        # carries an unmet exam_independent criterion, so the goal can close on
+        # an INDEPENDENT examiner's verdict (not self-report). Default OFF ->
+        # wired but dormant until observed; mirror of _fs_write_enabled (B2).
+        self._heldout_enabled = os.environ.get(
+            "HELDOUT_GRADER_ENABLED", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        # Override for the FS_WRITE sandbox root (None -> canonical
+        # meta_data/fs_sandbox under BASE_DIR). Settable for tests / relocation.
+        self._fs_sandbox_root = None
         self._approval_queue = None
         self._telegram_notifier = None
         self._current_trace: Optional[DecisionTrace] = None
         self._stuck_handler = StuckHandler()
+
+        # Per-tick log dedup for K12 bulletin advisory (P1 fix 2026-05-08).
+        # Without this, planner pivot loop logs the same advisory once per
+        # blocked goal (e.g. 6× per tick when 6 maintenance goals are
+        # all K7-blocked in SLEEP mode). Cleared at start of each run_cycle.
+        self._advisory_logged_this_tick: set = set()
 
         # Load persisted state
         self._load_state()
@@ -151,6 +223,15 @@ class PlannerCore:
     def set_world_model(self, world_model) -> None:
         self._world_model = world_model
         self.executor.set_world_model(world_model)
+
+    def set_semantic_memory(self, semantic_memory) -> None:
+        """Wire SemanticMemory so maintain() can run SEMANTIC dedup.
+
+        Without this, run_maintenance gets semantic_memory=None and the
+        embedding-similarity phase silently never runs (wired-but-dead
+        class, found 2026-06-10).
+        """
+        self._semantic_memory = semantic_memory
 
     def set_autonomy_policy(self, policy) -> None:
         self._autonomy_policy = policy
@@ -207,6 +288,162 @@ class PlannerCore:
         """Set TraceStore for decision traceability (Phase 1)."""
         self._trace_store = store
 
+    def set_strategic_planner(self, planner) -> None:
+        """Set StrategicPlanner for LLM-powered planning (v2 Phase B)."""
+        self._strategic_planner = planner
+
+    def set_strategic_drives(self, enabled: bool) -> None:
+        """Runtime toggle for #9 (Telegram /strategic). Flips whether the
+        strategist steers the tactical loop without a restart, so the in-vivo
+        drill can be driven from the phone and rolled back instantly. Runtime
+        only -- resets to the STRATEGIC_PLANNER_DRIVES env default on restart."""
+        self._strategic_drives = bool(enabled)
+        logger.info("[#9] strategic drives -> %s (runtime toggle)",
+                    self._strategic_drives)
+
+    def set_fs_write_enabled(self, enabled: bool) -> None:
+        """Runtime toggle for B2 autonomous FS_WRITE (Telegram /fs_write). Flips
+        the first-effector-action loop without a restart, so the in-vivo drill
+        can be driven from the phone and rolled back instantly. Runtime only --
+        resets to the FS_WRITE_ENABLED env default on restart."""
+        self._fs_write_enabled = bool(enabled)
+        logger.info("[B2] fs_write autonomous loop -> %s (runtime toggle)",
+                    "ON" if self._fs_write_enabled else "OFF")
+
+    def set_heldout_enabled(self, enabled: bool) -> None:
+        """Runtime toggle for B4 autonomous held-out exam (Telegram /heldout).
+        Drives the in-vivo drill: when ON the planner re-examines files behind
+        exam_independent criteria so their goals close on an independent
+        examiner's verdict. Pairs with the HELDOUT_GRADER_ENABLED env flag the
+        exam pipeline reads to actually grade held-out (set together by the
+        command). Runtime only -- resets to the env default on restart."""
+        self._heldout_enabled = bool(enabled)
+        logger.info("[B4] held-out exam autonomous loop -> %s (runtime toggle)",
+                    "ON" if self._heldout_enabled else "OFF")
+
+    def strategic_status_text(self) -> str:
+        """Human-readable #9 status for Telegram /strategic: whether the
+        strategist is driving + a summary of its current plan (if any)."""
+        state = "ON" if self._strategic_drives else "OFF"
+        lines = [f"StrategicPlanner DRIVES: {state}"]
+        sp = self._strategic_planner
+        if sp is None:
+            lines.append("(strateg nie wired)")
+            return "\n".join(lines)
+        plan = sp.current_plan
+        if plan is None:
+            lines.append("Brak aktywnego planu (jeszcze nie replanowal / wygasl).")
+        else:
+            lines.append(plan.summary())
+            lines.append(f"model: {plan.model_used}")
+        return "\n".join(lines)
+
+    def _strategic_plan_active(self):
+        """Single gate for all #9 wiring: return the strategist's current plan
+        IFF it should drive tactical decisions (STRATEGIC_PLANNER_DRIVES on and
+        a non-expired plan exists), else None. Flag off -> None -> every wiring
+        point is a no-op, so behaviour is identical to the advisory era."""
+        if not self._strategic_drives:
+            return None
+        if self._strategic_planner is None:
+            return None
+        return self._strategic_planner.current_plan  # None if expired
+
+    def _strategic_replan_due(self) -> bool:
+        """True iff the strategist should run its (blocking, LLM-backed) replan
+        this cycle. Gated on _strategic_drives: when strategic planning is not
+        driving tactics its plan is discarded by _strategic_plan_active() anyway,
+        so paying for the call was pure waste -- and on 2026-06-02 one such wasted
+        call hung Ollama and froze the tick loop for 10.5h. Off => no call, which
+        also makes Telegram /strategic off a real kill switch for this path."""
+        return bool(
+            self._strategic_drives
+            and self._strategic_planner is not None
+            and self._strategic_planner.should_replan()
+        )
+
+    def _apply_strategic_focus(self, ranked_goals: list) -> list:
+        """#9 Wire B: bring the strategist's next_action goal to the front of
+        the already-feasible ranking so it gets first attempt. The tactical loop
+        still decides the concrete action and keeps every safety gate -- the
+        strategist only steers WHICH goal, not HOW. If its target is not
+        feasible this round, skip that action so the plan advances (is_exhausted
+        -> should_replan) instead of fixating on a dead goal. No-op when not
+        driving."""
+        sp = self._strategic_plan_active()
+        if not sp:
+            return ranked_goals
+        nxt = sp.next_action
+        if not nxt or not nxt.goal_id:
+            return ranked_goals
+        if any(g.id == nxt.goal_id for g in ranked_goals):
+            focused = [g for g in ranked_goals if g.id == nxt.goal_id]
+            rest = [g for g in ranked_goals if g.id != nxt.goal_id]
+            return focused + rest
+        # focused goal not feasible now -> let the plan move on next cycle
+        sp.mark_action(nxt, skipped=True)
+        return ranked_goals
+
+    def _record_strategic_outcome(self, goal, *, completed: bool = False,
+                                  skipped: bool = False) -> None:
+        """#9 Wire B loop-closure: advance the strategist's plan when the
+        tactical loop commits (or NOOP-skips) the goal it asked for next, so the
+        plan lifecycle is real -- is_exhausted/should_replan react to work done,
+        not just the 30-min clock. No-op unless driving and the goal matches the
+        current next_action."""
+        sp = self._strategic_plan_active()
+        if not sp or goal is None:
+            return
+        nxt = sp.next_action
+        if nxt and nxt.goal_id and nxt.goal_id == goal.id:
+            sp.mark_action(nxt, completed=completed, skipped=skipped)
+
+    def _fallback_action(self, context: Dict) -> Optional[Plan]:
+        """STEP 5 idle fallback when no goal is actionable: the analytical
+        cascade then creative. #9 Wire C lets the strategist's idle_strategy
+        bias it -- "creative" promotes reflection ahead of the cascade, "wait"
+        skips the heavier trailing creative (the cheap READ-ONLY cascade still
+        runs), "evaluate"/None keep the original order. Returns a raw Plan (the
+        caller finalizes) or None."""
+        sp = self._strategic_plan_active()
+        idle_strategy = sp.idle_strategy if sp else None
+
+        # #9 Wire C: "creative" -> reflection takes priority over the analytical
+        # cascade (else evaluate/validate/critique can starve it).
+        if idle_strategy == "creative":
+            plan = self._maybe_creative(context)
+            if plan is not None:
+                return plan
+
+        # Evaluate as fallback
+        plan = self._maybe_evaluate(context)
+        if plan is not None:
+            return plan
+        # Faza F: cross-validate learned knowledge
+        plan = self._maybe_validate(context)
+        if plan is not None:
+            return plan
+        # Faza G: knowledge quality critique
+        plan = self._maybe_critique(context)
+        if plan is not None:
+            return plan
+        # K12: self-analysis
+        plan = self._maybe_self_analyze(context)
+        if plan is not None:
+            return plan
+        # K11: experiment proposal scan
+        plan = self._maybe_experiment_scan(context)
+        if plan is not None:
+            return plan
+
+        # K13: creative reflection (before NOOP). #9 Wire C: "wait" skips this
+        # heavier idle action; the cheap analytical cascade above still ran.
+        if idle_strategy != "wait":
+            plan = self._maybe_creative(context)
+            if plan is not None:
+                return plan
+        return None
+
     def set_capability_router(self, router) -> None:
         """Set CapabilityRouter for registry-based dispatch."""
         self.executor.set_capability_router(router)
@@ -228,20 +465,69 @@ class PlannerCore:
 
     def _is_action_rate_limited(self, action_type_value: str) -> bool:
         """
-        Quick check if action would be blocked by K7 (rate limit or consecutive failures).
+        Quick check if action would be blocked by K7 (rate limit, mode, or consecutive failures).
 
         Used to avoid creating plans we know will be blocked.
         """
         if not getattr(self, '_autonomy_policy', None):
             return False
         try:
+            # Pass current mode so K7 can block GUARDED actions in SLEEP/REDUCED
+            mode = "active"
+            health = 1.0
+            if self._homeostasis_core:
+                state = self._homeostasis_core.get_state()
+                mode = state.mode.value
+                health = state.health_score
             check = self._autonomy_policy.check(
                 action_type=action_type_value,
                 action_params={},
+                mode=mode,
+                health_score=health,
             )
             return not check.allowed
         except Exception:
             return False
+
+    # -- Action failure memory (Planner v2 Phase A) ----------
+
+    def _action_key(self, action_type: str, goal_id: Optional[str] = None) -> str:
+        """Build key for failure tracking."""
+        if goal_id:
+            return f"{action_type}:{goal_id}"
+        return action_type
+
+    def record_action_failure(self, action_type: str, goal_id: Optional[str] = None) -> None:
+        """Record a failed action for backoff tracking."""
+        key = self._action_key(action_type, goal_id)
+        count, _ = self._action_failures.get(key, (0, 0))
+        self._action_failures[key] = (count + 1, time.time())
+
+    def record_action_success(self, action_type: str, goal_id: Optional[str] = None) -> None:
+        """Clear failure memory on success."""
+        key = self._action_key(action_type, goal_id)
+        self._action_failures.pop(key, None)
+
+    def is_action_backed_off(self, action_type: str, goal_id: Optional[str] = None) -> bool:
+        """Check if action should be skipped due to repeated failures."""
+        key = self._action_key(action_type, goal_id)
+        if key not in self._action_failures:
+            return False
+        count, last_ts = self._action_failures[key]
+        # TTL expired - clear and allow
+        if time.time() - last_ts > self._FAILURE_MEMORY_TTL:
+            del self._action_failures[key]
+            return False
+        return count >= self._MAX_ACTION_FAILURES
+
+    def _get_idle_reason(self) -> str:
+        """Get human-readable reason why planner is idle (for traces/logs)."""
+        tc = self._time_ctx
+        if tc.is_quiet_hours:
+            return f"quiet hours ({tc.berlin_now.strftime('%H:%M')} Berlin)"
+        if not tc.is_learning_window:
+            return f"outside learning window (next in {tc.minutes_to_next_window}min)"
+        return "no feasible goals"
 
     # -- Main entry point (called from tick loop) -----------
 
@@ -290,6 +576,9 @@ class PlannerCore:
         self._state.total_cycles += 1
         self._state.last_cycle_tick = tick_count
 
+        # P1 fix: reset per-tick advisory dedup for this cycle
+        self._advisory_logged_this_tick.clear()
+
         # -- EPISODE TRACE: start --
         episode_id = generate_episode_id()
         trace = DecisionTrace(
@@ -328,12 +617,58 @@ class PlannerCore:
                 if plan is not None:
                     return plan
 
+        # -- STEP 1.7: STRATEGIC PLANNING (v2 Phase B) --
+        # Gated on _strategic_drives (see _strategic_replan_due): off => no
+        # blocking LLM replan, which is both free and freeze-proof.
+        if self._strategic_replan_due():
+            try:
+                strategic_plan = self._strategic_planner.plan(
+                    action_failures=self._action_failures
+                )
+                if strategic_plan and trace:
+                    trace.add_step(
+                        "strategic_planner", "replan",
+                        f"{len(strategic_plan.action_queue)} actions, "
+                        f"idle={strategic_plan.idle_strategy}",
+                    )
+                    logger.info(
+                        f"[Strategic] New plan: {strategic_plan.summary()}"
+                    )
+            except Exception as e:
+                logger.warning(f"Strategic planning failed: {e}")
+
         # -- STEP 2: PERCEIVE --
         context = self._gather_context()
+
+        # -- STEP 2.3: RECONCILE completed learning goals (Plank 2b) --
+        # Harvest goals whose material is already exam-verified before we
+        # select/plan -- they have no work left to trigger a progress credit.
+        self._reconcile_learning_goals(context)
+
+        # -- STEP 2.4: BACKFILL orphaned fetched files (P4, #4) --
+        # Bind any 'new', never-examined, fetched file that has no handoff goal
+        # so it can never sit unlearned forever (drains the live web_rss_* leak).
+        self._sweep_orphan_fetches(context)
 
         # -- STEP 2.5: CREATIVE CHECK (independent of goal cycle) --
         # Creative runs on its own cooldown, not competing with learn/fetch
         plan = self._maybe_creative(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # -- STEP 2.6: FS_WRITE (B2) -- first real effector action, flag-gated --
+        # When a goal carries an unmet file_exists success criterion, write the
+        # file so the goal can close on EXTERNAL evidence. Behind FS_WRITE_ENABLED
+        # (default OFF) -> no-op, so the loop below is unchanged until observed.
+        plan = self._maybe_fs_write(context)
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # -- STEP 2.7: HELD-OUT EXAM (B4) -- prove a learning goal by an
+        # INDEPENDENT examiner. When a goal carries an unmet exam_independent
+        # criterion, re-examine its file (held-out static grader) so it closes
+        # on recorded evidence. Behind the heldout flag (default OFF) -> no-op.
+        plan = self._maybe_run_heldout_exam(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -344,6 +679,16 @@ class PlannerCore:
             created = self._auto_create_learning_goal(context)
             if created:
                 ranked_goals = self._select_ranked_goals(context)
+
+        # #9 Wire B: focus. Bring the strategist's next_action goal to the front
+        # of the feasible ranking so it gets first attempt (tactical loop still
+        # decides the concrete action and keeps every safety gate).
+        ranked_goals = self._apply_strategic_focus(ranked_goals)
+
+        # Plank 1: promote a goal PENDING->ACTIVE the moment the planner
+        # commits real work to it (see activation block below). GoalStatus
+        # imported here following this module's local-import convention.
+        from agent_core.goals.goal_model import GoalStatus
 
         goal = None  # track last attempted goal for NOOP fallback
         for candidate in ranked_goals:
@@ -358,7 +703,13 @@ class PlannerCore:
                     "priority": getattr(goal, "priority", 0.0),
                 })
             # -- STEP 4: CREATE PLAN for goal --
+            self._last_off_window_approved = False
             plan = self._create_plan_for_goal(goal, context)
+            if self._last_off_window_approved and plan.action_type != ActionType.NOOP:
+                # 8b: this learn-family action was approved off-window against
+                # the daily budget -> tell the executor's own window gate to
+                # honor it instead of re-blocking as "outside_learning_window".
+                plan.metadata["off_window_approved"] = True
             if plan.action_type == ActionType.NOOP:
                 # Goal mapped to NOOP (e.g. all files completed, FETCH rate-limited)
                 # -> pivot: try next goal in ranking before falling through
@@ -371,7 +722,31 @@ class PlannerCore:
                         "skipped_goal": goal.id,
                         "reason": plan.action_params.get("reason", "noop"),
                     })
+                # #9 Wire B: if this NOOP'd goal is the strategist's focus,
+                # advance its plan so we don't re-focus a dead-end every cycle.
+                self._record_strategic_outcome(goal, skipped=True)
                 continue
+
+            # -- Plank 1: ACTIVATE the goal now that real work is committed --
+            # Goals are born PENDING and nothing ever promoted them to ACTIVE.
+            # update_progress() only auto-ACHIEVES goals that are ACTIVE, so
+            # learning goals could never close autonomously -> they all died
+            # "stale" (1118 abandoned, 0 autonomous completions before this).
+            # Promote here, before execution, so the executor's progress update
+            # can carry the goal to ACHIEVED in the same cycle.
+            if goal.status == GoalStatus.PENDING:
+                self._goal_store.update_status(
+                    goal.id, GoalStatus.ACTIVE,
+                    f"planner started work (action={plan.action_type.value})",
+                    "planner",
+                )
+                self._goal_store.save()
+                if trace:
+                    trace.add_step("planner", "goal_activated", "pending->active", {
+                        "goal_id": goal.id,
+                        "action_type": plan.action_type.value,
+                    })
+
             result = self._finalize_plan(plan)
             # If K7 blocked (autonomy_policy), try next goal
             blocked_by_k7 = (
@@ -389,35 +764,14 @@ class PlannerCore:
                         "skipped_goal": goal.id,
                     })
                 continue
+            # #9 Wire B: real work committed on the strategist's focus goal ->
+            # mark its action done so the plan advances toward exhaustion.
+            self._record_strategic_outcome(goal, completed=True)
             return result
 
-        # -- STEP 5: EVALUATE as fallback (no actionable goals or goal plan blocked) --
-        plan = self._maybe_evaluate(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # Faza F: Cross-validate learned knowledge (after evaluate, before critique)
-        plan = self._maybe_validate(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # Faza G: Knowledge quality critique (after validate, before self-analysis)
-        plan = self._maybe_critique(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # K12: Self-analysis (after critique, before giving up)
-        plan = self._maybe_self_analyze(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # K11: Experiment proposal scan (after self-analysis, before creative)
-        plan = self._maybe_experiment_scan(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # K13: Creative reflection (after experiment scan, before NOOP)
-        plan = self._maybe_creative(context)
+        # -- STEP 5: idle fallback (analytical cascade + creative). #9 Wire C
+        # lets the strategist's idle_strategy bias which idle action runs. --
+        plan = self._fallback_action(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -442,7 +796,7 @@ class PlannerCore:
             trace.finalize(success=True, result_summary="no_goals")
             self._save_trace(trace)
         self._emit_cycle_complete(tick_count, no_goals=True)
-        self._log_skip(tick_count, "no_goals", [])
+        self._log_skip(tick_count, "no_goals", list(self._last_skip_reasons))
         self._save_state()
         clear_episode_id()
         return None
@@ -488,6 +842,145 @@ class PlannerCore:
         )
 
     # -- Internal: perception context -----------------------
+
+    def _reconcile_learning_goals(self, context: Dict) -> None:
+        """Plank 2b: credit learning-goal progress from the current knowledge
+        state, independent of any LEARN/EXAM action.
+
+        Progress is otherwise credited only as a side effect of a successful
+        learn/exam (handlers.update_learning_goal). A goal whose material was
+        already mastered -- its files exam-passed while another goal drove
+        them, or in a prior session -- has nothing left to run and so could
+        never close: it sat at progress 0 until it died 'stale'. This sweep
+        harvests such goals: when a goal's owned files are all INDEPENDENTLY
+        exam-verified (a different model graded the recall, not the student's
+        own self-grading), it is marked ACHIEVED.
+        """
+        if self._goal_store is None or self._knowledge_analyzer is None:
+            return
+        snapshot = context.get("knowledge_snapshot")
+        if not snapshot:
+            return
+
+        from agent_core.goals.goal_model import GoalType, GoalStatus
+        from agent_core.routing.handlers import (
+            resolve_goal_files, independently_verified_completed_ids,
+        )
+
+        # Only INDEPENDENTLY exam-verified files may force-close a goal -- never
+        # the self-graded 'completed' status (audit 2026-06-01: closing on
+        # 'completed' bypassed the B4 keystone and falsely marked goals
+        # 'exam-verified' on the student's own self-grading).
+        verified = independently_verified_completed_ids(snapshot)
+        if not verified:
+            return
+
+        harvested = []
+        changed = False
+        for goal in self._goal_store.get_active(GoalType.LEARNING):
+            files = resolve_goal_files(goal, None, self._knowledge_analyzer)
+            if not files:
+                continue
+            frac = sum(1 for fid in files if fid in verified) / len(files)
+            if frac <= goal.progress:
+                continue
+            # update_progress auto-ACHIEVES an ACTIVE goal at >= 1.0; a PENDING
+            # goal needs the transition made explicitly.
+            self._goal_store.update_progress(goal.id, frac)
+            changed = True
+            if frac >= 1.0:
+                refreshed = self._goal_store.get(goal.id)
+                if refreshed and refreshed.status != GoalStatus.ACHIEVED:
+                    self._goal_store.update_status(
+                        goal.id, GoalStatus.ACHIEVED,
+                        "all material independently exam-verified (reconciliation)",
+                        "planner",
+                    )
+                self._goal_store.set_outcome(goal.id, {
+                    "completed_at": time.time(),
+                    "files_total": len(files),
+                    "reconciled": True,
+                })
+                harvested.append(goal.description)
+                logger.info(
+                    "[Plank2b] Learning goal ACHIEVED by reconciliation: "
+                    f"{goal.id} ({goal.description[:60]})"
+                )
+
+        if changed:
+            self._goal_store.save()
+        if harvested and self._telegram_notifier:
+            try:
+                lines = "\n".join(f"- {d[:60]}" for d in harvested[:8])
+                more = (
+                    f"\n(+{len(harvested) - 8} wiecej)"
+                    if len(harvested) > 8 else ""
+                )
+                self._telegram_notifier.notify(
+                    "learning_complete",
+                    f"*Cele domkniete (inwentaryzacja): {len(harvested)}*\n"
+                    f"{lines}{more}",
+                )
+            except Exception:
+                pass
+
+    def _sweep_orphan_fetches(self, context: Dict) -> None:
+        """P4 (#4): bind a learn-obligation for fetched files that reached the
+        index with NO handoff goal.
+
+        The forward bind (P1/P2) only fires on the fetch action path; a file can
+        still land in the index unbound -- written by a pre-handoff fetch, or by
+        a session whose bind the fixes missed. Such files sit status='new'
+        forever (only the best-effort teacher 'new file' loop might reach them).
+        This sweep drains them: every 'new', never-examined, fetched file with no
+        obligation is bound into a (backfill) fetch_handoff goal -- reusing the
+        one goal-creation path so it inherits selector priority + the 30d window.
+
+        Tightly scoped to avoid sweeping material the operator let decay:
+          - only web_*/codex_* names (fetched), never expert_* re-study seeds;
+          - only exam_attempts == 0 (a re-study file that lost 'completed' has
+            attempts > 0, e.g. expert_fizyka.txt with 14);
+          - only files not already obligated by an active/pending handoff goal.
+        Binding an obligation is clean state, not an action, so it is NOT gated
+        by the learning window (the learning it triggers is gated later).
+        """
+        if self._goal_store is None or self._knowledge_analyzer is None:
+            return
+        snapshot = context.get("knowledge_snapshot")
+        if not snapshot:
+            return
+
+        from agent_core.goals.goal_model import GoalType
+        from agent_core.routing.handlers import _register_fetch_handoff_goal
+
+        fetched_prefixes = ("web_", "codex_")
+        already_bound = set()
+        for goal in self._goal_store.get_active(GoalType.LEARNING):
+            if goal.metadata.get("source") == "fetch_handoff":
+                already_bound.update(goal.metadata.get("file_ids", []))
+
+        orphans = []
+        for rec in snapshot.get("files_by_status", {}).get("new", []):
+            fid = rec.get("id") or rec.get("file")
+            if not fid or not fid.startswith(fetched_prefixes):
+                continue
+            if rec.get("exam_attempts", 0) > 0:
+                continue
+            if fid in already_bound:
+                continue
+            orphans.append(fid)
+
+        if not orphans:
+            return
+
+        _register_fetch_handoff_goal(
+            None, {"fetched_files": orphans},
+            self._knowledge_analyzer, self._goal_store, backfill=True,
+        )
+        logger.info(
+            "[P4] orphan-sweep bound %d unlearned fetched file(s): %s",
+            len(orphans), ", ".join(orphans[:5]),
+        )
 
     def _gather_context(self) -> Dict[str, Any]:
         """Gather context from K1-K4 for decision making."""
@@ -644,8 +1137,15 @@ class PlannerCore:
 
         Triggers when:
         - Creative module is available
-        - Cooldown expired (2h)
+        - Planner-level cooldown expired (2h)
+        - Creative module itself says it's ready
         - Not rate-limited by K7
+
+        Planner-level cooldown is belt-and-suspenders over
+        creative_module.should_reflect() — we observed back-to-back
+        reflections on 2026-04-18 despite the facade cooldown. Origin of
+        the duplicate call is still unknown; this check guarantees at
+        least the planner path respects 2h spacing.
         """
         if self._creative_module is None:
             return None
@@ -654,10 +1154,17 @@ class PlannerCore:
         if self._is_action_rate_limited("creative"):
             return None
 
+        # Planner-level cooldown (independent of facade)
+        now = time.time()
+        since_creative = now - self._state.last_creative_ts
+        if since_creative < self.CREATIVE_INTERVAL_SEC:
+            return None
+
         # Check if creative module itself says it's ready
         if not self._creative_module.should_reflect():
             return None
 
+        self._state.last_creative_ts = now
         logger.info("[K13] Creative reflection triggered")
         return create_plan(
             goal_id=None,
@@ -665,6 +1172,173 @@ class PlannerCore:
             action_type=ActionType.CREATIVE,
             action_params={"trigger": "planner_idle"},
         )
+
+    def _maybe_fs_write(self, context: Dict) -> Optional[Plan]:
+        """B2: emit a sandboxed-write plan to satisfy a goal's file_exists
+        success criterion -- the first real effector action ("hands").
+
+        When an active goal carries an unmet success_criteria of type
+        file_exists, write the criterion's target file so the goal can close on
+        EXTERNAL evidence (K10 re-stats the file; the closer re-checks the
+        criterion). Behind FS_WRITE_ENABLED (default OFF): flag off -> no-op,
+        behaviour identical to today.
+        """
+        if not self._fs_write_enabled or self._goal_store is None:
+            return None
+        if self._is_action_rate_limited("fs_write"):
+            return None
+
+        from pathlib import Path
+        from agent_core.goals.goal_model import GoalStatus
+        from agent_core.goals.success_criteria import evaluate_criteria
+        from agent_core.hands.sandbox_writer import default_sandbox_root
+        sandbox_root = self._fs_sandbox_root
+        if not sandbox_root:
+            try:
+                from maria_core.sys.config import BASE_DIR
+                sandbox_root = default_sandbox_root(BASE_DIR)
+            except Exception:
+                sandbox_root = default_sandbox_root(".")
+
+        try:
+            active = self._goal_store.get_active()
+        except Exception:
+            return None
+
+        for goal in active:
+            crits = getattr(goal, "success_criteria", None)
+            if not crits:
+                continue
+            file_crit = next(
+                (c for c in crits
+                 if isinstance(c, dict) and c.get("type") == "file_exists"),
+                None,
+            )
+            if not file_crit:
+                continue
+            # Already satisfied? leave it for the closer/reconcile -- don't rewrite.
+            passed, _ = evaluate_criteria(crits, sandbox_root=sandbox_root)
+            if passed:
+                continue
+
+            target = file_crit.get("path") or ""
+            filename = Path(target).name or "maria_action"
+            content = (goal.metadata or {}).get("fs_write_content") or (
+                f"Maria's first real action.\n"
+                f"goal: {goal.id}\n{goal.description}\n"
+            )
+
+            # Plank-1 idiom: committing real work promotes PENDING->ACTIVE so
+            # update_progress can auto-achieve on closure.
+            if goal.status == GoalStatus.PENDING:
+                try:
+                    self._goal_store.update_status(
+                        goal.id, GoalStatus.ACTIVE,
+                        "planner committed fs_write", "planner",
+                    )
+                except Exception:
+                    pass
+
+            logger.info("[B2] fs_write plan for goal %s -> %s", goal.id, filename)
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=ActionType.FS_WRITE,
+                action_params={
+                    "filename": filename,
+                    "content": content,
+                    "sandbox_root": sandbox_root,
+                },
+            )
+        return None
+
+    def _maybe_run_heldout_exam(self, context: Dict) -> Optional[Plan]:
+        """B4: emit an EXAM plan to satisfy a goal's exam_independent criterion.
+
+        The learning sibling of _maybe_fs_write (B2): when an active goal carries
+        an unmet exam_independent criterion, re-examine its file through the
+        held-out static grader so the goal closes on an INDEPENDENT examiner's
+        recorded verdict (grader_independent=True in exam_results.jsonl), not the
+        student grading its own homework. Behind the heldout flag (default OFF):
+        flag off -> no-op, behaviour identical to today.
+        """
+        if not self._heldout_enabled or self._goal_store is None:
+            return None
+        if self._is_action_rate_limited("exam"):
+            return None
+
+        from agent_core.goals.goal_model import GoalStatus
+        from agent_core.goals.success_criteria import evaluate_criteria
+
+        try:
+            active = self._goal_store.get_active()
+        except Exception:
+            return None
+
+        for goal in active:
+            crits = getattr(goal, "success_criteria", None)
+            if not crits:
+                continue
+            exam_crit = next(
+                (c for c in crits
+                 if isinstance(c, dict) and c.get("type") == "exam_independent"),
+                None,
+            )
+            if not exam_crit:
+                continue
+            file_id = exam_crit.get("file") or exam_crit.get("file_id")
+            if not file_id:
+                continue
+            # Already proven by an independent exam on record? Close it NOW
+            # instead of re-examining -- and crucially, instead of leaving it
+            # ACTIVE. A satisfied exam_independent goal that is not closed gets
+            # re-picked as a learn target every cycle and loops to STUCK (the
+            # exam handler only closes a goal it just examined, so a criterion
+            # met by an EARLIER recorded exam had no closer). Mirrors
+            # close_goal_on_criteria's idempotent update_progress(1.0).
+            passed, evidence = evaluate_criteria(crits)
+            if passed:
+                try:
+                    self._goal_store.update_progress(goal.id, 1.0)
+                    refreshed = self._goal_store.get(goal.id)
+                    if refreshed and refreshed.status.value == "achieved":
+                        import time as _t
+                        self._goal_store.set_outcome(goal.id, {
+                            "closed_by": "success_criteria",
+                            "evidence": evidence,
+                            "completed_at": _t.time(),
+                        })
+                        self._goal_store.save()
+                        logger.info(
+                            "[B4] closed already-proven goal %s (recorded "
+                            "independent exam)", goal.id)
+                except Exception as exc:
+                    logger.debug("[B4] close already-proven skipped: %s", exc)
+                continue
+
+            # Plank-1 idiom (mirrors B2): committing real work promotes
+            # PENDING->ACTIVE so update_progress can auto-achieve on closure.
+            if goal.status == GoalStatus.PENDING:
+                try:
+                    self._goal_store.update_status(
+                        goal.id, GoalStatus.ACTIVE,
+                        "planner committed held-out exam", "planner",
+                    )
+                except Exception:
+                    pass
+
+            logger.info("[B4] held-out exam plan for goal %s -> %s",
+                        goal.id, file_id)
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=ActionType.EXAM,
+                action_params={
+                    "target_file_id": file_id,
+                    "source": "heldout_drill",
+                },
+            )
+        return None
 
     # Faza F: Cross-validation trigger
 
@@ -842,6 +1516,10 @@ class PlannerCore:
         if self._goal_store is None:
             return []
 
+        # Auto-abandon stale goals before ranking
+        self._cleanup_stale_goals()
+        self._last_skip_reasons = []
+
         active_goals = self._goal_store.get_active()
         if not active_goals:
             return []
@@ -849,13 +1527,30 @@ class PlannerCore:
         metrics = context.get("evaluation_metrics", {})
         snapshot = context.get("knowledge_snapshot")
 
-        # Use GoalSelector to filter feasible + rank
+        # 8b: off-window learning is allowed up to a daily budget, so goals are
+        # not hard-filtered just because we are outside the learning window.
+        off_window_allowed = self._off_window_budget_remaining() > 0
+
+        # Use GoalSelector to filter feasible + rank. Capture per-goal reasons
+        # for the infeasible ones so a no_goals skip can explain itself (8a).
         scored = []
+        infeasible = []
         for goal in active_goals:
             score = self.selector._compute_effective_priority(goal, time.time())
-            feasible, _ = self.selector._check_feasibility(goal, metrics, snapshot)
+            feasible, reason = self.selector._check_feasibility(
+                goal, metrics, snapshot,
+                off_window_learning_allowed=off_window_allowed,
+            )
             if feasible:
                 scored.append((score, goal))
+            else:
+                infeasible.append({
+                    "goal_id": goal.id,
+                    "type": goal.type.value if hasattr(goal.type, "value")
+                    else str(goal.type),
+                    "reason": reason,
+                })
+        self._last_skip_reasons = infeasible
         scored.sort(key=lambda x: x[0], reverse=True)
 
         # Filter out stuck-cooled goals
@@ -867,6 +1562,27 @@ class PlannerCore:
 
         scored = [(s, g) for s, g in scored
                   if self._state.stuck_cooldowns.get(g.id, 0) <= now]
+
+        # #9 Wire A: honor the strategist's blocked_goals. When the strategist
+        # is driving, drop goals it explicitly told us to skip this round (e.g.
+        # "backed off after 3 fails, review first"). Purely subtractive -> can
+        # only narrow the already-feasible set, never force an action. The skip
+        # reason is recorded so a no_goals cycle can still explain itself (8a).
+        sp = self._strategic_plan_active()
+        if sp and sp.blocked_goals:
+            kept = []
+            for s, g in scored:
+                block_reason = sp.blocked_goals.get(g.id)
+                if block_reason:
+                    self._last_skip_reasons.append({
+                        "goal_id": g.id,
+                        "type": g.type.value if hasattr(g.type, "value")
+                        else str(g.type),
+                        "reason": f"strategist_blocked: {block_reason}",
+                    })
+                else:
+                    kept.append((s, g))
+            scored = kept
 
         return [g for _, g in scored]
 
@@ -900,13 +1616,82 @@ class PlannerCore:
                 action_params=action_params,
             )
 
-        # MAINTENANCE goals -> maintenance action
-        if goal_type == "maintenance":
+        # v2 Phase A: Skip goals that have failed too many times
+        if self.is_action_backed_off("learn", goal.id) and goal_type == "learning":
+            logger.debug(f"Skipping goal {goal.id}: backed off after repeated failures")
             return create_plan(
                 goal_id=goal.id,
                 goal_description=goal.description,
-                action_type=ActionType.MAINTENANCE,
-                action_params={"metric": goal.metadata.get("metric", "")},
+                action_type=ActionType.NOOP,
+                action_params={"reason": "backed_off_failures"},
+            )
+
+        # MAINTENANCE goals -> action based on theme_tag (P2a fix 2026-05-08).
+        # Plain MAINTENANCE handler is NO-OP (returns success without doing
+        # anything), so K12-escalator goals never close and K12 keeps emitting
+        # "100% failure" advisory. Route by theme to a handler that actually
+        # bumps progress. Unknown themes fall back to MAINTENANCE.
+        if goal_type == "maintenance":
+            theme = (goal.metadata or {}).get("theme_tag", "")
+            theme_to_action = {
+                "learn_failures": ActionType.LEARN,
+                "passive_drift": ActionType.LEARN,
+                "retention_low": ActionType.REVIEW,
+                "skip_overuse": ActionType.EVALUATE,
+                "stale_goals": ActionType.EVALUATE,
+                # VALIDATE here was wrong: _exec_validate needs a file_id that
+                # K12-escalator goals never carry → always returns
+                # "No files ready for validation" → planner loops. EVALUATE
+                # runs the K4 report instead, surfaces metrics, and closes
+                # the goal without creating another validate cascade.
+                "validate_failures": ActionType.EVALUATE,
+                # exam_failures advisory → REVIEW is the logical response
+                # (re-study the material that failed). Falls back to MAINTENANCE
+                # (no-op) without this entry.
+                "exam_failures": ActionType.REVIEW,
+            }
+            routed = theme_to_action.get(theme, ActionType.MAINTENANCE)
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=routed,
+                action_params={
+                    "metric": goal.metadata.get("metric", ""),
+                    "theme": theme,
+                },
+            )
+
+        # D1.5c (2026-04-22): saturation META-learning goals route to FETCH
+        # directly. K8 Deliberation almost always picks learn_topic for goals
+        # with a concrete topic, so without this bypass saturated goals never
+        # pull new materials from the web even though explore_new exists.
+        # Window guard (_enforce_learning_window) still runs below.
+        from agent_core.planner.goal_selector import is_saturation_meta_goal
+        if (is_saturation_meta_goal(goal, snapshot)
+                and not self._is_action_rate_limited("fetch")):
+            action = ActionType.FETCH
+            action_params: Dict[str, Any] = {}
+            topics = goal.metadata.get("topics")
+            if topics:
+                action_params["topics"] = topics
+            action, override_reason = self._enforce_learning_window(goal, action)
+            if override_reason:
+                return create_plan(
+                    goal_id=goal.id,
+                    goal_description=goal.description,
+                    action_type=action,
+                    action_params={"reason": override_reason},
+                )
+            logger.info(
+                f"[Planner] Saturation META goal {goal.id}: library full, "
+                f"routing to FETCH"
+            )
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=action,
+                action_params=action_params,
+                metadata={"trigger": "saturation_meta_fetch"},
             )
 
         # K8: Consult Deliberation for multi-step strategy
@@ -964,6 +1749,20 @@ class PlannerCore:
                     if topics and "topics" not in action_params:
                         action_params["topics"] = topics
 
+                    # Window guard: K8 may propose a learn-family action even
+                    # when we're outside the learning window. Redirect to NOOP
+                    # so the executor does not reject it downstream.
+                    action, override_reason = self._enforce_learning_window(
+                        goal, action, delib_action=delib_action,
+                    )
+                    if override_reason:
+                        return create_plan(
+                            goal_id=goal.id,
+                            goal_description=goal.description,
+                            action_type=action,
+                            action_params={"reason": override_reason},
+                        )
+
                     return create_plan(
                         goal_id=goal.id,
                         goal_description=delib_action.get(
@@ -978,8 +1777,14 @@ class PlannerCore:
                         },
                     )
 
-        # Fallback: LEARNING goals or META goal -> decide learn/exam/review
-        action = self._decide_learning_action(snapshot, metrics)
+        # Fallback: LEARNING goals or META goal -> decide learn/exam/review.
+        # Fetch handoff goals carry explicit file scope and must not be
+        # displaced by generic exam/review candidates in the global snapshot.
+        from agent_core.planner.goal_selector import is_fetch_handoff_goal
+        if is_fetch_handoff_goal(goal):
+            action = ActionType.LEARN
+        else:
+            action = self._decide_learning_action(snapshot, metrics)
 
         # Pass topic filters from goal metadata to action_params
         action_params = {}
@@ -996,12 +1801,29 @@ class PlannerCore:
                         f"no matching files, switching to FETCH"
                     )
 
+        file_ids = (
+            goal.metadata.get("file_ids")
+            or goal.metadata.get("fetched_file_ids")
+        )
+        if file_ids:
+            action_params["resolved_file_ids"] = file_ids
+
         # ASK_EXPERT: add topic and source
         if action == ActionType.ASK_EXPERT:
             topic = self._pick_expert_topic()
             if topic:
                 action_params["topic"] = topic
                 action_params["source"] = "planner"
+
+        # Window guard (defense in depth for non-K8 path).
+        action, override_reason = self._enforce_learning_window(goal, action)
+        if override_reason:
+            return create_plan(
+                goal_id=goal.id,
+                goal_description=goal.description,
+                action_type=action,
+                action_params={"reason": override_reason},
+            )
 
         return create_plan(
             goal_id=goal.id,
@@ -1039,6 +1861,130 @@ class PlannerCore:
 
         return self._deliberation.get_next_action(goal.id, delib_context)
 
+    def _enforce_learning_window(
+        self,
+        goal,
+        action: ActionType,
+        delib_action: Optional[Dict] = None,
+    ) -> tuple:
+        """Block learning-family actions outside the learning window.
+
+        Returns (action, override_reason). override_reason is None when the
+        original action is preserved; otherwise NOOP is returned along with
+        the reason that will surface in plan.action_params.
+
+        Bypasses:
+            - goal.type.value == "user" (operator-driven)
+            - goal.metadata["forced_action_type"] (explicit operator override)
+
+        Side effect: abandons the K8 strategy tied to delib_action so the
+        deliberation layer rethinks its plan next tick instead of re-issuing
+        the same blocked step.
+        """
+        if action not in LEARNING_WINDOW_ACTIONS:
+            return action, None
+        try:
+            if goal.type.value == "user":
+                return action, None
+        except AttributeError:
+            return action, None
+        if goal.metadata.get("forced_action_type"):
+            return action, None
+        try:
+            from agent_core.environment.environment_model import is_learning_window
+            if is_learning_window():
+                return action, None
+        except Exception:
+            return action, None
+
+        # 8b: off-window, allow a bounded number of learn-family actions per day
+        # (rhythm/budget) rather than blocking every one. The window is now the
+        # *preferred* time; the daily budget is the throttle. Only spend budget
+        # when the current mode/health would actually let the action execute --
+        # otherwise the degradation gate in _finalize_plan blocks it (REDUCED /
+        # low health) and we would burn budget on a no-op.
+        if (self._off_window_budget_remaining() > 0
+                and self._heavy_action_mode_ok()):
+            self._consume_off_window_budget()
+            self._last_off_window_approved = True
+            logger.info(
+                f"[Planner] Goal {goal.id} action={action.value} allowed "
+                f"off-window ({self._state.off_window_learn_used}/"
+                f"{OFF_WINDOW_LEARN_BUDGET} off-window budget used today)"
+            )
+            return action, None
+
+        if delib_action and self._deliberation:
+            strategy_id = delib_action.get("strategy_id")
+            if strategy_id:
+                try:
+                    self._deliberation.abandon_strategy(
+                        strategy_id, reason="outside_learning_window",
+                    )
+                except Exception as e:
+                    logger.debug(
+                        f"[Planner] abandon_strategy failed for "
+                        f"{strategy_id}: {e}"
+                    )
+
+        logger.info(
+            f"[Planner] Goal {goal.id} action={action.value} redirected to "
+            f"NOOP: outside_learning_window (off-window daily budget exhausted)"
+        )
+        return ActionType.NOOP, "outside_learning_window"
+
+    @staticmethod
+    def _berlin_date_key() -> str:
+        """Today's date in Europe/Berlin (P3 #5).
+
+        The off-window budget resets at the SAME midnight the learning window
+        uses, so it stays consistent even if the OS timezone changes. It was
+        naive time.localtime() before, which would drift from the Berlin-pinned
+        window after an OS re-zone (the class of bug that caused #5).
+        """
+        from agent_core.environment.environment_model import berlin_now
+        return berlin_now().strftime("%Y-%m-%d")
+
+    def _off_window_budget_remaining(self) -> int:
+        """Learn-family actions still allowed off-window today (8b).
+
+        Resets at Berlin midnight. Irrelevant while the window is open (the
+        window check short-circuits before the budget is ever consulted).
+        """
+        today = self._berlin_date_key()
+        if self._state.off_window_learn_date != today:
+            return OFF_WINDOW_LEARN_BUDGET
+        return max(0, OFF_WINDOW_LEARN_BUDGET - self._state.off_window_learn_used)
+
+    def _consume_off_window_budget(self) -> None:
+        """Record one off-window learn-family action against today's budget (8b)."""
+        today = self._berlin_date_key()
+        if self._state.off_window_learn_date != today:
+            self._state.off_window_learn_date = today
+            self._state.off_window_learn_used = 0
+        self._state.off_window_learn_used += 1
+
+    def _heavy_action_mode_ok(self) -> bool:
+        """True if the current mode/health would let a heavy LLM action run.
+
+        Used by the 8b off-window budget so it is only spent on actions that
+        will actually execute -- the degradation gate in _finalize_plan blocks
+        heavy work in REDUCED / low health, and spending budget there would
+        silently drain the daily allowance before an ACTIVE/SLEEP window.
+        Defaults to True when no homeostasis core is wired (e.g. unit tests).
+        """
+        core = getattr(self, "_homeostasis_core", None)
+        if core is None:
+            return True
+        try:
+            st = core.get_state()
+            allowed, _ = self.guard.is_heavy_action_allowed(
+                st.mode.value, st.health_score
+            )
+            return allowed
+        except Exception:
+            return True
+
     def _decide_learning_action(
         self, snapshot: Optional[Dict], metrics: Dict
     ) -> ActionType:
@@ -1046,6 +1992,7 @@ class PlannerCore:
         Decide which learning action to take based on knowledge state.
 
         Priority logic:
+        - P0: Outside learning window -> redirect to non-learning actions
         - P1: Files in "learning" status -> LEARN (continue partial)
         - P2: Files in "learned" status (ready for exam) -> EXAM
         - P2.5: Weak beliefs (confidence < 0.3) -> REVIEW weak topic
@@ -1054,6 +2001,14 @@ class PlannerCore:
         - P5: No materials left -> FETCH (get new content from web)
         - P6: Nothing to do -> NOOP
         """
+        # P0: Outside learning window -> skip all learning, do other work
+        try:
+            from agent_core.environment.environment_model import is_learning_window
+            if not is_learning_window():
+                return self._decide_non_learning_action(metrics)
+        except Exception:
+            pass
+
         if snapshot is None:
             return ActionType.LEARN  # Default to learning
 
@@ -1099,6 +2054,27 @@ class PlannerCore:
         # P7: Post NEED_MATERIAL to bulletin board (instead of silent NOOP)
         self._post_need_material_if_missing()
 
+        return ActionType.NOOP
+
+    def _decide_non_learning_action(self, metrics: Dict) -> ActionType:
+        """Pick a productive action when outside learning window.
+
+        Instead of learn/exam/fetch, Maria does reflection and maintenance:
+        creative, self_analyze, critique, evaluate, validate, experiment.
+        """
+        # Priority: creative > self_analyze > critique > evaluate > validate
+        candidates = [
+            ("creative", ActionType.CREATIVE),
+            ("self_analyze", ActionType.SELF_ANALYZE),
+            ("critique", ActionType.CRITIQUE),
+            ("evaluate", ActionType.EVALUATE),
+            ("validate", ActionType.VALIDATE),
+        ]
+        for name, action_type in candidates:
+            if not self._is_action_rate_limited(name):
+                return action_type
+
+        # Everything rate-limited -> maintenance or NOOP
         return ActionType.NOOP
 
     def _find_weak_topic_file(self, snapshot: Optional[Dict]) -> Optional[str]:
@@ -1206,14 +2182,59 @@ class PlannerCore:
                 pass
         return False
 
+    def _is_gap_learnable_goal(self, goal_id: Optional[str]) -> bool:
+        """Check whether a goal represents a learnable topic (not meta-strategy).
+
+        GapPlanner expects a concrete knowledge topic (e.g. 'fizyka'). Meta,
+        MAINTENANCE, and creative capability_meta goals have prose descriptions
+        like 'Zmiana mechanizmu uczenia' that are strategies, not topics.
+        Feeding them into audit+gap pipeline produces absurd 'Maria nie ma
+        wiedzy o Zmiana mechanizmu uczenia' bulletin entries.
+
+        Returns:
+            True if goal is LEARNING/USER (or cannot be resolved — allow by
+            default to preserve legacy behavior when no store/goal exists).
+        """
+        if not goal_id or self._goal_store is None:
+            return True  # Preserve legacy: no goal info -> allow
+        try:
+            goal = self._goal_store.get(goal_id)
+        except Exception:
+            return True
+        if goal is None:
+            return True
+        # Compare by string to handle both enum and raw string goal_type fields
+        gtype_raw = getattr(goal, "goal_type", None)
+        gtype = getattr(gtype_raw, "value", gtype_raw)
+        if not isinstance(gtype, str):
+            return True
+        gtype_lower = gtype.lower()
+        # Block strategic / capability / maintenance goals from gap pipeline
+        if gtype_lower in {"meta", "maintenance"}:
+            return False
+        if gtype_lower.startswith("capability"):
+            return False
+        return True
+
     def _post_need_material_if_missing(self) -> None:
-        """Audit topic, plan gaps, post targeted needs to bulletin board."""
+        """Audit topic, plan gaps, post targeted needs to bulletin board.
+
+        Gate 1 (goal type): meta / capability_meta / maintenance goals carry
+        strategy descriptions, not learnable topics — skip gap pipeline for
+        them to avoid template'd 'no knowledge of <strategy>' bulletins.
+        """
         if not getattr(self, "_bulletin_store", None):
             return
         topic = self._get_current_goal_topic()
         if not topic:
             return
         goal_id = self._get_current_goal_id()
+        if not self._is_gap_learnable_goal(goal_id):
+            logger.debug(
+                f"[GAP_PLANNER] Skipping non-learnable goal "
+                f"(id={goal_id}, topic-desc={topic[:50]!r})"
+            )
+            return
         goal_desc = ""
         if self._current_trace:
             goal_desc = self._current_trace.goal_description or ""
@@ -1232,6 +2253,16 @@ class PlannerCore:
                     return  # Topic well-covered
 
                 plan = gap_planner.plan_for_topic(report, goal_desc)
+
+                # Warstwa 2 backstop: GapPlanner may return NO_ACTION for
+                # prose topics that slipped past Warstwa 1. Don't create a
+                # bulletin for those.
+                if plan.action == GapAction.NO_ACTION:
+                    logger.debug(
+                        f"[GAP_PLANNER] NO_ACTION for '{topic[:60]}' "
+                        f"(reason={plan.reason})"
+                    )
+                    return
 
                 # Map GapAction to EntryType
                 action_to_entry = {
@@ -1329,6 +2360,147 @@ class PlannerCore:
             return trace.goal_id
         return None
 
+    # -- D2: K12 -> bulletin -> planner advisory ------------
+
+    def _apply_bulletin_advisory(self, plan: Plan, trace) -> None:
+        """Annotate plan/trace if bulletin flags this action as broken.
+
+        Reads IMPROVEMENT entries posted by K12 (or other observers) whose
+        ``metadata["action_hint"]`` matches the plan's action_type. The
+        highest-priority match is recorded in plan.metadata and the trace
+        but execution is NOT blocked at this stage (Phase 1 advisory).
+        """
+        if self._bulletin_store is None:
+            return
+        try:
+            from agent_core.bulletin.bulletin_model import EntryType
+        except Exception:
+            return
+
+        try:
+            action_str = plan.action_type.value
+        except AttributeError:
+            return
+
+        try:
+            entries = self._bulletin_store.get_actionable()
+        except Exception as e:
+            logger.debug(f"[Planner] bulletin advisory read failed: {e}")
+            return
+
+        candidates = []
+        for entry in entries:
+            if entry.entry_type != EntryType.IMPROVEMENT:
+                continue
+            metadata = entry.metadata if isinstance(entry.metadata, dict) else {}
+            hint = metadata.get("action_hint")
+            if hint and hint == action_str:
+                candidates.append(entry)
+
+        if not candidates:
+            return
+
+        candidates.sort(key=lambda e: e.priority, reverse=True)
+        top = candidates[0]
+        top_meta = top.metadata if isinstance(top.metadata, dict) else {}
+
+        plan.metadata["bulletin_advisory"] = {
+            "entry_id": top.entry_id,
+            "summary": (top.summary or "")[:120],
+            "priority": top.priority,
+            "match_count": len(candidates),
+            "mode_aware": bool(top_meta.get("mode_aware")),
+            "hour_bucket": top_meta.get("hour_bucket"),
+        }
+        if trace is not None:
+            try:
+                trace.add_step(
+                    "bulletin", "advisory_match", "noted",
+                    {
+                        "entry_id": top.entry_id,
+                        "topic": (top.topic or "")[:80],
+                        "action": action_str,
+                        "match_count": len(candidates),
+                        "mode_aware": bool(top_meta.get("mode_aware")),
+                    },
+                )
+            except Exception:
+                pass
+        # P1 fix: dedup advisory log per action_type per tick.
+        # Plan metadata + trace step are still recorded (above) — we only
+        # suppress the redundant log line emitted in the pivot loop.
+        if action_str not in self._advisory_logged_this_tick:
+            self._advisory_logged_this_tick.add(action_str)
+            logger.info(
+                f"[Planner] K12 advisory for {action_str}: "
+                f"{(top.summary or '')[:80]}"
+            )
+
+    # -- D4 W3: mode-aware defer ---------------------------
+
+    def _current_hour_bucket(self) -> str:
+        """Wrapper for testability — patched in tests to control time."""
+        try:
+            from agent_core.self_analysis.mode_analyzer import _hour_bucket
+            from datetime import datetime
+            return _hour_bucket(datetime.now().hour)
+        except Exception:
+            return "unknown"
+
+    def _apply_mode_aware_defer(self, plan: Plan, trace) -> None:
+        """Soft-defer heavy actions when ModeAnalyzer flagged them for the
+        current hour bucket (D4 W3).
+
+        Triggered only when the bulletin advisory carries
+        ``metadata["mode_aware"] = True`` and the current hour bucket
+        matches the entry's ``hour_bucket``. The plan is rewritten to
+        NOOP so the executor skips it; the original action_type is
+        preserved in ``plan.action_params["deferred_action"]`` for
+        observability.
+        """
+        adv = plan.metadata.get("bulletin_advisory") if isinstance(plan.metadata, dict) else None
+        if not adv or not adv.get("mode_aware"):
+            return
+
+        target_bucket = adv.get("hour_bucket")
+        if not target_bucket or target_bucket == "unknown":
+            return
+
+        current_bucket = self._current_hour_bucket()
+        if current_bucket != target_bucket:
+            return
+
+        try:
+            original_action = plan.action_type.value
+        except AttributeError:
+            return
+
+        if original_action == ActionType.NOOP.value:
+            return
+
+        plan.action_type = ActionType.NOOP
+        plan.action_params = {
+            "reason": f"mode_aware_defer:{adv.get('entry_id', '?')}",
+            "deferred_action": original_action,
+            "hour_bucket": current_bucket,
+        }
+        if trace is not None:
+            try:
+                trace.add_step(
+                    "mode_aware", "defer", "applied",
+                    {
+                        "entry_id": adv.get("entry_id"),
+                        "deferred_action": original_action,
+                        "hour_bucket": current_bucket,
+                    },
+                )
+            except Exception:
+                pass
+        logger.info(
+            f"[Planner] Mode-aware defer: {original_action} -> NOOP "
+            f"(entry {adv.get('entry_id')}, bucket={current_bucket})"
+        )
+
     # -- Internal: finalize and persist ---------------------
 
     def _finalize_plan(self, plan: Plan) -> Plan:
@@ -1346,6 +2518,20 @@ class PlannerCore:
             trace.action_params = plan.action_params
             trace.goal_id = plan.goal_id
             trace.goal_description = plan.goal_description
+
+        # D2 (2026-04-26): K12 advisory layer. If bulletin holds an
+        # IMPROVEMENT entry flagging this action_type as broken/suboptimal,
+        # surface it via trace + plan metadata + log. Phase 1 is
+        # advisory-only — does not block execution. Phase 2 (separate
+        # D-task) may add penalty/skip semantics with operator override.
+        self._apply_bulletin_advisory(plan, trace)
+
+        # D4 W3 (2026-04-26): mode-aware defer. When the matched advisory
+        # comes from ModeAnalyzer (mode_aware=True) and the entry's
+        # hour_bucket matches the current bucket, soft-defer the action by
+        # rewriting it to NOOP. The original action is preserved in
+        # action_params["deferred_action"] for trace/diagnostic visibility.
+        self._apply_mode_aware_defer(plan, trace)
 
         # Phase 3: Degradation check - block heavy LLM actions in REDUCED mode
         _heavy_actions = {
@@ -1466,6 +2652,28 @@ class PlannerCore:
                             topic = intent[len(prefix):]
                             break
 
+                # Fallback 4: derive topic from file_ids (LEARN/EXAM/REVIEW actions).
+                # Without this, K9 records topic='' for every learn, which
+                # collapses topic-level confidence tracking.
+                if not topic:
+                    file_ids = plan.action_params.get("file_ids", []) or []
+                    if file_ids:
+                        # input_008_logika_formalna.txt -> "logika formalna"
+                        # expert_fizyka.txt -> "fizyka"
+                        # web_wiki_astrofizyka.txt -> "astrofizyka"
+                        import re as _re
+                        first = file_ids[0]
+                        stem = first.replace(".txt", "").replace(".md", "")
+                        # Strip known prefixes
+                        for pref in ("input_", "expert_", "web_wiki_", "web_rss_"):
+                            if stem.startswith(pref):
+                                stem = stem[len(pref):]
+                                break
+                        # Strip leading digits_ pattern (e.g., "008_")
+                        stem = _re.sub(r"^\d+_", "", stem)
+                        # Replace underscores with spaces
+                        topic = stem.replace("_", " ").strip()
+
                 mc_context = {
                     "action_params": plan.action_params,
                     "topic": topic,
@@ -1519,9 +2727,29 @@ class PlannerCore:
 
         plan.result = result
         plan.duration_ms = (time.time() - start) * 1000
-        plan.status = (
-            PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
-        )
+        if result.get("success"):
+            plan.status = PlanStatus.COMPLETED
+        elif result.get("skipped"):
+            # T-LEARN-003: a skipped action (outside window, no material) was
+            # never attempted -- it is not a failure. Record it honestly so
+            # self-analysis sensors don't count planner rest as a failed action.
+            plan.status = PlanStatus.SKIPPED
+        else:
+            plan.status = PlanStatus.FAILED
+
+        # v2 Phase A: track action success/failure for backoff
+        if result.get("success"):
+            self.record_action_success(plan.action_type.value, plan.goal_id)
+        elif not result.get("skipped"):
+            self.record_action_failure(plan.action_type.value, plan.goal_id)
+
+        # v2 Phase B: feed execution result back to strategic planner
+        if self._strategic_planner:
+            self._strategic_planner.record_action(
+                plan.action_type.value, plan.goal_id,
+                success=result.get("success", False),
+                duration_ms=plan.duration_ms,
+            )
 
         # K10: Capture after-state and validate effects
         if self._action_safety:
@@ -1568,9 +2796,16 @@ class PlannerCore:
             except Exception:
                 pass
 
-        # Reset idle streak so Maria doesn't stay in SLEEP forever
-        # after autonomous learning/exam/evaluation actions
-        if plan.action_type != ActionType.NOOP and self._homeostasis_core:
+        # Reset idle streak only for actions that produce real work.
+        # Reflection actions (creative, self_analyze, critique, evaluate, validate)
+        # outside learning window are "thinking in circles" and should NOT
+        # prevent Maria from entering SLEEP mode.
+        _productive_actions = {
+            ActionType.LEARN, ActionType.EXAM, ActionType.REVIEW,
+            ActionType.FETCH, ActionType.ASK_EXPERT, ActionType.MAINTENANCE,
+            ActionType.EXPERIMENT, ActionType.EFFECTOR,
+        }
+        if plan.action_type in _productive_actions and self._homeostasis_core:
             try:
                 self._homeostasis_core.record_activity()
             except Exception:
@@ -1586,24 +2821,19 @@ class PlannerCore:
             except Exception:
                 pass
 
-        # K6: Rebuild beliefs after LEARN (new knowledge -> new beliefs)
-        # and after EVALUATE (~1/hour periodic rebuild)
-        if (plan.action_type in (ActionType.EVALUATE, ActionType.LEARN)
-                and result.get("success")
-                and self._world_model):
-            try:
-                self._world_model.build_all()
-                self._world_model.save()
-            except Exception:
-                pass
+        # K6: Rebuild beliefs after plan execution (throttled).
+        self._maybe_rebuild_beliefs(plan, result)
 
         # Belief Store v2: maintenance after EVALUATE (~1/hour)
-        # Runs: decay -> dedup -> prune -> compact
+        # Runs: decay -> dedup -> prune -> compact. semantic_memory enables
+        # the SEMANTIC dedup phase (flag-gated, SEMANTIC_DEDUP_ENABLED) --
+        # before 2026-06-10 maintain() was always called bare, so embedding
+        # dedup never ran in production despite being fully implemented.
         if (plan.action_type == ActionType.EVALUATE
                 and result.get("success")
                 and self._world_model):
             try:
-                self._world_model.maintain()
+                self._world_model.maintain(semantic_memory=self._semantic_memory)
             except Exception:
                 pass
 
@@ -1634,6 +2864,12 @@ class PlannerCore:
             self._state.consecutive_noop_count += 1
         else:
             self._state.consecutive_noop_count = 0
+
+        # Non-productive loop detection: same goal + same reflection action
+        # repeated N times. COMPLETED evaluates/critiques on an undecomposable
+        # meta-goal don't trigger stuck_history (below) — this catches them.
+        self._track_nonproductive_repeat(plan)
+        self._track_goal_cycle(plan, plan.result or {})
 
         # Stuck detection: track repeated failures on the same goal+action
         if plan.status == PlanStatus.FAILED and plan.goal_id:
@@ -1676,36 +2912,108 @@ class PlannerCore:
 
     # -- Internal: stale goal cleanup -------------------------
 
+    # Per-type stale threshold. K12/critic mass-produce LEARNING goals and
+    # K13/creative mass-produces META goals — they decay faster than USER
+    # goals (which represent explicit operator intent).
+    _STALE_THRESHOLDS_SEC = {
+        "learning": 3 * 24 * 3600,    # 3d: mostly k12/critic auto-created
+        "meta": 5 * 24 * 3600,        # 5d: creative meta-goals
+        "user": 14 * 24 * 3600,       # 14d: operator-requested
+        "maintenance": 30 * 24 * 3600,  # 30d: system goals
+    }
+    _STALE_DEFAULT_SEC = 7 * 24 * 3600
+    # Plank 3: an ACTIVE learning goal that never makes progress wedges --
+    # Plank 1 promotes goals into ACTIVE, which the PENDING-only net above
+    # can't reap, and the goal-cycle detector only cools-down/escalates,
+    # never terminates. Reap zero-progress ACTIVE learning goals past this
+    # (longer) threshold; goals with ANY progress are spared -- they are
+    # still working toward completion (reactivation over the trash heap).
+    _ACTIVE_STUCK_SEC = 7 * 24 * 3600
+    # P3 (#4): fetch_handoff goals point at real downloaded bytes on disk,
+    # unlike the k12/critic auto-goals the 3d learning threshold was tuned for.
+    # Give them a 30d window (matches maintenance) before abandoning -- the live
+    # handoff cleared the old 3d PENDING reaper by only 2.5h, so 3d demonstrably
+    # orphans real material under any learning delay. Applied to BOTH the PENDING
+    # and the ACTIVE-stuck branch: Plank 1 promotes handoffs to ACTIVE early, so
+    # a handoff spends most of its life ACTIVE -- exempting only PENDING would
+    # leave the hole exactly where the goal lives.
+    _FETCH_HANDOFF_STALE_SEC = 30 * 24 * 3600
+
     def _cleanup_stale_goals(self) -> None:
-        """Auto-abandon goals that are PENDING > 7 days with no progress.
+        """Auto-abandon goals that are PENDING past their per-type threshold.
 
         Safety net against goals that can never be fulfilled (e.g. camera
-        commands parsed as learning goals, or actions without completion logic).
+        commands parsed as learning goals, abstract meta-goals without
+        decomposition, actions without completion logic).
         Runs once per cycle - lightweight (iterates active goals only).
         """
         if self._goal_store is None:
             return
 
         now = time.time()
-        stale_threshold_sec = 7 * 24 * 3600  # 7 days
+        from agent_core.goals.goal_model import GoalStatus, GoalType
 
-        from agent_core.goals.goal_model import GoalStatus
-
+        stale_count = 0
         for goal in self._goal_store.get_active():
+            is_fetch_handoff = goal.metadata.get("source") == "fetch_handoff"
+            threshold = self._STALE_THRESHOLDS_SEC.get(
+                goal.type.value, self._STALE_DEFAULT_SEC,
+            )
+            if is_fetch_handoff:
+                threshold = self._FETCH_HANDOFF_STALE_SEC
             age_sec = now - goal.created_at
-            if (age_sec > stale_threshold_sec
+            if (age_sec > threshold
                     and goal.progress <= 0.0
                     and goal.status == GoalStatus.PENDING):
                 logger.warning(
-                    f"Planner: auto-abandoning stale goal {goal.id} "
-                    f"({goal.description[:50]}) - pending {age_sec / 3600:.0f}h "
-                    f"with no progress"
+                    f"Planner: auto-abandoning stale {goal.type.value} goal "
+                    f"{goal.id} ({goal.description[:50]}) - pending "
+                    f"{age_sec / 3600:.0f}h with no progress "
+                    f"(threshold {threshold / 3600:.0f}h)"
                 )
                 self._goal_store.update_status(
                     goal.id, GoalStatus.ABANDONED,
-                    reason=f"stale: pending {age_sec / 3600:.0f}h with no progress",
+                    reason=(
+                        f"stale: pending {age_sec / 3600:.0f}h "
+                        f"with no progress"
+                    ),
                     actor="planner_stale_cleanup",
                 )
+                stale_count += 1
+            elif (goal.status == GoalStatus.ACTIVE
+                    and goal.type == GoalType.LEARNING
+                    and goal.progress <= 0.0
+                    and age_sec > (self._FETCH_HANDOFF_STALE_SEC
+                                   if is_fetch_handoff
+                                   else self._ACTIVE_STUCK_SEC)):
+                # Plank 3: a learning goal the planner activated but that never
+                # moved -- the goal-cycle detector cooled it down and escalated
+                # to K12, but nothing ever terminated it. Reap it so the active
+                # set stays healthy (else MAX_ACTIVE_GOALS silently fills with
+                # un-completable goals and blocks new ones).
+                logger.warning(
+                    f"Planner: auto-abandoning wedged ACTIVE learning goal "
+                    f"{goal.id} ({goal.description[:50]}) - active "
+                    f"{age_sec / 3600:.0f}h with no progress"
+                )
+                self._goal_store.update_status(
+                    goal.id, GoalStatus.ABANDONED,
+                    reason=(
+                        f"active goal stuck: no progress in "
+                        f"{age_sec / 3600:.0f}h"
+                    ),
+                    actor="planner_active_stuck_cleanup",
+                )
+                self._state.actions_since_progress.pop(goal.id, None)
+                self._state.stuck_cooldowns.pop(goal.id, None)
+                stale_count += 1
+
+        if stale_count > 0:
+            self._goal_store.save()
+            logger.info(
+                "Planner stale cleanup: abandoned %d goals this cycle",
+                stale_count,
+            )
 
     # -- Internal: auto-create learning goals -----------------
 
@@ -1853,16 +3161,21 @@ class PlannerCore:
         """
         from agent_core.tracing.episode import current_episode_id, clear_episode_id
 
-        authority_level = ""
-        reasons = check.blocked_result.get("reasons", []) if check.blocked_result else []
-        for r in reasons:
-            if "authority_level=" in r:
-                # Extract level from reason string
-                for part in r.split(","):
-                    if "authority_level=" in part:
-                        authority_level = part.split("=")[1].strip().split(":")[0]
-                        break
-                break
+        # Authority level is read STRUCTURALLY from the check; the reason-string
+        # parse is only a defensive fallback. The BOUNDED escalate reason carried
+        # no "authority_level=" token, so the old parse-only path silently missed
+        # it -> the dangerous-tool request fell through to a plain block and never
+        # reached the approval queue (audit 2026-06-01 #4).
+        authority_level = getattr(check, "authority_level", "") or ""
+        if not authority_level:
+            reasons = check.blocked_result.get("reasons", []) if check.blocked_result else []
+            for r in reasons:
+                if "authority_level=" in r:
+                    for part in r.split(","):
+                        if "authority_level=" in part:
+                            authority_level = part.split("=")[1].strip().split(":")[0]
+                            break
+                    break
 
         tool_name = plan.action_params.get("tool_name", "")
         tool_args = plan.action_params.get("tool_args", {})
@@ -1890,7 +3203,12 @@ class PlannerCore:
             }
             plan.message = f"Sugestia: {tool_name} (operator powiadomiony)"
 
-        elif authority_level in ("confirm", "bounded"):
+        else:
+            # Any other escalating level -- confirm, bounded, or an
+            # unrecognized elevated level -- needs operator approval. This
+            # handler runs ONLY for effector ESCALATE decisions, so an
+            # escalation must never silently fall through to a plain block;
+            # route it to the approval queue (safe HITL default).
             # Submit to approval queue
             if self._approval_queue:
                 request = self._approval_queue.submit(
@@ -1930,13 +3248,6 @@ class PlannerCore:
                 plan.status = PlanStatus.FAILED
                 plan.result = {"success": False, "blocked_by": "no_approval_queue"}
                 plan.message = f"Brak kolejki zatwierdzen dla {tool_name}"
-        else:
-            # Other levels (observe) - standard block
-            plan.status = PlanStatus.FAILED
-            plan.result = check.blocked_result or {
-                "success": False, "blocked_by": "authority_observe"
-            }
-            plan.message = f"Efektor zablokowany (level={authority_level})"
 
         self._state.total_plans_executed += 1
 
@@ -1975,12 +3286,17 @@ class PlannerCore:
         plan.message = f"Wykonuje zatwierdzony efektor: {approved_request.tool_name}"
         plan.metadata["approval_request_id"] = approved_request.request_id
 
-        # K7: Validate even approved effectors through autonomy policy
+        # K7: Validate even approved effectors through autonomy policy.
+        # `already_approved=True` short-circuits the authority-level rule
+        # (operator already consented via ApprovalQueue) but keeps all
+        # other rules active — mode/health restrictions and consecutive
+        # failure breakers still apply.
         if self._autonomy_policy:
             check = self._autonomy_policy.check(
                 action_type="effector",
                 action_params=plan.action_params,
                 goal_id=plan.goal_id,
+                already_approved=True,
             )
             if not check.allowed:
                 plan.status = PlanStatus.FAILED
@@ -2026,9 +3342,15 @@ class PlannerCore:
         result = self.executor.execute(plan)
         plan.result = result
         plan.duration_ms = (time.time() - start) * 1000
-        plan.status = (
-            PlanStatus.COMPLETED if result.get("success") else PlanStatus.FAILED
-        )
+        if result.get("success"):
+            plan.status = PlanStatus.COMPLETED
+        elif result.get("skipped"):
+            # T-LEARN-003: a skipped action (outside window, no material) was
+            # never attempted -- it is not a failure. Record it honestly so
+            # self-analysis sensors don't count planner rest as a failed action.
+            plan.status = PlanStatus.SKIPPED
+        else:
+            plan.status = PlanStatus.FAILED
 
         # K10: after_action
         if self._action_safety:
@@ -2117,6 +3439,153 @@ class PlannerCore:
         # Clear history to avoid re-triggering immediately
         self._state.stuck_history.clear()
 
+    # Reflection actions that don't move goals forward on their own. Repeating
+    # the same one on the same goal forever == loop, not progress.
+    _NONPRODUCTIVE_ACTIONS = frozenset([
+        ActionType.EVALUATE, ActionType.CRITIQUE, ActionType.VALIDATE,
+        ActionType.SELF_ANALYZE, ActionType.CREATIVE,
+    ])
+
+    def _plan_made_progress(self, plan: Plan, result: Dict[str, Any]) -> bool:
+        """T-B4-001: did this plan execution move its goal forward?"""
+        if not result.get("success"):
+            return False
+        if result.get("skipped"):
+            return False
+        action = plan.action_type
+        if action == ActionType.LEARN:
+            return result.get("chunks_learned", 0) > 0
+        if action == ActionType.EXAM:
+            return result.get("exams_passed", 0) > 0
+        if action == ActionType.REVIEW:
+            return result.get("reviews_done", 0) > 0
+        return True
+
+    def _track_goal_cycle(self, plan: Plan, result: Dict[str, Any]) -> None:
+        """T-B4-001: increment per-goal cycle counter; escalate at threshold."""
+        goal_id = plan.goal_id
+        if not goal_id:
+            return
+
+        if self._plan_made_progress(plan, result):
+            self._state.actions_since_progress.pop(goal_id, None)
+            return
+
+        count = self._state.actions_since_progress.get(goal_id, 0) + 1
+        self._state.actions_since_progress[goal_id] = count
+
+        if count >= GOAL_CYCLE_THRESHOLD:
+            self._escalate_goal_cycle(goal_id, count)
+            self._state.actions_since_progress.pop(goal_id, None)
+
+    def _escalate_goal_cycle(self, goal_id: str, count: int) -> None:
+        """T-B4-001: cooldown + K12 IMPROVEMENT bulletin for exhausted cycle."""
+        self._state.stuck_cooldowns[goal_id] = time.time() + STUCK_COOLDOWN_SEC
+
+        goal_desc = ""
+        if self._goal_store:
+            try:
+                goal = self._goal_store.get(goal_id)
+                if goal:
+                    goal_desc = (goal.description or "")[:120]
+            except Exception as exc:
+                logger.debug("[Planner] goal lookup for cycle escalation: %s", exc)
+
+        if self._bulletin_store is not None:
+            try:
+                from agent_core.bulletin.bulletin_model import (
+                    BulletinEntry,
+                    EntryStatus,
+                    EntryType,
+                )
+
+                topic = goal_desc or goal_id[:24]
+                entry = BulletinEntry(
+                    entry_id=f"cbb-goal-cycle-{goal_id[:12]}-{int(time.time())}",
+                    goal_id=goal_id,
+                    entry_type=EntryType.IMPROVEMENT,
+                    priority=0.85,
+                    status=EntryStatus.OPEN,
+                    topic=topic[:120],
+                    reason_code="goal_exhausted_cycle",
+                    summary=(
+                        f"Cel '{topic[:60]}' nie poczynil postepu w {count} "
+                        "probach. K12 powinno przeanalizowac."
+                    ),
+                    requested_by="planner_goal_cycle_detector",
+                    metadata={
+                        "category": "goal_exhausted_cycle",
+                        "goal_id": goal_id,
+                        "actions_attempted": count,
+                        "threshold": GOAL_CYCLE_THRESHOLD,
+                        "action_hint": "self_analyze",
+                    },
+                )
+                self._bulletin_store.post(entry)
+            except Exception as exc:
+                logger.warning(
+                    "[Planner] failed to post goal_exhausted bulletin: %s", exc,
+                )
+
+        logger.warning(
+            "[Planner] Goal %s exhausted after %d cycles without progress - "
+            "posted IMPROVEMENT bulletin",
+            goal_id[:12], count,
+        )
+
+    def _track_nonproductive_repeat(self, plan: Plan) -> None:
+        """Abandon goal when a reflection action repeats N times without progress.
+
+        Productive actions (LEARN/EXAM/FETCH/...) naturally repeat — we only
+        track reflection actions that can't change goal state.
+        """
+        if not plan.goal_id or plan.action_type not in self._NONPRODUCTIVE_ACTIONS:
+            self._state.last_goal_action_key = None
+            self._state.goal_action_repeat_count = 0
+            return
+
+        key = f"{plan.goal_id}:{plan.action_type.value}"
+        if key == self._state.last_goal_action_key:
+            self._state.goal_action_repeat_count += 1
+        else:
+            self._state.last_goal_action_key = key
+            self._state.goal_action_repeat_count = 1
+
+        if self._state.goal_action_repeat_count >= NONPRODUCTIVE_REPEAT_THRESHOLD:
+            self._abandon_nonproductive_goal(
+                plan.goal_id, plan.action_type.value,
+                self._state.goal_action_repeat_count,
+            )
+            self._state.last_goal_action_key = None
+            self._state.goal_action_repeat_count = 0
+
+    def _abandon_nonproductive_goal(
+        self, goal_id: str, action: str, count: int,
+    ) -> None:
+        """Abandon a goal stuck in a non-productive reflection loop."""
+        if self._goal_store is None:
+            return
+        from agent_core.goals.goal_model import GoalStatus
+        reason = (
+            f"non-productive loop: {count} consecutive {action} "
+            f"actions without progress"
+        )
+        try:
+            updated = self._goal_store.update_status(
+                goal_id, GoalStatus.ABANDONED, reason=reason,
+                actor="planner_nonproductive_detector",
+            )
+            if updated:
+                self._goal_store.save()
+                logger.warning(
+                    "[Planner] Abandoned goal %s after %d consecutive %s "
+                    "actions without progress", goal_id[:12], count, action,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to abandon non-productive goal %s: %s", goal_id, e,
+            )
+
     def _format_message(self, plan: Plan) -> str:
         """Generate human-readable message for a plan decision."""
         action = plan.action_type
@@ -2146,6 +3615,48 @@ class PlannerCore:
         elif action == ActionType.NOOP:
             return "Nic do zrobienia - czekam"
         return f"{action.value}: {goal}"
+
+    # -- Internal: K6 throttled belief rebuild -------------------
+
+    _BELIEF_BUILD_COOLDOWN_SEC: float = 3600.0
+
+    def _maybe_rebuild_beliefs(self, plan: Plan, result: Dict[str, Any]) -> None:
+        """Rebuild beliefs after successful LEARN always; after EVALUATE
+        only once per cooldown window.
+
+        The builder enumerates every concept in longterm memory (~22k),
+        which is then pruned to cap=2000. Running this every EVALUATE
+        burned CPU on build->prune cycles for zero progress (observed
+        ~19.8k supersedes/minute on 2026-04-17). LEARN still triggers
+        unconditionally because it reflects real new knowledge.
+        """
+        if not (result.get("success") and self._world_model):
+            return
+        if plan.action_type == ActionType.LEARN:
+            pass  # always rebuild
+        elif plan.action_type == ActionType.EVALUATE:
+            elapsed = time.time() - self._state.last_belief_build_ts
+            if elapsed < self._BELIEF_BUILD_COOLDOWN_SEC:
+                return
+        else:
+            return
+
+        try:
+            stats = self._world_model.build()
+            self._world_model.save()
+            self._state.last_belief_build_ts = time.time()
+            if stats and any(stats.values()):
+                logger.info(
+                    f"[K6] Beliefs rebuilt after {plan.action_type.value}: "
+                    f"+{stats.get('topics',0)} topics, "
+                    f"+{stats.get('files',0)} files, "
+                    f"+{stats.get('concepts',0)} concepts"
+                )
+        except Exception as e:
+            # Historical bug: silent swallow hid AttributeError
+            # (build_all vs build) for a full month. Log now so regressions
+            # surface immediately.
+            logger.warning(f"[K6] build/save failed after {plan.action_type.value}: {e}")
 
     # -- Internal: event emission ---------------------------
 

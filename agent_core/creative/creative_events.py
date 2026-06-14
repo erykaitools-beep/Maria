@@ -8,6 +8,7 @@ META_GOAL_PROPOSED = "creative.meta_goal_proposed"
 REFRAME_GENERATED = "creative.reframe_generated"
 EXPLORATION_PROPOSED = "creative.exploration_program_proposed"
 GOAL_REJECTED_DUPLICATE = "creative.goal_rejected_duplicate"
+GOAL_SUPPRESSED_LOOP = "creative.goal_suppressed_loop"  # D3
 MEMORY_RETRIEVED = "creative.memory_retrieved"
 JOURNAL_ENTRY_WRITTEN = "creative.journal_entry_written"
 PERSONALITY_SIGNAL_EMITTED = "creative.personality_signal_emitted"

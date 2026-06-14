@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 # Default paths
 _META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
 _DEFAULT_PLANS_PATH = _META_DIR / "teacher_plans.jsonl"
+_DEFAULT_EXAM_COOLDOWN_PATH = _META_DIR / "teacher_exam_cooldown.json"
+
+# BUG B fix (audit 2026-05-25): after a pipeline failure on a learned file,
+# park it for this long before P2 tries to exam it again. Six hours = roughly
+# one Maria active-window cycle, so the next learn-attempt picks the queue
+# back up without re-burning NIM on the same broken file.
+_EXAM_COOLDOWN_SEC = 6 * 3600
 
 
 class TeacherAgent:
@@ -43,6 +50,7 @@ class TeacherAgent:
         knowledge_analyzer: KnowledgeAnalyzer,
         plans_path: Optional[Path] = None,
         max_nim_planning_calls: int = 5,
+        exam_cooldown_path: Optional[Path] = None,
     ):
         """
         Args:
@@ -50,11 +58,14 @@ class TeacherAgent:
             knowledge_analyzer: KnowledgeAnalyzer for reading JSONL state
             plans_path: Where to log teaching plans (JSONL)
             max_nim_planning_calls: Max NIM calls for gap analysis per session
+            exam_cooldown_path: Where to persist per-file exam cooldown (JSON)
         """
         self.router = router
         self.analyzer = knowledge_analyzer
         self.scheduler = SpacedRepetitionScheduler()
         self.plans_path = Path(plans_path or _DEFAULT_PLANS_PATH)
+        self.exam_cooldown_path = Path(exam_cooldown_path or _DEFAULT_EXAM_COOLDOWN_PATH)
+        self._exam_cooldown: Dict[str, float] = self._load_exam_cooldown()
 
         self._max_nim_planning = max_nim_planning_calls
         self._nim_planning_used = 0
@@ -67,6 +78,7 @@ class TeacherAgent:
             "chunks_learned": 0,
             "exams_run": 0,
             "exams_passed": 0,
+            "exam_pipeline_failures": 0,
             "reviews_done": 0,
             "strategies_executed": 0,
             "nim_planning_calls": 0,
@@ -76,6 +88,10 @@ class TeacherAgent:
         # Callbacks
         self._learn_chunk_fn: Optional[Callable] = None
         self._run_exam_fn: Optional[Callable] = None
+
+        # Gap-driven learning (from Critic / Auditor)
+        self._critic_agent = None
+        self._bulletin_store = None
 
     # ──────────────────────────────────────────────
     # Setup: inject learning/exam functions
@@ -88,6 +104,14 @@ class TeacherAgent:
     def set_exam_fn(self, fn: Callable) -> None:
         """Set the function to run exam: fn(file_id) -> Dict or None."""
         self._run_exam_fn = fn
+
+    def set_critic_agent(self, critic) -> None:
+        """Set CriticAgent for quality-driven learning priorities."""
+        self._critic_agent = critic
+
+    def set_bulletin_store(self, store) -> None:
+        """Set BulletinStore for gap-driven learning priorities."""
+        self._bulletin_store = store
 
     # ──────────────────────────────────────────────
     # Main loop
@@ -121,6 +145,7 @@ class TeacherAgent:
             "chunks_learned": 0,
             "exams_run": 0,
             "exams_passed": 0,
+            "exam_pipeline_failures": 0,
             "reviews_done": 0,
             "strategies_executed": 0,
             "nim_planning_calls": 0,
@@ -179,6 +204,55 @@ class TeacherAgent:
     # Decision engine (priorities 1-6)
     # ──────────────────────────────────────────────
 
+    def _find_critic_gap(self, snapshot: Dict[str, Any]) -> Optional[tuple]:
+        """
+        Check Critic findings for topics that match available new files.
+
+        Returns (file_id, topic) if a gap matches, else None.
+        Zero LLM cost - reads last persisted Critic report.
+        """
+        gap_topics = []
+
+        # Critic findings: LEARN_MORE, REFRESH, REVIEW actions
+        if self._critic_agent is not None:
+            try:
+                report = self._critic_agent.get_last_report()
+                if report and report.findings:
+                    for f in report.findings:
+                        if f.suggested_action in ("learn_more", "refresh", "review"):
+                            gap_topics.append(f.topic_normalized)
+            except Exception:
+                pass
+
+        # Bulletin NEED_MATERIAL entries
+        if self._bulletin_store is not None:
+            try:
+                from agent_core.bulletin.bulletin_store import EntryType
+                # Audyt 2026-06-12: get_entries_by_type + .get() na dataclass
+                # to byly fantomy -- sciezka martwa od 04-13, wyjatek polykany
+                # nizej. Realne API: get_by_type (tylko OPEN) + entry.topic.
+                needs = self._bulletin_store.get_by_type(EntryType.NEED_MATERIAL)
+                for entry in needs:
+                    topic = entry.topic
+                    if topic:
+                        gap_topics.append(topic.lower().replace(" ", "_"))
+            except Exception:
+                pass
+
+        if not gap_topics:
+            return None
+
+        # Match gap topics to available new files
+        new_files = snapshot.get("new_files_available", [])
+        for nf in new_files:
+            file_id = nf.get("id", nf.get("file", ""))
+            file_lower = file_id.lower().replace("-", "_").replace(" ", "_")
+            for topic in gap_topics:
+                if topic in file_lower or file_lower in topic:
+                    return (file_id, topic)
+
+        return None
+
     def _filter_records(self, records: List[Dict]) -> List[Dict]:
         """Filter file records by topic filter if active."""
         if self._filter_file_ids is None:
@@ -222,6 +296,13 @@ class TeacherAgent:
 
         # P2: Examine ready files
         ready_for_exam = self._filter_records(by_status.get("learned", []))
+        # BUG B fix (audit 2026-05-25): drop files whose exam pipeline failed
+        # within _EXAM_COOLDOWN_SEC. Stops Maria re-burning NIM on a broken
+        # learned file while the new-file queue starves.
+        ready_for_exam = [
+            r for r in ready_for_exam
+            if not self._is_in_exam_cooldown(r.get("id", r.get("file", "")))
+        ]
         if ready_for_exam:
             target = ready_for_exam[0]
             file_id = target.get("id", target.get("file", ""))
@@ -243,6 +324,16 @@ class TeacherAgent:
                 params={"reason": "weak_topic_priority",
                         "attempts": target.get("exam_attempts", 0)},
             )
+
+        # P2.7: Gap-driven learning (Critic/Bulletin say what's missing)
+        if self._filter_file_ids is None:
+            gap_file = self._find_critic_gap(snapshot)
+            if gap_file:
+                return TeachingStrategy(
+                    TeachingStrategy.LEARN_NEW,
+                    gap_file[0],
+                    params={"reason": "critic_gap", "topic": gap_file[1]},
+                )
 
         # P3: Start new file
         new_files = self._filter_records(
@@ -431,8 +522,25 @@ class TeacherAgent:
                     "score": result.get("score", 0),
                     "passed": result.get("passed", False)}
         else:
+            # BUG A fix (audit 2026-05-25): track pipeline failures separately
+            # so K9/K12 can see the true attempt count. exams_run stays as
+            # "successful executions"; exam_pipeline_failures counts attempts
+            # where run_exam_fn returned but executed=False (parser truncation,
+            # LLM timeout, etc.). Without this, exams_run=0 hides the loop and
+            # the planner happily retries 30+ times in a single window.
+            self._stats["exam_pipeline_failures"] += 1
+            err_msg = result.get("error", "exam failed") if result else "exam returned None"
+            logger.warning(
+                f"[EXAM] Pipeline failure for {file_id}: {err_msg} "
+                f"(session failures: {self._stats['exam_pipeline_failures']})"
+            )
+            # BUG B fix (audit 2026-05-25): park this file so P2 stops picking
+            # it back up next iteration. Without cooldown the planner re-picks
+            # the same learned-but-broken file every window and the new-file
+            # queue starves.
+            self._mark_exam_cooldown(file_id)
             return {"success": False, "file_id": file_id, "type": "exam",
-                    "error": result.get("error", "exam failed") if result else "exam returned None"}
+                    "error": err_msg}
 
     def _exec_fill_gap(self, strategy: TeachingStrategy) -> Dict[str, Any]:
         """Execute FILL_GAP strategy (re-learn with simple prompt)."""
@@ -466,6 +574,39 @@ class TeacherAgent:
     # ──────────────────────────────────────────────
     # Persistence
     # ──────────────────────────────────────────────
+
+    def _load_exam_cooldown(self) -> Dict[str, float]:
+        """Load persisted per-file exam cooldown timestamps."""
+        try:
+            if self.exam_cooldown_path.exists():
+                with open(self.exam_cooldown_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return {k: float(v) for k, v in data.items()}
+        except (IOError, ValueError, TypeError) as e:
+            logger.warning(f"Could not load exam cooldown: {e}")
+        return {}
+
+    def _save_exam_cooldown(self) -> None:
+        """Persist current exam cooldown map."""
+        try:
+            self.exam_cooldown_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.exam_cooldown_path, "w", encoding="utf-8") as f:
+                json.dump(self._exam_cooldown, f, indent=2)
+        except IOError as e:
+            logger.warning(f"Could not save exam cooldown: {e}")
+
+    def _is_in_exam_cooldown(self, file_id: str) -> bool:
+        """Return True if file_id had a pipeline failure within cooldown window."""
+        ts = self._exam_cooldown.get(file_id)
+        if ts is None:
+            return False
+        return (time.time() - ts) < _EXAM_COOLDOWN_SEC
+
+    def _mark_exam_cooldown(self, file_id: str) -> None:
+        """Record a pipeline-failure timestamp and persist."""
+        self._exam_cooldown[file_id] = time.time()
+        self._save_exam_cooldown()
 
     def _log_plan(self, strategy: TeachingStrategy, result: Dict[str, Any]) -> None:
         """Log strategy + result to JSONL."""

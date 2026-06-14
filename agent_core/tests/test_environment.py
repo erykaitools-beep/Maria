@@ -9,7 +9,10 @@ import os
 import tempfile
 import time
 from datetime import datetime
+from types import SimpleNamespace
 import pytest
+
+from agent_core.homeostasis.state_model import Mode
 
 from agent_core.environment.environment_model import (
     EnvironmentMode,
@@ -146,7 +149,7 @@ class TestModeDetector:
     def test_detect_learning_weekday_morning(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # Monday at 10:00 -> LEARNING should trigger
+        # Monday 10:00 Berlin -> LEARNING should trigger
         now = datetime(2026, 4, 13, 10, 0)  # Monday
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.LEARNING
@@ -154,23 +157,23 @@ class TestModeDetector:
     def test_detect_quiet_at_night(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # Any day at 23:00 -> QUIET should trigger
-        now = datetime(2026, 4, 12, 23, 0)  # Saturday night
+        # 23:00 Berlin -> QUIET should trigger
+        now = datetime(2026, 4, 12, 23, 0)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.QUIET
 
     def test_detect_quiet_early_morning(self):
         detector = ModeDetector()
         detector._last_switch_ts = 0
-        # 3 AM -> QUIET
-        now = datetime(2026, 4, 13, 3, 0)  # Monday 3AM
+        # 03:00 Berlin -> QUIET
+        now = datetime(2026, 4, 13, 3, 0)  # Monday 03:00 Berlin
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result == EnvironmentMode.QUIET
 
     def test_anti_flap_guard(self):
         detector = ModeDetector()
         detector._last_switch_ts = time.time()  # Just switched
-        now = datetime(2026, 4, 13, 10, 0)
+        now = datetime(2026, 4, 13, 10, 0)  # Monday 10:00 Berlin (would trigger LEARNING)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         assert result is None  # Anti-flap blocks
 
@@ -179,10 +182,10 @@ class TestModeDetector:
         detector._last_switch_ts = 0
 
         class FakeCore:
-            _current_mode = "REDUCED"
+            state = SimpleNamespace(mode=Mode.REDUCED)
 
         detector.set_homeostasis_core(FakeCore())
-        now = datetime(2026, 4, 13, 14, 0)  # Afternoon (would be LEARNING)
+        now = datetime(2026, 4, 13, 14, 0)  # Monday 14:00 Berlin (would be LEARNING)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         # Homeostasis degradation should override to QUIET
         assert result == EnvironmentMode.QUIET
@@ -192,10 +195,10 @@ class TestModeDetector:
         detector._last_switch_ts = 0
 
         class FakeCore:
-            _current_mode = "ACTIVE"
+            state = SimpleNamespace(mode=Mode.ACTIVE)
 
         detector.set_homeostasis_core(FakeCore())
-        now = datetime(2026, 4, 13, 10, 0)  # Monday morning
+        now = datetime(2026, 4, 13, 10, 0)  # Monday 10:00 Berlin
         result = detector.detect(EnvironmentMode.DEFAULT, now)
         # Should detect LEARNING, not QUIET
         assert result == EnvironmentMode.LEARNING
@@ -449,7 +452,7 @@ class TestEnvironmentIntegration:
         detector._last_switch_ts = 0
 
         class FakeCore:
-            _current_mode = "REDUCED"
+            state = SimpleNamespace(mode=Mode.REDUCED)
 
         detector.set_homeostasis_core(FakeCore())
 
@@ -457,3 +460,53 @@ class TestEnvironmentIntegration:
         result = mgr.maybe_auto_switch()
         assert result == EnvironmentMode.QUIET
         assert mgr.get_active_mode() == EnvironmentMode.QUIET
+
+
+# ========== LEARNING-WINDOW TZ (P1 #5) ==========
+
+class TestLearningWindowTimezone:
+    """P1 (#5): the learning window is Berlin wall-clock, pinned to Europe/Berlin
+    so it is DST-correct and immune to OS-timezone changes. The 2026-05-29 switch
+    from Etc/UTC to Europe/Warsaw silently shifted the old UTC-authored naive
+    window by 2h, starving daytime learning -- this locks the corrected hours."""
+
+    @pytest.fixture(autouse=True)
+    def always_learning_window(self):
+        # Shadow conftest's global is_learning_window->True patch: this class is
+        # the one place that must exercise the REAL window function.
+        yield
+
+    def test_fires_at_corrected_berlin_hours_on_weekday(self):
+        from agent_core.environment.environment_model import is_learning_window
+        # Monday (2026-04-13). Intended: 09:00-10:59 + 14:00-15:59 Berlin.
+        for hour in (9, 10, 14, 15):
+            assert is_learning_window(datetime(2026, 4, 13, hour, 30)) is True, hour
+        for hour in (8, 11, 12, 13, 16, 23):
+            assert is_learning_window(datetime(2026, 4, 13, hour, 30)) is False, hour
+
+    def test_old_utc_window_hours_now_closed(self):
+        from agent_core.environment.environment_model import is_learning_window
+        # Regression on the exact skew: 07:00 and 12:00 were the old UTC-authored
+        # window (false-open half). They must now be CLOSED.
+        assert is_learning_window(datetime(2026, 4, 13, 7, 0)) is False
+        assert is_learning_window(datetime(2026, 4, 13, 12, 0)) is False
+        # And 10:00 / 15:00 (false-closed back-half) must now be OPEN.
+        assert is_learning_window(datetime(2026, 4, 13, 10, 0)) is True
+        assert is_learning_window(datetime(2026, 4, 13, 15, 0)) is True
+
+    def test_closed_on_weekend_even_in_learning_hour(self):
+        from agent_core.environment.environment_model import is_learning_window
+        # Saturday 2026-04-11 at 10:00 -- a learning HOUR but not a learning DAY.
+        assert is_learning_window(datetime(2026, 4, 11, 10, 0)) is False
+
+    def test_berlin_now_is_zone_pinned_not_naive(self):
+        from agent_core.environment.environment_model import berlin_now
+        now = berlin_now()
+        # tz-aware + the real zone -> immune to OS-TZ changes (a naive
+        # datetime.now() would be tzinfo=None, the bug that bit on 2026-05-29).
+        assert now.tzinfo is not None
+        assert "Europe/Berlin" in str(now.tzinfo)
+
+    def test_default_now_returns_bool(self):
+        from agent_core.environment.environment_model import is_learning_window
+        assert isinstance(is_learning_window(), bool)

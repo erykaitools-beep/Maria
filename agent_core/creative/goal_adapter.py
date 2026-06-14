@@ -5,11 +5,10 @@ Creative PROPOSES, GoalStore STORES, Planner EXECUTES.
 """
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
 
 from agent_core.creative.creative_model import (
-    MetaGoal, MetaGoalStatus, MetaGoalType,
+    MetaGoal, MetaGoalType,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,54 +29,54 @@ _META_GOAL_TYPE_TO_GOAL_TYPE = {
 class GoalAdapter:
     """Adapts Creative meta-goals into GoalStore records."""
 
-    def __init__(self, goal_store=None):
+    def __init__(self, goal_store=None, bulletin_store=None):
         """
         Args:
-            goal_store: GoalStore instance (optional, wired later).
+            goal_store: GoalStore instance (deprecated since R1, kept for compat).
+            bulletin_store: BulletinStore instance (wired later).
         """
+        # goal_store kept for backward-compat wiring; unused since R1
+        # (2026-05-29) - creative meta-goals post IMPROVEMENT advisories.
         self._goal_store = goal_store
+        self._bulletin_store = bulletin_store
 
     def set_goal_store(self, goal_store) -> None:
         self._goal_store = goal_store
 
+    def set_bulletin_store(self, store) -> None:
+        self._bulletin_store = store
+
     def adapt_and_propose(self, meta_goal: MetaGoal) -> Optional[str]:
         """
-        Transform a meta-goal into a GoalStore PROPOSED record.
+        Post a Creative meta-goal to the bulletin as an IMPROVEMENT advisory.
+
+        R1 (2026-05-29): meta-goals used to become PROPOSED goals, but 217
+        creative goals aged to ABANDONED without ever going ACTIVE. They are
+        exploratory upgrade proposals, not actionable goals - IMPROVEMENT
+        advisories on the bulletin are their proper home (dedup by topic+type).
 
         Returns:
-            Goal ID if successfully proposed, None if store is full or unavailable.
+            Bulletin entry ID if posted, None if no bulletin store or on error.
         """
-        if self._goal_store is None:
-            logger.warning("[CREATIVE] GoalStore not available, cannot propose meta-goal")
+        if self._bulletin_store is None:
+            logger.warning("[CREATIVE] No bulletin_store, cannot post meta-goal")
             return None
 
         try:
-            # Import here to avoid circular dependency
-            from agent_core.goals.goal_model import Goal, GoalType, GoalStatus, AuditEntry
+            from agent_core.bulletin.bulletin_model import EntryType
 
-            goal = Goal(
-                id=meta_goal.goal_id,
-                type=GoalType.META,
-                description=meta_goal.title,
+            summary = (
+                meta_goal.why_now[:200] if meta_goal.why_now else meta_goal.title
+            )
+            entry = self._bulletin_store.create_and_post(
+                entry_type=EntryType.IMPROVEMENT,
+                topic=meta_goal.title,
+                reason_code=f"creative_{meta_goal.goal_type.value}",
+                summary=summary,
+                requested_by="creative",
                 priority=meta_goal.priority,
-                status=GoalStatus.PROPOSED,
-                progress=0.0,
-                parent_goal_id=None,
-                created_by="creative",
-                created_at=time.time(),
-                updated_at=time.time(),
-                deadline=None,
-                audit_trail=[
-                    AuditEntry(
-                        timestamp=time.time(),
-                        old_status=None,
-                        new_status="proposed",
-                        reason=meta_goal.why_now[:200],
-                        actor="creative",
-                    )
-                ],
                 metadata={
-                    "source": "creative",
+                    "meta_goal_id": meta_goal.goal_id,
                     "meta_goal_type": meta_goal.goal_type.value,
                     "risk_level": meta_goal.risk_level.value,
                     "evidence_refs": meta_goal.evidence_refs,
@@ -85,22 +84,14 @@ class GoalAdapter:
                     "decomposition_hint": meta_goal.decomposition_hint,
                 },
             )
-
-            result = self._goal_store.propose(goal)
-            if result:
-                logger.info(
-                    f"[CREATIVE] Meta-goal promoted to GoalStore: "
-                    f"{meta_goal.goal_id} -> {meta_goal.title}"
-                )
-                return result
-            else:
-                logger.info(
-                    f"[CREATIVE] GoalStore proposal rejected (at limit): {meta_goal.title}"
-                )
-                return None
+            logger.info(
+                f"[CREATIVE] Meta-goal posted as IMPROVEMENT: "
+                f"{meta_goal.goal_id} -> {entry.entry_id}"
+            )
+            return entry.entry_id
 
         except Exception as e:
-            logger.warning(f"[CREATIVE] Failed to propose meta-goal: {e}")
+            logger.warning(f"[CREATIVE] Failed to post meta-goal: {e}")
             return None
 
     def adapt_batch(self, meta_goals: List[MetaGoal]) -> Dict[str, Any]:

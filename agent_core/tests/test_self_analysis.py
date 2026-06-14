@@ -20,7 +20,6 @@ from agent_core.self_analysis.recommendation_model import (
     SuggestedAction,
     AnalyzerBackend,
     MAX_RECOMMENDATIONS_PER_REPORT,
-    MAX_PROPOSED_GOALS_FROM_ANALYSIS,
     _gen_id,
 )
 from agent_core.self_analysis.state_collector import StateCollector
@@ -28,6 +27,11 @@ from agent_core.self_analysis.external_analyzer import ExternalAnalyzer
 from agent_core.self_analysis.recommendation_applier import RecommendationApplier
 from agent_core.self_analysis import SelfAnalysis
 from agent_core.planner.planner_model import Plan, ActionType, PlanStatus
+from agent_core.goals.store import GoalStore
+from agent_core.world_model import WorldModel
+from agent_core.bulletin.bulletin_store import BulletinStore
+from agent_core.consciousness.core import ConsciousnessCore
+from agent_core.tests.spec_helpers import specced
 
 
 # =============================================================================
@@ -214,6 +218,8 @@ class TestRecommendationModel:
         )
         d = report.to_dict()
         assert d["report_id"] == "sa-test"
+        assert "model" in d
+        assert d["model"] is None
         assert len(d["recommendations"]) == 1
         assert d["goals_created"] == ["g1"]
 
@@ -229,6 +235,7 @@ class TestRecommendationModel:
         report = AnalysisReport.from_dict(d)
         assert report.report_id == "sa-abc"
         assert report.analyzer == "claude_cli"
+        assert report.model is None
         assert len(report.recommendations) == 1
         assert report.recommendations[0].topic == "fizyka"
 
@@ -242,6 +249,7 @@ class TestRecommendationModel:
         restored = AnalysisReport.from_dict(d)
         assert restored.recommendations[0].topic == "math"
         assert restored.analyzer == "local_planner"
+        assert restored.model is None
 
 
 # =============================================================================
@@ -349,6 +357,23 @@ class TestExternalAnalyzer:
         assert report.recommendations[1].topic == "chemia"
         mock_llm.assert_called_once()
 
+    def test_analyze_sets_local_model(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_PLANNER_MODEL", "test-model:latest")
+        response_json = json.dumps({
+            "recommendations": [
+                {"category": "knowledge_gap", "topic": "fizyka",
+                 "description": "Low confidence", "priority": 0.9,
+                 "suggested_action": "fetch"},
+            ],
+        })
+
+        analyzer = ExternalAnalyzer(llm_fn=MagicMock(return_value=response_json))
+        report = analyzer.analyze({"input_hash": "test", "analysis_prompt": "analyze"})
+
+        assert report.error is None
+        assert report.model == "test-model:latest"
+        assert report.to_dict()["model"] == "test-model:latest"
+
     def test_analyze_markdown_wrapped_json(self):
         response = """Here are my recommendations:
 ```json
@@ -439,8 +464,11 @@ class TestRecommendationApplier:
         assert hint["source"] == "self_analysis"
         assert hint["consumed"] is False
 
-    def test_apply_with_goal_store(self, tmp_project):
-        mock_store = MagicMock()
+    def test_apply_learn_rec_no_goal_writes_hint(self, tmp_project):
+        # R1 (2026-05-29): non-strategic recs no longer create PROPOSED goals
+        # (99.9% were never worked). A learn rec writes a topic hint instead,
+        # which is what actually drives the WebSource learning pipeline.
+        mock_store = specced(GoalStore)
         mock_store.propose = MagicMock(return_value="goal-123")
 
         applier = RecommendationApplier(
@@ -454,12 +482,15 @@ class TestRecommendationApplier:
         report = AnalysisReport(report_id="sa-test", recommendations=[rec])
 
         result = applier.apply(report)
-        assert "goal-123" in result["goals_created"]
-        mock_store.propose.assert_called_once()
+        assert result["goals_created"] == []
+        mock_store.propose.assert_not_called()
+        assert result["hints_written"] == 1
 
-    def test_apply_max_goals(self, tmp_project):
-        mock_store = MagicMock()
-        mock_store.propose = MagicMock(side_effect=lambda **kw: f"goal-{kw['description'][:5]}")
+    def test_apply_many_recs_no_goals(self, tmp_project):
+        # R1: a batch of non-strategic learn recs produces zero goals -
+        # no goal-queue flooding (was the source of 549 abandoned orphans).
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(side_effect=lambda **kw: "goal-x")
 
         applier = RecommendationApplier(
             goal_store=mock_store,
@@ -476,9 +507,12 @@ class TestRecommendationApplier:
         report = AnalysisReport(recommendations=recs)
         result = applier.apply(report)
 
-        assert len(result["goals_created"]) <= MAX_PROPOSED_GOALS_FROM_ANALYSIS
+        assert result["goals_created"] == []
+        mock_store.propose.assert_not_called()
 
     def test_apply_with_world_model(self, tmp_project):
+        # spec-blocked: add_belief is a phantom (no production WorldModel has it);
+        # this test intentionally exercises the hasattr-guarded hypothetical path
         mock_wm = MagicMock()
         mock_wm.add_belief = MagicMock()
 
@@ -496,14 +530,462 @@ class TestRecommendationApplier:
         assert result["beliefs_updated"] == 1
         mock_wm.add_belief.assert_called_once()
 
+    def test_apply_with_real_world_model_reports_zero(self, tmp_project, tmp_path):
+        """Audyt 2026-06-12: zaden produkcyjny WorldModel nie ma add_belief
+        (test wyzej fabrykuje ja na mocku). Licznik beliefs_updated rosl
+        bezwarunkowo i raport klamal "N beliefs" przy zerze zapisow.
+        Na PRAWDZIWYM WorldModelu licznik musi uczciwie zwrocic 0."""
+        from agent_core.world_model import WorldModel
+
+        wm = WorldModel(
+            beliefs_path=tmp_path / "beliefs.jsonl",
+            knowledge_index_path=tmp_path / "ki.jsonl",
+            longterm_memory_path=tmp_path / "ltm.jsonl",
+            exam_results_path=tmp_path / "exam.jsonl",
+        )
+        assert not hasattr(wm, "add_belief")  # dokumentuje stan API
+
+        applier = RecommendationApplier(
+            world_model=wm,
+            project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="knowledge_gap", topic="fizyka",
+            description="Low confidence", priority=0.9, suggested_action="learn",
+        )
+        result = applier.apply(AnalysisReport(recommendations=[rec]))
+
+        assert result["beliefs_updated"] == 0
+
+    # R2.1.1 (2026-05-05) — registry-aware filter
+    @staticmethod
+    def _seed_registry(project_root, *topics):
+        """Helper: write fetch_registry entries for given topics."""
+        path = project_root / "meta_data" / "web_fetch_registry.jsonl"
+        with open(path, "a", encoding="utf-8") as f:
+            for t in topics:
+                f.write(json.dumps({
+                    "topic": t,
+                    "title": t,
+                    "url": "https://example/",
+                    "source_type": "wikipedia",
+                    "char_count": 1234,
+                    "fetched_at": "2026-05-01T00:00:00Z",
+                    "ts": 1777680000.0,
+                    "output_file": f"input/web_wiki_{t}.txt",
+                }) + "\n")
+
+    def test_already_fetched_topic_filters_hint(self, tmp_project):
+        self._seed_registry(tmp_project, "wnioskowanie")
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="new_topic", topic="wnioskowanie",
+            description="K12 thinks new", priority=0.7, suggested_action="fetch",
+        )
+        report = AnalysisReport(recommendations=[rec])
+        result = applier.apply(report)
+        assert result["hints_written"] == 0
+        # File should not be created (or be empty)
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        if hints_path.exists():
+            assert hints_path.read_text().strip() == ""
+
+    def test_already_fetched_topic_filters_goal(self, tmp_project):
+        self._seed_registry(tmp_project, "wnioskowanie")
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(return_value="goal-should-not-fire")
+        applier = RecommendationApplier(
+            goal_store=mock_store, project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="knowledge_gap", topic="wnioskowanie",
+            description="...", priority=0.9, suggested_action="learn",
+        )
+        report = AnalysisReport(recommendations=[rec])
+        result = applier.apply(report)
+        assert result["goals_created"] == []
+        mock_store.propose.assert_not_called()
+
+    def test_not_in_registry_passes_filter(self, tmp_project):
+        self._seed_registry(tmp_project, "filozofia")  # different topic
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="new_topic", topic="muzyka",
+            description="...", priority=0.7, suggested_action="fetch",
+        )
+        report = AnalysisReport(recommendations=[rec])
+        result = applier.apply(report)
+        assert result["hints_written"] == 1
+
+    def test_registry_filter_case_insensitive(self, tmp_project):
+        self._seed_registry(tmp_project, "Wnioskowanie")  # capital W in registry
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="new_topic", topic="WNIOSKOWANIE",
+            description="...", priority=0.7, suggested_action="fetch",
+        )
+        report = AnalysisReport(recommendations=[rec])
+        result = applier.apply(report)
+        assert result["hints_written"] == 0
+
+    def test_review_rec_creates_no_goal_no_hint(self, tmp_project):
+        # R1 (2026-05-29): a non-strategic "review" rec (not fetch/learn)
+        # produces no goal and no topic hint - it becomes a no-op. These
+        # review/experiment recs were abandoned noise in the goal queue.
+        self._seed_registry(tmp_project, "fizyka")
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(return_value="goal-review-ok")
+        applier = RecommendationApplier(
+            goal_store=mock_store, project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="r1", category="knowledge_gap", topic="fizyka",
+            description="needs review", priority=0.7, suggested_action="review",
+        )
+        report = AnalysisReport(recommendations=[rec])
+        result = applier.apply(report)
+        assert result["goals_created"] == []
+        mock_store.propose.assert_not_called()
+        assert result["hints_written"] == 0
+
     def test_set_dependencies(self, tmp_project):
         applier = RecommendationApplier(project_root=str(tmp_project))
-        mock_store = MagicMock()
-        mock_wm = MagicMock()
+        mock_store = specced(GoalStore)
+        mock_wm = specced(WorldModel)
+        mock_bs = specced(BulletinStore)
         applier.set_goal_store(mock_store)
         applier.set_world_model(mock_wm)
+        applier.set_bulletin_store(mock_bs)
         assert applier._goal_store is mock_store
         assert applier._world_model is mock_wm
+        assert applier._bulletin_store is mock_bs
+
+
+# =============================================================================
+# D2 (2026-04-26): Strategic recs route to bulletin instead of misroute goals
+# =============================================================================
+
+class TestRecommendationApplierStrategic:
+    """Strategic K12 recs (category=strategy_change) post bulletin
+    IMPROVEMENT entries instead of creating misroute LEARNING goals."""
+
+    def _make_bulletin(self, tmp_project):
+        from agent_core.bulletin import BulletinStore
+        return BulletinStore(
+            path=tmp_project / "meta_data" / "cognitive_bulletin.jsonl"
+        )
+
+    def test_strategy_change_posts_to_bulletin(self, tmp_project):
+        bulletin = self._make_bulletin(tmp_project)
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(return_value="goal-strategy")
+        applier = RecommendationApplier(
+            goal_store=mock_store,
+            bulletin_store=bulletin,
+            project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="rec-strat-1",
+            category="strategy_change",
+            topic="Akcja 'self_analyze'",
+            description="Skutecznosc 20%, zatrzymaj loop",
+            priority=0.95,
+            suggested_action="experiment",
+        )
+        report = AnalysisReport(report_id="sa-test-1", recommendations=[rec])
+
+        result = applier.apply(report)
+
+        # Strategic rec must NOT create a misroute learning goal
+        assert result["goals_created"] == []
+        mock_store.propose.assert_not_called()
+
+        # Strategic rec MUST post a bulletin IMPROVEMENT entry
+        assert len(result["bulletin_posted"]) == 1
+
+        from agent_core.bulletin.bulletin_model import EntryType
+        entries = bulletin.get_by_type(EntryType.IMPROVEMENT)
+        assert len(entries) == 1
+        e = entries[0]
+        assert e.requested_by == "self_analysis"
+        assert e.priority == pytest.approx(0.95)
+        assert e.metadata["rec_id"] == "rec-strat-1"
+        assert e.metadata["report_id"] == "sa-test-1"
+        assert e.metadata["category"] == "strategy_change"
+        assert e.metadata["action_hint"] == "self_analyze"
+
+    def test_strategy_change_skips_topic_hint(self, tmp_project):
+        """Strategic rec topics like 'Akcja X' are not real topics —
+        topic hint must be skipped to avoid polluting fetcher queue."""
+        bulletin = self._make_bulletin(tmp_project)
+        applier = RecommendationApplier(
+            bulletin_store=bulletin,
+            project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="rec-strat-2",
+            category="strategy_change",
+            topic="proces nauki (learn action)",
+            description="Mechanizm uszkodzony",
+            priority=0.9,
+            suggested_action="learn",
+        )
+        report = AnalysisReport(report_id="sa-test-2", recommendations=[rec])
+
+        result = applier.apply(report)
+        assert result["hints_written"] == 0
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        assert not hints_path.exists()
+
+    def test_non_strategic_no_goal_writes_hint(self, tmp_project):
+        """R1 (2026-05-29): knowledge_gap recs no longer create goals; the
+        fetch/learn action writes a topic hint instead (drives learning)."""
+        bulletin = self._make_bulletin(tmp_project)
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(return_value="goal-kg-1")
+        applier = RecommendationApplier(
+            goal_store=mock_store,
+            bulletin_store=bulletin,
+            project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="rec-kg-1",
+            category="knowledge_gap",
+            topic="fizyka",
+            description="Low confidence",
+            priority=0.9,
+            suggested_action="fetch",
+        )
+        report = AnalysisReport(report_id="sa-test-3", recommendations=[rec])
+
+        result = applier.apply(report)
+        assert result["goals_created"] == []
+        assert result["bulletin_posted"] == []
+        assert result["hints_written"] == 1
+        mock_store.propose.assert_not_called()
+
+    def test_strategic_without_bulletin_drops_silently(self, tmp_project):
+        """No bulletin_store wired -> strategic rec is dropped, not misrouted."""
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(return_value="goal-x")
+        applier = RecommendationApplier(
+            goal_store=mock_store,
+            project_root=str(tmp_project),
+        )
+        rec = AnalysisRecommendation(
+            rec_id="rec-strat-3",
+            category="strategy_change",
+            topic="Akcja 'learn'",
+            description="...",
+            priority=0.9,
+            suggested_action="experiment",
+        )
+        report = AnalysisReport(report_id="sa-test-4", recommendations=[rec])
+
+        result = applier.apply(report)
+        assert result["goals_created"] == []
+        assert result["bulletin_posted"] == []
+        mock_store.propose.assert_not_called()
+
+    def test_mixed_recommendations_routed_correctly(self, tmp_project):
+        """Mix of strategic + non-strategic: each goes to its own channel."""
+        bulletin = self._make_bulletin(tmp_project)
+        mock_store = specced(GoalStore)
+        mock_store.propose = MagicMock(side_effect=lambda g: g.id)
+        applier = RecommendationApplier(
+            goal_store=mock_store,
+            bulletin_store=bulletin,
+            project_root=str(tmp_project),
+        )
+        recs = [
+            AnalysisRecommendation(
+                rec_id="r-strat", category="strategy_change",
+                topic="Akcja 'fetch'", description="0% success",
+                priority=1.0, suggested_action="experiment",
+            ),
+            AnalysisRecommendation(
+                rec_id="r-kg", category="knowledge_gap",
+                topic="biologia", description="missing content",
+                priority=0.8, suggested_action="learn",
+            ),
+            AnalysisRecommendation(
+                rec_id="r-new", category="new_topic",
+                topic="logika", description="unexplored area",
+                priority=0.7, suggested_action="fetch",
+            ),
+        ]
+        report = AnalysisReport(report_id="sa-mix", recommendations=recs)
+        result = applier.apply(report)
+
+        # R1: strategic -> bulletin (1), non-strategic -> topic hints (2), no goals.
+        assert len(result["bulletin_posted"]) == 1
+        assert result["goals_created"] == []
+        assert result["hints_written"] == 2
+        mock_store.propose.assert_not_called()
+
+    def test_extract_action_hint_quoted(self, tmp_project):
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        assert applier._extract_action_hint("Akcja 'self_analyze'") == "self_analyze"
+        assert applier._extract_action_hint("Akcja 'learn'") == "learn"
+
+    def test_extract_action_hint_inline_word(self, tmp_project):
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        assert applier._extract_action_hint("proces nauki (learn action)") == "learn"
+        assert applier._extract_action_hint("effector_actions") == "effector"
+
+    def test_extract_action_hint_unknown_returns_none(self, tmp_project):
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        assert applier._extract_action_hint("trudny temat (hard_topic)") is None
+        assert applier._extract_action_hint("losowy ciag tekstu") is None
+        assert applier._extract_action_hint("") is None
+
+
+# =============================================================================
+# R2.1 (2026-04-29): hint quality filter + dedup
+# =============================================================================
+
+class TestRecommendationApplierHintFilter:
+    """K12 sometimes emits internal-meta rec topics that aren't searchable on
+    wikipedia (e.g. "Obsługa błędów i fallback dla akcji 'learn'"). They
+    pollute the fetcher queue and never resolve. Filter rejects obvious
+    internal-meta shapes before write; dedup blocks repeat hints from the
+    same K12 cycle landing as multiple jsonl entries."""
+
+    def test_searchable_simple_topic_accepted(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        assert _is_searchable_topic("Logika formalna") is True
+        assert _is_searchable_topic("Mechanika kwantowa") is True
+        assert _is_searchable_topic("fizyka") is True
+        # Two-word with parens (real wiki disambiguation) — accept
+        assert _is_searchable_topic("Metoda naukowa") is True
+
+    def test_quoted_action_topic_rejected(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        assert _is_searchable_topic("Akcja 'learn'") is False
+        assert _is_searchable_topic("proces nauki 'fetch'") is False
+        assert _is_searchable_topic('Strategia "self_analyze"') is False
+
+    def test_k12_metadata_suffix_rejected(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        assert _is_searchable_topic("Analiza tekstu (hard_topic)") is False
+        assert _is_searchable_topic("temat trudny (easy_topic)") is False
+        assert _is_searchable_topic("proces (learn action)") is False
+
+    def test_engineering_jargon_rejected(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        assert _is_searchable_topic("fallback dla planera") is False
+        assert _is_searchable_topic("mechanizm walidacji") is False
+        assert _is_searchable_topic("Obsluga bledow w pipeline") is False
+        assert _is_searchable_topic("backoff strategii") is False
+        # Unicode error-handling phrase
+        assert _is_searchable_topic("Obsługa błędów i fallback") is False
+
+    def test_too_long_topic_rejected(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        # 6+ words = sentence, not a wiki topic
+        assert _is_searchable_topic(
+            "Walidacja wiedzy i kryteria weryfikacji oraz testowanie"
+        ) is False
+
+    def test_empty_or_too_short_rejected(self, tmp_project):
+        from agent_core.self_analysis.recommendation_applier import (
+            _is_searchable_topic,
+        )
+        assert _is_searchable_topic("") is False
+        assert _is_searchable_topic("   ") is False
+        assert _is_searchable_topic("ab") is False
+        assert _is_searchable_topic(None) is False  # type: ignore[arg-type]
+
+    def test_unsearchable_hint_filtered_during_apply(self, tmp_project):
+        """Apply with an internal-meta topic should not write to jsonl."""
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r-meta-1",
+            category="knowledge_gap",
+            topic="Obsluga bledow i fallback dla akcji 'learn'",
+            description="K12 sees missing error handler",
+            priority=0.9,
+            suggested_action="fetch",
+        )
+        report = AnalysisReport(report_id="sa-meta", recommendations=[rec])
+        result = applier.apply(report)
+        assert result["hints_written"] == 0
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        assert not hints_path.exists()
+
+    def test_duplicate_hint_skipped(self, tmp_project):
+        """Second apply with same topic + still pending should not append."""
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r-dup-1",
+            category="knowledge_gap",
+            topic="logika formalna",
+            description="first",
+            priority=0.9,
+            suggested_action="fetch",
+        )
+        report1 = AnalysisReport(report_id="sa-1", recommendations=[rec])
+        result1 = applier.apply(report1)
+        assert result1["hints_written"] == 1
+
+        # Second cycle proposes the same topic — should be filtered as duplicate
+        rec2 = AnalysisRecommendation(
+            rec_id="r-dup-2",
+            category="knowledge_gap",
+            topic="Logika Formalna",  # different casing on purpose
+            description="second",
+            priority=0.95,
+            suggested_action="fetch",
+        )
+        report2 = AnalysisReport(report_id="sa-2", recommendations=[rec2])
+        result2 = applier.apply(report2)
+        assert result2["hints_written"] == 0
+
+        # File should still have only one hint line
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        with open(hints_path) as f:
+            lines = [l for l in f if l.strip()]
+        assert len(lines) == 1
+
+    def test_duplicate_consumed_does_not_block_repropose(self, tmp_project):
+        """A consumed (already fetched) hint should not block re-proposal —
+        K12 may re-flag a topic after the article gets retired/archived."""
+        import json as _json
+        hints_path = tmp_project / "meta_data" / "topic_hints.jsonl"
+        # Pre-seed a CONSUMED hint
+        hints_path.write_text(
+            _json.dumps({
+                "topic": "fizyka",
+                "source": "self_analysis",
+                "report_id": "sa-old",
+                "priority": 0.5,
+                "timestamp": time.time() - 86400,
+                "consumed": True,
+            }, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        applier = RecommendationApplier(project_root=str(tmp_project))
+        rec = AnalysisRecommendation(
+            rec_id="r-repro",
+            category="knowledge_gap",
+            topic="fizyka",
+            description="re-propose",
+            priority=0.8,
+            suggested_action="fetch",
+        )
+        report = AnalysisReport(report_id="sa-repro", recommendations=[rec])
+        result = applier.apply(report)
+        assert result["hints_written"] == 1
 
 
 # =============================================================================
@@ -586,6 +1068,23 @@ class TestSelfAnalysisFacade:
         assert "available" in status
         assert status["available"] is False  # No LLM
 
+    def test_run_analysis_emits_introspection_signal(self, populated_project):
+        # C6 fix: K12 must feed `introspection_run` to consciousness so
+        # `refleksyjna` gets reinforced beyond session_with_summary alone.
+        response_json = json.dumps({"recommendations": []})
+        mock_llm = MagicMock(return_value=response_json)
+
+        sa = SelfAnalysis(project_root=str(populated_project))
+        sa.set_llm_fn(mock_llm)
+
+        consc = specced(ConsciousnessCore)
+        sa.set_consciousness(consc)
+
+        sa.run_analysis()
+
+        consc.record_experience.assert_called_once()
+        assert consc.record_experience.call_args.args[0] == "introspection_run"
+
         sa.set_llm_fn(MagicMock())
         status = sa.get_status()
         assert status["available"] is True
@@ -639,7 +1138,7 @@ class TestPlannerIntegration:
     def test_k7_classification(self):
         from agent_core.autonomy.action_class import classify_action, ActionClassification
         cls = classify_action("self_analyze")
-        assert cls == ActionClassification.GUARDED
+        assert cls == ActionClassification.ANALYTICAL
 
     def test_k7_rate_limit(self):
         from agent_core.autonomy.rate_limiter import DEFAULT_RATE_LIMITS

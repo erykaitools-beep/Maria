@@ -364,6 +364,46 @@ class ContentGenerators:
             message="\n".join(lines),
         )
 
+    def proposed_goal_alert(
+        self, new_goals: List[Dict[str, Any]]
+    ) -> Optional[ProactiveContact]:
+        """Alert about freshly created PROPOSED goal(s) awaiting approval.
+
+        Called directly by ProactiveScheduler with the diff against
+        seen_proposed_goal_ids — not part of generate() dispatch since it
+        needs the new-goals list as input. Single-vs-batch format keeps the
+        message readable when escalator creates several goals in one scan.
+        """
+        if not new_goals:
+            return None
+
+        if len(new_goals) == 1:
+            g = new_goals[0]
+            desc = (g.get("description") or g.get("title") or "?")[:200]
+            message = (
+                "*Nowy PROPOSED cel*\n\n"
+                f"{desc}\n\n"
+                "Approve via /goals."
+            )
+        else:
+            lines = [f"*{len(new_goals)} nowych PROPOSED celow*", ""]
+            for g in new_goals[:5]:
+                desc = (g.get("description") or g.get("title") or "?")[:80]
+                lines.append(f"  - {desc}")
+            if len(new_goals) > 5:
+                lines.append(f"  ... i {len(new_goals) - 5} wiecej")
+            lines.append("\nApprove via /goals.")
+            message = "\n".join(lines)
+
+        return ProactiveContact(
+            reason=ContactReason.GOAL_PROPOSED,
+            message=message,
+            metadata={
+                "count": len(new_goals),
+                "goal_ids": [g.get("id") for g in new_goals if g.get("id")],
+            },
+        )
+
     def _interest_match(self) -> Optional[ProactiveContact]:
         """Alert about new content matching user's interests."""
         interests = self._safe_call(self._get_user_interests) or []

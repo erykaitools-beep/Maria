@@ -1,10 +1,146 @@
 """Teacher REPL commands: /teacher, /teacher status, /teacher plan, /teacher history."""
 
+import logging
+import os
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
 from agent_core.registry import MariaModule, CommandInfo
+
+logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _make_nim_first_examiner_fn(
+    fallback_model: str,
+    *,
+    role: str,
+    temperature: float,
+    max_tokens: int,
+    nim_timeout: int,
+    fallback_num_predict: int,
+    scheduler=None,
+):
+    """Examiner-side LLM (question AUTHOR or GRADER): NIM first, honest local fallback.
+
+    Authoring and grading are both EXAMINER work -- neither may run on the
+    student model, or the exam self-grades and the independence guarantee breaks.
+    Both are also heavy generations that chronically timed out on the contended
+    local CPU (incident 2026-06-04 author: 20/20 failed; 2026-06-05 grade: the
+    regular exam's answer+grade overran OLLAMA_TIMEOUT x retries -> 841s storms).
+    Running them on NIM (nemotron, off-CPU) with ``force_json`` removes them from
+    the CPU path entirely, leaving only the student's answer local.
+
+    On ANY NIM failure (timeout, empty content, exception) it falls back to the
+    local ``fallback_model`` (e.g. qwen3 -- a DIFFERENT family than the student),
+    NEVER the student, so the run stays honestly independent whichever model ran.
+    This explicit fallback is the fix for the old hidden self-grade: a naive NIM
+    grader timed out and the ROUTER silently fell back to the student; here the
+    fallback is hard-wired to ``fallback_model``, never the student.
+
+    Params differ between author (creative temp, 120s ok) and grader
+    (deterministic temp, needs ~240s for a full 6-question rubric: NIM measured
+    ~85s/3q). Returns a ``callable(prompt) -> str`` matching the call_ollama API.
+    """
+    from maria_core.learning.llm_utils import call_ollama
+
+    nim = None
+    try:
+        from maria_core.sys.config import (
+            NVIDIA_NIM_API_KEY, NVIDIA_NIM_MODEL, NVIDIA_NIM_BASE_URL,
+        )
+        if NVIDIA_NIM_API_KEY:
+            from agent_core.llm.nim_client import NIMClient
+            nim = NIMClient(
+                api_key=NVIDIA_NIM_API_KEY,
+                model=NVIDIA_NIM_MODEL,
+                base_url=NVIDIA_NIM_BASE_URL or None,
+                # Generous timeout: the old 45s default cut NIM off mid-call.
+                # Author (force_json, no reasoning preamble) lands in ~30s; the
+                # grader needs more (~170s for a 6-question rubric) -> 240s.
+                timeout=nim_timeout,
+                system_prompt=(
+                    "Jestes precyzyjnym egzaminatorem. "
+                    "Zwracasz WYLACZNIE poprawny JSON, bez komentarzy."
+                ),
+            )
+    except Exception as exc:  # pragma: no cover - construction guard
+        logger.warning("[EXAM] NIM %s unavailable (%s); using local %s",
+                        role, exc, fallback_model)
+        nim = None
+
+    def _run(prompt: str):
+        if nim is not None:
+            try:
+                resp = nim._ask_once(
+                    prompt, temperature=temperature,
+                    max_tokens=max_tokens, force_json=True,
+                )
+                if resp and resp.strip():
+                    return resp
+                logger.warning("[EXAM] NIM %s returned empty; "
+                               "falling back to local %s", role, fallback_model)
+            except Exception as exc:
+                logger.warning("[EXAM] NIM %s failed (%s); "
+                               "falling back to local %s", role, exc, fallback_model)
+        # Local examiner fallback is a heavy model (qwen3) on the CPU -- serialize
+        # it on the scheduler mutex so it never overlaps the student answer or K12.
+        guard = (scheduler.heavy_lease(f"exam_{role}_local")
+                 if scheduler is not None else nullcontext())
+        with guard:
+            return call_ollama(prompt, model=fallback_model,
+                               num_predict=fallback_num_predict, num_ctx=8192)
+
+    return _run
+
+
+def _make_exam_author_fn(fallback_model: str, scheduler=None):
+    """Exam-question AUTHOR: NIM first (fast, off-CPU), honest local fallback.
+
+    Authoring a multi-question rubric is a heavy generation that chronically
+    timed out on the contended local CPU (incident 2026-06-04: 20/20 exams
+    failed). See ``_make_nim_first_examiner_fn`` for the shared contract. Author
+    uses a creative temperature and the 120s NIM timeout (authoring lands ~30s).
+    """
+    return _make_nim_first_examiner_fn(
+        fallback_model, role="author", temperature=0.3,
+        max_tokens=4096, nim_timeout=120, fallback_num_predict=4096,
+        scheduler=scheduler,
+    )
+
+
+def _make_exam_grader_fn(fallback_model: str, scheduler=None):
+    """Exam GRADER: NIM first (off-CPU), local independent fallback.
+
+    Grading was the last heavy CPU step in the regular exam: qwen3 graded a
+    6-question rubric in ~400s on CPU and overran OLLAMA_TIMEOUT on retry -> the
+    chronic 841s timeout storm (root-caused 2026-06-05; the EXAM_MAX_QUESTIONS
+    12->6 patch halved it but did not remove it). Moving grade to NIM takes it
+    off the contended CPU, leaving only the student's answer local.
+
+    Differs from the author: low temperature for consistent scoring, and a 240s
+    NIM timeout because a full 6-question rubric measured ~85s/3q (~170s/6q) --
+    the author's 120s would cut it off mid-grade (the exact pitfall that kept
+    grading local until now). On any NIM failure -> qwen3 local (independent:
+    != student), so independence holds and we never self-grade.
+
+    max_tokens=6144 (NOT 2048): nemotron is a REASONING model that emits a long
+    thinking trace before the JSON, so a 2048 cap truncated mid-grade
+    (finish_reason=length, verify 2026-06-06) and silently dropped every grade to
+    the qwen3 fallback -- defeating the off-CPU cure. 6144 clears the trace + a
+    6-question grade JSON with margin. The qwen3 FALLBACK stays at 2048 (qwen3 is
+    not a reasoning model -- it graded a 4-question rubric fine at 2048).
+    """
+    return _make_nim_first_examiner_fn(
+        fallback_model, role="grader", temperature=0.1,
+        max_tokens=6144, nim_timeout=240, fallback_num_predict=2048,
+        scheduler=scheduler,
+    )
 
 
 class TeacherModule(MariaModule):
@@ -81,7 +217,12 @@ class TeacherModule(MariaModule):
             router = self._get_router()
             llm_fn = None
             if router and hasattr(router, "_ask_once"):
-                llm_fn = lambda prompt: router._ask_once(prompt, temperature=0.3)
+                # BUG C fix (audit 2026-05-25): learn output is a structured
+                # JSON with summary + key-points + chunks, often 3-4K tokens.
+                # Default 2048 truncated mid-JSON and triggered fallback loops.
+                llm_fn = lambda prompt: router._ask_once(
+                    prompt, temperature=0.3, force_json=True, max_tokens=4096,
+                )
 
             success = learn_next_chunk(
                 base_dir=INPUT_DIR,
@@ -100,17 +241,117 @@ class TeacherModule(MariaModule):
             from maria_core.learning.exam_agent import run_exam_if_ready
             from maria_core.sys.config import KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS
 
-            router = self._get_router()
-            llm_fn = None
-            if router and hasattr(router, "_ask_once"):
-                llm_fn = lambda prompt: router._ask_once(prompt, temperature=0.3)
+            from maria_core.learning.llm_utils import call_ollama
+            from maria_core.sys.config import (
+                OLLAMA_MODEL, EXAM_ANSWER_TIMEOUT_SEC, EXAM_ANSWER_HTTP_TIMEOUT_SEC,
+            )
+            from agent_core.llm.execution_budget import call_with_timeout
 
+            # KEYSTONE (2026-05-30): split the formerly self-graded exam into a
+            # local STUDENT and an INDEPENDENT EXAMINER (a DIFFERENT model). The
+            # student is Maria's deployed model (OLLAMA_MODEL, llama3.1); the
+            # examiner authors the questions+rubric AND grades, while the student
+            # answers blind (answer_exam never shows the expected answers). So the
+            # score measures real capability instead of the model agreeing with
+            # its own expected answers.
+            #
+            # GRADER ON NIM (2026-06-06): the examiner (author + grader) now runs
+            # NIM-first off-CPU with an honest qwen3-local fallback (see
+            # _make_exam_grader_fn). This is the long-planned upgrade over the
+            # local-only qwen3 grader, which stayed local only because a NAIVE NIM
+            # grader timed out at 45s and the ROUTER silently fell back to the
+            # student = hidden self-grade. The fix: a 240s NIM timeout (clears the
+            # ~170s 6-question rubric) + an EXPLICIT fallback wired to qwen3, never
+            # the student -- so independence holds whichever model graded, and the
+            # heavy grade leaves the contended CPU (the 841s-storm cure).
+            #
+            # num_predict/num_ctx raised (2026-05-25 BUG C): the exam calls over
+            # ~12 questions overflow the 2048 default and truncate mid-JSON, which
+            # looped the pipeline forever.
+            student_model = OLLAMA_MODEL
+            examiner_model = "qwen3:8b" if student_model != "qwen3:8b" else "llama3.1:8b"
+            heldout = _env_flag("HELDOUT_GRADER_ENABLED")
+            # Both exam paths now answer CONCISE (held-out always did; the regular
+            # path switched 2026-06-06 -- see _execute_exam), so a short fact/number
+            # reply fits well under 2048 tokens. 4096 is no longer needed: generate
+            # and grade moved off-CPU to NIM, leaving the student answer as the only
+            # local call, and a concise answer never approaches 2048.
+            student_num_predict = 2048
+            # The student's answer is the ONLY exam step still on the local CPU
+            # (generate + grade run off-CPU on NIM, 2026-06-06). On this GPU-less
+            # CPU prompt-eval is ~17 tok/s, so even a concise answer over a capped
+            # ~2k-token context runs ~207s. call_ollama gets EXAM_ANSWER_HTTP_TIMEOUT
+            # (290s) so a legal answer passes in ONE try (not retry -> 841s zombie),
+            # and call_with_timeout(EXAM_ANSWER_TIMEOUT_SEC=300) is the hard upper
+            # bound: a wedged llama fails on one deadline -> answer_exam pads empties
+            # (score 0) -> a clean, bounded fail instead of an open-ended hang.
+            # Reach the heavy-mutex scheduler via the router so the (heavy, local)
+            # student answer and the qwen3 examiner fallback serialize on the same
+            # lock as ask_as_role/K12 instead of bypassing it -- the connect that
+            # cures the exam-answer || planner contention storm. Defensive: any gap
+            # in wiring -> None -> heavy_lease() degrades to a no-op (today's path).
+            _exam_scheduler = None
+            try:
+                _exam_router = self._get_router()
+                if _exam_router is not None and hasattr(_exam_router, "get_model_scheduler"):
+                    _exam_scheduler = _exam_router.get_model_scheduler()
+            except Exception:
+                _exam_scheduler = None
+
+            _student_call = lambda prompt: call_ollama(
+                prompt, model=student_model,
+                num_predict=student_num_predict, num_ctx=8192,
+                timeout=EXAM_ANSWER_HTTP_TIMEOUT_SEC)
+
+            def llm_fn(prompt):
+                # Student answer is the ONLY heavy step still local (author + grade
+                # run off-CPU on NIM). Hold the heavy mutex for its full duration so
+                # it never overlaps a heavy local on the CPU. No-op until the flag.
+                guard = (_exam_scheduler.heavy_lease("exam_answer")
+                         if _exam_scheduler is not None else nullcontext())
+                with guard:
+                    return call_with_timeout(
+                        lambda: _student_call(prompt),
+                        timeout_sec=EXAM_ANSWER_TIMEOUT_SEC, label="exam_answer")
+            # GRADE now runs on NIM (off-CPU) -- the last heavy step taken off the
+            # contended CPU, and the actual cure for the chronic 841s storm (the
+            # EXAM_MAX_QUESTIONS 12->6 patch only halved it). On any NIM failure it
+            # falls back to qwen3 local (independent, NEVER the student), so the
+            # score stays honestly independent whichever model graded. (The old
+            # local-only grader stayed because a NAIVE NIM grader timed out at 45s
+            # and the ROUTER silently fell back to the student = hidden self-grade;
+            # _make_exam_grader_fn fixes both: 240s timeout + explicit qwen3 fallback.)
+            grader_llm_fn = _make_exam_grader_fn(examiner_model, scheduler=_exam_scheduler)
+            # Author the questions on NIM too (off-CPU, fast); same honest fallback.
+            generator_llm_fn = _make_exam_author_fn(examiner_model, scheduler=_exam_scheduler)
+            grader_meta = {
+                # Independence holds for EITHER grader: NIM nemotron and the qwen3
+                # fallback are both a different family than the student (llama).
+                "independent": examiner_model != student_model,
+                "grader": f"nim-first|{examiner_model}",
+                "student": student_model,
+            }
+
+            # Live SemanticMemory for CLOSED-BOOK held-out answering (retrieval
+            # over learned summaries instead of spoon-feeding the file's own).
+            # Wired as ctx.semantic_search (homeostasis_module); None -> the exam
+            # falls back to legacy open-book, so this is safe before backfill.
+            _ctx = getattr(self, "ctx", None)
+            sem_mem = (
+                getattr(_ctx, "semantic_search", None)
+                or getattr(_ctx, "semantic_memory", None)
+            )
             result = run_exam_if_ready(
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
                 exam_path=EXAM_RESULTS,
                 llm_fn=llm_fn,
                 target_file_id=file_id,
+                grader_llm_fn=grader_llm_fn,
+                generator_llm_fn=generator_llm_fn,
+                grader_meta=grader_meta,
+                use_heldout=heldout,
+                semantic_memory=sem_mem,
             )
             return {
                 "success": result["executed"],

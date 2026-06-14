@@ -9,6 +9,13 @@ from agent_core.orchestrator.tool_registry import ToolCapabilityRegistry
 from agent_core.orchestrator.progress_tracker import TaskProgressTracker
 from agent_core.orchestrator.limitation_reporter import LimitationReporter
 from agent_core.routing.capability_spec import CapabilitySpec
+from agent_core.routing.capability_router import CapabilityRouter
+from agent_core.goals.store import GoalStore
+from agent_core.goals.goal_model import AuditEntry
+from agent_core.registry.shared_context import SharedContext
+from agent_core.homeostasis.state_model import Mode
+from agent_core.autonomy import AutonomyPolicy
+from agent_core.tests.spec_helpers import specced
 
 
 # ===========================================================================
@@ -32,11 +39,12 @@ def _make_specs():
 
 @pytest.fixture
 def mock_ctx():
-    ctx = MagicMock()
-    mode = MagicMock()
-    mode.name = "ACTIVE"
+    ctx = specced(SharedContext)
+    # HomeostasisCore exposes the live mode at core.state.mode (real Mode enum).
+    # Guards bug #4: if production regresses to the phantom `_current_mode`, the
+    # mode-dependent tests below go red (a MagicMock _current_mode.name != "SLEEP").
     ctx.homeostasis_core = MagicMock()
-    ctx.homeostasis_core._current_mode = mode
+    ctx.homeostasis_core.state.mode = Mode.ACTIVE
     ctx.autonomy_policy = None
     ctx.meta_cognition = None
     ctx.openclaw_client = None
@@ -48,13 +56,13 @@ def mock_ctx():
     ctx.trace_store = None
     ctx.brain_model = "llama3.1:8b"
 
-    router = MagicMock()
+    router = specced(CapabilityRouter)
     router.list_capabilities.return_value = _make_specs()
     router.is_available.return_value = True
     router.dispatch.return_value = {"success": True, "chunks_learned": 3}
     ctx.capability_router = router
 
-    goal_store = MagicMock()
+    goal_store = specced(GoalStore)
     goal_store.get.return_value = None
     goal_store.get_active.return_value = []
     goal_store.get_all.return_value = []
@@ -280,13 +288,10 @@ class TestProgressTrackerTimeline:
         assert timeline == []
 
     def test_timeline_with_audit(self, progress_tracker, mock_ctx):
-        entry = MagicMock()
-        entry.timestamp = time.time()
-        entry.old_status = None
-        entry.new_status = "active"
-        entry.reason = "created"
-        entry.actor = "user"
-        entry.to_dict.return_value = {"timestamp": entry.timestamp}
+        ts = time.time()
+        entry = specced(AuditEntry, timestamp=ts, old_status=None,
+                        new_status="active", reason="created", actor="user")
+        entry.to_dict.return_value = {"timestamp": ts}
 
         goal = MagicMock()
         goal.audit_trail = [entry]
@@ -321,14 +326,14 @@ class TestLimitationReporterLimitations:
         assert len(mode_lims) == 0
 
     def test_reduced_mode_has_warning(self, limitation_reporter, mock_ctx):
-        mock_ctx.homeostasis_core._current_mode.name = "REDUCED"
+        mock_ctx.homeostasis_core.state.mode = Mode.REDUCED
         lims = limitation_reporter.get_current_limitations()
         mode_lims = [l for l in lims if l["category"] == "mode"]
         assert len(mode_lims) == 1
         assert mode_lims[0]["severity"] == "warning"
 
     def test_sleep_mode_critical(self, limitation_reporter, mock_ctx):
-        mock_ctx.homeostasis_core._current_mode.name = "SLEEP"
+        mock_ctx.homeostasis_core.state.mode = Mode.SLEEP
         lims = limitation_reporter.get_current_limitations()
         mode_lims = [l for l in lims if l["category"] == "mode"]
         assert mode_lims[0]["severity"] == "critical"
@@ -352,24 +357,25 @@ class TestLimitationReporterCanDo:
         assert result["reasons"] == []
 
     def test_cannot_do_in_sleep(self, limitation_reporter, mock_ctx):
-        mock_ctx.homeostasis_core._current_mode.name = "SLEEP"
+        mock_ctx.homeostasis_core.state.mode = Mode.SLEEP
         result = limitation_reporter.can_do("learn")
         assert result["can_do"] is False
         assert len(result["reasons"]) > 0
 
     def test_can_do_noop_in_sleep(self, limitation_reporter, mock_ctx):
-        mock_ctx.homeostasis_core._current_mode.name = "SLEEP"
+        mock_ctx.homeostasis_core.state.mode = Mode.SLEEP
         result = limitation_reporter.can_do("noop")
         assert result["can_do"] is True
 
     def test_restricted_has_suggestion(self, limitation_reporter, mock_ctx):
-        policy = MagicMock()
-        classification = MagicMock()
-        classification.level = "restricted"
-        policy.classify_action.return_value = classification
-        mock_ctx.autonomy_policy = policy
+        # Bug #3 guard: K7 classify_action is a MODULE function (action_class.py),
+        # NOT a method on AutonomyPolicy -- limitation_reporter must call the module
+        # func. policy here only needs to be truthy ("is K7 wired"). An unregistered
+        # action classifies RESTRICTED (safe-by-default) -> "/approve" suggestion.
+        # If production regresses to policy.classify_action(...) this goes red.
+        mock_ctx.autonomy_policy = specced(AutonomyPolicy)
 
-        result = limitation_reporter.can_do("effector")
+        result = limitation_reporter.can_do("some_unregistered_action_xyz")
         assert any("approve" in s.lower() for s in result["suggestions"])
 
 
@@ -380,7 +386,7 @@ class TestLimitationReporterBlocked:
         assert len(blocked) == 0  # ACTIVE mode, all available
 
     def test_get_blocked_in_sleep(self, limitation_reporter, mock_ctx):
-        mock_ctx.homeostasis_core._current_mode.name = "SLEEP"
+        mock_ctx.homeostasis_core.state.mode = Mode.SLEEP
         blocked = limitation_reporter.get_blocked_actions()
         assert len(blocked) > 0  # Most actions blocked in SLEEP
 

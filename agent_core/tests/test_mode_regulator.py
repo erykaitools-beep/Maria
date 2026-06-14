@@ -6,6 +6,7 @@ Spec reference: homeostasis_spec.md section 5 (lines 550-700)
 
 import pytest
 import time
+from unittest.mock import patch
 
 from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 from agent_core.homeostasis.state_model import Mode
@@ -177,9 +178,33 @@ class TestModeDecision:
         }
         alerts = []
 
-        mode = regulator.decide_mode(state, alerts)
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=False):
+            mode = regulator.decide_mode(state, alerts)
 
         assert mode == Mode.SLEEP
+
+    def test_learning_window_prevents_sleep(self, regulator):
+        """Maria should not go to SLEEP during learning windows."""
+        state = {
+            "idle_seconds": 5000,
+            "ram_available_pct": 80,
+            "cpu_load": 20,
+        }
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=True):
+            mode = regulator.decide_mode(state, [])
+        assert mode == Mode.ACTIVE
+
+    def test_learning_window_wakes_from_sleep(self, regulator):
+        """Maria should auto-wake from SLEEP when learning window starts."""
+        regulator.transition_to(Mode.SLEEP)
+        state = {
+            "idle_seconds": 50000,
+            "ram_available_pct": 80,
+            "cpu_load": 20,
+        }
+        with patch.object(ModeRegulator, '_is_learning_window', return_value=True):
+            mode = regulator.decide_mode(state, [])
+        assert mode == Mode.ACTIVE
 
     def test_user_override_respected(self, regulator):
         """User override should be respected if not critical."""
@@ -255,7 +280,7 @@ class TestMultipleAlerts:
         # Mode is determined by actual metrics in state
         state = {
             "ram_available_pct": 15,  # Below RAM_FOR_REDUCED_PCT (20)
-            "cpu_load": 80,           # Above CPU_FOR_REDUCED_PCT (75)
+            "cpu_load": 95,           # Above CPU_FOR_REDUCED_PCT (90)
         }
         alerts = [
             "ALERT: RAM pressure critical",
@@ -266,5 +291,68 @@ class TestMultipleAlerts:
         mode = regulator.decide_mode(state, alerts)
 
         # Bad metrics should trigger REDUCED
+        assert mode == Mode.REDUCED
+
+    def test_cpu_single_spike_does_not_trigger_reduced(self, regulator):
+        """Single CPU spike should NOT demote to REDUCED (avoids flapping during LLM inference)."""
+        state = {
+            "ram_available_pct": 60,
+            "cpu_load": 95,  # Above threshold, but just one tick
+        }
+        mode = regulator.decide_mode(state, [])
+        assert mode == Mode.ACTIVE
+
+    def test_cpu_sustained_spike_triggers_reduced(self, regulator):
+        """CPU above threshold for CPU_SPIKE_TICKS_FOR_REDUCED consecutive ticks triggers REDUCED."""
+        # Expire startup grace period so CPU demote is active
+        regulator._startup_time = time.time() - regulator.STARTUP_GRACE_PERIOD_SEC - 1
+        state = {
+            "ram_available_pct": 60,
+            "cpu_load": 95,  # Above threshold
+        }
+        # Need N consecutive high-CPU ticks
+        for _ in range(regulator.CPU_SPIKE_TICKS_FOR_REDUCED):
+            mode = regulator.decide_mode(state, [])
+        assert mode == Mode.REDUCED
+
+    def test_cpu_spike_counter_resets_on_low_cpu(self, regulator):
+        """CPU spike counter should reset when CPU drops below threshold."""
+        high = {"ram_available_pct": 60, "cpu_load": 95}
+        low = {"ram_available_pct": 60, "cpu_load": 30}
+        # Two high ticks, then one low - counter should reset
+        regulator.decide_mode(high, [])
+        regulator.decide_mode(high, [])
+        regulator.decide_mode(low, [])  # Reset counter
+        # Now another high tick alone should not trigger REDUCED
+        mode = regulator.decide_mode(high, [])
+        assert mode == Mode.ACTIVE
+
+    def test_startup_grace_period_prevents_cpu_demote(self, regulator):
+        """During startup grace period, sustained CPU spikes should NOT demote (Ollama model load)."""
+        high = {"ram_available_pct": 60, "cpu_load": 99}
+        # Even many consecutive high-CPU ticks should not demote during grace
+        for _ in range(10):
+            mode = regulator.decide_mode(high, [])
+        assert mode == Mode.ACTIVE
+
+    def test_startup_grace_does_not_block_ram_pressure(self, regulator):
+        """RAM pressure must still demote even during startup grace (memory leak safety)."""
+        state = {"ram_available_pct": 15, "cpu_load": 30}  # Low RAM
+        mode = regulator.decide_mode(state, [])
+        assert mode == Mode.REDUCED
+
+    def test_startup_grace_does_not_block_survival(self, regulator):
+        """CRITICAL alerts must still force SURVIVAL even during startup grace."""
+        state = {"ram_available_pct": 60, "cpu_load": 99}
+        mode = regulator.decide_mode(state, ["CRITICAL: RAM pressure imminent OOM"])
+        assert mode == Mode.SURVIVAL
+
+    def test_cpu_demote_works_after_grace_expires(self, regulator):
+        """After grace period expires, sustained CPU should demote normally."""
+        # Simulate grace period expired
+        regulator._startup_time = time.time() - regulator.STARTUP_GRACE_PERIOD_SEC - 1
+        high = {"ram_available_pct": 60, "cpu_load": 95}
+        for _ in range(regulator.CPU_SPIKE_TICKS_FOR_REDUCED):
+            mode = regulator.decide_mode(high, [])
         assert mode == Mode.REDUCED
 

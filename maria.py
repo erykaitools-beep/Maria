@@ -126,6 +126,64 @@ def print_startup_banner(mode: str, issues: list):
 # DAEMON (homeostasis tick loop)
 # ====================================================================
 
+def _maybe_warm_recover(ctx) -> None:
+    """Klocek 9b: on a WARM boot, resume the in-flight strategic plan and log
+    the pre-crash mode. Mode is a HINT only -- tick 1 re-derives it from live
+    sensors, so a crash caused by a bad mode can NOT be resurrected into a
+    crash loop. Flag-gated; OFF (or no fresh snapshot) = cold boot exactly as
+    before. Never raises -- a recovery failure must not block the daemon.
+
+    Runs after SystemState init + start_watchdog and BEFORE the first tick, so
+    the restored plan is in place before the tactical loop runs, and before the
+    tick-0 self-perception snapshot."""
+    try:
+        from agent_core.homeostasis import recovery
+        if not recovery.is_enabled():
+            return
+        snap = recovery.read_snapshot()
+        if not snap:
+            logger.info("Warm recovery: no fresh snapshot -> cold boot")
+            return
+
+        resumed = False
+        sp = getattr(ctx, "strategic_planner", None)
+        plan_dict = snap.get("strategic_plan")
+        if sp is not None and plan_dict and hasattr(sp, "restore_plan"):
+            from agent_core.planner.strategic_plan import StrategicPlan
+            plan = StrategicPlan.from_dict(plan_dict)
+            # Operational continuity only if the plan is still usable; an
+            # expired/exhausted plan is pointless to resume.
+            if not plan.is_expired and not plan.is_exhausted:
+                sp.restore_plan(plan)
+                resumed = True
+
+        prior_mode = snap.get("mode")
+        goal_ids = snap.get("active_goal_ids") or []
+        logger.info(
+            "Warm recovery: prior_mode=%s (hint; sensors re-derive), "
+            "plan_resumed=%s, in_flight_goals=%d",
+            prior_mode, resumed, len(goal_ids),
+        )
+
+        # Audit trail (best-effort; uses the homeostasis event log).
+        try:
+            core = getattr(ctx, "homeostasis_core", None)
+            ev = getattr(core, "event_logger", None) if core else None
+            if ev is not None and hasattr(ev, "_write_event"):
+                ev._write_event({
+                    "timestamp": time.time(),
+                    "event": "recovery",
+                    "type": "warm_recovery",
+                    "prior_mode": prior_mode,
+                    "plan_resumed": resumed,
+                    "in_flight_goals": len(goal_ids),
+                })
+        except Exception:
+            pass
+    except Exception:
+        logger.warning("Warm recovery failed -> continuing cold", exc_info=True)
+
+
 def run_daemon(ctx, registry):
     """Run homeostasis tick loop until shutdown."""
     if not ctx.homeostasis_core:
@@ -134,6 +192,8 @@ def run_daemon(ctx, registry):
 
     core = ctx.homeostasis_core
     core._running = True
+    core.start_watchdog()  # out-of-loop freeze detector (2026-06-02 incident)
+    _maybe_warm_recover(ctx)  # Klocek 9b: resume in-flight plan (flag-gated)
     logger.info("Daemon: homeostasis tick loop started")
 
     while not _shutdown.is_set():
@@ -186,6 +246,44 @@ def run_web_ui():
 # GRACEFUL SHUTDOWN
 # ====================================================================
 
+def _finalize_exit() -> None:
+    """Bounded farewell + hard exit (audyt 2026-06-12).
+
+    Pool llm-timeout ma watki NIE-daemonowe (Python 3.9+), wiec zwykle
+    sys.exit() czeka na porzucone wywolanie LLM do konca jego timeoutu --
+    zaobserwowane 191 s ("Shutdown complete" 17:43:37 -> exit 17:46:48,
+    /restart trafil w sesje refleksji). Kolejnosc bezpieczenstwa:
+    1. graceful_shutdown() JUZ zapisal checkpoint swiadomosci (przed nami).
+    2. Krotka gracja na dokonczenie biezacego wywolania (wynik i tak
+       poszedlby do kosza -- proces umiera).
+    3. Flush logow i twarde wyjscie: exit 1 = /restart (systemd
+       Restart=on-failure podnosi), exit 0 = czysty stop.
+    """
+    exit_code = 0
+    try:
+        from agent_core.runtime_flags import restart_requested
+        if restart_requested():
+            exit_code = 1
+    except Exception:
+        pass
+    try:
+        from agent_core.llm.execution_budget import wait_for_llm_workers
+        if not wait_for_llm_workers(grace_sec=15.0):
+            logger.warning(
+                "LLM worker still busy after 15s grace -- exiting hard"
+            )
+    except Exception:
+        pass
+    logger.info(f"Exiting (code {exit_code})")
+    logging.shutdown()
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(exit_code)
+
+
 def graceful_shutdown(ctx, registry):
     """Cleanup: consciousness checkpoint + module cleanup."""
     logger.info("Graceful shutdown starting...")
@@ -231,7 +329,143 @@ def graceful_shutdown(ctx, registry):
 # MAIN
 # ====================================================================
 
+def _cleanup_stale_processes():
+    """Kill stale ccd-cli and pytest processes from old Claude Code sessions.
+
+    These accumulate when SSH sessions disconnect without cleanup,
+    eating 300-500MB RAM each. Safe to kill: they have no open files
+    or network connections that Maria depends on.
+    """
+    import subprocess
+    my_pid = os.getpid()
+    killed = 0
+    freed_mb = 0
+
+    try:
+        # Find stale ccd-cli processes (old Claude Code sessions)
+        result = subprocess.run(
+            ["pgrep", "-u", "maria", "-f", "ccd-cli"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for pid_str in result.stdout.strip().split("\n"):
+            if not pid_str.strip():
+                continue
+            pid = int(pid_str.strip())
+            if pid == my_pid:
+                continue
+            try:
+                # Check age: only kill processes older than 2 hours
+                stat = Path(f"/proc/{pid}/stat").read_text().split()
+                # Get RSS in pages (field 23), page size = 4KB
+                rss_pages = int(stat[23])
+                rss_mb = rss_pages * 4 / 1024
+                os.kill(pid, 9)
+                killed += 1
+                freed_mb += rss_mb
+            except (OSError, IndexError, ValueError):
+                continue
+
+        # Find stale pytest processes
+        result = subprocess.run(
+            ["pgrep", "-u", "maria", "-f", "pytest"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for pid_str in result.stdout.strip().split("\n"):
+            if not pid_str.strip():
+                continue
+            pid = int(pid_str.strip())
+            if pid == my_pid:
+                continue
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text().split()
+                rss_pages = int(stat[23])
+                rss_mb = rss_pages * 4 / 1024
+                os.kill(pid, 9)
+                killed += 1
+                freed_mb += rss_mb
+            except (OSError, IndexError, ValueError):
+                continue
+
+        if killed > 0:
+            logger.info(
+                f"Startup cleanup: killed {killed} stale processes, "
+                f"freed ~{freed_mb:.0f}MB RAM"
+            )
+    except Exception as e:
+        logger.debug(f"Stale process cleanup skipped: {e}")
+
+
+def _force_recompile_pyc():
+    """Hardening for the C3 incident (2026-04-24).
+
+    Force-recompile every ``.py`` in ``agent_core/`` and ``maria_core/``.
+    During the C3 audit a ``git checkout`` preserved the .py mtime of an
+    older revision while leaving an even older ``.pyc`` cached — Python's
+    bytecode freshness check (mtime equality) considered the stale cache
+    valid and ran an outdated function for hours. ``compileall.force=True``
+    rewrites every cache so every restart is guaranteed to run the .py
+    that's actually on disk right now.
+
+    Skipped when ``MARIA_SKIP_PYC_RECOMPILE=1`` (e.g. unit tests, CI) and
+    swallows errors silently — boot must never fail because of cache work.
+    """
+    if os.environ.get("MARIA_SKIP_PYC_RECOMPILE", "").lower() in ("1", "true", "yes"):
+        return
+    try:
+        import compileall
+
+        targets = [BASE_DIR / "agent_core", BASE_DIR / "maria_core"]
+        recompiled_dirs = 0
+        start = time.time()
+        for target in targets:
+            if not target.exists():
+                continue
+            try:
+                compileall.compile_dir(
+                    str(target),
+                    force=True,      # rewrite even if mtime says cache is fresh
+                    quiet=2,         # silent on success
+                    workers=0,       # auto worker count
+                )
+                recompiled_dirs += 1
+            except Exception as e:
+                logger.debug(f"compileall failed for {target}: {e}")
+        elapsed_ms = (time.time() - start) * 1000
+        logger.info(
+            f"Startup hardening: pyc force-recompile of {recompiled_dirs} "
+            f"package(s) in {elapsed_ms:.0f}ms"
+        )
+    except Exception as e:
+        logger.debug(f"pyc recompile skipped: {e}")
+
+
 def main():
+    def _thread_excepthook(args):
+        logger.critical(
+            "Unhandled exception in thread %s: %s",
+            getattr(args.thread, "name", "unknown"),
+            args.exc_value,
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _thread_excepthook
+
+    def _sys_excepthook(exc_type, exc_value, exc_tb):
+        logger.critical(
+            "Unhandled exception: %s",
+            exc_value,
+            exc_info=(exc_type, exc_value, exc_tb),
+        )
+
+    sys.excepthook = _sys_excepthook
+
+    # Cleanup stale processes from old Claude Code sessions
+    _cleanup_stale_processes()
+
+    # C3 hardening: force-recompile .pyc to defeat stale-cache attacks
+    # like the 2026-04-24 git-checkout drift incident.
+    _force_recompile_pyc()
+
     parser = argparse.ArgumentParser(description="M.A.R.I.A. - Unified Launcher")
     parser.add_argument("--daemon", action="store_true", help="Daemon only (no Web UI)")
     parser.add_argument("--ui", action="store_true", help="Web UI only (no daemon)")
@@ -293,6 +527,16 @@ def main():
     registry.init_all(ctx)
     print("  Modules: initialized")
 
+    # Expose ConsciousnessCore process-wide so the Web UI (which lives in
+    # the same process but doesn't share the SharedContext object) can emit
+    # personality signals like `conversation_turn` (C6 fix).
+    if ctx.consciousness:
+        try:
+            from agent_core.consciousness import set_global_consciousness
+            set_global_consciousness(ctx.consciousness)
+        except Exception as e:
+            logger.warning(f"Could not register global consciousness: {e}")
+
     # ── V3 Orchestrator (Phase A) ──
     try:
         from agent_core.awareness import ContextBuilder
@@ -346,7 +590,9 @@ def main():
             run_daemon(ctx, registry)
         finally:
             graceful_shutdown(ctx, registry)
-        return
+        # /restart -> exit 1 (systemd podnosi), czysty stop -> exit 0;
+        # twarde wyjscie z gracja, patrz _finalize_exit.
+        _finalize_exit()
 
     # ── Full mode: daemon + Web UI ──
     print("  Starting daemon + Web UI...\n")
@@ -359,6 +605,20 @@ def main():
             logger.info("Vision cortex shared with Web UI")
         except Exception as e:
             logger.debug(f"Could not share vision cortex with Web UI: {e}")
+
+    # Share the live approval stores with the Web UI so in-app approve/reject
+    # (Skrzynka layer 2) writes through the SAME store instances as the tick +
+    # Telegram threads -- one lock per store, no cross-instance race.
+    try:
+        from maria_ui.app import set_approval_stores
+        set_approval_stores(
+            outbox=getattr(ctx, "outbox_store", None),
+            conductor=getattr(ctx, "maria_conductor", None),
+            bulletin=getattr(ctx, "bulletin_store", None),
+        )
+        logger.info("Approval stores shared with Web UI")
+    except Exception as e:
+        logger.debug(f"Could not share approval stores with Web UI: {e}")
 
     # Start Web UI in background thread
     ui_thread = threading.Thread(target=run_web_ui, name="web-ui", daemon=True)
@@ -379,6 +639,10 @@ def main():
         run_daemon(ctx, registry)
     finally:
         graceful_shutdown(ctx, registry)
+
+    # /restart -> exit 1 (systemd podnosi), czysty stop -> exit 0;
+    # twarde wyjscie z gracja, patrz _finalize_exit.
+    _finalize_exit()
 
 
 if __name__ == "__main__":

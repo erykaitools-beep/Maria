@@ -22,6 +22,14 @@ from agent_core.orchestrator.task_orchestrator import (
     SubmitResult,
 )
 from agent_core.routing.capability_spec import CapabilitySpec
+from agent_core.registry.shared_context import SharedContext
+from agent_core.homeostasis.core import HomeostasisCore
+from types import SimpleNamespace
+from agent_core.homeostasis.state_model import Mode
+from agent_core.routing.capability_router import CapabilityRouter
+from agent_core.goals.store import GoalStore
+from agent_core.goals.goal_model import Goal, GoalStatus
+from agent_core.tests.spec_helpers import specced
 
 
 # ===========================================================================
@@ -31,16 +39,14 @@ from agent_core.routing.capability_spec import CapabilitySpec
 @pytest.fixture
 def mock_ctx():
     """SharedContext with typical mocks."""
-    ctx = MagicMock()
-    ctx.homeostasis_core = MagicMock()
-    mode = MagicMock()
-    mode.name = "ACTIVE"
-    ctx.homeostasis_core._current_mode = mode
+    ctx = specced(SharedContext)
+    hc = specced(HomeostasisCore, state=SimpleNamespace(mode=Mode.ACTIVE))
+    ctx.homeostasis_core = hc
     ctx.autonomy_policy = None
-    ctx.capability_router = MagicMock()
+    ctx.capability_router = specced(CapabilityRouter)
     ctx.capability_router.is_available.return_value = True
     ctx.knowledge_analyzer = None
-    ctx.goal_store = MagicMock()
+    ctx.goal_store = specced(GoalStore)
     ctx.goal_store.create.return_value = "goal-test123"
     ctx.goal_store.get.return_value = None
     return ctx
@@ -245,9 +251,7 @@ class TestExecutionPlanBuilder:
         assert plan.is_executable is True
 
     def test_plan_warnings_in_reduced_mode(self, plan_builder, decomposer, mock_ctx):
-        mode = MagicMock()
-        mode.name = "REDUCED"
-        mock_ctx.homeostasis_core._current_mode = mode
+        mock_ctx.homeostasis_core.state.mode = Mode.REDUCED
         decomposed = decomposer.decompose("naucz sie fizyki")
         plan = plan_builder.build(decomposed)
         assert any("REDUCED" in w for w in plan.warnings)
@@ -402,9 +406,9 @@ class TestTaskOrchestratorProgress:
         result = orchestrator.submit("naucz sie fizyki", auto_approve=True)
 
         # Simulate goal progress
-        mock_goal = MagicMock()
+        mock_goal = specced(Goal)
         mock_goal.progress = 0.6
-        mock_goal.status.value = "active"
+        mock_goal.status = GoalStatus.ACTIVE
         mock_goal.is_terminal = False
         mock_ctx.goal_store.get.return_value = mock_goal
 
@@ -415,9 +419,9 @@ class TestTaskOrchestratorProgress:
     def test_progress_syncs_completed(self, orchestrator, mock_ctx):
         result = orchestrator.submit("naucz sie fizyki", auto_approve=True)
 
-        mock_goal = MagicMock()
+        mock_goal = specced(Goal)
         mock_goal.progress = 1.0
-        mock_goal.status.value = "achieved"
+        mock_goal.status = GoalStatus.ACHIEVED
         mock_goal.outcome = {"score": 0.9}
         mock_ctx.goal_store.get.return_value = mock_goal
 

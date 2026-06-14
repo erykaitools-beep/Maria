@@ -13,8 +13,12 @@ Usage:
     messages = bridge.poll()  # returns new messages from operator
 """
 
+import logging
+
 from agent_core.telegram.bot import TelegramBot
 from agent_core.telegram.notifier import TelegramNotifier
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TelegramBot", "TelegramNotifier", "TelegramBridge"]
 
@@ -69,7 +73,23 @@ class TelegramBridge:
         self.last_poll_texts = []
         unhandled = []
 
+        # Security: only the configured master chat may drive the bot. Without
+        # this, poll_and_respond dispatched every command for any sender, so
+        # anyone who messaged the bot could run /restart, /do, /codex, etc.
+        # (replies only ever went to the master chat anyway). master_active is
+        # False when no numeric master is configured (mock bots in tests /
+        # unconfigured) -> no gating; production always has a real int chat_id
+        # because poll returns early above when the bot is not configured.
+        master = getattr(self.bot, "_chat_id", 0)
+        master_active = isinstance(master, int) and master != 0
+
         for msg in messages:
+            if master_active and msg.get("chat_id") != master:
+                logger.warning(
+                    "Telegram: ignored message from non-master chat %s",
+                    msg.get("chat_id"),
+                )
+                continue
             text = msg.get("text", "").strip()
 
             # Handle document with caption as command
@@ -105,6 +125,15 @@ class TelegramBridge:
                 except Exception as e:
                     self.bot.send_message(f"Blad: {e}")
             else:
+                # Unknown SLASH command -> tell the operator instead of silently
+                # dropping it. A /teacher or /task typo used to look like a no-op
+                # (the message was consumed, fed to OperatorModel, no reply) which
+                # cost trust + session time. Plain (non-slash) text is genuine
+                # chat/intent -> still flows to `unhandled` unchanged.
+                if text.startswith("/"):
+                    self.bot.send_message(
+                        f"Nieznana komenda: /{cmd}. Wyslij /help po liste komend."
+                    )
                 unhandled.append(msg)
                 self.last_poll_texts.append(text)
 

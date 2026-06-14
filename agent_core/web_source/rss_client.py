@@ -22,11 +22,18 @@ USER_AGENT = "MARIA-Bot/1.0 (educational AI agent; local use only)"
 # Atom namespace
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
-# Default Polish educational/science feeds
+# Default Polish educational/science feeds — probed live 2026-04-25.
+# R1.2 (broaden knowledge sources): grew the list from 1 to 5 active
+# feeds after two of the original three started 404'ing in 2026-03.
 DEFAULT_FEEDS = [
-    "https://naukawpolsce.pl/rss.xml",            # Nauka w Polsce (PAP) - nauka PL
-    # polskieradio.pl/130/rss - 404 since 2026-03 (removed)
-    # kopalniawiedzy.pl/rss/feed.xml - 404 since 2026-03 (removed)
+    "https://naukawpolsce.pl/rss.xml",   # PAP — nauka, ogólnonaukowy
+    "https://www.crazynauka.pl/feed/",   # CrazyNauka — popularnonaukowy
+    "https://kosmonauta.net/feed/",      # Kosmonauta — astronomia/kosmos
+    "https://www.focus.pl/feed",         # Focus — popularnonaukowy
+    "https://www.granicenauki.pl/feed",  # Granice Nauki — biologia/medycyna
+    # polskieradio.pl/130/rss      — 404 since 2026-03 (removed)
+    # kopalniawiedzy.pl/rss/feed.xml — 404 since 2026-03 (removed)
+    # urania.edu.pl/rss            — 404 (removed 2026-04-25)
 ]
 
 

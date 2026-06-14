@@ -13,8 +13,10 @@ Design:
 
 import json
 import logging
+import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -26,6 +28,12 @@ try:
 except ImportError:
     ollama_lib = None
 
+# Timeout-aware client. load/unload/ps run synchronously on the homeostasis tick
+# thread (Phase 9.5); with the bare module client (timeout=None) a wedged Ollama
+# would block the main loop forever (2026-06-02 freeze class). The shared client's
+# httpx read-timeout bounds them so a stall raises instead of hanging the tick.
+from .execution_budget import get_ollama_client
+
 from .model_registry import (
     ModelRole, ModelSpec, ConcurrencyClass, WarmState,
     get_model, get_heavy_models, list_models,
@@ -33,6 +41,18 @@ from .model_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _mutex_enforced() -> bool:
+    """Whether heavy_lease() actively serializes (env flag, default OFF).
+
+    Ships inert so the lease wiring lands as a no-op and is enabled + OBSERVED
+    in production before becoming the default (rollout guardrail: flag -> observe
+    -> cutover). Set SCHEDULER_ENFORCE_MUTEX=1 (and restart) to activate.
+    """
+    return os.environ.get("SCHEDULER_ENFORCE_MUTEX", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 @dataclass
@@ -74,6 +94,10 @@ class ModelScheduler:
         self._loaded: Dict[ModelRole, LoadedModel] = {}
         self._lock = threading.Lock()
         self._heavy_lock = threading.Lock()
+        # Per-thread reentrancy flag for heavy_lease(): _heavy_lock is a plain
+        # (non-reentrant) Lock, so a lease nested inside another lease on the
+        # SAME thread must skip re-acquiring instead of self-deadlocking.
+        self._lease_local = threading.local()
 
         self._health_path = Path(health_path or "meta_data/model_health.json")
         self._tick_count = 0
@@ -188,6 +212,70 @@ class ModelScheduler:
                 self._heavy_lock.release()
             except RuntimeError:
                 pass  # Already released
+
+    @contextmanager
+    def heavy_lease(self, label: str = "", timeout_s: float = 120.0):
+        """Serialize a heavy LOCAL inference that calls Ollama OUTSIDE ask_as_role().
+
+        ensure_ready()/ask_as_role() hold _heavy_lock across inference so two heavy
+        local models never share the GPU-less CPU (invariant: <=1 LOCAL_HEAVY at a
+        time -- the cure for the contention storms). But the heavy paths that call
+        Ollama directly -- the exam STUDENT answer, the exam author/grader local
+        fallback, and the learn/_ask_once local fallback -- bypassed that lock and
+        so could run a second heavy model concurrently (the confirmed 447s-storm
+        mechanism: teacher-thread exam answer || planner-thread K12, both heavy
+        local, no shared lock). This context manager wraps those direct calls in
+        the SAME _heavy_lock, so they serialize against every other heavy local
+        caller. NIM (off-CPU/EXTERNAL) and light (nomic embed) paths must NOT use
+        it -- they are meant to run in parallel.
+
+        Behavior:
+        - No-op (just yields) unless SCHEDULER_ENFORCE_MUTEX is set, so the wiring
+          ships inert and is enabled + observed before cutover.
+        - Reentrant-safe: a lease already held on THIS thread yields without
+          re-acquiring (the non-reentrant Lock would otherwise self-deadlock).
+        - Degrades on timeout: if the mutex cannot be acquired within timeout_s it
+          logs a WARNING and proceeds UNGUARDED rather than blocking the tick/
+          teacher thread forever. A residual overlap is logged, never a deadlock.
+        """
+        if not _mutex_enforced():
+            yield
+            return
+
+        # Reentrancy: a heavy_lease already active on this thread holds the lock.
+        if getattr(self._lease_local, "held", False):
+            yield
+            return
+
+        t0 = time.time()
+        acquired = self._heavy_lock.acquire(timeout=timeout_s)
+        if not acquired:
+            logger.warning(
+                "[ModelScheduler] heavy_lease(%s) could not acquire mutex in %.0fs "
+                "-> proceeding UNGUARDED (heavy overlap possible)",
+                label or "?", timeout_s,
+            )
+            yield
+            return
+
+        waited = time.time() - t0
+        self._lease_local.held = True
+        if waited > 0.5:
+            # The OBSERVED signal: this heavy local waited for another to finish
+            # instead of thrashing the CPU -- proof the mutex prevented an overlap.
+            logger.info(
+                "[ModelScheduler] heavy_lease(%s) waited %.1fs for mutex "
+                "(serialized -- prevented CPU overlap)",
+                label or "?", waited,
+            )
+        try:
+            yield
+        finally:
+            self._lease_local.held = False
+            try:
+                self._heavy_lock.release()
+            except RuntimeError:
+                pass  # already released elsewhere -- never crash the caller
 
     def force_unload(self, role: ModelRole) -> bool:
         """
@@ -406,12 +494,13 @@ class ModelScheduler:
         Returns:
             True if loaded successfully
         """
-        if ollama_lib is None:
+        client = get_ollama_client()
+        if client is None:
             logger.warning("[ModelScheduler] ollama library not available")
             return False
 
         try:
-            ollama_lib.generate(
+            client.generate(
                 model=ollama_tag,
                 prompt=" ",
                 options={"num_predict": 1},
@@ -431,11 +520,12 @@ class ModelScheduler:
         Returns:
             True if unloaded successfully
         """
-        if ollama_lib is None:
+        client = get_ollama_client()
+        if client is None:
             return False
 
         try:
-            ollama_lib.generate(
+            client.generate(
                 model=ollama_tag,
                 prompt="",
                 options={"num_predict": 1},
@@ -448,11 +538,12 @@ class ModelScheduler:
 
     def _ollama_list_running(self) -> List[str]:
         """List currently running models in Ollama."""
-        if ollama_lib is None:
+        client = get_ollama_client()
+        if client is None:
             return []
 
         try:
-            result = ollama_lib.ps()
+            result = client.ps()
             models = result.get("models", [])
             return [m.get("name", "") for m in models if m.get("name")]
         except Exception as e:

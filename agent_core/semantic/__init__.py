@@ -82,18 +82,23 @@ class SemanticMemory:
         return self._store.add_text(entry_id, text, self._model, meta)
 
     def index_batch(self, namespace: str,
-                    entries: List[Tuple[str, str]],
+                    entries: List[Tuple],
                     extra_metadata: Optional[Dict[str, Any]] = None) -> int:
         """Embed and store multiple texts. Returns count indexed.
 
         Args:
             namespace: Category for all entries.
-            entries: List of (entry_id, text) tuples.
+            entries: List of (entry_id, text) tuples, or (entry_id, text,
+                metadata) triples for per-entry metadata (e.g. the belief
+                indexer attaching belief_id/entity for dedup resolution).
             extra_metadata: Shared metadata for all entries.
         """
         batch = []
-        for entry_id, text in entries:
+        for item in entries:
+            entry_id, text = item[0], item[1]
+            per_entry = item[2] if len(item) > 2 and item[2] else {}
             meta = dict(extra_metadata) if extra_metadata else {}
+            meta.update(per_entry)
             meta["namespace"] = namespace
             batch.append((entry_id, text, meta))
 

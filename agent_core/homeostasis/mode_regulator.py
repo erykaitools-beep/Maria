@@ -15,11 +15,14 @@ Handles mode transitions with:
 Spec reference: homeostasis_spec.md section 3 (lines 239-361)
 """
 
+import logging
 import time
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 
 from .state_model import Mode
+
+logger = logging.getLogger(__name__)
 
 
 class TransitionResult(Enum):
@@ -47,9 +50,11 @@ class ModeRegulator:
     IDLE_FOR_SLEEP_SEC = 1800  # 30 minutes
     RAM_FOR_REDUCED_PCT = 20   # Below 20% available → REDUCED
     RAM_FOR_ACTIVE_PCT = 30    # Above 30% available → can be ACTIVE
-    CPU_FOR_REDUCED_PCT = 75   # Above 75% → REDUCED
-    CPU_FOR_ACTIVE_PCT = 60    # Below 60% → can be ACTIVE
+    CPU_FOR_REDUCED_PCT = 90   # Above 90% → REDUCED (raised from 75: LLM inference briefly saturates CPU)
+    CPU_FOR_ACTIVE_PCT = 70    # Below 70% → can be ACTIVE (histeresis gap 20%)
+    CPU_SPIKE_TICKS_FOR_REDUCED = 3   # Require N consecutive high-CPU ticks before demoting
     STABLE_TIME_FOR_ACTIVE_SEC = 120  # 2 minutes stable before returning to ACTIVE
+    STARTUP_GRACE_PERIOD_SEC = 120    # Ollama model loading saturates CPU — skip CPU demote during warmup
 
     # Forbidden transitions from spec
     FORBIDDEN_TRANSITIONS = {
@@ -64,6 +69,8 @@ class ModeRegulator:
         self.mode_change_time = time.time()
         self._stable_since: Optional[float] = None
         self._operator_override: Optional[Tuple[Mode, float]] = None  # (mode, until_timestamp)
+        self._cpu_spike_ticks: int = 0  # consecutive ticks above CPU_FOR_REDUCED_PCT
+        self._startup_time: float = time.time()  # for startup grace period (CPU-only)
 
     def decide_mode(
         self,
@@ -111,12 +118,35 @@ class ModeRegulator:
         cpu_load = state.get("cpu_load", 0)
         idle_time = state.get("idle_seconds", 0)
 
+        # WAKE UP: If in SLEEP but it's learning window time, wake up
+        if self.current_mode == Mode.SLEEP and self._is_learning_window():
+            logger.info("Auto-wake: learning window active, transitioning SLEEP -> ACTIVE")
+            return Mode.ACTIVE
+
         # SLEEP: If idle long enough and resources OK
         if idle_time > self.IDLE_FOR_SLEEP_SEC and ram_available_pct > 60:
+            # Don't go to sleep during learning windows
+            if self._is_learning_window():
+                return self.current_mode  # Stay in current mode
             return Mode.SLEEP
 
         # REDUCED: If resource pressure
-        if ram_available_pct < self.RAM_FOR_REDUCED_PCT or cpu_load > self.CPU_FOR_REDUCED_PCT:
+        # RAM is persistent — trigger immediately. CPU is bursty (LLM inference) —
+        # require sustained high load across multiple ticks to avoid flapping.
+        # During startup grace, skip CPU demote (Ollama model loading saturates CPU).
+        ram_pressure = ram_available_pct < self.RAM_FOR_REDUCED_PCT
+        in_startup_grace = (time.time() - self._startup_time) < self.STARTUP_GRACE_PERIOD_SEC
+
+        if cpu_load > self.CPU_FOR_REDUCED_PCT:
+            self._cpu_spike_ticks += 1
+        else:
+            self._cpu_spike_ticks = 0
+        cpu_sustained = (
+            self._cpu_spike_ticks >= self.CPU_SPIKE_TICKS_FOR_REDUCED
+            and not in_startup_grace
+        )
+
+        if ram_pressure or cpu_sustained:
             # Track when resources became stable
             self._stable_since = None
             return Mode.REDUCED
@@ -138,6 +168,15 @@ class ModeRegulator:
 
         # Fallback: stay in current mode if borderline
         return self.current_mode
+
+    @staticmethod
+    def _is_learning_window() -> bool:
+        """Check if current time is within a learning window (reuses environment config)."""
+        try:
+            from agent_core.environment.environment_model import is_learning_window
+            return is_learning_window()
+        except Exception:
+            return False
 
     def _can_transition_to(
         self,
@@ -267,6 +306,7 @@ class ModeRegulator:
         self.current_mode = new_mode
         self.mode_change_time = time.time()
         self._stable_since = None
+        self._cpu_spike_ticks = 0
 
         return TransitionResult.SUCCESS
 

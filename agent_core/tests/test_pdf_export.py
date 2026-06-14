@@ -4,6 +4,7 @@ Tests for PDF export and Telegram send_document.
 Covers: PDF generation, Polish chars, code blocks, send_document API.
 """
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent_core.telegram.pdf_export import generate_task_pdf
+
+
+def _jsonl(path):
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 class TestPDFGeneration:
@@ -120,13 +129,14 @@ class TestPDFGeneration:
 class TestTelegramSendDocument:
     """TelegramBot.send_document() method."""
 
-    def test_send_document_calls_api(self):
+    def test_send_document_calls_api(self, tmp_path):
         from agent_core.telegram.bot import TelegramBot
 
-        bot = TelegramBot(token="test_token", chat_id=12345)
+        outbox = tmp_path / "telegram_outbox.jsonl"
+        bot = TelegramBot(token="test_token", chat_id=12345, outbox_path=outbox)
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"ok": True}
+        mock_resp.json.return_value = {"ok": True, "result": {"message_id": 7}}
 
         # Create a temp file to send
         import tempfile
@@ -143,24 +153,50 @@ class TestTelegramSendDocument:
                 assert "sendDocument" in call_args[0][0]
                 assert call_args[1]["data"]["chat_id"] == 12345
                 assert call_args[1]["data"]["caption"] == "Test doc"
+                rows = _jsonl(outbox)
+                assert rows[0]["kind"] == "send_document"
+                assert rows[0]["status"] == "sent"
+                assert rows[0]["file_path"] == tmp_path
+                assert rows[0]["text_preview"] == "Test doc"
+                assert rows[0]["telegram_message_id"] == 7
         finally:
             os.unlink(tmp_path)
 
-    def test_send_document_not_configured(self):
+    def test_send_document_not_configured(self, tmp_path, monkeypatch):
+        # TelegramBot.__init__ falls back to TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+        # when token/chat_id are empty. load_dotenv() bleeds the prod .env into the
+        # process at import (any co-collected module triggers it), so without
+        # stripping those keys this test builds a *configured* bot on the live
+        # token, exercises the wrong code path, and hits the live outbox -- an
+        # order-dependent .env leak. Delenv restores the genuine not-configured
+        # state and also dodges the int("") crash from a blank leaked chat id.
+        monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
         from agent_core.telegram.bot import TelegramBot
-        bot = TelegramBot(token="", chat_id=0)
+        outbox = tmp_path / "telegram_outbox.jsonl"
+        bot = TelegramBot(token="", chat_id=0, outbox_path=outbox)
+        assert bot.configured is False
         result = bot.send_document("/tmp/fake.pdf")
         assert result is False
+        rows = _jsonl(outbox)
+        assert rows[0]["kind"] == "send_document"
+        assert rows[0]["status"] == "failed"
+        assert rows[0]["error"] == "not_configured"
 
-    def test_send_document_file_not_found(self):
+    def test_send_document_file_not_found(self, tmp_path):
         from agent_core.telegram.bot import TelegramBot
-        bot = TelegramBot(token="test", chat_id=123)
+        outbox = tmp_path / "telegram_outbox.jsonl"
+        bot = TelegramBot(token="test", chat_id=123, outbox_path=outbox)
         result = bot.send_document("/nonexistent/path.pdf")
         assert result is False
+        rows = _jsonl(outbox)
+        assert rows[0]["status"] == "failed"
+        assert "No such file" in rows[0]["error"] or "nonexistent" in rows[0]["error"]
 
-    def test_send_document_truncates_caption(self):
+    def test_send_document_truncates_caption(self, tmp_path):
         from agent_core.telegram.bot import TelegramBot
-        bot = TelegramBot(token="test", chat_id=123)
+        outbox = tmp_path / "telegram_outbox.jsonl"
+        bot = TelegramBot(token="test", chat_id=123, outbox_path=outbox)
 
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": True}
@@ -176,8 +212,37 @@ class TestTelegramSendDocument:
                 bot.send_document(tmp_path, caption=long_caption)
                 call_args = mock_post.call_args
                 assert len(call_args[1]["data"]["caption"]) <= 1024
+                rows = _jsonl(outbox)
+                assert rows[0]["text_len"] == 1024
+                assert len(rows[0]["text_preview"]) == 500
         finally:
             os.unlink(tmp_path)
+
+    def test_send_document_api_error_logs_failed(self, tmp_path):
+        from agent_core.telegram.bot import TelegramBot
+        bot = TelegramBot(
+            token="test",
+            chat_id=123,
+            outbox_path=tmp_path / "telegram_outbox.jsonl",
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False, "description": "Bad doc"}
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(b"content")
+            tmp_file = f.name
+
+        try:
+            with patch("requests.post", return_value=mock_resp):
+                assert bot.send_document(tmp_file, caption="Doc") is False
+            rows = _jsonl(tmp_path / "telegram_outbox.jsonl")
+            assert rows[0]["kind"] == "send_document"
+            assert rows[0]["status"] == "failed"
+            assert rows[0]["error"] == "Bad doc"
+        finally:
+            os.unlink(tmp_file)
 
 
 class TestStartupCooldown:

@@ -9,10 +9,12 @@ Config: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
 
 import logging
 import os
-import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+
+from agent_core.telegram.outbox_store import TelegramOutboxStore
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,21 @@ _TIMEOUT = (5, 10)
 
 # Max message length (Telegram limit)
 MAX_MESSAGE_LENGTH = 4096
+
+
+def _parse_chat_id(raw: Optional[str]) -> int:
+    """Parse a Telegram chat id from env, tolerating empty/garbage values.
+
+    int("") and int("notanumber") raise ValueError; an unset or malformed
+    TELEGRAM_CHAT_ID must degrade to 0 ("not configured"), never crash the
+    TelegramBot constructor -- which runs at wiring time outside any
+    try/except. Keeps negative ids (Telegram group/supergroup chats are
+    negative, e.g. -1001234567890).
+    """
+    try:
+        return int((raw or "").strip())
+    except (TypeError, ValueError):
+        return 0
 
 
 class TelegramBot:
@@ -38,10 +55,13 @@ class TelegramBot:
         self,
         token: Optional[str] = None,
         chat_id: Optional[int] = None,
+        outbox_path: Optional[Path] = None,
+        outbox_store: Optional[TelegramOutboxStore] = None,
     ):
         self._token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        self._chat_id = chat_id or int(os.environ.get("TELEGRAM_CHAT_ID", "0"))
+        self._chat_id = chat_id or _parse_chat_id(os.environ.get("TELEGRAM_CHAT_ID", "0"))
         self._last_update_id: int = 0
+        self._outbox = outbox_store or TelegramOutboxStore(outbox_path)
 
     @property
     def configured(self) -> bool:
@@ -86,11 +106,18 @@ class TelegramBot:
         Returns:
             True if sent successfully, False otherwise.
         """
+        target = chat_id or self._chat_id
         if not self.configured:
             logger.warning("TelegramBot: not configured (missing token or chat_id)")
+            self._record_outbox(
+                kind="send_message",
+                success=False,
+                chat_id=target,
+                text=text,
+                parse_mode=parse_mode,
+                error="not_configured",
+            )
             return False
-
-        target = chat_id or self._chat_id
 
         # Truncate if needed
         if len(text) > MAX_MESSAGE_LENGTH:
@@ -112,11 +139,21 @@ class TelegramBot:
             data = resp.json()
             if data.get("ok"):
                 logger.debug(f"TelegramBot: message sent ({len(text)} chars)")
+                self._record_outbox(
+                    kind="send_message",
+                    success=True,
+                    chat_id=target,
+                    text=text,
+                    parse_mode=parse_mode,
+                    telegram_message_id=_message_id(data),
+                )
                 return True
             else:
+                retry = ""
                 # Retry without parse_mode if Markdown fails
                 if parse_mode and "parse" in str(data.get("description", "")).lower():
                     logger.debug("TelegramBot: Markdown failed, retrying plain text")
+                    retry = "markdown_fallback"
                     payload.pop("parse_mode", None)
                     resp2 = requests.post(
                         self._api_url("sendMessage"),
@@ -125,11 +162,39 @@ class TelegramBot:
                     )
                     data2 = resp2.json()
                     if data2.get("ok"):
+                        self._record_outbox(
+                            kind="send_message",
+                            success=True,
+                            chat_id=target,
+                            text=text,
+                            parse_mode=None,
+                            telegram_message_id=_message_id(data2),
+                            retry=retry,
+                        )
                         return True
-                logger.warning(f"TelegramBot: send failed: {data.get('description')}")
+                    data = data2
+                error = str(data.get("description", "send_failed"))
+                logger.warning(f"TelegramBot: send failed: {error}")
+                self._record_outbox(
+                    kind="send_message",
+                    success=False,
+                    chat_id=target,
+                    text=text,
+                    parse_mode=parse_mode,
+                    error=error,
+                    retry=retry,
+                )
                 return False
         except requests.RequestException as e:
             logger.warning(f"TelegramBot: request error: {e}")
+            self._record_outbox(
+                kind="send_message",
+                success=False,
+                chat_id=target,
+                text=text,
+                parse_mode=parse_mode,
+                error=str(e),
+            )
             return False
 
     def send_document(
@@ -149,16 +214,25 @@ class TelegramBot:
         Returns:
             True if sent successfully, False otherwise.
         """
+        target = chat_id or self._chat_id
         if not self.configured:
+            self._record_outbox(
+                kind="send_document",
+                success=False,
+                chat_id=target,
+                text=caption,
+                file_path=file_path,
+                error="not_configured",
+            )
             return False
 
-        target = chat_id or self._chat_id
+        caption_to_send = caption[:1024] if caption else None
 
         try:
             with open(file_path, "rb") as f:
                 data = {"chat_id": target}
-                if caption:
-                    data["caption"] = caption[:1024]
+                if caption_to_send:
+                    data["caption"] = caption_to_send
                 resp = requests.post(
                     self._api_url("sendDocument"),
                     data=data,
@@ -168,14 +242,36 @@ class TelegramBot:
             result = resp.json()
             if result.get("ok"):
                 logger.debug("TelegramBot: document sent: %s", file_path)
+                self._record_outbox(
+                    kind="send_document",
+                    success=True,
+                    chat_id=target,
+                    text=caption_to_send,
+                    file_path=file_path,
+                    telegram_message_id=_message_id(result),
+                )
                 return True
-            logger.warning(
-                "TelegramBot: sendDocument failed: %s",
-                result.get("description"),
+            error = str(result.get("description", "send_document_failed"))
+            logger.warning("TelegramBot: sendDocument failed: %s", error)
+            self._record_outbox(
+                kind="send_document",
+                success=False,
+                chat_id=target,
+                text=caption_to_send,
+                file_path=file_path,
+                error=error,
             )
             return False
         except Exception as e:
             logger.warning("TelegramBot: sendDocument error: %s", e)
+            self._record_outbox(
+                kind="send_document",
+                success=False,
+                chat_id=target,
+                text=caption_to_send,
+                file_path=file_path,
+                error=str(e),
+            )
             return False
 
     def get_updates(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -190,17 +286,21 @@ class TelegramBot:
         if not self.configured:
             return []
 
+        # P3 fix 2026-05-08: was timeout=1 (long-poll) + HTTP (5,5).
+        # Long-polling held the main tick thread for ~1s on every poll
+        # (we already poll every 30s so long-polling adds no value here).
+        # Now: instant-return poll + tighter HTTP timeout to keep tick budget.
         params = {
             "offset": self._last_update_id + 1,
             "limit": limit,
-            "timeout": 1,  # Short poll (called from tick loop)
+            "timeout": 0,  # Instant return; we poll every 30s anyway.
         }
 
         try:
             resp = requests.get(
                 self._api_url("getUpdates"),
                 params=params,
-                timeout=(5, 5),
+                timeout=(3, 3),
             )
             data = resp.json()
             if not data.get("ok"):
@@ -297,3 +397,41 @@ class TelegramBot:
             "chat_id": self._chat_id,
             "last_update_id": self._last_update_id,
         }
+
+    def _record_outbox(
+        self,
+        *,
+        kind: str,
+        success: bool,
+        chat_id: int,
+        text: Optional[str] = None,
+        parse_mode: Optional[str] = None,
+        telegram_message_id: Optional[int] = None,
+        file_path: str = "",
+        error: str = "",
+        retry: str = "",
+    ) -> None:
+        metadata: Dict[str, Any] = {}
+        if parse_mode:
+            metadata["parse_mode"] = parse_mode
+        if retry:
+            metadata["retry"] = retry
+        self._outbox.record_attempt(
+            kind=kind,
+            success=success,
+            chat_id=chat_id,
+            text=text,
+            telegram_message_id=telegram_message_id,
+            file_path=file_path,
+            error=error,
+            metadata=metadata,
+        )
+
+
+def _message_id(data: Dict[str, Any]) -> Optional[int]:
+    result = data.get("result")
+    if isinstance(result, dict):
+        message_id = result.get("message_id")
+        if isinstance(message_id, int):
+            return message_id
+    return None

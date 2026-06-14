@@ -114,16 +114,26 @@ class ConfidenceTracker:
         reflections: List[Reflection],
     ) -> float:
         """
-        Compute exponential-decay-weighted success rate.
+        Compute exponential-decay-weighted confidence in action success.
 
         reflections should be newest-first (as returned by store queries).
         Oldest reflections get lower weight.
 
-        Uses outcome_match for nuanced scoring:
-        - match: 1.0 (prediction correct)
-        - partial: 0.5 (partial success)
-        - mismatch: 0.0 (prediction wrong)
-        - If outcome_match not set, falls back to binary success.
+        Historical bug fix (2026-04-16):
+        Previous implementation used outcome_match as the score directly:
+        'mismatch' -> 0.0, which conflates two distinct signals:
+        - prediction-calibration quality ("did we guess right?")
+        - action-outcome quality ("did the action succeed?")
+
+        Confidence in taking an action should reflect the latter. A reflection
+        where we underestimated but succeeded ('unexpected_success',
+        outcome=mismatch with actual_success=True) must not drive confidence
+        down — the action worked. That was the source of a feedback loop
+        where learn actions on empty topics kept scoring 0, which drove
+        confidence to 0.01, which made every new learn a "mismatch", etc.
+
+        New logic: primary signal is actual_success. outcome_match='partial'
+        halves the score. Unreflected records fall back to pending=neutral.
         """
         if len(reflections) < MIN_SAMPLES:
             return DEFAULT_CONFIDENCE
@@ -139,18 +149,22 @@ class ConfidenceTracker:
             weight = DECAY_WEIGHT ** (n - 1 - i)
             weight_sum += weight
 
-            # Use outcome_match for nuanced scoring if available
-            match_val = r.outcome_match.value if hasattr(r.outcome_match, 'value') else str(r.outcome_match)
-            if match_val == "match":
-                score_sum += weight * 1.0
-            elif match_val == "partial":
+            match_val = (
+                r.outcome_match.value if hasattr(r.outcome_match, "value")
+                else str(r.outcome_match)
+            )
+
+            # Primary signal: did the action actually succeed?
+            if not r.is_reflected:
+                # Pending reflection — neutral contribution (0.5)
                 score_sum += weight * 0.5
-            elif match_val in ("mismatch", "surprising"):
-                pass  # 0.0
-            else:
-                # UNKNOWN or not reflected yet: fallback to binary success
-                if r.actual_success:
-                    score_sum += weight
+                continue
+
+            base = 1.0 if r.actual_success else 0.0
+            # 'partial' outcomes dampen: success → 0.5, failure → 0 anyway
+            if match_val == "partial":
+                base = min(base, 0.5)
+            score_sum += weight * base
 
         if weight_sum == 0:
             return DEFAULT_CONFIDENCE

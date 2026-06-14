@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock
 from agent_core.llm.codex_client import (
     CodexClient, MAX_CALLS_PER_HOUR, RATE_WINDOW_SEC,
 )
+from agent_core.tests.spec_helpers import specced
 
 
 class TestCodexClientAvailability:
@@ -255,10 +256,10 @@ class TestRouterEncyclopedia:
         router_module = __import__("agent_core.llm.router", fromlist=["LLMRouter"])
         router = router_module.LLMRouter(ollama_brain=ollama)
 
-        codex = MagicMock()
-        codex.is_available = MagicMock(return_value=codex_available)
-        codex.ask = MagicMock(return_value=codex_result if codex_available else None)
-        codex.get_stats = MagicMock(return_value={"available": codex_available})
+        codex = specced(CodexClient)
+        codex.is_available.return_value = codex_available
+        codex.ask.return_value = codex_result if codex_available else None
+        codex.get_stats.return_value = {"available": codex_available}
         router.set_codex_client(codex)
 
         return router, codex, ollama

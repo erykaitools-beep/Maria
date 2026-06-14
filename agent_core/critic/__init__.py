@@ -75,8 +75,12 @@ class CriticAgent:
         self._dispute_log = log
 
     def set_goal_store(self, store):
-        """Set K3 GoalStore for PROPOSED goal creation."""
+        """Deprecated (R1): retained for wiring compat; critic uses bulletin."""
         self._applier.set_goal_store(store)
+
+    def set_bulletin_store(self, store):
+        """Set the bulletin board for NEED_REVIEW advisories (R1)."""
+        self._applier.set_bulletin_store(store)
 
     def set_llm_fn(self, fn: Callable[[str], str]):
         """Set LLM function for summary decoration."""

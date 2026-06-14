@@ -35,6 +35,7 @@ class ActionExecutor:
         self._knowledge_analyzer = None
         self._experiment_system = None
         self._openclaw_client = None
+        self._effector_coordinator = None
         self._self_analysis = None
         self._creative_module = None
         self._telegram_notifier = None
@@ -50,6 +51,10 @@ class ActionExecutor:
     def set_expert_bridge(self, bridge) -> None:
         """Set ExpertBridge for audit-aware expert queries."""
         self._expert_bridge = bridge
+
+    def set_effector_coordinator(self, coordinator) -> None:
+        """Set EffectorCoordinator for orchestrated OpenClaw invocations."""
+        self._effector_coordinator = coordinator
 
     def set_bulletin_store(self, store) -> None:
         """Set BulletinStore for resolving cognitive needs after actions."""
@@ -70,6 +75,23 @@ class ActionExecutor:
     def set_semantic_search(self, semantic_memory) -> None:
         """Set SemanticMemory for semantic-aware fetch sessions."""
         self._semantic_search = semantic_memory
+
+    def _is_outside_learning_window(self, plan: "Plan") -> bool:
+        """Check if autonomous learning should be suppressed (outside window).
+
+        User-requested goals always pass; so do actions the planner already
+        approved off-window against the daily rhythm/budget (8b,
+        metadata["off_window_approved"]). Returns True if blocked."""
+        try:
+            meta = getattr(plan, "metadata", {}) or {}
+            if meta.get("goal_type") == "USER":
+                return False
+            if meta.get("off_window_approved"):
+                return False
+            from agent_core.environment.environment_model import is_learning_window
+            return not is_learning_window()
+        except Exception:
+            return False  # Allow if import fails
 
     def _incremental_index(self) -> None:
         """Index new knowledge files into semantic memory."""
@@ -147,6 +169,7 @@ class ActionExecutor:
         ActionType.FETCH: "_exec_fetch",
         ActionType.EXPERIMENT: "_exec_experiment",
         ActionType.EFFECTOR: "_exec_effector",
+        ActionType.FS_WRITE: "_exec_fs_write",
         ActionType.SELF_ANALYZE: "_exec_self_analyze",
         ActionType.CREATIVE: "_exec_creative",
         ActionType.ASK_EXPERT: "_exec_ask_expert",
@@ -191,8 +214,12 @@ class ActionExecutor:
                     description=str(result.get("error", ""))[:200],
                     goal_id=getattr(plan, 'goal_id', "") or "",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "ActionExecutor: failed to record incident for action %s: %s",
+                    getattr(plan, "plan_id", "?"),
+                    exc,
+                )
 
         return result
 
@@ -241,26 +268,54 @@ class ActionExecutor:
         )
         return file_ids or None
 
+    def _exec_fs_write(self, plan: Plan) -> Dict[str, Any]:
+        """B2: first real effector primitive -- write one small file into the
+        dedicated sandbox. Params: {filename, content, [sandbox_root]}.
+
+        Sandboxed + size-capped (the write itself lives in
+        agent_core/hands/sandbox_writer so the router handler and this fallback
+        share one SSoT). K10 then re-stats the file as an external check.
+        """
+        from agent_core.hands.sandbox_writer import (
+            sandbox_write,
+            default_sandbox_root,
+        )
+        params = plan.action_params or {}
+        filename = params.get("filename") or params.get("path") or "maria_action"
+        content = params.get("content", "")
+        sandbox_root = params.get("sandbox_root")
+        if not sandbox_root:
+            try:
+                from maria_core.sys.config import BASE_DIR
+                sandbox_root = default_sandbox_root(BASE_DIR)
+            except Exception:
+                sandbox_root = default_sandbox_root(".")
+        return sandbox_write(filename, content, sandbox_root=sandbox_root)
+
     def _exec_learn(self, plan: Plan) -> Dict[str, Any]:
         """Delegate learning to TeacherAgent (single iteration)."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
+
+        # Gate: respect learning windows for autonomous learning
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
         )
         stats = status.get("stats", {})
-        # Success = any productive work: new chunks OR review/exam executed
+        # Strict: success requires new chunks. Matches handlers.make_learn_handler
+        # (single source of truth in production via CapabilityRouter).
         learned = stats.get("chunks_learned", 0)
-        exams = stats.get("exams_run", 0)
-        strategies = stats.get("strategies_executed", 0)
         result = {
-            "success": learned > 0 or exams > 0 or strategies > 0,
+            "success": learned > 0,
             "chunks_learned": learned,
-            "exams_run": exams,
+            "exams_run": stats.get("exams_run", 0),
             "exams_passed": stats.get("exams_passed", 0),
-            "strategies_executed": strategies,
+            "strategies_executed": stats.get("strategies_executed", 0),
         }
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
@@ -281,6 +336,10 @@ class ActionExecutor:
         """Delegate exam to TeacherAgent (single iteration)."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
+
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
@@ -307,6 +366,10 @@ class ActionExecutor:
         """Delegate review/spaced repetition to TeacherAgent."""
         if self._teacher_agent is None:
             return {"success": False, "error": "No teacher agent configured"}
+
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
         status = self._teacher_agent.run_session(
@@ -345,6 +408,11 @@ class ActionExecutor:
         if self._knowledge_analyzer is None:
             return {"success": False, "error": "No knowledge analyzer configured"}
 
+        # Gate: respect learning windows (fetch feeds learning pipeline)
+        if self._is_outside_learning_window(plan):
+            return {"success": False, "skipped": True,
+                    "reason": "outside_learning_window"}
+
         try:
             from agent_core.web_source import run_fetch_session
 
@@ -368,9 +436,26 @@ class ActionExecutor:
                 # Material arrived -> update bulletin: NEED_MATERIAL -> READY_TO_LEARN
                 self._transition_bulletin_to_ready(plan.goal_id)
 
+            # P2: bind the same durable learn-handoff the CapabilityRouter path
+            # binds, delegating to the single source of truth in routing.handlers
+            # so this no-router fallback can never drift (cf. _update_learning_goal
+            # above). Without this, a fetch here wrote bytes that no goal ever
+            # obligated learning -- a silent orphan leak. Same fetched_files
+            # trigger as P1 (bind on any written file, not only error-free).
+            handoff_files = []
+            if result.get("fetched_files"):
+                from agent_core.routing.handlers import (
+                    _register_fetch_handoff_goal,
+                )
+                handoff_files = _register_fetch_handoff_goal(
+                    plan, result, self._knowledge_analyzer, self._goal_store,
+                )
+
             return {
                 "success": errors == 0,
                 "articles_fetched": fetched,
+                "fetched_files": result.get("fetched_files", []),
+                "learn_handoff_files": handoff_files,
                 "topics_searched": result.get("topics_searched", 0),
                 "errors": errors,
             }
@@ -438,16 +523,37 @@ class ActionExecutor:
         }
 
     def _exec_effector(self, plan: Plan) -> Dict[str, Any]:
-        """Execute OpenClaw tool via effector client (ADR-016)."""
-        if self._openclaw_client is None:
-            return {"success": False, "error": "No OpenClaw client configured"}
-
+        """Execute OpenClaw tool via effector coordinator (preferred) or client."""
         tool_name = plan.action_params.get("tool_name")
         tool_args = plan.action_params.get("tool_args", {})
 
         if not tool_name:
             return {"success": False, "error": "No tool_name in action_params"}
 
+        # Preferred path: coordinator handles preflight, pre-warm, retry, diagnose
+        if self._effector_coordinator is not None:
+            from agent_core.effector.coordinator import EffectorTask
+            task = EffectorTask(
+                tool_name=tool_name,
+                tool_args=tool_args,
+                plan_id=getattr(plan, "plan_id", None),
+                goal_id=getattr(plan, "goal_id", None),
+                source="planner",
+            )
+            outcome = self._effector_coordinator.execute_task(task)
+            return {
+                "success": outcome.ok,
+                "tool_name": tool_name,
+                "tool_result": outcome.result.get("result") if outcome.result else None,
+                "task_id": outcome.task_id,
+                "attempts": len(outcome.attempts),
+                "status": outcome.status.value,
+                "duration_s": round(outcome.total_duration_s, 2),
+            }
+
+        # Legacy path: direct client invocation (used in tests / partial setup)
+        if self._openclaw_client is None:
+            return {"success": False, "error": "No OpenClaw client configured"}
         try:
             response = self._openclaw_client.invoke_tool(
                 tool_name=tool_name,
@@ -484,7 +590,11 @@ class ActionExecutor:
             # Notify operator about analysis results
             if self._telegram_notifier and report.recommendations:
                 try:
-                    summary = report.analysis_text[:300] if report.analysis_text else ""
+                    # AnalysisReport has no analysis_text field; the analyzer's text
+                    # output lives in raw_response. The old phantom read fell into the
+                    # bare except below -> self-analysis Telegram summary was always
+                    # silently dropped (audyt 2026-06-13).
+                    summary = report.raw_response[:300] if report.raw_response else ""
                     recs = [r if isinstance(r, str) else str(r) for r in report.recommendations]
                     self._telegram_notifier.notify_self_analysis(summary, recs)
                 except Exception:
@@ -811,7 +921,12 @@ class ActionExecutor:
                     updated += 1
 
             if updated:
-                store.flush()
+                # BeliefStore persists via save() (appends dirty records);
+                # flush() never existed -- the AttributeError fell into the
+                # except below, so revisions sat dirty-in-memory until some
+                # unrelated later save() and this function reported 0
+                # (wired-but-dead, found 2026-06-10, fixed 2026-06-11).
+                store.save()
                 logger.info(
                     f"[Faza F] Updated {updated} beliefs for {file_id} "
                     f"(avg_confidence={avg_confidence:.2f})"
@@ -822,88 +937,19 @@ class ActionExecutor:
             return 0
 
     def _update_learning_goal(self, plan, result: dict) -> None:
+        """CDL feedback loop: update LEARNING goal progress and outcome.
+
+        Delegates to the single source of truth in routing.handlers so this
+        no-router fallback path and the production CapabilityRouter path can
+        never drift. They had: this copy ignored explicit file_ids, read only
+        the "topics" key, and its topic match compared id-strings against
+        record-dicts -- so it always scored 0 (Plank 2).
         """
-        CDL feedback loop: update LEARNING goal progress and outcome.
-
-        Called after successful LEARN or EXAM execution.
-        Computes progress from knowledge snapshot if available,
-        sends Telegram notification, sets outcome on completion.
-        """
-        if not self._goal_store or not plan.goal_id:
-            return
-
-        try:
-            goal = self._goal_store.get(plan.goal_id)
-            if not goal or goal.type.value != "learning":
-                return
-
-            # Compute progress from knowledge state
-            progress = goal.progress
-            topics = goal.metadata.get("topics", [])
-
-            if self._knowledge_analyzer and topics:
-                try:
-                    scored_files = self._knowledge_analyzer.get_files_for_topics(topics)
-                    file_ids = [fid for fid, _ in scored_files]
-                    if file_ids:
-                        snapshot = self._knowledge_analyzer.get_knowledge_snapshot()
-                        completed = snapshot.get("files_by_status", {}).get("completed", [])
-                        done = sum(1 for f in file_ids if f in completed)
-                        progress = done / len(file_ids) if file_ids else 0.0
-                except Exception:
-                    pass
-
-            # Fallback: increment progress
-            if progress <= goal.progress:
-                chunks = result.get("chunks_learned", 0)
-                exams_passed = result.get("exams_passed", 0)
-                if chunks > 0:
-                    progress = min(0.9, goal.progress + 0.1)
-                if exams_passed > 0:
-                    progress = min(1.0, goal.progress + 0.2)
-
-            # Update goal progress
-            if progress > goal.progress:
-                self._goal_store.update_progress(plan.goal_id, progress)
-
-            # Check if goal just completed (progress >= 1.0)
-            goal_refreshed = self._goal_store.get(plan.goal_id)
-            if goal_refreshed and goal_refreshed.status.value == "achieved":
-                outcome = {
-                    "chunks_learned": result.get("chunks_learned", 0),
-                    "exams_passed": result.get("exams_passed", 0),
-                    "final_score": result.get("score", 0.0),
-                    "completed_at": time.time(),
-                }
-                self._goal_store.set_outcome(plan.goal_id, outcome)
-                self._goal_store.save()
-
-                # Notify operator
-                topic = goal.metadata.get("topic", goal.description)
-                if self._telegram_notifier:
-                    try:
-                        self._telegram_notifier.notify(
-                            "learning_complete",
-                            f"*Nauka zakonczona: {topic}*\n"
-                            f"Wynik: {outcome.get('final_score', 0):.0%}"
-                        )
-                    except Exception:
-                        pass
-                logger.info(f"[CDL] Learning goal achieved: {topic}")
-
-            elif self._telegram_notifier and progress > goal.progress:
-                # Progress update (with cooldown in notifier)
-                topic = goal.metadata.get("topic", goal.description)
-                try:
-                    self._telegram_notifier.notify(
-                        "learning_progress",
-                        f"*Nauka: {topic}*\nPostep: {progress:.0%}"
-                    )
-                except Exception:
-                    pass
-
-        except Exception as e:
-            logger.debug(f"Learning goal update skipped: {e}")
+        from agent_core.routing.handlers import update_learning_goal
+        update_learning_goal(
+            plan, result, self._goal_store,
+            self._knowledge_analyzer, self._telegram_notifier,
+        )
 
     # -- One-shot goal completion helper --------------------------------
 
@@ -918,8 +964,10 @@ class ActionExecutor:
         try:
             from agent_core.goals.goal_model import GoalStatus
             goal = self._goal_store.get(plan.goal_id)
+            mutated = False
             if goal and goal.status.value in ("pending", "active"):
                 self._goal_store.update_progress(plan.goal_id, 1.0)
+                mutated = True
                 # update_progress auto-transitions to ACHIEVED at >= 1.0
                 # but only for ACTIVE goals, so also set status explicitly
                 goal_refreshed = self._goal_store.get(plan.goal_id)
@@ -929,7 +977,11 @@ class ActionExecutor:
                         reason="one-shot action completed",
                         actor="action_executor",
                     )
+                    mutated = True
                 self._goal_store.set_outcome(plan.goal_id, outcome)
+                mutated = True
+            if mutated:
+                self._goal_store.save()
         except Exception as e:
             logger.debug(f"One-shot goal completion failed: {e}")
 

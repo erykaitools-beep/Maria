@@ -6,7 +6,9 @@ All subprocess calls are mocked - zero external dependencies.
 
 import json
 import subprocess
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
+
+from agent_core.tests.spec_helpers import specced
 
 import pytest
 
@@ -414,6 +416,79 @@ class TestOpenClawClientInvokeAgent:
         assert result["result"] == "Plain text response from agent"
 
     @patch("subprocess.run")
+    def test_invoke_agent_aborted_status_is_not_ok(self, mock_run, client):
+        """Openclaw can return exit 0 + JSON with status=aborted; ok=False."""
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({
+                "status": "aborted",
+                "response": "agent timed out before completing",
+            }),
+        )
+
+        result = client.invoke_tool("web_search", {"query": "test"})
+        assert result["ok"] is False
+        assert result["status"] == "aborted"
+
+    @patch("subprocess.run")
+    def test_invoke_agent_error_status_is_not_ok(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({"status": "error", "response": "bad"}),
+        )
+        result = client.invoke_tool("web_fetch", {"url": "https://x"})
+        assert result["ok"] is False
+        assert result["status"] == "error"
+
+    @patch("subprocess.run")
+    def test_invoke_agent_meta_aborted_overrides_top_status_ok(self, mock_run, client):
+        """Real openclaw format: status=ok BUT result.meta.aborted=True."""
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({
+                "runId": "x",
+                "status": "ok",
+                "summary": "completed",
+                "result": {
+                    "payloads": [{"text": "Request timed out...", "mediaUrl": None}],
+                    "meta": {"durationMs": 10448, "aborted": True},
+                },
+            }),
+        )
+        result = client.invoke_tool("web_search", {"query": "test"})
+        assert result["ok"] is False
+        assert result["status"] == "aborted"
+        # text from payloads is surfaced
+        assert "timed out" in result["result"].lower()
+
+    @patch("subprocess.run")
+    def test_invoke_agent_payload_text_on_success(self, mock_run, client):
+        """Real openclaw success: text lives in result.payloads[0].text."""
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({
+                "runId": "x",
+                "status": "ok",
+                "summary": "completed",
+                "result": {
+                    "payloads": [{"text": "Berlin weather: 12°C, cloudy"}],
+                    "meta": {"durationMs": 5000, "aborted": False},
+                },
+            }),
+        )
+        result = client.invoke_tool("web_search", {"query": "berlin weather"})
+        assert result["ok"] is True
+        assert result["result"] == "Berlin weather: 12°C, cloudy"
+
+    @patch("subprocess.run")
+    def test_invoke_agent_ok_when_status_clean(self, mock_run, client):
+        mock_run.return_value = _make_subprocess_result(
+            stdout=json.dumps({
+                "status": "ok",
+                "response": "results here",
+            }),
+        )
+        result = client.invoke_tool("web_search", {"query": "test"})
+        assert result["ok"] is True
+        assert result["result"] == "results here"
+
+    @patch("subprocess.run")
     def test_invoke_cron(self, mock_run, client):
         mock_run.return_value = _make_subprocess_result(
             stdout=json.dumps({"response": "job scheduled"}),
@@ -502,7 +577,8 @@ class TestActionTypeEffector:
         from agent_core.autonomy.action_class import (
             classify_action, ActionClassification,
         )
-        assert classify_action("effector") == ActionClassification.RESTRICTED
+        # action_class.py:46: post-24h-test plank up keeps effector GUARDED.
+        assert classify_action("effector") == ActionClassification.GUARDED
 
     def test_k7_rate_limit(self):
         from agent_core.autonomy.rate_limiter import DEFAULT_RATE_LIMITS
@@ -552,7 +628,7 @@ class TestActionExecutorEffector:
         import uuid, time as t
 
         executor = ActionExecutor()
-        mock_client = Mock()
+        mock_client = specced(OpenClawClient)
         executor.set_openclaw_client(mock_client)
 
         plan = Plan(
@@ -574,7 +650,7 @@ class TestActionExecutorEffector:
         import uuid, time as t
 
         executor = ActionExecutor()
-        mock_client = Mock()
+        mock_client = specced(OpenClawClient)
         mock_client.invoke_tool.return_value = {"ok": True, "result": "file list"}
         executor.set_openclaw_client(mock_client)
 
@@ -601,7 +677,7 @@ class TestActionExecutorEffector:
         import uuid, time as t
 
         executor = ActionExecutor()
-        mock_client = Mock()
+        mock_client = specced(OpenClawClient)
         mock_client.invoke_tool.side_effect = OpenClawError("Gateway down")
         executor.set_openclaw_client(mock_client)
 

@@ -72,6 +72,12 @@ class SharedContext:
     capability_router: Any = None      # CapabilityRouter (registry-based dispatch)
     context_builder: Any = None        # ContextBuilder (self-awareness aggregator)
     user_facing_self_model: Any = None # UserFacingSelfModel (V3 Module 3)
+    limitation_reporter: Optional[Any] = None  # LimitationReporter (V3 Module 13)
+    tool_capability_registry: Optional[Any] = None  # ToolCapabilityRegistry (V3 Module 11)
+    self_perception: Optional[Any] = None  # SelfPerception (T-SELF-001)
+    system_failure_monitor: Optional[Any] = None  # SystemFailureMonitor (T-SELF-002)
+    repair_task_creator: Optional[Any] = None  # RepairTaskCreator (T-SELF-002)
+    maria_conductor: Optional[Any] = None  # Conductor for project=maria
     onboarding_flow: Any = None        # OnboardingFlow (V3 Module 2)
     task_orchestrator: Any = None      # TaskOrchestrator (V3 Module 4)
     product_shell: Any = None          # ProductShell (V3 Module 14)
@@ -113,6 +119,11 @@ class SharedContext:
 
     # Environment Adaptation (Faza 6)
     environment_manager: Any = None      # EnvironmentManager
+
+    # Trust & Autonomy Graduation (Faza 7)
+    trust_scorer: Any = None             # TrustScorer
+    incident_memory: Any = None          # IncidentMemory
+    auto_promotion: Any = None           # AutoPromotion
 
     # REPL state
     last_result: Any = None

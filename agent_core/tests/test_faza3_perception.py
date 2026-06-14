@@ -25,6 +25,8 @@ from agent_core.homeostasis.sensors.workspace_sensor import (
 )
 from agent_core.perception.salience_filter import SalienceFilter
 from agent_core.perception.fusion import PerceptionFusion
+from agent_core.operator.operator_model import OperatorModel
+from agent_core.tests.spec_helpers import specced
 
 
 # =============================================================================
@@ -368,20 +370,20 @@ class TestSalienceFilter:
         assert sf.is_worth_telling("unknown", {}) is False
 
     def test_dnd_suppresses(self):
-        om = MagicMock()
+        om = specced(OperatorModel)
         om.get_context.return_value = "jestem na urlopie"
         sf = SalienceFilter(operator_model=om)
         assert sf.is_worth_telling("holiday", {"is_today": True}) is False
 
     def test_dnd_allows_critical(self):
-        om = MagicMock()
+        om = specced(OperatorModel)
         om.get_context.return_value = "urlop"
         sf = SalienceFilter(operator_model=om)
         # Priority 0.9+ passes even in DND
         assert sf.is_worth_telling("system", {"priority": 0.95, "ollama_alive": False}) is True
 
     def test_quiet_hours_suppresses(self):
-        om = MagicMock()
+        om = specced(OperatorModel)
         om.get_context.return_value = None
         om.get_preference.return_value = [23, 6]  # quiet 23:00-06:00
         sf = SalienceFilter(operator_model=om)
@@ -410,7 +412,7 @@ class TestPerceptionFusion:
         assert data == {}
 
     def test_with_holiday(self, fusion):
-        holiday_sensor = MagicMock()
+        holiday_sensor = specced(HolidaySensor)
         holiday_sensor.get_today.return_value = HolidayInfo(
             name_pl="Nowy Rok", name_de="Neujahr",
             country="PL+DE", holiday_date=date(2026, 1, 1),
@@ -423,7 +425,7 @@ class TestPerceptionFusion:
         assert "Nowy Rok" in data["holiday_today"]
 
     def test_with_system_alert(self, fusion):
-        sys_sensor = MagicMock()
+        sys_sensor = specced(SystemSensor)
         health = SystemHealth(
             ollama_alive=False, ollama_latency_ms=0,
             service_restarts=0, service_uptime_sec=100,
@@ -438,7 +440,7 @@ class TestPerceptionFusion:
         assert any("Ollama" in a for a in data["system_alerts"])
 
     def test_with_workspace_changes(self, fusion):
-        ws = MagicMock()
+        ws = specced(WorkspaceSensor)
         ws.scan.return_value = WorkspaceSnapshot(
             changes=(), total_files=10, new_input_files=3, timestamp=time.time(),
         )
@@ -448,7 +450,7 @@ class TestPerceptionFusion:
         assert data["new_input_files"] == 3
 
     def test_format_for_brief(self, fusion):
-        holiday_sensor = MagicMock()
+        holiday_sensor = specced(HolidaySensor)
         holiday_sensor.get_today.return_value = HolidayInfo(
             name_pl="Wielkanoc", name_de="Ostersonntag",
             country="PL+DE", holiday_date=date(2026, 4, 5),
@@ -456,7 +458,7 @@ class TestPerceptionFusion:
         holiday_sensor.format_today.return_value = "Dzis swieto: Wielkanoc"
         fusion.set_holiday_sensor(holiday_sensor)
 
-        ws = MagicMock()
+        ws = specced(WorkspaceSensor)
         ws.scan.return_value = WorkspaceSnapshot(
             changes=(), total_files=10, new_input_files=2, timestamp=time.time(),
         )
@@ -467,13 +469,13 @@ class TestPerceptionFusion:
         assert any("plikow" in l for l in lines)
 
     def test_salience_filter_applied(self, fusion):
-        ws = MagicMock()
+        ws = specced(WorkspaceSensor)
         ws.scan.return_value = WorkspaceSnapshot(
             changes=(), total_files=10, new_input_files=0, timestamp=time.time(),
         )
         fusion.set_workspace_sensor(ws)
 
-        sf = MagicMock()
+        sf = specced(SalienceFilter)
         sf.is_worth_telling.return_value = False
         fusion.set_salience_filter(sf)
 

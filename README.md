@@ -8,7 +8,7 @@
   <p align="center">
     <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/tests-4200%2B-brightgreen" alt="4200+ tests">
+    <img src="https://img.shields.io/badge/tests-4500%2B-brightgreen" alt="4500+ tests">
     <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
     <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
   </p>
@@ -205,6 +205,66 @@ Maria reaches out via Telegram when she has something meaningful to say:
 
 Quiet hours (23:00-6:00), daily limits, per-reason cooldowns.
 
+## Running in Production
+
+Maria has been running continuously on a single mini PC since 2026-02-22. This isn't a demo — it's the same process, same logs, same beliefs carried across every tick.
+
+| | |
+|---|---|
+| **Hardware** | AMD Ryzen 5 7430U · 32 GB RAM · 1 TB SSD · Ubuntu 22.04 |
+| **Deployment** | `maria.service` under systemd, auto-restart on failure |
+| **Resource ceiling** | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` (systemd drop-in, hard-capped after an incident — see below) |
+| **Archival storage** | 6 TB ext4 disk for rotated logs and daily summaries |
+
+Live counters as of 2026-04-18 (~8 weeks in):
+
+| Signal | Count |
+|---|---|
+| Knowledge entries | 286 |
+| Beliefs (post-compaction) | 1,961 |
+| Semantic vectors (nomic-embed-text, 768-dim) | 10,030 |
+| Decision traces (episode-correlated) | 4,589 |
+| Test suite | 4,490 passing · 1 xfail · 104s runtime |
+
+Observed modes: `ACTIVE` most of the day, `REDUCED` briefly during LLM inference spikes, `SLEEP` during low-activity hours, `SURVIVAL` never triggered in production.
+
+## Incidents & Lessons Learned
+
+Real issues from production, and what we did about them. Every fix below is in the commit history.
+
+### 2026-04-17 — The 1.5M-line JSONL
+
+**Symptom.** Nine-hour freeze. Swap exhausted. The watchdog kept restarting the process; every restart hung in the same place.
+
+**Cause.** `beliefs.jsonl` is an append-only log. Confidence decay, revisions, and dedup had accumulated **~1.5 million tombstone rows (1.1 GB)**. On startup, `BeliefStore` replayed the whole file into memory. Compaction had a cadence rule that required a "quiet period" to kick in — but the system was never quiet, because the log was what made it un-quiet. A deadlock in slow motion.
+
+**Fix.**
+- Forced compaction on startup when the file exceeds a size threshold
+- systemd drop-in: `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` — a hard ceiling so a runaway replay gets killed fast instead of thrashing swap for hours
+- Audit cron every 4 days that surfaces anomalies before they freeze the loop
+
+**Lesson.** An append-only log needs a compaction trigger that **doesn't depend on the system being healthy**. If the hang caused by the log is what prevents compaction, you have a deadlock.
+
+### 2026-04-16 — Confidence feedback loop
+
+**Symptom.** `ConfidenceTracker` reported 0.01 on every action type. Maria effectively stopped trying — every `LEARN` was gated out by low confidence.
+
+**Cause.** The scoring function used `outcome_match` directly: `mismatch → 0.0`. That conflated two distinct signals — *"did we predict right?"* and *"did the action succeed?"*. Learn actions on small/empty topics produced `outcome_match=mismatch` with `actual_success=True` (the action ran fine; we just underestimated). Each such reflection pushed confidence down. Once floored, every subsequent learn was also a "mismatch" relative to the (now-zero) expectation. Floor sealed shut.
+
+**Fix.** Separated the signals. `actual_success` is the primary score. `outcome_match='partial'` halves it. Pending reflections fall back to neutral. (Commit `e1f753d`.)
+
+**Lesson.** When a signal drives a control loop, make sure it measures the thing the loop is reacting to — not a proxy. Proxies are fine until they drift, and control loops amplify drift.
+
+### 2026-04-18 — BeliefBuilder cold-build hang
+
+**Symptom.** After a month-long silent bug in `BeliefBuilder` was fixed, a rebuild unlocked ~7,766 queued topic concepts. The first cold rebuild hung for several minutes and pegged a core.
+
+**Cause.** `BeliefStore.add()` enforces a 2,000-entry cap per call. On a cold rebuild of ~22 k concepts, cap enforcement ran 22 k times — each pass scanning the store.
+
+**Fix.** Wrapped the three build passes in `store.bulk_mode()` — cap enforcement runs once at the end instead of per-add. Multi-minute hang became seconds. (Commit `3a3925e`.)
+
+**Lesson.** Per-item invariants are cheap per call and pathological in bulk. If a path can be called with a large batch, offer a bulk mode that defers the invariant.
+
 ## Project Structure
 
 ```
@@ -271,6 +331,6 @@ python main.py
 
 ## Credits
 
-M.A.R.I.A. has been running continuously since February 2026.
+M.A.R.I.A. has been running continuously since **February 22, 2026**.
 
 Built by Eryk with help from Claude, ChatGPT, and Grok.

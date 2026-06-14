@@ -5,6 +5,7 @@ Sprint 5: Proactive notifications
 
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
+import logging
 import os
 import sys
 import time
@@ -16,6 +17,8 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from functools import wraps
+
+logger = logging.getLogger(__name__)
 
 # Master prompt - single source of truth
 try:
@@ -51,10 +54,15 @@ except ImportError:
 
 # Import OllamaBrain for chat (with fallback)
 try:
-    from models.ollama_brain import OllamaBrain
+    from models.ollama_brain import OllamaBrain, BrainTimeout
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
+
+    class BrainTimeout(Exception):
+        """Fallback so the chat handler can reference it even if the brain
+        lib failed to import (OLLAMA_AVAILABLE is False -> handler won't run,
+        but the name must still resolve)."""
 
 # Import introspection for code self-awareness (with fallback)
 try:
@@ -112,9 +120,64 @@ def set_vision_cortex(cortex) -> None:
     global _vision_cortex
     _vision_cortex = cortex
 
+
+# Live approval stores, shared from maria.py in unified mode so the in-app
+# approve/reject (Skrzynka layer 2) writes through the SAME instances as the
+# tick + Telegram threads -- one lock per store, no cross-instance race. None
+# in UI-only mode -> the action endpoint degrades to 503 (use Telegram).
+_approval_stores = {"outbox": None, "conductor": None, "bulletin": None}
+
+
+def set_approval_stores(outbox=None, conductor=None, bulletin=None) -> None:
+    """Share the daemon's live outbox / conductor / bulletin stores (called
+    from maria.py). Reads still go fresh-from-jsonl; only writes need these."""
+    _approval_stores["outbox"] = outbox
+    _approval_stores["conductor"] = conductor
+    _approval_stores["bulletin"] = bulletin
+
 # Rate limiting storage: {session_id: [timestamp1, timestamp2, ...]}
 _rate_limit_data = {}
 _rate_limit_lock = threading.Lock()
+
+# Login brute-force throttle (audyt 2026-06-12): 6-cyfrowy PIN na 0.0.0.0
+# bez limitu prob = 1e6 kombinacji do zgadniecia; fail2ban pilnuje tylko
+# ssh, reverse proxy brak -- limit musi byc w samym handlerze.
+# {ip: [ts_nieudanej_proby, ...]}
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SEC = 900  # 15 min
+_login_failures = {}
+_login_lock = threading.Lock()
+
+
+def check_login_allowed(ip: str):
+    """Return (is_allowed, seconds_until_retry) for a login attempt from ip."""
+    now = time.time()
+    window_start = now - LOGIN_WINDOW_SEC
+    with _login_lock:
+        # Prune: stare wpisy + IP bez swiezych prob (bounded memory).
+        for known_ip in list(_login_failures):
+            fresh = [ts for ts in _login_failures[known_ip] if ts > window_start]
+            if fresh:
+                _login_failures[known_ip] = fresh
+            else:
+                del _login_failures[known_ip]
+        failures = _login_failures.get(ip, [])
+        if len(failures) >= LOGIN_MAX_FAILURES:
+            wait = int(min(failures) + LOGIN_WINDOW_SEC - now) + 1
+            return False, max(wait, 1)
+        return True, 0
+
+
+def record_login_failure(ip: str) -> None:
+    """Record a failed PIN attempt for ip."""
+    with _login_lock:
+        _login_failures.setdefault(ip, []).append(time.time())
+
+
+def clear_login_failures(ip: str) -> None:
+    """Successful login resets the counter for ip."""
+    with _login_lock:
+        _login_failures.pop(ip, None)
 
 # Message counter for periodic saving
 _message_counter = 0
@@ -124,6 +187,7 @@ _message_counter_lock = threading.Lock()
 # Stored per-session, separate from Ollama brain history
 _ui_chat_history = []  # List of {"role": "user"|"maria"|"system", "content": "..."}
 _ui_chat_lock = threading.Lock()
+_ui_chat_history_loaded = False  # Hydrated from disk on first read
 MAX_UI_CHAT_HISTORY = 50  # Max messages to keep in UI
 
 # =============================================================================
@@ -138,14 +202,63 @@ _last_planner_timestamp = 0.0
 NOTIFICATION_CHECK_INTERVAL = 5  # seconds
 
 
+def _load_persisted_chat_history() -> int:
+    """Hydrate _ui_chat_history from CHAT_LOG_FILE on first access.
+
+    Reads the last MAX_UI_CHAT_HISTORY entries from chat_history.jsonl.
+    Idempotent: subsequent calls are no-ops (gated by _ui_chat_history_loaded).
+    Called lazily so cold start (no traffic) doesn't pay I/O cost.
+
+    Survives Maria restart + new browser tabs (2026-05-15 Eryk request).
+    """
+    global _ui_chat_history_loaded
+    if _ui_chat_history_loaded:
+        return 0
+    if not CHAT_LOG_FILE.exists():
+        _ui_chat_history_loaded = True
+        return 0
+    try:
+        # Tail-only read: open + readlines is fine, file is bounded by
+        # rotation (caller may add later). For now no rotation - file
+        # grows; we only keep last MAX_UI_CHAT_HISTORY entries in memory.
+        with open(CHAT_LOG_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+        recent = lines[-MAX_UI_CHAT_HISTORY:]
+        loaded = 0
+        with _ui_chat_lock:
+            for line in recent:
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                _ui_chat_history.append({
+                    "role": e.get("role", "system"),
+                    "content": e.get("content", ""),
+                    "timestamp": e.get("timestamp", 0.0),
+                })
+                loaded += 1
+            _ui_chat_history_loaded = True
+        print(f"[UI] [OK] Loaded {loaded} chat messages from disk history")
+        return loaded
+    except Exception as e:
+        print(f"[UI] [WARN] Could not load chat history: {e}")
+        _ui_chat_history_loaded = True  # don't retry on every call
+        return 0
+
+
 def get_ui_chat_history():
-    """Get current UI chat history."""
+    """Get current UI chat history. Hydrates from disk on first call."""
+    _load_persisted_chat_history()
     with _ui_chat_lock:
         return list(_ui_chat_history)
 
 
 def add_ui_chat_message(role: str, content: str):
     """Add message to UI chat history."""
+    # Ensure disk history hydrated before appending - prevents the case where
+    # a system notification arrives before any read and writes to an empty
+    # in-memory buffer, while disk has prior session messages.
+    _load_persisted_chat_history()
     with _ui_chat_lock:
         _ui_chat_history.append({
             "role": role,
@@ -305,11 +418,13 @@ def _create_ui_router(brain):
                     "Odpowiadasz po polsku, chyba ze zadanie wymaga inaczej."
                 )
 
+        nim_timeout = int(os.environ.get("NIM_TIMEOUT", "120"))
         nim = NIMClient(
             api_key=NVIDIA_NIM_API_KEY,
             model=NVIDIA_NIM_MODEL,
             base_url=NVIDIA_NIM_BASE_URL,
             system_prompt=nim_system_prompt,
+            timeout=nim_timeout,
         )
         budget = TokenBudget(
             daily_limit=NIM_DAILY_TOKEN_LIMIT,
@@ -329,6 +444,169 @@ def _create_ui_router(brain):
         return None
 
 
+def _verify_third_party_claim(
+    claim: dict, window_seconds: int = 300
+) -> dict:
+    """Verify whether Maria's third-party past claim has matching evidence.
+
+    Konfabulacja-2.0 fix (2026-05-15): Maria says "planer wykonal X" or
+    "system zrobil Y" or fakes a grounded prefix ("Widze w logach..."). We
+    cross-check against llm_tape (was last chat call grounded?), goals.jsonl
+    (was relevant goal created recently?), and action_audit.jsonl (did
+    planner actually do anything?).
+
+    Returns dict:
+        confirmed: bool - True if claim has supporting evidence
+        evidence_summary: str - one-line description for operator/log
+    """
+    import time
+    import json as _json
+    from pathlib import Path as _Path
+
+    now = time.time()
+    cutoff = now - window_seconds
+    category = claim.get("category", "")
+
+    if category == "fake_grounded":
+        # Was the last chat tape entry actually role=chat_grounded?
+        tape_path = _Path("meta_data/llm_tape.jsonl")
+        if not tape_path.exists():
+            return {"confirmed": False,
+                    "evidence_summary": "llm_tape unavailable"}
+        try:
+            with open(tape_path, encoding="utf-8") as f:
+                # Read tail only - tape can be big
+                lines = f.readlines()[-50:]
+            recent_chat_roles = []
+            for line in lines:
+                try:
+                    e = _json.loads(line)
+                except Exception:
+                    continue
+                if e.get("ts", 0) < cutoff:
+                    continue
+                role = e.get("role", "")
+                if role.startswith("chat"):
+                    recent_chat_roles.append(role)
+            if not recent_chat_roles:
+                return {"confirmed": False,
+                        "evidence_summary": "no recent chat tape entries"}
+            if "chat_grounded" in recent_chat_roles:
+                return {"confirmed": True,
+                        "evidence_summary": "chat_grounded fired recently"}
+            return {
+                "confirmed": False,
+                "evidence_summary": (
+                    f"recent chat role={recent_chat_roles[-1]!r}, "
+                    f"NOT grounded - prefix is decorative not evidence"
+                ),
+            }
+        except Exception as e:
+            return {"confirmed": False,
+                    "evidence_summary": f"tape read error: {e}"}
+
+    if category in ("planner", "system", "executor", "polecenie"):
+        audit_path = _Path("meta_data/action_audit.jsonl")
+        if not audit_path.exists():
+            return {"confirmed": False,
+                    "evidence_summary": "action_audit unavailable"}
+        try:
+            recent_actions = []
+            with open(audit_path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        e = _json.loads(line)
+                    except Exception:
+                        continue
+                    if e.get("timestamp", 0) >= cutoff:
+                        atype = e.get("action_type", "?")
+                        recent_actions.append(atype)
+            if not recent_actions:
+                return {
+                    "confirmed": False,
+                    "evidence_summary": (
+                        f"0 actions in last {window_seconds // 60}min - "
+                        f"planner idle, claim looks fabricated"
+                    ),
+                }
+            from collections import Counter as _C
+            hist = _C(recent_actions)
+            return {
+                "confirmed": True,
+                "evidence_summary": (
+                    f"{len(recent_actions)} actions in window: "
+                    f"{dict(hist.most_common(3))}"
+                ),
+            }
+        except Exception as e:
+            return {"confirmed": False,
+                    "evidence_summary": f"audit read error: {e}"}
+
+    return {"confirmed": False,
+            "evidence_summary": f"unknown claim category: {category}"}
+
+
+def _build_work_context_for_brain() -> str:
+    """Work-context provider for OllamaBrain (closes Bug 2, postmortem 2026-05-14).
+
+    Returns a short plaintext snapshot of Maria's current goal state so that
+    chat-path system prompt actually contains real goals instead of the
+    grounded-parser placeholder `[?]`. Fast read of meta_data/goals.jsonl,
+    called once per chat turn via OllamaBrain.refresh_time_context().
+
+    Empty string on any error - chat should not break if goal store is busy.
+    """
+    try:
+        from agent_core.goals.store import GoalStore
+        from agent_core.goals.goal_model import GoalStatus, GoalType
+        from pathlib import Path as _GPath
+
+        _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
+        _gs.load()
+
+        active_pending = _gs.get_active()  # PENDING + ACTIVE, sorted by priority desc
+        active = [g for g in active_pending if g.status == GoalStatus.ACTIVE]
+        pending = [g for g in active_pending if g.status == GoalStatus.PENDING]
+        proposed = _gs.get_proposed()
+
+        lines: list = []
+        if active:
+            lines.append(f"Aktywne cele ({len(active)}):")
+            for g in active[:3]:
+                _desc = g.description[:90]
+                lines.append(f"  - [{g.type.value}/p={g.priority:.1f}] {_desc}")
+
+        if pending:
+            lines.append(f"Pending ({len(pending)}, top 5):")
+            for g in pending[:5]:
+                _desc = g.description[:90]
+                lines.append(f"  - [{g.type.value}/p={g.priority:.1f}] {_desc}")
+
+        if proposed:
+            lines.append(f"Proposed (czeka na Eryka, {len(proposed)}):")
+            for g in proposed[:3]:
+                _desc = g.description[:90]
+                lines.append(f"  - [{g.type.value}/p={g.priority:.1f}] {_desc}")
+
+        # Quick totals for sense of scale
+        all_goals = list(_gs._goals.values()) if hasattr(_gs, "_goals") else []
+        if all_goals:
+            achieved = sum(1 for g in all_goals if g.status == GoalStatus.ACHIEVED)
+            abandoned = sum(1 for g in all_goals if g.status == GoalStatus.ABANDONED)
+            lines.append(
+                f"Calkowicie w store: {len(all_goals)} ({achieved} achieved, {abandoned} abandoned)."
+            )
+
+        return "\n".join(lines)
+    except Exception as _e:
+        # Degrade gracefully: empty work_context means chat still works,
+        # but surface it — otherwise the chat silently loses awareness of
+        # Maria's own goals and nobody knows why.
+        print(f"[UI] [WARN] work_context build for chat failed "
+              f"(continuing without goals): {_e}")
+        return ""
+
+
 def get_maria_brain():
     """Get or create Maria's brain instance (thread-safe)."""
     global _maria_brain
@@ -339,10 +617,19 @@ def get_maria_brain():
                     # Wire identity store so Maria knows who she is
                     _id_store = _get_identity_store()
 
+                    # Chat-specific (short) HTTP timeout so an interactive turn
+                    # fails fast with a graceful message instead of hanging for
+                    # the 240s learning timeout (silent dead chat, 2026-06-08).
+                    try:
+                        from maria_core.sys.config import CHAT_HTTP_TIMEOUT as _chat_timeout
+                    except Exception:
+                        _chat_timeout = 75
+
                     brain = OllamaBrain(
                         model="llama3.1:8b",
                         identity_store=_id_store,
-                        verify_model=False
+                        verify_model=False,
+                        http_timeout=_chat_timeout,
                     )
 
                     # Wire conversation memory for persistent context
@@ -357,14 +644,17 @@ def get_maria_brain():
                             print("[UI] [OK] Conversation memory wired")
                         except Exception as e:
                             print(f"[UI] [WARN] Conversation memory not available: {e}")
-                    # Wire user profile for personalized responses
+                    # Wire the shared OperatorModel for personalized responses
+                    # (split-brain #5 plank 2): the UI brain now reads identity
+                    # from + learns into the same OperatorModel the daemon uses
+                    # (homeostasis_module wires it the same way), instead of the
+                    # legacy UserProfile. Stops the duplicate user_profile.json write.
                     try:
-                        from agent_core.consciousness.user_profile import UserProfile
-                        _up = UserProfile()
-                        brain.set_user_profile(_up)
-                        print("[UI] [OK] User profile wired")
+                        from agent_core.operator.operator_model import get_operator_model
+                        brain.set_user_profile(get_operator_model())
+                        print("[UI] [OK] OperatorModel wired (shared with daemon)")
                     except Exception as e:
-                        print(f"[UI] [WARN] User profile not available: {e}")
+                        print(f"[UI] [WARN] OperatorModel not available: {e}")
 
                     # Wire state-grounded operator response pipeline
                     try:
@@ -395,6 +685,14 @@ def get_maria_brain():
                         print("[UI] [OK] Grounding pipeline wired")
                     except Exception as e:
                         print(f"[UI] Grounding pipeline not available: {e}")
+
+                    # Wire work_context_provider so Maria knows her own goals
+                    # in chat (closes Bug 2 from postmortem 2026-05-14).
+                    try:
+                        brain.set_work_context_provider(_build_work_context_for_brain)
+                        print("[UI] [OK] Work context provider wired")
+                    except Exception as e:
+                        print(f"[UI] Work context provider not wired: {e}")
 
                     # Wrap with LLM Router if NIM available
                     router = _create_ui_router(brain)
@@ -648,14 +946,28 @@ def login():
     error = None
 
     if request.method == 'POST':
+        ip = request.remote_addr or "unknown"
+        allowed, wait_s = check_login_allowed(ip)
+        if not allowed:
+            logger.warning(
+                "[LOGIN] Throttled: %s przekroczyl %d nieudanych prob PIN "
+                "w %d s (retry za %d s)",
+                ip, LOGIN_MAX_FAILURES, LOGIN_WINDOW_SEC, wait_s,
+            )
+            error = f"Za duzo prob. Sprobuj ponownie za {max(wait_s // 60, 1)} min."
+            return render_template('login.html', error=error), 429
+
         pin = request.form.get('pin', '')
 
         import hmac
         if UI_PIN and hmac.compare_digest(pin, UI_PIN):
+            clear_login_failures(ip)
             session['authenticated'] = True
             session.permanent = True
             return redirect(url_for('index'))
         else:
+            record_login_failure(ip)
+            logger.warning("[LOGIN] Nieudana proba PIN z %s", ip)
             error = "Nieprawidlowy PIN"
 
     return render_template('login.html', error=error)
@@ -1849,6 +2161,23 @@ def handle_chat_message(data):
     # Save to file periodically
     maybe_save_chat("user", user_message)
 
+    # Split-brain fix (#5, Plank 1): feed the shared OperatorModel from UI chat,
+    # the same way the daemon does from Telegram (core.py poll loop). UI and
+    # daemon share one in-memory OperatorModel via get_operator_model(), so a
+    # fact learned in the Web UI now reaches the operational model too.
+    try:
+        from agent_core.operator.operator_model import get_operator_model
+        get_operator_model().learn_from_message(user_message)
+    except Exception as _om_err:
+        print(f"[UI][WARN] OperatorModel learn failed: {_om_err}")
+
+    # Personality signal — feeds `pomocna` and `spoleczna` (C6 fix).
+    try:
+        from agent_core.consciousness import record_experience
+        record_experience(None, "conversation_turn", {"source": "web"})
+    except Exception:
+        pass
+
     # Emit "thinking" status
     emit('chat_status', {'status': 'thinking'})
 
@@ -2041,12 +2370,22 @@ def handle_chat_message(data):
     if _op_handled:
         return
 
-    # Retry brain.think() up to 2 times (ollama may be busy with planner)
+    # Retry brain.think() up to 2 times (ollama may be busy with planner).
+    # raise_on_timeout=True: a real read-timeout (model busy/cold on CPU) comes
+    # back as BrainTimeout so we can surface a clear "busy" message instead of a
+    # silent dead chat (2026-06-08). A timeout is NOT retried -- it already cost
+    # the full chat timeout, and an immediate retry would just stall again.
     response = None
     last_error = None
+    timed_out = False
     for _attempt in range(2):
         try:
-            response = brain.think(user_message)
+            response = brain.think(user_message, raise_on_timeout=True)
+            break
+        except BrainTimeout as e:
+            timed_out = True
+            last_error = e
+            print(f"[UI] [CHAT] think() timed out (model busy/cold on CPU): {e}")
             break
         except Exception as e:
             last_error = e
@@ -2058,6 +2397,12 @@ def handle_chat_message(data):
     # Trim history if needed
     trim_brain_history()
 
+    # Graceful-degrade message for "model is alive but busy/cold on CPU" -- shown
+    # on a timeout OR an empty reply so the operator never faces a silent dead
+    # chat (2026-06-08). ASCII-only Polish per ADR-005.
+    _busy_msg = ("Jestem teraz zajeta ciezkim mysleniem (planer/nauka na CPU), "
+                 "sprobuj za chwile.")
+
     if response:
         print(f"[UI] [CHAT] Maria: {response[:50]}...")
 
@@ -2067,10 +2412,144 @@ def handle_chat_message(data):
         # Save to file periodically
         maybe_save_chat("maria", response)
 
-        emit('chat_response', {
+        # Bug 3 + Bug 5 fix (postmortem 2026-05-14):
+        # Maria response NLU - close chat-path asymmetry + flag confabulation.
+        _maria_intent_payload = None
+        _confabulation_payload = None
+        try:
+            from agent_core.perception.maria_speech_intent import (
+                detect_maria_intent, detect_past_claim, detect_third_party_claim,
+            )
+            maria_intent = detect_maria_intent(response)
+            if maria_intent and maria_intent.get("action") != "planner_delegation":
+                # Mirror of user-side detect_operational_intent flow:
+                # Maria says "Pobiore X" -> USER goal with forced_action_type.
+                _ma_action = maria_intent["action"]
+                _ma_topic = maria_intent.get("topic")
+                try:
+                    from agent_core.goals.goal_model import (
+                        GoalType, GoalStatus, create_goal,
+                    )
+                    from agent_core.goals.store import GoalStore
+                    from pathlib import Path as _GPath
+                    _gs = GoalStore(goals_path=_GPath("meta_data/goals.jsonl"))
+                    _gs.load()
+                    _meta = {
+                        "source": "maria_response",
+                        "channel": "webui",
+                        "action": _ma_action,
+                        "forced_action_type": _ma_action,
+                    }
+                    if _ma_topic:
+                        _meta["topic"] = _ma_topic
+                        _meta["topics"] = [_ma_topic]
+                    _desc_map = {
+                        "fetch": "Pobierz nowe materialy (z chatu Marii)",
+                        "evaluate": "Ewaluacja (z chatu Marii)",
+                        "critique": "Krytyka jakosci wiedzy (z chatu Marii)",
+                        "self_analyze": "Autoanaliza (z chatu Marii)",
+                        "creative": "Refleksja kreatywna (z chatu Marii)",
+                        "validate": "Walidacja krzyzowa (z chatu Marii)",
+                        "exam": f"Egzamin: {_ma_topic}" if _ma_topic else "Egzamin (z chatu Marii)",
+                        "learn": f"Nauka: {_ma_topic}" if _ma_topic else "Nauka (z chatu Marii)",
+                    }
+                    _desc = _desc_map.get(_ma_action, f"Akcja: {_ma_action}")
+                    _goal_type = (
+                        GoalType.LEARNING if _ma_action == "learn" else GoalType.USER
+                    )
+                    _g = create_goal(
+                        goal_type=_goal_type,
+                        description=_desc,
+                        priority=1.1,
+                        status=GoalStatus.PENDING,
+                        created_by="maria_response",
+                        metadata=_meta,
+                    )
+                    _gs.create(_g)
+                    _gs.save()
+                    _maria_intent_payload = {
+                        "action": _ma_action,
+                        "topic": _ma_topic,
+                    }
+                    emit('chat_status', {
+                        'status': 'maria_intent_goal_created',
+                        'action': _ma_action,
+                        'topic': _ma_topic,
+                    })
+                    print(
+                        f"[UI] [MRS] Maria intent -> goal: {_ma_action}"
+                        + (f" topic={_ma_topic}" if _ma_topic else "")
+                    )
+                except Exception as _ge:
+                    print(f"[UI] [MRS] Goal creation from Maria intent failed: {_ge}")
+
+            # Confabulation soft tripwire (Bug 3c):
+            # Past-tense claim of action + no goal just created => flag.
+            past_claim = detect_past_claim(response)
+            if past_claim and _maria_intent_payload is None:
+                _confabulation_payload = {
+                    "matched": past_claim["matched"],
+                    "snippet": past_claim["snippet"][:120],
+                }
+                emit('chat_status', {
+                    'status': 'possible_confabulation',
+                    'snippet': past_claim["snippet"][:120],
+                })
+                print(
+                    f"[UI] [WARN] Possible confabulation in chat: "
+                    f"{past_claim['matched']!r} | snippet={past_claim['snippet'][:80]!r}"
+                )
+
+            # Third-party claim verification (Konfabulacja-2.0/3.0 fix,
+            # 2026-05-15): Maria attributes past actions to planner/system/
+            # skrypt or uses fake grounded prefix. Cross-check against
+            # llm_tape + action_audit. Soft flag when unconfirmed.
+            tp_claim = detect_third_party_claim(response)
+            if tp_claim:
+                verification = _verify_third_party_claim(tp_claim)
+                if not verification["confirmed"]:
+                    if _confabulation_payload is None:
+                        _confabulation_payload = {}
+                    _confabulation_payload["third_party"] = {
+                        "category": tp_claim["category"],
+                        "matched": tp_claim["matched"],
+                        "snippet": tp_claim["snippet"][:120],
+                        "evidence": verification["evidence_summary"],
+                    }
+                    emit('chat_status', {
+                        'status': 'possible_third_party_confabulation',
+                        'category': tp_claim["category"],
+                        'snippet': tp_claim["snippet"][:120],
+                        'evidence': verification["evidence_summary"],
+                    })
+                    print(
+                        f"[UI] [WARN] Third-party confabulation: "
+                        f"category={tp_claim['category']!r} "
+                        f"matched={tp_claim['matched']!r} "
+                        f"evidence={verification['evidence_summary']!r}"
+                    )
+        except Exception as _mse:
+            print(f"[UI] [MRS] maria_speech_intent error: {_mse}")
+
+        _resp_payload = {
             'success': True,
             'message': response,
-            'fallback': False
+            'fallback': False,
+        }
+        if _maria_intent_payload is not None:
+            _resp_payload['maria_intent'] = _maria_intent_payload
+        if _confabulation_payload is not None:
+            _resp_payload['confabulation_flag'] = _confabulation_payload
+        emit('chat_response', _resp_payload)
+    elif timed_out:
+        # Model stalled on the read-timeout: alive but busy/cold. Tell the
+        # operator plainly instead of leaving the chat dead (the 2026-06-08 bug).
+        print("[UI] [CHAT] Timeout -> busy message to operator")
+        emit('chat_response', {
+            'success': True,
+            'message': _busy_msg,
+            'fallback': True,
+            'timeout': True,
         })
     elif last_error:
         print(f"[UI] [ERROR] Chat error after retries: {last_error}")
@@ -2080,10 +2559,13 @@ def handle_chat_message(data):
             'fallback': True
         })
     else:
+        # Empty reply with no exception -> treat like a soft stall: same clear
+        # busy message rather than a vague "nie udalo mi sie" (still not silence).
+        print("[UI] [CHAT] Empty response -> busy message to operator")
         emit('chat_response', {
             'success': True,
-            'message': 'Przepraszam, nie udalo mi sie wygenerowac odpowiedzi. Sprobuj ponownie.',
-            'fallback': True
+            'message': _busy_msg,
+            'fallback': True,
         })
 
 
@@ -2200,6 +2682,57 @@ _JSONL_DATA_FLOW = {
         "label": "Exam results",
     },
 }
+
+def _build_data_flow_map():
+    """Data-flow map generated from the live filesystem (finding #7).
+
+    The hand-maintained ``_JSONL_DATA_FLOW`` above drifted — it lists ~16
+    stores while ``meta_data/`` actually holds ~23 JSONL files
+    (creative_events, market_task_queue, self_state_snapshots, ... all
+    missing). A hand-kept list of what-exists is guaranteed to rot.
+
+    So existence comes from disk (can't drift) and the curated
+    writers/readers/label annotations are merged on top where we have
+    them. Un-annotated files surface with ``curated: false`` so the gap is
+    visible instead of hidden. Curated entries outside meta_data/ (e.g.
+    memory/) are kept so the map stays a superset, never a regression.
+    """
+    from pathlib import Path as _Path
+
+    curated_by_file = {
+        _Path(key).name: (key, meta) for key, meta in _JSONL_DATA_FLOW.items()
+    }
+
+    out = {}
+    seen = set()
+
+    meta_dir = _Path("meta_data")
+    if meta_dir.is_dir():
+        for p in sorted(meta_dir.glob("*.jsonl")):
+            seen.add(p.name)
+            try:
+                lines = sum(1 for _ in p.open("r", encoding="utf-8"))
+            except OSError:
+                lines = None
+            if p.name in curated_by_file:
+                key, meta = curated_by_file[p.name]
+                out[key] = {**meta, "lines": lines, "curated": True}
+            else:
+                out[f"meta_data/{p.name}"] = {
+                    "writers": [],
+                    "readers": [],
+                    "label": "(no curated writers/readers yet)",
+                    "lines": lines,
+                    "curated": False,
+                }
+
+    # Curated stores that live outside meta_data/ (memory/, etc.)
+    for fname, (key, meta) in curated_by_file.items():
+        if fname not in seen and key not in out:
+            out[key] = {**meta, "curated": True}
+
+    return out
+
 
 # Decision pipeline (ordered steps)
 _DECISION_PIPELINE = [
@@ -2329,7 +2862,7 @@ def _build_architecture_data():
         result = {
             "packages": packages,
             "edges": edges,
-            "data_flow": _JSONL_DATA_FLOW,
+            "data_flow": _build_data_flow_map(),
             "pipeline": _DECISION_PIPELINE,
             "stats": model.get_statistics(),
         }
@@ -3337,11 +3870,19 @@ def api_vision_snap():
 # ====== USER PROFILE ======
 
 def _get_user_profile():
-    """Lazy-init UserProfile for Web UI."""
+    """Return the shared OperatorModel for the Web UI profile page.
+
+    Plank 3 (split-brain #5): this was a fresh UserProfile() per call (its own
+    user_profile.json), disconnected from the daemon's brain -- what you edited
+    here never reached Maria's operational identity. Now it returns the one
+    process-wide OperatorModel singleton (same instance the daemon, Telegram
+    and chat use), so the profile page reads/writes the single source of truth.
+    The flat shape the front-end expects comes from get_profile_card().
+    """
     try:
-        from agent_core.consciousness.user_profile import UserProfile
-        return UserProfile()
-    except ImportError:
+        from agent_core.operator.operator_model import get_operator_model
+        return get_operator_model()
+    except Exception:
         return None
 
 
@@ -3358,7 +3899,7 @@ def api_user_profile():
     profile = _get_user_profile()
     if not profile:
         return jsonify({"error": "UserProfile not available"}), 503
-    return jsonify(profile.get_full_profile())
+    return jsonify(profile.get_profile_card())
 
 
 @app.route('/api/user/profile', methods=['POST'])
@@ -3406,7 +3947,7 @@ def api_user_profile_update():
         profile.add_schedule_note(str(data["add_schedule"]))
         updated.append("schedule")
 
-    return jsonify({"updated": updated, "profile": profile.get_full_profile()})
+    return jsonify({"updated": updated, "profile": profile.get_profile_card()})
 
 
 @app.route('/api/user/summary')
@@ -3434,6 +3975,192 @@ def _get_task_store():
 @require_auth
 def page_tasks():
     return render_template('tasks.html', active_page='tasks')
+
+
+def _parse_build_now(path):
+    """Parse docs/BUILD_NOW.md into its three operator-facing sections.
+
+    Expected headings: '## Teraz', '## Ostatnio skonczone', '## Nastepny
+    krok'. Lines under a heading are joined; blockquote/comment lines are
+    skipped. Missing file or headings -> None values (the mobile tab then
+    shows only the git timeline).
+    """
+    keys = {
+        'teraz': 'now',
+        'ostatnio skonczone': 'done',
+        'nastepny krok': 'next',
+    }
+    note = {'now': None, 'done': None, 'next': None, 'updated_at': None}
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return note
+    note['updated_at'] = path.stat().st_mtime
+    current = None
+    buf = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('## '):
+            current = keys.get(stripped[3:].strip().lower())
+            continue
+        if current and stripped and not stripped.startswith('>'):
+            buf.setdefault(current, []).append(stripped)
+    for key, lines in buf.items():
+        note[key] = ' '.join(lines)
+    return note
+
+
+@app.route('/api/build')
+@require_auth
+def api_build():
+    """The human construction-site view: curated note + recent git history.
+
+    Hybrid by design (operator decision 2026-06-10): the note in
+    docs/BUILD_NOW.md says in plain Polish what is being built right now;
+    the git log underneath is the always-true automatic timeline.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    payload = {
+        "note": _parse_build_now(root / "docs" / "BUILD_NOW.md"),
+        "git": {"branch": None, "ahead": None, "commits": []},
+    }
+
+    def _git(*args):
+        out = subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True,
+            timeout=5,
+        )
+        return out.stdout.strip() if out.returncode == 0 else None
+
+    try:
+        payload["git"]["branch"] = _git("rev-parse", "--abbrev-ref", "HEAD")
+        ahead = _git("rev-list", "--count", "@{u}..HEAD")
+        payload["git"]["ahead"] = int(ahead) if ahead else None
+        log = _git("log", "-30", "--pretty=format:%h%x09%ct%x09%s")
+        for line in (log or "").splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) == 3:
+                payload["git"]["commits"].append({
+                    "hash": parts[0],
+                    "ts": float(parts[1]),
+                    "subject": parts[2],
+                })
+    except Exception as e:
+        print(f"[UI] [WARN] /api/build git read failed: {e}")
+
+    return jsonify(payload)
+
+
+@app.route('/api/projects')
+@require_auth
+def api_projects():
+    """Read-only Conductor view: per-project build status + recent tasks.
+
+    Sources (same files Phase 17 maintains):
+      - meta_data/*_task_queue.jsonl  (append-log, TaskQueue dedupes by id)
+      - meta_data/market_build_status.json (shared store, one entry/project)
+    Task descriptions are omitted on purpose -- they are multi-KB Codex
+    briefs; the mobile Projects screen needs titles and lifecycle only.
+    """
+    try:
+        from agent_core.conductor.task_queue import TaskQueue
+        from agent_core.conductor.build_status import BuildStatusStore
+    except ImportError as e:
+        return jsonify({"error": f"Conductor not available: {e}"}), 503
+
+    limit = min(request.args.get('limit', 12, type=int), 50)
+    meta_dir = Path(__file__).resolve().parents[1] / "meta_data"
+
+    # Fresh instances per request: TaskQueue caches its load, and the daemon
+    # appends to these files between requests.
+    status_store = BuildStatusStore()
+    projects = {}
+    for queue_path in sorted(meta_dir.glob("*_task_queue.jsonl")):
+        try:
+            queue = TaskQueue(path=queue_path)
+            for project in queue.projects():
+                tasks = queue.list(project=project)
+                tasks.sort(key=lambda t: t.updated_at, reverse=True)
+                status = status_store.load(project)
+                projects[project] = {
+                    "project": project,
+                    "status": status.to_dict() if status else None,
+                    "task_count": len(tasks),
+                    "tasks": [
+                        {
+                            "task_id": t.task_id,
+                            "title": t.title,
+                            "status": t.status.value,
+                            "phase": t.phase,
+                            "assignee": t.assignee.value,
+                            "priority": t.priority,
+                            "blockers": t.blockers,
+                            "approval_required": bool(
+                                t.artifacts.get("approval_required", False)
+                            ),
+                            "drill": bool(t.artifacts.get("drill", False)),
+                            "created_at": t.created_at,
+                            "updated_at": t.updated_at,
+                            "completed_at": t.completed_at,
+                        }
+                        for t in tasks[:limit]
+                    ],
+                }
+        except Exception as e:
+            print(f"[UI] [WARN] Skipping queue {queue_path.name}: {e}")
+
+    return jsonify({"projects": sorted(projects.values(),
+                                       key=lambda p: p["project"])})
+
+
+@app.route('/api/approval/inbox')
+@require_auth
+def api_approval_inbox():
+    """Unified 'awaiting your decision' inbox for the mobile app (read-only).
+
+    Collapses the three Telegram-only approval queues (outbox notes,
+    self-repair tasks, bulletin WAITING_HUMAN) into one list, read fresh from
+    jsonl. See maria_ui/approval_inbox.py for the aggregation logic. No write
+    path here -- approval still goes through Telegram for now (layer 1).
+    """
+    from maria_ui.approval_inbox import build_approval_inbox
+    meta_dir = Path(__file__).resolve().parents[1] / "meta_data"
+    return jsonify(build_approval_inbox(meta_dir))
+
+
+@app.route('/api/approval/act', methods=['POST'])
+@require_auth
+def api_approval_act():
+    """Apply an operator approval action (Skrzynka layer 2 -- the write path).
+
+    Body: {"kind": note|repair|review, "id": "...", "action": approve|reject}.
+    Routes through the daemon's live stores (set_approval_stores); 503 if the
+    daemon is not wired in (UI-only mode) so the operator falls back to
+    Telegram rather than a fresh-instance write racing the tick thread.
+    """
+    data = request.get_json(silent=True) or {}
+    kind = (data.get("kind") or "").strip()
+    item_id = (data.get("id") or "").strip()
+    action = (data.get("action") or "").strip()
+    if action not in ("approve", "reject"):
+        return jsonify({"ok": False, "message": "action musi byc approve|reject"}), 400
+
+    if not any(_approval_stores.values()):
+        return jsonify({
+            "ok": False,
+            "message": "Daemon nie jest uruchomiony -- zatwierdz w Telegramie.",
+        }), 503
+
+    from maria_ui.approval_actions import apply_approval_action
+    result = apply_approval_action(
+        outbox=_approval_stores["outbox"],
+        conductor=_approval_stores["conductor"],
+        bulletin=_approval_stores["bulletin"],
+        kind=kind, item_id=item_id, action=action,
+    )
+    return jsonify(result), (200 if result.get("ok") else 400)
 
 
 @app.route('/api/tasks')

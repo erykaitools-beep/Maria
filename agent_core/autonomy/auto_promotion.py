@@ -16,6 +16,7 @@ Trust must be EARNED, not given.
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,12 +83,23 @@ class AutoPromotion:
         goal_store=None,
         notify_fn: Optional[Callable[[str, str], None]] = None,
         log_path: Optional[Path] = None,
+        enabled: Optional[bool] = None,
     ):
         self._scorer = trust_scorer
         self._authority = authority_manager
         self._goal_store = goal_store
         self._notify_fn = notify_fn  # Telegram notification
         self._log_path = log_path or DEFAULT_PROMOTION_LOG_PATH
+        # Gated OFF by default. Authority is operator-only (via /authority) until
+        # an autonomous effector path is deliberately wired -- without effector
+        # use a promotion is meaningless, and raising authority must stay a
+        # conscious decision, not an earned-trust auto-proposal. Flip the env
+        # flag only after the effector rungs + K7 reconciliation (2026-06-07).
+        if enabled is None:
+            enabled = os.getenv(
+                "AUTO_PROMOTION_ENABLED", ""
+            ).strip().lower() in ("1", "true", "yes", "on")
+        self._enabled = enabled
 
         # State
         self._last_check_at: float = 0.0
@@ -132,6 +144,11 @@ class AutoPromotion:
 
         Returns action dict if something happened, None otherwise.
         """
+        # Flag gate (default OFF): no-op entirely until autonomy promotion is
+        # deliberately enabled. See __init__ for rationale (K7 reconciliation).
+        if not self._enabled:
+            return None
+
         now = time.time()
 
         # Rate limit checks
@@ -233,13 +250,24 @@ class AutoPromotion:
 
         # Complete the goal
         if self._goal_store and self._pending_goal_id:
+            from agent_core.goals.goal_model import GoalStatus
             try:
                 self._goal_store.update_status(
-                    self._pending_goal_id, "achieved",
+                    self._pending_goal_id, GoalStatus.ACHIEVED,
                     reason="Promotion applied", actor="auto_promotion",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                # The promotion itself is already applied (set_level above); a
+                # failure to close the tracking goal must not crash that flow --
+                # but it must NOT be swallowed silently either. The old bare
+                # `except: pass` hid an AttributeError from passing the status as
+                # the raw string "achieved" instead of GoalStatus.ACHIEVED
+                # (update_status reads status.value), so the goal was never
+                # actually closed (audit 2026-06-01 #5).
+                logger.warning(
+                    "auto_promotion: could not close goal %s after promotion: %s",
+                    self._pending_goal_id, exc,
+                )
 
         # Notify operator
         if self._notify_fn:
@@ -364,25 +392,51 @@ class AutoPromotion:
         if not proposal:
             return None
 
-        # Create a PROPOSED goal for operator approval
+        # Create a PROPOSED goal for operator approval.
+        # GoalStore.propose() takes a Goal object (not kwargs) -- the old kwargs
+        # call always raised TypeError, was swallowed by the except below, and so
+        # auto-promotion NEVER actually proposed anything (no promotion_history.jsonl
+        # ever written). Tests mocked goal_store, hiding the signature mismatch.
+        # created_by="auto_promotion" is intentionally NOT in GoalStore's
+        # AUTO_CONFIRM_SOURCES, so the goal stays PROPOSED (operator-gated) and is
+        # never auto-confirmed into PENDING -- authority cannot self-apply. (K7
+        # reconciliation 2026-06-07)
         goal_id = None
         if self._goal_store:
             try:
-                goal_id = self._goal_store.propose(
+                from agent_core.goals.goal_model import (
+                    GoalStatus,
+                    GoalType,
+                    create_goal,
+                )
+                goal = create_goal(
+                    goal_type=GoalType.USER,
                     description=(
                         f"Awans autonomii: {proposal.current_level.value} -> "
                         f"{proposal.proposed_level.value} "
                         f"(trust: {proposal.trust_score:.2f})"
                     ),
-                    goal_type="user",
-                    source="auto_promotion",
+                    priority=0.6,
+                    status=GoalStatus.PROPOSED,
+                    created_by="auto_promotion",
                     metadata={
                         "promotion": proposal.to_dict(),
                         "type": "authority_promotion",
                     },
                 )
+                goal_id = self._goal_store.propose(goal)
+                if goal_id and hasattr(self._goal_store, "save"):
+                    self._goal_store.save()
             except Exception as e:
                 logger.warning("Failed to create promotion goal: %s", e)
+                return None
+            if goal_id is None:
+                # propose() returns None on capacity/displacement -- don't
+                # half-commit a pending state; retry after the cooldown.
+                logger.info(
+                    "auto_promotion: propose() returned None "
+                    "(capacity/displacement), skipping round"
+                )
                 return None
 
         self._pending_proposal = proposal

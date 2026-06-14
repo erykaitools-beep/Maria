@@ -24,6 +24,7 @@ class EntryType(Enum):
     WAITING_HUMAN = "waiting_human"       # Needs operator decision or approval
     CODE_TASK = "code_task"               # Code task result from Codex
     IMPROVEMENT = "improvement"           # Module analysis / upgrade proposal
+    SURPRISE = "surprise"                 # Predictive layer: state-transition surprise (B0/B0.1)
 
 
 class EntryStatus(Enum):

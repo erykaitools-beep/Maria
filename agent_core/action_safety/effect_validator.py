@@ -169,6 +169,19 @@ class EffectValidator:
                 unexpected = True
                 details["error_on_success"] = str(error)[:200]
 
+        # B2: filesystem write -- re-stat the target (the real external check:
+        # "did the file the action claims to have written actually appear?").
+        if action_type == "fs_write":
+            path = result.get("path")
+            success = result.get("success", False)
+            exists = bool(path) and Path(path).is_file()
+            details["path"] = path
+            details["file_exists"] = exists
+            details["size"] = result.get("size")
+            if success and not exists:
+                unexpected = True
+                details["file_missing_on_success"] = True
+
         if unexpected:
             return ValidationResult.UNEXPECTED, details
 

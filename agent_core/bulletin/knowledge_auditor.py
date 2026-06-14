@@ -237,17 +237,19 @@ class KnowledgeAuditor:
         if self._knowledge_analyzer is None:
             return
         try:
-            snapshot = self._knowledge_analyzer.get_snapshot()
+            snapshot = self._knowledge_analyzer.get_knowledge_snapshot()
             by_status = snapshot.get("files_by_status", {})
             # Files that are "completed" have been examined
             # Files that are "learned" have NOT been examined yet
             learned = by_status.get("learned", [])
 
             topic_lower = topic.lower()
-            untested = [
-                f for f in learned
-                if topic_lower in f.lower()
-            ]
+            # files_by_status trzyma dicty rekordow -- nazwa w id/file
+            untested = []
+            for rec in learned:
+                name = rec.get("id") or rec.get("file") or ""
+                if topic_lower in name.lower():
+                    untested.append(name)
             if untested:
                 report.gaps.append(KnowledgeGap(
                     gap_type=GapType.NO_EXAM,

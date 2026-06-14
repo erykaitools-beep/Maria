@@ -24,8 +24,11 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "effector": 10,   # OpenClaw: max 10 tool invocations per hour
     "self_analyze": 2,  # K12: max 2 per hour (practically 1/day via planner cooldown)
     "creative": 2,      # K13: max 2 creative reflections per hour
+    "critique": 1,      # Faza G: max 1 critique per hour (was: unlimited -> spam loop)
     "ask_expert": 10,   # ChatGPT encyclopedia: max 10 per hour
     "validate": 5,      # Cross-validation: max 5 per hour
+    "evaluate": 2,      # Evaluation: max 2 per hour
+    "review": 5,        # Spaced repetition review: max 5 per hour
 }
 
 # Sliding window size

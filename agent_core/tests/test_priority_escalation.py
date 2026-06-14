@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.telegram.bot import TelegramBot
 from agent_core.creative.creative_model import (
     CreativeInsight,
     DetectedTension,
@@ -309,7 +311,7 @@ class TestTelegramPriorityCommand:
         """Integration test: /priority command through TelegramBridge."""
         store = self._make_goal_store(tmp_path)
 
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
             {"text": "/priority goal-test 0.9", "from": "User", "chat_id": 123,
@@ -365,7 +367,7 @@ class TestTelegramPriorityCommand:
         assert store.get("goal-test1234").priority == 0.9
 
     def test_priority_invalid_value(self):
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
             {"text": "/priority goal-x abc", "from": "User", "chat_id": 123,
@@ -392,7 +394,7 @@ class TestTelegramPriorityCommand:
         assert "Nieprawidlowy" in sent
 
     def test_priority_out_of_range(self):
-        bot = MagicMock()
+        bot = specced(TelegramBot)
         bot.configured = True
         bot.get_updates = MagicMock(return_value=[
             {"text": "/priority goal-x 1.5", "from": "User", "chat_id": 123,

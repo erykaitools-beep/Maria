@@ -15,6 +15,22 @@ from agent_core.routing.capability_spec import CapabilitySpec, DEFAULT_CAPABILIT
 from agent_core.routing.capability_router import CapabilityRouter
 from agent_core.routing import CapabilityRouter as ImportedRouter
 
+from agent_core.tests.spec_helpers import specced
+from agent_core.teacher.teacher_agent import TeacherAgent
+from agent_core.evaluation.observer import EvaluationObserver
+from agent_core.evaluation.report import EvaluationReport
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import SystemState
+from agent_core.homeostasis.mode_regulator import Mode
+from agent_core.experiment import ExperimentSystem
+from agent_core.experiment.experiment_model import ExperimentReport
+from agent_core.effector.openclaw_client import OpenClawClient
+from agent_core.self_analysis import SelfAnalysis
+from agent_core.self_analysis.recommendation_model import AnalysisReport
+from agent_core.creative.facade import CreativeModule
+from agent_core.llm.router import LLMRouter
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -35,6 +51,11 @@ class MockPlan:
     action_params: Dict[str, Any]
     goal_id: Optional[str] = None
     goal_description: str = ""
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @pytest.fixture
@@ -95,12 +116,12 @@ class TestCapabilitySpec:
         assert s1 == s2
 
     def test_default_specs_complete(self):
-        """All 14 known action types have specs."""
+        """All 15 known action types have specs."""
         expected = {
             "learn", "exam", "review", "evaluate", "noop",
             "maintenance", "fetch", "experiment", "effector",
             "self_analyze", "creative", "ask_expert", "validate",
-            "critique",
+            "critique", "fs_write",
         }
         assert set(DEFAULT_CAPABILITY_SPECS.keys()) == expected
 
@@ -109,7 +130,7 @@ class TestCapabilitySpec:
         free = {"learn", "exam", "review", "evaluate", "noop"}
         guarded = {
             "maintenance", "fetch", "experiment", "self_analyze",
-            "creative", "ask_expert", "validate",
+            "creative", "ask_expert", "validate", "fs_write",
         }
         restricted = {"effector"}
 
@@ -285,7 +306,7 @@ class TestHandlerFactories:
 
     def test_make_learn_handler_success(self):
         from agent_core.routing.handlers import make_learn_handler
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 3, "strategies_executed": 1}
         }
@@ -297,7 +318,7 @@ class TestHandlerFactories:
 
     def test_make_learn_handler_idle(self):
         from agent_core.routing.handlers import make_learn_handler
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 0, "idle_reason": "no_files", "filtered_out_count": 5}
         }
@@ -317,7 +338,7 @@ class TestHandlerFactories:
 
     def test_make_exam_handler_success(self):
         from agent_core.routing.handlers import make_exam_handler
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {
             "stats": {
                 "exams_run": 1, "exams_passed": 1,
@@ -332,7 +353,7 @@ class TestHandlerFactories:
 
     def test_make_review_handler_success(self):
         from agent_core.routing.handlers import make_review_handler
-        teacher = MagicMock()
+        teacher = specced(TeacherAgent)
         teacher.run_session.return_value = {
             "stats": {"strategies_executed": 2}
         }
@@ -351,11 +372,11 @@ class TestHandlerFactories:
 
     def test_make_evaluate_handler_success(self):
         from agent_core.routing.handlers import make_evaluate_handler
-        observer = MagicMock()
-        report = MagicMock()
-        report.report_id = "rpt-1"
-        report.metrics = {"learning_velocity": 0.5}
-        report.recommendations = ["study more"]
+        observer = specced(EvaluationObserver)
+        report = specced(EvaluationReport,
+                         report_id="rpt-1",
+                         metrics={"learning_velocity": 0.5},
+                         recommendations=["study more"])
         observer.generate_report.return_value = report
         handler = make_evaluate_handler(evaluation_observer=observer)
         plan = MockPlan(MockActionType.LEARN, {"period_hours": 2.0})
@@ -373,12 +394,11 @@ class TestHandlerFactories:
 
     def test_make_maintenance_handler_success(self):
         from agent_core.routing.handlers import make_maintenance_handler
-        core = MagicMock()
-        state = MagicMock()
-        state.health_score = 0.95
-        state.interpreted_state = {"cpu_load": 0.3}
-        state.mode = MagicMock()
-        state.mode.value = "active"
+        core = specced(HomeostasisCore)
+        state = specced(SystemState,
+                        mode=Mode.ACTIVE,
+                        health_score=0.95,
+                        interpreted_state={"cpu_load": 0.3})
         core.get_state.return_value = state
         handler = make_maintenance_handler(homeostasis_core=core)
         plan = MockPlan(MockActionType.LEARN, {})
@@ -402,7 +422,7 @@ class TestHandlerFactories:
 
     def test_make_experiment_handler_no_proposal(self):
         from agent_core.routing.handlers import make_experiment_handler
-        system = MagicMock()
+        system = specced(ExperimentSystem)
         handler = make_experiment_handler(experiment_system=system)
         plan = MockPlan(MockActionType.LEARN, {})
         result = handler(plan)
@@ -411,12 +431,12 @@ class TestHandlerFactories:
 
     def test_make_experiment_handler_success(self):
         from agent_core.routing.handlers import make_experiment_handler
-        system = MagicMock()
-        report = MagicMock()
-        report.report_id = "exp-1"
-        report.recommendation = "ADOPT"
-        report.confidence = 0.8
-        report.conclusion = "Works well"
+        system = specced(ExperimentSystem)
+        report = specced(ExperimentReport,
+                         report_id="exp-1",
+                         recommendation="ADOPT",
+                         confidence=0.8,
+                         conclusion="Works well")
         system.run_experiment.return_value = report
         handler = make_experiment_handler(experiment_system=system)
         plan = MockPlan(MockActionType.LEARN, {"proposal_id": "p-1"})
@@ -433,7 +453,7 @@ class TestHandlerFactories:
 
     def test_make_effector_handler_no_tool_name(self):
         from agent_core.routing.handlers import make_effector_handler
-        client = MagicMock()
+        client = specced(OpenClawClient)
         handler = make_effector_handler(openclaw_client=client)
         plan = MockPlan(MockActionType.EFFECTOR, {})
         result = handler(plan)
@@ -442,7 +462,7 @@ class TestHandlerFactories:
 
     def test_make_effector_handler_success(self):
         from agent_core.routing.handlers import make_effector_handler
-        client = MagicMock()
+        client = specced(OpenClawClient)
         client.invoke_tool.return_value = {"ok": True, "result": "done"}
         handler = make_effector_handler(openclaw_client=client)
         plan = MockPlan(MockActionType.EFFECTOR, {"tool_name": "exec", "tool_args": {"cmd": "ls"}})
@@ -459,14 +479,13 @@ class TestHandlerFactories:
 
     def test_make_self_analyze_handler_success(self):
         from agent_core.routing.handlers import make_self_analyze_handler
-        sa = MagicMock()
-        report = MagicMock()
-        report.error = None
-        report.report_id = "sa-1"
-        report.recommendations = ["rec1"]
-        report.goals_created = 1
-        report.duration_ms = 500
-        report.analysis_text = "All good"
+        sa = specced(SelfAnalysis)
+        report = specced(AnalysisReport,
+                         error=None,
+                         report_id="sa-1",
+                         recommendations=["rec1"],
+                         goals_created=["goal-1"],
+                         duration_ms=500.0)
         sa.run_analysis.return_value = report
         handler = make_self_analyze_handler(self_analysis=sa)
         plan = MockPlan(MockActionType.LEARN, {})
@@ -483,7 +502,7 @@ class TestHandlerFactories:
 
     def test_make_creative_handler_success(self):
         from agent_core.routing.handlers import make_creative_handler
-        creative = MagicMock()
+        creative = specced(CreativeModule)
         creative.reflect.return_value = {
             "success": True,
             "tensions": ["repetition"],
@@ -503,7 +522,7 @@ class TestHandlerFactories:
 
     def test_make_ask_expert_handler_success(self):
         from agent_core.routing.handlers import make_ask_expert_handler
-        llm = MagicMock()
+        llm = specced(LLMRouter)
         llm.ask_encyclopedia.return_value = "Python jest jezykiem programowania."
         handler = make_ask_expert_handler(llm_router=llm)
         plan = MockPlan(
@@ -517,7 +536,7 @@ class TestHandlerFactories:
 
     def test_make_ask_expert_no_question_no_topic(self):
         from agent_core.routing.handlers import make_ask_expert_handler
-        llm = MagicMock()
+        llm = specced(LLMRouter)
         handler = make_ask_expert_handler(llm_router=llm)
         plan = MockPlan(MockActionType.LEARN, {})
         result = handler(plan)
@@ -559,7 +578,7 @@ class TestResolveTopics:
 
     def test_with_analyzer(self):
         from agent_core.routing.handlers import resolve_topics
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_files_for_topics.return_value = [
             ("file1.txt", 3.0), ("file2.txt", 1.5),
         ]
@@ -570,7 +589,7 @@ class TestResolveTopics:
 
     def test_empty_results(self):
         from agent_core.routing.handlers import resolve_topics
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_files_for_topics.return_value = []
         plan = MockPlan(MockActionType.LEARN, {"topics": ["nonexistent"]})
         result = resolve_topics(plan, analyzer)
@@ -596,12 +615,12 @@ class TestImports:
 
 class TestFullFlow:
     def test_register_all_defaults_and_dispatch(self):
-        """Register all 13 default capabilities and dispatch noop."""
+        """Register all 15 default capabilities and dispatch noop."""
         router = CapabilityRouter()
         for name, spec in DEFAULT_CAPABILITY_SPECS.items():
             router.register(name, _ok_handler, spec)
 
-        assert router.registered_count == 14
+        assert router.registered_count == 15
         plan = MockPlan(MockActionType.NOOP, {})
         result = router.dispatch(plan)
         assert result["success"] is True
@@ -623,7 +642,7 @@ class TestFullFlow:
             router.register(name, _ok_handler, spec)
 
         status = router.get_status()
-        assert status["registered"] == 14
+        assert status["registered"] == 15
         free_count = sum(
             1 for c in status["capabilities"]
             if c["classification"] == "free"

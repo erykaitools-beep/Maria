@@ -101,12 +101,16 @@ class TraitEvolver:
             new_score = max(SCORE_MIN, min(SCORE_MAX, new_score))
 
             entry["score"] = round(new_score, 4)
+            # last_updated reflects the most recent evolution pass. Decay
+            # alone shifts the score, so refreshing this stamp every cycle
+            # avoids the misleading "trait frozen since YYYY-MM-DD" signal
+            # we saw with unreinforced traits during the C6 audit.
+            entry["last_updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             if delta != 0:
                 entry["evidence_count"] += sum(
                     count for event, count in experience_counts.items()
                     if self._event_affects_trait(event, trait_name)
                 )
-                entry["last_updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
 
             # Log emergence/disappearance
             was_emerged = old_score >= EMERGENCE_THRESHOLD

@@ -13,6 +13,11 @@ from agent_core.perception.learning_intent import (
     detect_learning_intent, detect_cancel_intent,
 )
 from agent_core.perception.conversation_learning import process_user_message
+from agent_core.tests.spec_helpers import specced
+from agent_core.registry.shared_context import SharedContext
+from agent_core.perception.buffer import PerceptionBuffer
+from agent_core.goals.store import GoalStore
+from agent_core.semantic import SemanticMemory
 
 
 # =========================================================================
@@ -134,14 +139,15 @@ class TestLearningIntentEnglish:
 
 class TestProcessUserMessage:
     def _make_ctx(self, tmp_path=None):
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
+
+        # spec-blocked: PerceptionBuffer defines __len__ -> autospec returns 0 -> falsy -> if ctx.perception_buffer: skips push
         ctx.perception_buffer = MagicMock()
         ctx.perception_buffer.push = MagicMock()
 
         # GoalStore mock
-        ctx.goal_store = MagicMock()
-        ctx.goal_store.create = MagicMock(return_value="goal-test123")
-        ctx.goal_store.save = MagicMock()
+        ctx.goal_store = specced(GoalStore)
+        ctx.goal_store.create.return_value = "goal-test123"
 
         ctx.semantic_search = None
         return ctx
@@ -195,7 +201,7 @@ class TestProcessUserMessage:
 
     def test_semantic_indexing(self):
         ctx = self._make_ctx()
-        ctx.semantic_search = MagicMock()
+        ctx.semantic_search = specced(SemanticMemory)
         process_user_message("naucz sie o genetyce", ctx)
         ctx.semantic_search.index_text.assert_called_once()
 

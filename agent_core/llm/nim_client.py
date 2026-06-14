@@ -10,10 +10,19 @@ Chat stays on local Ollama (offline, fast).
 
 import json
 import logging
+import os
 import re
 import time
 import requests
 from typing import Dict, Any, Optional, List, Callable
+
+from maria_core.sys.config import DEFAULT_NIM_MODEL
+
+# NIM output cap. 2048 chronically truncated nemotron-49b reasoning/planner
+# responses (finish_reason=length, ~4x/day) -> forced fallback to local Ollama
+# (a cold qwen3 on CPU). Raised + made tunable; an explicit per-call max_tokens
+# still overrides this default.
+DEFAULT_MAX_TOKENS = int(os.environ.get("NIM_MAX_TOKENS", "4096"))
 
 try:
     from agent_core.llm.master_prompt import build_compact_prompt, build_base_prompt
@@ -51,7 +60,7 @@ class NIMClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        model: str = DEFAULT_NIM_MODEL,
         base_url: Optional[str] = None,
         timeout: int = 45,
         system_prompt: Optional[str] = None,
@@ -104,7 +113,8 @@ class NIMClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        force_json: bool = False,
     ) -> str:
         """
         Raw API call to NIM (OpenAI-compatible format).
@@ -113,6 +123,7 @@ class NIMClient:
             messages: Chat messages [{"role": "...", "content": "..."}]
             temperature: Sampling temperature
             max_tokens: Maximum response tokens
+            force_json: Request server-side JSON object output
 
         Returns:
             Response content text
@@ -131,6 +142,8 @@ class NIMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if force_json:
+            payload["response_format"] = {"type": "json_object"}
 
         last_error = None
         timeout_count = 0
@@ -180,7 +193,29 @@ class NIMClient:
                 choices = data.get("choices", [])
                 if not choices:
                     return ""
-                content = choices[0].get("message", {}).get("content", "")
+                # `.get(key, default)` returns the stored value when the key
+                # exists -- including when that value is None. Some NIM models
+                # (observed: nvidia/llama-3.3-nemotron-super-49b-v1.5) do
+                # return `"content": null` on roughly 1 in 6 calls, which used
+                # to crash here with "'NoneType' object has no attribute
+                # 'strip'" and force a Ollama fallback. Coerce to "" instead.
+                content = choices[0].get("message", {}).get("content") or ""
+
+                # BUG C fix (audit 2026-05-25): when finish_reason="length",
+                # NIM hit max_tokens mid-stream and the response is truncated.
+                # Previously we returned the partial content as success, and the
+                # caller's JSON parser failed silently — Maria looped 30+ times
+                # on the same broken exam. Raise so the caller (router) can
+                # fall back to Ollama or retry with a larger max_tokens.
+                finish_reason = choices[0].get("finish_reason")
+                if finish_reason == "length":
+                    completion_tokens = self.last_completion_tokens
+                    raise NIMAPIError(
+                        f"Response truncated (finish_reason=length, "
+                        f"completion_tokens={completion_tokens}, "
+                        f"max_tokens={max_tokens}). Retry with higher max_tokens."
+                    )
+
                 return content.strip()
 
             except requests.exceptions.Timeout:
@@ -223,7 +258,8 @@ class NIMClient:
     # -------------------------------------------------
 
     def _ask_once(
-        self, prompt: str, temperature: float = 0.3, **kwargs
+        self, prompt: str, temperature: float = 0.3,
+        force_json: bool = False, max_tokens: int = DEFAULT_MAX_TOKENS, **kwargs
     ) -> str:
         """
         One-shot question (no history).
@@ -233,6 +269,8 @@ class NIMClient:
         Args:
             prompt: User prompt
             temperature: Sampling temperature
+            force_json: Request server-side JSON object output
+            max_tokens: Maximum response tokens (default 2048)
 
         Returns:
             Response text
@@ -241,7 +279,12 @@ class NIMClient:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
         ]
-        return self._chat(messages, temperature=temperature)
+        return self._chat(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            force_json=force_json,
+        )
 
     def think(
         self, prompt: str, temperature: float = 0.3, **kwargs

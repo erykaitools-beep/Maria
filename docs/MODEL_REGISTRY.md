@@ -54,16 +54,22 @@ These must load only when needed:
 - MEMORY dedicated instance: unload immediately after compression job completes
 ---
 ## REGISTERED MODELS
+
+> **[STALE LICZBY — sync 2026-05-29]** Aktualne: **MODEL-01 = qwen3:8b** (~5.5GB,
+> budzet 60s), **MODEL-06 = nvidia/llama-3.3-nemotron-super-49b-v1.5** (od 2026-05-10,
+> ~750k tok/dzien, 40 RPM). Niektore sekcje ponizej moga miec stare wartosci
+> RAM/timeout — source of truth dla tagow/modeli to `agent_core/llm/model_registry.py`.
+
 ### MODEL-01 -- Strategic Planner (Primary Brain)
 ```yaml
-id: qwen2.5-14b-instruct
+id: qwen3-8b
 file_format: GGUF / Q4_K_M
-ram_estimate_gb: 9
+ram_estimate_gb: 5.5
 warm_state: cold
 priority: high
-ollama_tag: qwen2.5:14b
+ollama_tag: qwen3:8b
 role: PLANNER
-latency_budget_max_s: 45
+latency_budget_max_s: 60
 concurrency_class: heavy
 use_when:
   - planning
@@ -202,7 +208,7 @@ hard_rule:
 ```
 ### MODEL-06 -- External API (NIM)
 ```yaml
-id: z-ai/glm5
+id: nvidia/llama-3.3-nemotron-super-49b-v1.5
 endpoint: integrate.api.nvidia.com/v1
 ram_estimate_gb: 0
 warm_state: external
@@ -211,8 +217,8 @@ role: EXTERNAL_LEARNING
 latency_budget_max_s: 30
 concurrency_class: none
 token_budget:
-  daily: 100000
-  monthly: 2000000
+  daily: 750000
+  monthly: 15000000
 expiry: 2026-08-xx
 use_when:
   - learning analysis (current primary use)

@@ -259,7 +259,11 @@ class ExecutionPlanBuilder:
             return (False, "")
 
         try:
-            classification = policy.classify_action(action)
+            # classify_action is a module-level function (action_class.py), NOT a
+            # method on AutonomyPolicy -- the old policy.classify_action(action) raised
+            # AttributeError, swallowed below -> K7 check failed OPEN (audyt 2026-06-13).
+            from agent_core.autonomy.action_class import classify_action
+            classification = classify_action(action)
             if hasattr(classification, "level"):
                 level = classification.level
             elif hasattr(classification, "value"):
@@ -278,7 +282,7 @@ class ExecutionPlanBuilder:
         """Get homeostasis mode."""
         core = self._ctx.homeostasis_core
         if core:
-            mode = getattr(core, "_current_mode", None)
+            mode = getattr(getattr(core, "state", None), "mode", None)
             if mode:
                 return mode.name if hasattr(mode, "name") else str(mode)
         return "UNKNOWN"

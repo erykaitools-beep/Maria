@@ -27,13 +27,19 @@ class GoalStatus(Enum):
     ACHIEVED = "achieved"        # Zrealizowany
     FAILED = "failed"            # Nie udalo sie
     ABANDONED = "abandoned"      # Swiadomie porzucony
+    CANCELLED = "cancelled"      # Anulowany przez uzytkownika/operatora
 
 
 # Statusy ktore licza sie jako "aktywne" (wliczane do limitu 20)
 ACTIVE_STATUSES = {GoalStatus.PENDING, GoalStatus.ACTIVE}
 
 # Statusy terminalne (cel zakonczony)
-TERMINAL_STATUSES = {GoalStatus.ACHIEVED, GoalStatus.FAILED, GoalStatus.ABANDONED}
+TERMINAL_STATUSES = {
+    GoalStatus.ACHIEVED,
+    GoalStatus.FAILED,
+    GoalStatus.ABANDONED,
+    GoalStatus.CANCELLED,
+}
 
 # Limity
 MAX_ACTIVE_GOALS = 20
@@ -88,6 +94,12 @@ class Goal:
     audit_trail: List[AuditEntry] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     outcome: Optional[Dict[str, Any]] = None  # v2: learning results when goal completed
+    # B3: machine-checkable acceptance criteria. None = legacy goal (closure via the
+    # learning/progress path). A non-empty list = ALL criteria must pass to achieve.
+    # Each item: {"type": "file_exists" | "regex_in_log" | "exam_passed", ...}.
+    # Pure evaluator: agent_core/goals/success_criteria.py. Readers (B2 closer,
+    # deadline reaper) land in later planks -- this field is additive only.
+    success_criteria: Optional[List[Dict[str, Any]]] = None
 
     @property
     def is_active(self) -> bool:
@@ -116,6 +128,7 @@ class Goal:
             "audit_trail": [a.to_dict() for a in self.audit_trail],
             "metadata": self.metadata,
             "outcome": self.outcome,
+            "success_criteria": self.success_criteria,
         }
 
     @staticmethod
@@ -139,6 +152,7 @@ class Goal:
             ],
             metadata=d.get("metadata", {}),
             outcome=d.get("outcome"),
+            success_criteria=d.get("success_criteria"),
         )
 
 
@@ -152,6 +166,7 @@ def create_goal(
     deadline: Optional[float] = None,
     metadata: Optional[Dict[str, Any]] = None,
     goal_id: Optional[str] = None,
+    success_criteria: Optional[List[Dict[str, Any]]] = None,
 ) -> Goal:
     """Factory function do tworzenia celow z automatycznym audit trail."""
     now = time.time()
@@ -179,5 +194,6 @@ def create_goal(
             )
         ],
         metadata=metadata or {},
+        success_criteria=success_criteria,
     )
     return goal

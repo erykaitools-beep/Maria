@@ -29,10 +29,13 @@ def _create_router(brain):
 
         from agent_core.llm import NIMClient, TokenBudget, LLMRouter
 
+        import os
+        nim_timeout = int(os.environ.get("NIM_TIMEOUT", "120"))
         nim = NIMClient(
             api_key=NVIDIA_NIM_API_KEY,
             model=NVIDIA_NIM_MODEL,
             base_url=NVIDIA_NIM_BASE_URL,
+            timeout=nim_timeout,
         )
         budget = TokenBudget(
             daily_limit=NIM_DAILY_TOKEN_LIMIT,

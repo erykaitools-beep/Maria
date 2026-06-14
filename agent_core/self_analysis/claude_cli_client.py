@@ -11,6 +11,7 @@ Pattern: follows OpenClaw client (agent_core/effector/openclaw_client.py).
 """
 
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -21,6 +22,26 @@ logger = logging.getLogger(__name__)
 
 # Rate limit: max calls per 24h
 MAX_CALLS_PER_DAY = 3
+
+# User-level install paths to check before OpenClaw fallback.
+# systemd services run with a minimal PATH that omits ~/.npm-global/bin,
+# which is where Claude Code CLI lands after `npm install -g`. Without
+# this list, every is_available() call trips the OpenClaw exec fallback,
+# which wakes qwen2.5:3b (~3GB RAM) for a single `which` — costly.
+_USER_CLAUDE_PATHS = [
+    "/home/maria/.npm-global/bin/claude",
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
+    os.path.expanduser("~/.npm-global/bin/claude"),
+    os.path.expanduser("~/.local/bin/claude"),
+]
+
+# Opt-out knob: set OPENCLAW_CLAUDE_FALLBACK=0 to disable the fallback
+# entirely when OpenClaw is known to be idle/offline. Default: enabled
+# to preserve legacy behavior when deployadmin is the one with claude.
+_OPENCLAW_FALLBACK_ENABLED = (
+    os.environ.get("OPENCLAW_CLAUDE_FALLBACK", "1") not in ("0", "false", "False")
+)
 
 
 class ClaudeCLIClient:
@@ -45,13 +66,30 @@ class ClaudeCLIClient:
         self._openclaw_client = client
 
     def is_available(self) -> bool:
-        """Check if Claude CLI is installed and accessible."""
-        # Direct check
+        """Check if Claude CLI is installed and accessible.
+
+        Check order (cheapest -> costliest):
+        1. shutil.which on current PATH (free)
+        2. Common user install paths (free) — upgrades self._claude_bin
+           to the full path on hit so analyze() can run directly
+        3. OpenClaw exec fallback (wakes qwen2.5:3b, ~3GB) — only if
+           OPENCLAW_CLAUDE_FALLBACK env is not disabled
+        """
+        # 1. Direct check on PATH
         if shutil.which(self._claude_bin):
             return True
 
-        # OpenClaw exec fallback: check if deployadmin has claude
-        if self._openclaw_client:
+        # 2. Common user install paths (cheap, via shutil.which for
+        # consistent mock behavior in tests)
+        for path in _USER_CLAUDE_PATHS:
+            resolved = shutil.which(path)
+            if resolved:
+                self._claude_bin = resolved  # Use full path directly
+                logger.debug(f"[ClaudeCLI] Found claude at {resolved}")
+                return True
+
+        # 3. OpenClaw exec fallback (expensive — wakes qwen2.5:3b)
+        if self._openclaw_client and _OPENCLAW_FALLBACK_ENABLED:
             try:
                 result = self._openclaw_client.invoke_tool(
                     "exec", {"command": f"which {self._claude_bin}"}

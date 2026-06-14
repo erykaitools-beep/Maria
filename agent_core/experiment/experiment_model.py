@@ -49,6 +49,7 @@ class ProposalSource(Enum):
     K9_PATTERN = "k9_pattern"
     K9_STRUGGLING = "k9_struggling"
     MANUAL = "manual"
+    K12_STRATEGIC_CHANGE = "k12_strategic_change"  # Most #2 step 1 (2026-05-08)
 
 
 # -- ParameterSpec (frozen) ---------------------------------------

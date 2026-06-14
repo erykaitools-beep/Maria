@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -37,15 +38,38 @@ class BeliefStore:
         self._path = Path(beliefs_path)
         self._beliefs: Dict[str, Belief] = {}
         self._dirty: set = set()  # belief_ids needing save
+        self._bulk_mode: bool = False  # when True, defer _enforce_cap to end of batch
 
         # Indexes (rebuilt on load and maintained on add)
         self._by_entity: Dict[str, List[str]] = defaultdict(list)
         self._by_entity_type: Dict[EntityType, List[str]] = defaultdict(list)
         self._by_tag: Dict[str, List[str]] = defaultdict(list)
 
+    @contextmanager
+    def bulk_mode(self):
+        """Defer cap enforcement during mass inserts (BeliefBuilder.build_all).
+
+        Without this, each add() triggers _enforce_cap() — O(n) per call on
+        current beliefs. For a fresh build of ~22k concepts, that's O(n²)
+        and hangs for minutes. With bulk_mode enabled, cap enforcement runs
+        exactly once on exit.
+        """
+        prev = self._bulk_mode
+        self._bulk_mode = True
+        try:
+            yield
+        finally:
+            self._bulk_mode = prev
+            # Run cap enforcement once, after the whole batch
+            self._enforce_cap()
+
     def load(self) -> int:
         """
         Load beliefs from JSONL with MERGE semantics.
+
+        Pruned records (superseded_by == "pruned") are skipped on load — they
+        are forgotten beliefs with no referential value. Revised records
+        (superseded_by == <new_id>) are kept for history chain continuity.
 
         Returns:
             Number of current (non-superseded) beliefs loaded.
@@ -57,6 +81,7 @@ class BeliefStore:
             self._rebuild_indexes()
             return 0
 
+        skipped_pruned = 0
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -65,6 +90,9 @@ class BeliefStore:
                         continue
                     try:
                         data = json.loads(line)
+                        if data.get("superseded_by") == "pruned":
+                            skipped_pruned += 1
+                            continue
                         belief = Belief.from_dict(data)
                         self._beliefs[belief.belief_id] = belief
                     except (json.JSONDecodeError, KeyError, ValueError):
@@ -74,6 +102,21 @@ class BeliefStore:
 
         self._rebuild_indexes()
         current = [b for b in self._beliefs.values() if b.superseded_by is None]
+
+        # Auto-compact if the file is bloated with pruned records.
+        # Triggers on recovery from bug where prune tombstones were never
+        # cleaned up. Threshold: 10x more pruned than active → compact now.
+        if skipped_pruned > max(10 * len(current), 1000):
+            logger.info(
+                f"[BeliefStore] load: {skipped_pruned} pruned records in file "
+                f"vs {len(current)} active — auto-compacting"
+            )
+            self.compact()
+        elif skipped_pruned:
+            logger.info(
+                f"[BeliefStore] load: skipped {skipped_pruned} pruned records"
+            )
+
         return len(current)
 
     def save(self) -> None:
@@ -89,15 +132,21 @@ class BeliefStore:
                     if belief:
                         f.write(json.dumps(belief.to_dict(), ensure_ascii=False) + "\n")
             self._dirty.clear()
+            self._compact_if_needed()
         except IOError as e:
             logger.warning(f"Could not save beliefs: {e}")
 
     def add(self, belief: Belief) -> None:
-        """Add a belief to the store."""
+        """Add a belief to the store.
+
+        When bulk_mode() is active, _enforce_cap is deferred to the end
+        of the batch (context manager exit) to avoid O(n²) behavior.
+        """
         self._beliefs[belief.belief_id] = belief
         self._dirty.add(belief.belief_id)
         self._index_belief(belief)
-        self._enforce_cap()
+        if not self._bulk_mode:
+            self._enforce_cap()
 
     def revise(
         self,
@@ -254,39 +303,119 @@ class BeliefStore:
                 self._by_tag[tag].append(bid)
 
     def compact(self) -> int:
-        """Compact beliefs.jsonl by removing superseded records. v2."""
-        from agent_core.world_model.belief_maintenance import compact_jsonl
-        return compact_jsonl(self)
+        """Rewrite beliefs.jsonl to only non-superseded beliefs.
+
+        Drops all records with superseded_by set (both "pruned" tombstones
+        and revised-chain markers). Only the current, active view of the
+        world survives compaction — both on disk and in memory. This
+        prevents the JSONL and the in-memory dict from growing unboundedly
+        as prune cycles accumulate tombstones.
+        """
+        if not self._path.exists():
+            # Even without a file, shrink memory to current.
+            keep_mem = {bid: b for bid, b in self._beliefs.items() if b.superseded_by is None}
+            if len(keep_mem) < len(self._beliefs):
+                self._beliefs = keep_mem
+                self._rebuild_indexes()
+                self._dirty.intersection_update(self._beliefs)
+            return 0
+
+        line_count = self._count_nonempty_lines()
+        keep = [b for b in self._beliefs.values() if b.superseded_by is None]
+        if line_count == 0 and not keep:
+            return 0
+
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for belief in keep:
+                    f.write(json.dumps(belief.to_dict(), ensure_ascii=False) + "\n")
+            tmp_path.replace(self._path)
+            # Shrink memory to match disk — drop tombstones entirely.
+            self._beliefs = {b.belief_id: b for b in keep}
+            self._rebuild_indexes()
+            # All beliefs are now persisted; nothing is dirty.
+            self._dirty.clear()
+            return max(0, line_count - len(keep))
+        except IOError as e:
+            logger.warning(f"Could not compact beliefs: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            return 0
+
+    def _count_nonempty_lines(self) -> int:
+        if not self._path.exists():
+            return 0
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                return sum(1 for line in f if line.strip())
+        except IOError as e:
+            logger.warning(f"Could not inspect beliefs: {e}")
+            return 0
+
+    def _compact_if_needed(self) -> None:
+        keep = sum(1 for b in self._beliefs.values() if b.superseded_by is None)
+        if keep == 0:
+            return
+        if self._count_nonempty_lines() > (2 * keep):
+            self.compact()
+
+    def drop_belief(self, belief_id: str) -> bool:
+        """Remove a belief from memory and indexes.
+
+        Used by prune paths (smart_prune, fallback) to forget beliefs
+        without leaving tombstones in self._beliefs. The JSONL file
+        retains historical append records until compact() runs.
+
+        Returns True if removed, False if not present.
+        """
+        b = self._beliefs.pop(belief_id, None)
+        if b is None:
+            return False
+
+        for idx, key in (
+            (self._by_entity, b.entity),
+            (self._by_entity_type, b.entity_type),
+        ):
+            lst = idx.get(key)
+            if lst and belief_id in lst:
+                lst.remove(belief_id)
+                if not lst:
+                    del idx[key]
+        for tag in b.tags:
+            lst = self._by_tag.get(tag)
+            if lst and belief_id in lst:
+                lst.remove(belief_id)
+                if not lst:
+                    del self._by_tag[tag]
+
+        self._dirty.discard(belief_id)
+        return True
 
     def _enforce_cap(self) -> None:
-        """Prune lowest-scored beliefs if over cap. v2: uses smart_prune."""
+        """Prune lowest-scored beliefs if over cap. v2: uses smart_prune.
+
+        Pruned beliefs are DROPPED from memory (not kept as tombstones).
+        After pruning, compact() is called to rewrite the JSONL without
+        the dropped records — otherwise they would be loaded back on
+        next restart (append-only file still has them as "current").
+        """
         current = self.get_current()
         if len(current) <= MAX_CURRENT_BELIEFS:
             return
+        pruned = 0
         try:
             from agent_core.world_model.belief_maintenance import smart_prune
-            smart_prune(self, cap=MAX_CURRENT_BELIEFS)
+            pruned = smart_prune(self, cap=MAX_CURRENT_BELIEFS)
         except Exception:
             # Fallback to naive pruning if maintenance module unavailable
             current.sort(key=lambda b: b.confidence)
             excess = len(current) - MAX_CURRENT_BELIEFS
             for b in current[:excess]:
-                superseded = Belief(
-                    belief_id=b.belief_id,
-                    entity=b.entity,
-                    entity_type=b.entity_type,
-                    belief_type=b.belief_type,
-                    content=b.content,
-                    confidence=b.confidence,
-                    source=b.source,
-                    source_id=b.source_id,
-                    tags=b.tags,
-                    created_at=b.created_at,
-                    updated_at=time.time(),
-                    revision=b.revision,
-                    superseded_by="pruned",
-                    related_entities=b.related_entities,
-                    evidence=b.evidence,
-                )
-                self._beliefs[b.belief_id] = superseded
-                self._dirty.add(b.belief_id)
+                if self.drop_belief(b.belief_id):
+                    pruned += 1
+        if pruned > 0:
+            self.compact()

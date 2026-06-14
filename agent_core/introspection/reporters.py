@@ -65,7 +65,6 @@ class HumanReporter:
 
         layer_names = {
             "core": "rdzen (homeostaza, pamiec, LLM)",
-            "adapters": "adaptery do starego kodu",
             "legacy": "stary kod maria_core",
             "ui": "interfejs uzytkownika",
             "models": "modele AI",
@@ -133,7 +132,6 @@ class HumanReporter:
 
         layer_purposes = {
             "core": "To moje serce - tu zarzadzam homeostaza, pamiecia i LLM.",
-            "adapters": "To mosty miedzy nowym a starym kodem.",
             "legacy": "To moj stary kod, wciaz potrzebny ale stopniowo wymieniam go.",
             "ui": "Tak komunikuje sie ze swiatem zewnetrznym.",
             "models": "Tu mieszkaja modele AI, z ktorymi rozmawiam.",

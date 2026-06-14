@@ -14,5 +14,12 @@ Usage:
 
 from agent_core.routing.capability_router import CapabilityRouter
 from agent_core.routing.capability_spec import CapabilitySpec, DEFAULT_CAPABILITY_SPECS
+from agent_core.routing.intent_router import IntentMatch, IntentRouter
 
-__all__ = ["CapabilityRouter", "CapabilitySpec", "DEFAULT_CAPABILITY_SPECS"]
+__all__ = [
+    "CapabilityRouter",
+    "CapabilitySpec",
+    "DEFAULT_CAPABILITY_SPECS",
+    "IntentMatch",
+    "IntentRouter",
+]

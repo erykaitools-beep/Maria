@@ -573,6 +573,58 @@ class TestGoalStorePersistence:
         assert store2.get("goal-maint-ram") is not None
         assert store2.get("goal-maint-cpu") is not None
 
+    def test_compact_removes_duplicates(self, tmp_path):
+        path = tmp_path / "goals.jsonl"
+        store = GoalStore(path)
+
+        goals = [
+            create_goal(GoalType.LEARNING, "Goal A", 0.5, goal_id="g-a"),
+            create_goal(GoalType.LEARNING, "Goal B", 0.6, goal_id="g-b"),
+            create_goal(GoalType.LEARNING, "Goal C", 0.7, goal_id="g-c"),
+        ]
+        for goal in goals:
+            store.create(goal)
+        store.save()
+
+        for idx in range(10):
+            for goal in goals:
+                store.update_progress(goal.id, min(1.0, 0.1 * idx))
+                store.save()
+
+        raw_lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(raw_lines) > len(goals)
+
+        store.compact()
+        compacted_lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(compacted_lines) == len(goals)
+
+    def test_compact_preserves_latest(self, tmp_path):
+        path = tmp_path / "goals.jsonl"
+        store = GoalStore(path)
+
+        goal = create_goal(GoalType.LEARNING, "Goal latest", 0.7, goal_id="g-latest")
+        store.create(goal)
+        store.save()
+
+        store.update_status("g-latest", GoalStatus.ACTIVE, "start", "teacher")
+        store.save()
+        store.update_progress("g-latest", 0.42)
+        store.save()
+        store.update_status("g-latest", GoalStatus.ACHIEVED, "done", "system")
+        store.save()
+
+        store.compact()
+
+        compacted_lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(compacted_lines) == 1
+
+        store_reloaded = GoalStore(path)
+        store_reloaded.load()
+        restored = store_reloaded.get("g-latest")
+        assert restored is not None
+        assert restored.status == GoalStatus.ACHIEVED
+        assert restored.progress == 0.42
+
 
 class TestGoalStoreStats:
     def test_empty(self, tmp_path):

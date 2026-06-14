@@ -14,8 +14,6 @@ LLM summary: decoration only, does not affect decisions.
 """
 
 import logging
-import time
-import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from agent_core.critic.critique_model import (
@@ -35,14 +33,23 @@ class CritiqueApplier:
     def __init__(
         self,
         goal_store=None,
+        bulletin_store=None,
         llm_fn: Optional[Callable[[str], str]] = None,
     ):
+        # goal_store kept for backward-compat wiring; unused since R1
+        # (2026-05-29) - critic posts NEED_REVIEW advisories to the bulletin
+        # instead of flooding the goal queue with un-actionable LEARNING goals.
         self._goal_store = goal_store
+        self._bulletin_store = bulletin_store
         self._llm_fn = llm_fn
 
     def set_goal_store(self, store):
-        """Dependency injection."""
+        """Deprecated (R1): retained for wiring compat; critic uses bulletin."""
         self._goal_store = store
+
+    def set_bulletin_store(self, store):
+        """Dependency injection for the bulletin board (R1)."""
+        self._bulletin_store = store
 
     def set_llm_fn(self, fn: Callable[[str], str]):
         """Set LLM function for summary (decoration only)."""
@@ -50,13 +57,20 @@ class CritiqueApplier:
 
     def apply(self, report: CritiqueReport) -> Dict[str, Any]:
         """
-        Create PROPOSED goals from findings. Optionally generate LLM summary.
+        Post critique findings to the bulletin as NEED_REVIEW advisories.
+        Optionally generate an LLM summary.
+
+        R1 (2026-05-29): findings used to become PROPOSED goals, but 260 critic
+        goals aged to ABANDONED without ever going ACTIVE. They are quality
+        observations, not actionable goals - the bulletin is their proper home.
 
         Returns:
-            {"goals_created": [...], "llm_summary_ok": bool, "errors": [...]}
+            {"bulletin_posted": [...], "goals_created": [], "llm_summary_ok": bool,
+             "errors": [...]}
         """
         result: Dict[str, Any] = {
-            "goals_created": [],
+            "bulletin_posted": [],
+            "goals_created": [],  # retained (always empty) for caller compat
             "errors": [],
             "llm_summary_ok": False,
         }
@@ -64,27 +78,26 @@ class CritiqueApplier:
         if not report.findings:
             return result
 
-        goals_created = 0
+        posted = 0
 
         for finding in report.findings:
-            if goals_created >= MAX_PROPOSED_GOALS_FROM_CRITIQUE:
+            if posted >= MAX_PROPOSED_GOALS_FROM_CRITIQUE:
                 break
 
             try:
-                should_create = self._should_create_goal(finding)
-                if not should_create:
+                if not self._should_post_advisory(finding):
                     continue
 
-                goal_id = self._create_proposed_goal(finding, report.report_id)
-                if goal_id:
-                    result["goals_created"].append(goal_id)
-                    goals_created += 1
+                entry_id = self._post_advisory(finding, report.report_id)
+                if entry_id:
+                    result["bulletin_posted"].append(entry_id)
+                    posted += 1
 
             except Exception as e:
-                logger.warning("[Critic] Error creating goal: %s", e)
+                logger.warning("[Critic] Error posting advisory: %s", e)
                 result["errors"].append(str(e)[:100])
 
-        # Update report
+        # Update report (goals_created retained as empty for compat)
         report.goals_created = result["goals_created"]
 
         # LLM summary (decoration only, failure does not break apply)
@@ -98,140 +111,81 @@ class CritiqueApplier:
             logger.debug("[Critic] LLM summary failed (non-critical): %s", e)
 
         logger.info(
-            "[Critic] Applied: %d goals created from %d findings",
-            goals_created, len(report.findings),
+            "[Critic] Applied: %d advisories posted from %d findings",
+            posted, len(report.findings),
         )
 
         return result
 
-    def _should_create_goal(self, finding: CritiqueFinding) -> bool:
+    def _should_post_advisory(self, finding: CritiqueFinding) -> bool:
         """
-        Determine if finding should create a PROPOSED goal.
+        Determine if a finding should be posted as a bulletin advisory.
 
-        Policy:
-        - CRITICAL: yes (always)
-        - WARNING: yes if no existing similar goal
-        - INFO: never
+        Policy (R1 2026-05-29):
+        - CRITICAL / WARNING: yes
+        - INFO: never (report-only)
+
+        Idempotency is handled by BulletinStore.create_and_post (dedups by
+        topic+type), so the old goal-store existence check is gone.
         """
-        if finding.severity == FindingSeverity.INFO.value:
-            return False
+        return finding.severity in (
+            FindingSeverity.CRITICAL.value,
+            FindingSeverity.WARNING.value,
+        )
 
-        if finding.severity == FindingSeverity.CRITICAL.value:
-            # Always, but still check idempotency
-            return not self._has_existing_goal(finding)
-
-        if finding.severity == FindingSeverity.WARNING.value:
-            return not self._has_existing_goal(finding)
-
-        return False
-
-    def _has_existing_goal(self, finding: CritiqueFinding) -> bool:
-        """Check if a similar goal already exists (idempotency)."""
-        if self._goal_store is None:
-            return False
-
-        try:
-            # Check active goals
-            active = []
-            if hasattr(self._goal_store, "get_active"):
-                active = self._goal_store.get_active()
-            proposed = []
-            if hasattr(self._goal_store, "get_proposed"):
-                proposed = self._goal_store.get_proposed()
-
-            all_goals = active + proposed
-            dedupe_key = finding.dedupe_key
-            topic_norm = finding.topic_normalized
-
-            for goal in all_goals:
-                meta = getattr(goal, "metadata", {}) or {}
-                # Check by dedupe_key
-                if meta.get("dedupe_key") == dedupe_key:
-                    return True
-                # Check by topic similarity (source=critic + similar topic)
-                if (
-                    meta.get("source") == "critic"
-                    and meta.get("topic_normalized") == topic_norm
-                    and meta.get("category") == finding.category
-                ):
-                    return True
-
-        except Exception as e:
-            logger.debug("[Critic] Goal check failed: %s", e)
-
-        return False
-
-    def _create_proposed_goal(
+    def _post_advisory(
         self, finding: CritiqueFinding, report_id: str,
     ) -> Optional[str]:
-        """Create a PROPOSED LEARNING goal from finding."""
-        if self._goal_store is None:
+        """Post a critique finding to the bulletin as a NEED_REVIEW advisory.
+
+        R1 (2026-05-29): replaces the old PROPOSED-goal flow. NEED_REVIEW is
+        the bulletin entry type for exactly this case ("quality problem from
+        critic/validation"). Operator and planner can read it without the goal
+        queue filling with un-actionable LEARNING goals.
+        """
+        if self._bulletin_store is None:
+            logger.debug(
+                "[Critic] No bulletin_store, dropping finding %s",
+                finding.finding_id,
+            )
             return None
 
         try:
-            from agent_core.goals.goal_model import (
-                Goal, GoalType, GoalStatus, AuditEntry,
-            )
+            from agent_core.bulletin.bulletin_model import EntryType
+        except Exception as e:
+            logger.warning("[Critic] Bulletin import failed: %s", e)
+            return None
 
-            # Get goal title from map or finding
-            title = finding.recommended_goal_title
-            if not title:
-                template = GOAL_TITLE_MAP.get(finding.category, "Sprawdz: {}")
-                title = template.format(finding.topic)
+        title = finding.recommended_goal_title
+        if not title:
+            template = GOAL_TITLE_MAP.get(finding.category, "Sprawdz: {}")
+            title = template.format(finding.topic)
 
-            goal_id_str = f"goal-crit-{uuid.uuid4().hex[:8]}"
-            now = time.time()
-
-            goal = Goal(
-                id=goal_id_str,
-                type=GoalType.LEARNING,
-                description=title,
+        try:
+            entry = self._bulletin_store.create_and_post(
+                entry_type=EntryType.NEED_REVIEW,
+                topic=finding.topic,
+                reason_code=f"critic_{finding.category}",
+                summary=title,
+                requested_by="critic",
                 priority=0.6 if finding.severity == "critical" else 0.4,
-                status=GoalStatus.PROPOSED,
-                progress=0.0,
-                parent_goal_id=None,
-                created_by="critic",
-                created_at=now,
-                updated_at=now,
-                audit_trail=[
-                    AuditEntry(
-                        timestamp=now,
-                        old_status=None,
-                        new_status="proposed",
-                        reason=f"Critic: {finding.category} - {finding.topic}",
-                        actor="critic",
-                    )
-                ],
                 metadata={
-                    "source": "critic",
                     "report_id": report_id,
                     "finding_id": finding.finding_id,
                     "category": finding.category,
                     "severity": finding.severity,
-                    "topic": finding.topic,
                     "topic_normalized": finding.topic_normalized,
                     "dedupe_key": finding.dedupe_key,
                     "suggested_action": finding.suggested_action,
                 },
             )
-
-            goal_id = None
-            if hasattr(self._goal_store, "propose"):
-                goal_id = self._goal_store.propose(goal)
-            elif hasattr(self._goal_store, "create"):
-                self._goal_store.create(goal)
-                goal_id = goal.id
-
-            if goal_id:
-                logger.info(
-                    "[Critic] Created PROPOSED goal: %s (%s)",
-                    goal_id, finding.topic,
-                )
-
-            return goal_id
-
+            logger.info(
+                "[Critic] Posted NEED_REVIEW: %s (%s, sev=%s)",
+                entry.entry_id, finding.topic[:50], finding.severity,
+            )
+            return entry.entry_id
         except Exception as e:
-            logger.warning("[Critic] Goal creation failed: %s", e)
+            logger.warning("[Critic] Bulletin post failed: %s", e)
             return None
 
     def _generate_summary(self, findings: List[CritiqueFinding]) -> Optional[str]:

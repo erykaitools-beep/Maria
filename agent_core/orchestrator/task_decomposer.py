@@ -497,7 +497,7 @@ class TaskDecomposer:
         # Check mode
         core = self._ctx.homeostasis_core
         if core:
-            mode = getattr(core, "_current_mode", None)
+            mode = getattr(getattr(core, "state", None), "mode", None)
             mode_name = mode.name if hasattr(mode, "name") else str(mode) if mode else ""
             if mode_name in ("SLEEP", "SURVIVAL"):
                 return ("limited", f"Tryb {mode_name} - ograniczone dzialanie")

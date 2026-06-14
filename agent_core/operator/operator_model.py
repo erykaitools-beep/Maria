@@ -138,7 +138,9 @@ class OperatorModel:
     def __init__(self, path: Optional[Path] = None):
         self._path = Path(path or DEFAULT_MODEL_PATH)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        # Re-entrant: readers take the lock and then call _reload_if_changed,
+        # which also takes the lock (E1 race fix). A plain Lock would deadlock.
+        self._lock = threading.RLock()
         self._last_mtime: float = 0.0
 
         # Initialize sub-objects first (needed by _save)
@@ -184,6 +186,7 @@ class OperatorModel:
                 "quiet_hours": [23, 6],
             },
             "interests": [],
+            "schedule_notes": [],
             "day_rhythm": DayRhythm().to_dict(),
             "current_context": CurrentContext().to_dict(),
             "privacy_boundaries": [],
@@ -223,6 +226,15 @@ class OperatorModel:
                 data[section] = defaults[section]
         if "interests" not in data:
             data["interests"] = []
+        if "schedule_notes" not in data:
+            data["schedule_notes"] = []
+        # E2: migrate the legacy single 'schedule_note' durable fact (which every
+        # add_schedule_note call overwrote, discarding all prior notes) into the
+        # accumulating list. Idempotent: pop removes it so reloads do not re-add.
+        legacy_note = data.get("durable_facts", {}).pop("schedule_note", None)
+        if isinstance(legacy_note, dict) and legacy_note.get("value"):
+            if legacy_note["value"] not in data["schedule_notes"]:
+                data["schedule_notes"].append(legacy_note["value"])
         if "privacy_boundaries" not in data:
             data["privacy_boundaries"] = []
         if "version" not in data:
@@ -236,9 +248,20 @@ class OperatorModel:
             return 0.0
 
     def _reload_if_changed(self) -> None:
-        """Reload from disk if modified by another process."""
-        mtime = self._get_mtime()
-        if mtime > self._last_mtime:
+        """Reload from disk if modified by another process.
+
+        Runs the rebind under self._lock (RLock) so _data/_privacy/_rhythm/
+        _context are swapped atomically versus concurrent writers and other
+        readers -- a reader iterating _data must never observe a half-swapped
+        model, nor have the dict rebound mid-iteration (E1). Cheap mtime check
+        first (double-checked locking) keeps the common no-change path lock-free.
+        """
+        if self._get_mtime() <= self._last_mtime:
+            return
+        with self._lock:
+            mtime = self._get_mtime()
+            if mtime <= self._last_mtime:
+                return
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -426,6 +449,7 @@ class OperatorModel:
             logger.debug("[OperatorModel] Blocked by privacy: %s", key)
             return
         with self._lock:
+            self._reload_if_changed()  # E3: read-modify-write (whole-doc save)
             self._data["durable_facts"][key] = OperatorFact(
                 value=value.strip()[:200],
                 confidence=min(max(confidence, 0.0), 1.0),
@@ -449,17 +473,19 @@ class OperatorModel:
 
     def get_all_facts(self) -> Dict[str, OperatorFact]:
         """Get all durable facts."""
-        self._reload_if_changed()
-        result = {}
-        for key, raw in self._data.get("durable_facts", {}).items():
-            if isinstance(raw, dict):
-                result[key] = OperatorFact.from_dict(raw)
-        return result
+        with self._lock:  # E1: iterate durable_facts under lock (no torn read)
+            self._reload_if_changed()
+            result = {}
+            for key, raw in self._data.get("durable_facts", {}).items():
+                if isinstance(raw, dict):
+                    result[key] = OperatorFact.from_dict(raw)
+            return result
 
     def remove_fact(self, key: str) -> bool:
         """Remove a fact. Returns True if found."""
         key = key.strip().lower()
         with self._lock:
+            self._reload_if_changed()  # E3
             if key in self._data.get("durable_facts", {}):
                 del self._data["durable_facts"][key]
                 self._save()
@@ -474,18 +500,21 @@ class OperatorModel:
 
     def set_preference(self, key: str, value: Any) -> None:
         with self._lock:
+            self._reload_if_changed()  # E3
             self._data.setdefault("preferences", {})[key] = value
             self._save()
 
     def get_preferences(self) -> Dict[str, Any]:
-        self._reload_if_changed()
-        return dict(self._data.get("preferences", {}))
+        with self._lock:  # E1: copy under lock
+            self._reload_if_changed()
+            return dict(self._data.get("preferences", {}))
 
     # ── Interests ────────────────────────────────────────────
 
     def get_interests(self) -> List[str]:
-        self._reload_if_changed()
-        return list(self._data.get("interests", []))
+        with self._lock:  # E1: copy under lock
+            self._reload_if_changed()
+            return list(self._data.get("interests", []))
 
     def add_interest(self, interest: str) -> bool:
         """Add interest if not duplicate. Returns True if new."""
@@ -495,6 +524,7 @@ class OperatorModel:
         if not self._privacy.is_allowed(interest):
             return False
         with self._lock:
+            self._reload_if_changed()  # E3
             current = self._data.get("interests", [])
             if interest in [i.lower() for i in current]:
                 return False
@@ -506,6 +536,7 @@ class OperatorModel:
     def remove_interest(self, interest: str) -> bool:
         interest_lower = interest.strip().lower()
         with self._lock:
+            self._reload_if_changed()  # E3
             current = self._data.get("interests", [])
             new = [i for i in current if i.lower() != interest_lower]
             if len(new) == len(current):
@@ -523,6 +554,7 @@ class OperatorModel:
 
     def set_rhythm(self, rhythm: DayRhythm) -> None:
         with self._lock:
+            self._reload_if_changed()  # E3
             self._rhythm = rhythm
             self._save()
 
@@ -545,6 +577,7 @@ class OperatorModel:
     def set_context(self, text: str, expires_hours: int = 24) -> None:
         """Set volatile operator context with auto-expiry."""
         with self._lock:
+            self._reload_if_changed()  # E3
             now = time.time()
             self._context = CurrentContext(
                 text=text.strip()[:300],
@@ -560,6 +593,7 @@ class OperatorModel:
 
     def clear_context(self) -> None:
         with self._lock:
+            self._reload_if_changed()  # E3
             self._context = CurrentContext()
             self._save()
 
@@ -590,6 +624,7 @@ class OperatorModel:
 
     def record_interaction(self, channel: str = "") -> None:
         with self._lock:
+            self._reload_if_changed()  # E3
             self._data["stats"]["last_seen"] = datetime.now().isoformat()
             self._data["stats"]["total_messages"] = (
                 self._data["stats"].get("total_messages", 0) + 1
@@ -598,14 +633,16 @@ class OperatorModel:
 
     def record_session(self) -> None:
         with self._lock:
+            self._reload_if_changed()  # E3
             self._data["stats"]["sessions_count"] = (
                 self._data["stats"].get("sessions_count", 0) + 1
             )
             self._save()
 
     def get_stats(self) -> Dict[str, Any]:
-        self._reload_if_changed()
-        return dict(self._data.get("stats", {}))
+        with self._lock:  # E1: copy under lock
+            self._reload_if_changed()
+            return dict(self._data.get("stats", {}))
 
     # ── Fact Extraction from Messages ────────────────────────
 
@@ -820,8 +857,8 @@ class OperatorModel:
 
     def get_full_data(self) -> Dict[str, Any]:
         """Return complete model data for API endpoints."""
-        self._reload_if_changed()
-        with self._lock:
+        with self._lock:  # E1: reload + serialize atomically (was reload outside lock)
+            self._reload_if_changed()
             return json.loads(json.dumps(self._data))
 
     # ── Convenience: name shortcut ───────────────────────────
@@ -866,18 +903,46 @@ class OperatorModel:
         return result
 
     def add_schedule_note(self, note: str) -> None:
-        """Legacy: store schedule note as a fact."""
+        """Add a schedule/routine note. Notes accumulate as a capped list
+        (max 30, dedup by exact match).
+
+        E2: previously every note overwrote the single durable fact
+        'schedule_note', silently discarding all prior notes -- a regression
+        versus legacy UserProfile introduced when the Web UI was rewired onto
+        OperatorModel (b890e7b). Now mirrors the legacy list semantics.
+        """
+        note = (note or "").strip()
         if not note or len(note) > 200:
             return
-        self.set_fact("schedule_note", note, 0.8, "explicit:schedule")
+        if not self._privacy.is_allowed(note):
+            return
+        with self._lock:
+            self._reload_if_changed()  # E3
+            notes = self._data.setdefault("schedule_notes", [])
+            if note in notes:
+                return
+            notes.append(note)
+            self._data["schedule_notes"] = notes[-30:]
+            self._save()
 
     def get_schedule_notes(self) -> List[str]:
-        """Legacy: return schedule-related facts."""
-        result = []
-        for key, fact in self.get_all_facts().items():
-            if "schedule" in key or "work" in key:
-                result.append(fact.value if isinstance(fact, OperatorFact) else str(fact))
-        return result
+        """Return the operator's schedule notes (oldest first, newest last)."""
+        with self._lock:
+            self._reload_if_changed()
+            return list(self._data.get("schedule_notes", []))
+
+    def remove_schedule_note(self, note: str) -> bool:
+        """Remove a schedule note. Returns True if it was present."""
+        note = (note or "").strip()
+        with self._lock:
+            self._reload_if_changed()  # E3
+            notes = self._data.get("schedule_notes", [])
+            new = [n for n in notes if n != note]
+            if len(new) == len(notes):
+                return False
+            self._data["schedule_notes"] = new
+            self._save()
+            return True
 
     def get_summary(self) -> str:
         """Alias for get_operator_brief (backward compat)."""
@@ -886,6 +951,33 @@ class OperatorModel:
     def get_full_profile(self) -> Dict[str, Any]:
         """Alias for get_full_data (backward compat)."""
         return self.get_full_data()
+
+    def get_profile_card(self) -> Dict[str, Any]:
+        """Return the operator profile in the flat shape the Web UI profile
+        page (profile.js) expects: identity / preferences / interests /
+        schedule / facts / stats.
+
+        OperatorModel's own structure is richer (durable_facts / day_rhythm /
+        current_context / ...); this maps it to the legacy UserProfile "card"
+        so the front-end stays byte-for-byte unchanged while the Web UI reads
+        from the one shared OperatorModel instead of a separate
+        user_profile.json (Plank 3, split-brain #5). The front-end degrades
+        gracefully on any missing leaf (|| '?' / || 0), so partial preferences
+        or stats never break the page.
+        """
+        self._reload_if_changed()
+        return {
+            "identity": {
+                "name": self.get_name(),
+                "language": self.get_language(),
+                "timezone": self.get_fact_value("timezone", "Europe/Warsaw"),
+            },
+            "preferences": self.get_preferences(),
+            "interests": self.get_interests(),
+            "schedule": {"notes": self.get_schedule_notes()},
+            "facts": self.get_facts(),
+            "stats": self.get_stats(),
+        }
 
     def get_language(self) -> str:
         return self.get_fact_value("language", "pl")
@@ -908,3 +1000,40 @@ class OperatorModel:
             if self.add_fact(raw):
                 added += 1
         return added
+
+
+# ── Process-wide singleton ───────────────────────────────────────────────
+# One in-memory OperatorModel shared by the daemon and the Web UI (same
+# process under maria.py UnifiedLauncher). Previously the daemon held its own
+# OperatorModel while the UI lazy-init'd a separate UserProfile, so facts
+# learned in one channel never reached the other (split-brain, audit v2 #3).
+# Sharing a single instance makes OperatorModel the one source of truth for
+# operator identity across Telegram, Web UI chat, and autonomy.
+#
+# In split modes (`maria.py --daemon` / `--ui` = two processes) each process
+# gets its own singleton; cross-process consistency falls back to the file +
+# _reload_if_changed(), the pre-existing behaviour.
+_SINGLETON: Optional["OperatorModel"] = None
+_SINGLETON_LOCK = threading.Lock()
+
+
+def get_operator_model(path: Optional[Path] = None) -> "OperatorModel":
+    """Return the process-wide shared OperatorModel, creating it on first call.
+
+    Both the homeostasis daemon and the Web UI must go through this accessor so
+    they mutate the same in-memory instance (single source of truth). The
+    optional ``path`` only applies when the singleton is first created.
+    """
+    global _SINGLETON
+    if _SINGLETON is None:
+        with _SINGLETON_LOCK:
+            if _SINGLETON is None:
+                _SINGLETON = OperatorModel(path=path)
+    return _SINGLETON
+
+
+def reset_operator_model_singleton() -> None:
+    """Reset the shared singleton (tests only)."""
+    global _SINGLETON
+    with _SINGLETON_LOCK:
+        _SINGLETON = None

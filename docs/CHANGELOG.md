@@ -3,6 +3,150 @@
 
 ---
 
+## [2026-04-10] - Sesja 33: Master Prompt + Reminders & Todos + Task Pipeline Web UI + UserProfile
+
+### Added - Master Prompt (agent_core/llm/master_prompt.py)
+- **Single source of truth dla wszystkich LLM paths** (OllamaBrain, NIM, WebUI, Claude, Codex)
+- Based on `docs/MARIA_PROMPT.md`
+- Replaces scattered prompt fragments w 5 miejscach
+
+### Added - Reminders & Todos (agent_core/reminders/, 83 testow)
+- Time-triggered notifications
+- PL + EN time parser ("jutro o 9", "tomorrow at 9am")
+- **Phase 12 w tick loop** (scheduler check)
+- Recurring: DAILY/WEEKLY/MONTHLY
+- REPL + Telegram + tick scheduler integration
+- Persistence: `meta_data/reminders.jsonl`
+
+### Added - UserProfile (agent_core/consciousness/, 60 testow)
+- `meta_data/user_profile.json` (single file, not JSONL)
+- Auto-learn z chat + ConversationMemory
+- Telegram /profile, Web UI /api/user/profile
+
+### Added - Task Pipeline in Web UI (20 testow)
+- /tasks page: submit, list, detail, PDF download
+- 4 API endpoints (submit, list, get, pdf)
+- Auto-refresh, status badges
+
+### Statistics
+- 163 new tests, ~3935 total
+
+---
+
+## [2026-04-05] - Sesja 28: Vision Phase 1-4 COMPLETE + V3 Phase A-E COMPLETE (MASSIVE)
+
+### Added - Vision Phase 1-4 (297 testow)
+**Faza 1: Sensor Abstraction (123 testy)**
+- models.py: Frame, VisionMode, DegradationType, SensorIssue, DiagnosticReport
+- sensors/base.py, health.py (7 degradation levels), mock_sensor.py, usb_webcam.py
+
+**Faza 2: Preprocessing (87 testow)**
+- quality.py (6 metryk), degradation.py (12 typow), normalizer.py (resize, CLAHE), preprocessor.py
+
+**Faza 3: Vision Modules (56 testow)**
+- modules/base.py, motion/detector.py, scene/analyzer.py (LLaVA + stats fallback)
+
+**Faza 4: Vision Cortex (31 testow)**
+- cortex.py (adaptive modules, pipeline), percept.py (consciousness format)
+
+### Added - V3 Orchestrator Phase A-E COMPLETE (15 modulow, 251 testow)
+**Phase A Foundation (Modules 1-3, 65 testow):**
+- UnifiedLauncher (maria.py) - single entry point, daemon+UI+signals
+- OnboardingFlow - 5-step first-run guidance
+- UserFacingSelfModel - unified self-model aggregation
+
+**Phase B Task Pipeline (Modules 4-6, 70 testow):**
+- TaskOrchestrator - submit/approve/cancel/progress, Goal lifecycle
+- TaskDecomposer - keyword classification (6 categories)
+- ExecutionPlanBuilder - LLM cost estimates, K7 blocked check
+
+**Phase C Practical Intelligence (Modules 7-9, 49 testow):**
+- CostEstimator - NIM tokens, local LLM calls, external calls
+- TimeEstimator - seconds estimate, cold start penalties
+- FreeVsPaidPlanner - LOCAL_ONLY/MIXED/PREFER_PAID strategies
+
+**Phase D Execution Bridge (Modules 10-13, 41 testow):**
+- ExecutionRouter - can_execute/execute/list_available
+- ToolCapabilityRegistry - list_all/list_by_category/search
+- TaskProgressTracker - goal progress, timeline
+- LimitationReporter - mode/autonomy/resource/hardware limitations
+
+**Phase E Product Hardening (Modules 14-15, 26 testow):**
+- ProductShell - unified facade (do/approve/cancel/progress/who/what/limits)
+- V3Module REPL - /v3 command (12 subcommands)
+
+### Statistics
+- **548 new tests** w jednej sesji (Vision 297 + V3 251)
+- Vision COMPLETE, V3 COMPLETE (15/15 modulow)
+
+---
+
+## [2026-04-01] - Sesja 25: Learning Upgrade Phase 4-5
+
+### Added - Phase 4: ExpertBridge (27 testow)
+- Audit-aware expert queries
+- Targeted prompts: "Maria wie X, potrzebuje Y"
+- Cascade LLM (local -> NIM -> Claude CLI)
+
+### Added - Phase 5: Full wiring (15 testow)
+- `_exec_ask_expert` uses ExpertBridge (with legacy fallback)
+- `make_ask_expert_handler` accepts expert_bridge + bulletin_store
+- Homeostasis init: ExpertBridge wired z auditor + gap_planner + ask_encyclopedia LLM fn
+- Bulletin NEED_MATERIAL -> resolved, save to input/
+
+### Statistics
+- 42 new tests (2761 -> 2803)
+- Plan od ChatGPT: `docs/plans/plan_upgrade_nauki_maria.pdf` - wszystkie 5 faz COMPLETE
+
+---
+
+## [2026-03-31] - Sesja 24: Learning Upgrade Phase 1-3
+
+### Added - Phase 1: Cognitive Bulletin Board (32 testy)
+- `agent_core/bulletin/bulletin_store.py` - JSONL persistence
+- 5 EntryTypes: NEED_MATERIAL, QUESTION_UNANSWERED, UNUSED_CAPABILITY, etc.
+- Dedup, bounded, thread-safe
+- Telegram /board, Web UI /api/bulletin
+
+### Added - Phase 2: KnowledgeAuditor (11 testow)
+- Checks MemoryQuery + beliefs + critic + exams
+- AuditReport z 7 gap types: weak_topic, stale_knowledge, coverage_gap, etc.
+
+### Added - Phase 3: GapPlanner (14 testow)
+- Reads audit, decides: ASK_EXPERT (with context_prompt), REVIEW, RUN_EXAM, DECOMPOSE, WAIT_HUMAN
+- Priority ranking by gap severity + topic importance
+
+### Statistics
+- 57 new tests (2704 -> 2761)
+
+---
+
+## [2026-03-30] - Sesja 23: Faza G Agent Krytyk (Knowledge Quality Gate)
+
+### Added - agent_core/critic/ (4 pliki, 69 testow)
+- **critique_model.py** - FindingCategory(7), Severity(3), CritiqueFinding, CritiqueReport, GOAL_TITLE_MAP
+- **knowledge_critic.py** - silnik analizy READ-ONLY, zero LLM, zero side effects:
+  1. CONTRADICTION - negation patterns (PL+EN), numeric conflicts
+  2. OVERCONFIDENT - confidence > 0.7 + no/failed exam
+  3. UNDERCONFIDENT - confidence < 0.4 + passed exam
+  4. SHALLOW_KNOWLEDGE - brak facts, single source
+  5. UNRESOLVED_DISPUTE - >=2 high-severity z DisputeLog
+  6. COVERAGE_GAP - partially/completed bez exam (3d grace)
+  7. STALE_KNOWLEDGE - decayed confidence < 0.15
+- **critique_applier.py** - PROPOSED goals + LLM summary
+- **facade.py** - orchestration
+
+### Added - Integration
+- ActionType.CRITIQUE, CapabilityRouter (14th capability)
+- Planner trigger: 8h cadence + post_validate + post_maintenance
+- Telegram: notify_critique (tylko CRITICAL) + cooldown
+- ADR-028: coherence/calibration critic, **nie truth engine**
+
+### Statistics
+- 69 new tests (2566 -> 2635)
+
+---
+
 ## [2026-03-29] - Sesja 21: Faza F Multi-Source Learning + Roadmap v1.0
 
 ### Added - Faza F: Multi-Source Learning COMPLETE
@@ -625,19 +769,21 @@ DEBUG_MODE = False                 # Production mode
 
 > Uwaga: Ponizsze to rekonstrukcja na podstawie analizy kodu. Daty przybliozone.
 
-### ~2024-11-30
-- Utworzenie projektu DEAMONMARIA V2
+### ~2025-11-30
+- Utworzenie projektu DEAMONMARIA V2 (prekursor M.A.R.I.A.)
 - Podstawowa struktura: perception, learning, exam, memory
 - Konfiguracja Ollama
 
-### ~2024-12-07
+### ~2025-12-07
 - Dodanie semantic_graph.py
 - Rozbudowa meta_controller.py
 - Dodanie resource_watchdog.py
 
-### ~2024-12-08
+### ~2025-12-08
 - main.py - rozszerzony REPL z wieloma komendami
 - brain_memory_integration.py
+
+> Start wlasciwego projektu M.A.R.I.A.: 2025-11-14. Powyzsze daty rekonstrukcja z kodu.
 
 ---
 

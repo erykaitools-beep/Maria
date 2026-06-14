@@ -12,6 +12,10 @@ from agent_core.introspection.evidence_collector import (
     EvidenceCollector,
 )
 from agent_core.introspection.query_router import ResponseMode
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.llm.llm_tape import LLMTape
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.tests.spec_helpers import specced
 
 
 @pytest.fixture
@@ -75,7 +79,7 @@ class TestCollectForMode:
 
 class TestCollectHomeostasis:
     def test_from_runtime_object(self, collector):
-        mock_core = MagicMock()
+        mock_core = specced(HomeostasisCore)
         state = MagicMock()
         state.mode.value = "active"
         state.health_score = 0.95
@@ -140,14 +144,22 @@ class TestCollectPlanner:
 
 class TestCollectLearning:
     def test_from_knowledge_analyzer(self, collector):
-        mock_ka = MagicMock()
-        mock_ka.get_stats.return_value = {"total_files": 67, "completed": 12}
+        # Bug #2 guard: real API is get_knowledge_snapshot() returning a {total_files,
+        # files_by_status: {status: [records]}} shape -- "completed" is the bucket len.
+        # specced() makes the old get_stats() phantom regress red.
+        mock_ka = specced(KnowledgeAnalyzer)
+        mock_ka.get_knowledge_snapshot.return_value = {
+            "total_files": 67,
+            "files_by_status": {"completed": [{"id": f"f{i}.txt"} for i in range(12)]},
+        }
         collector.set_knowledge_analyzer(mock_ka)
 
         evidence = collector.collect_learning()
         files = [e for e in evidence if e.key == "learning.total_files"]
         assert len(files) == 1
         assert files[0].value == "67"
+        completed = [e for e in evidence if e.key == "learning.completed"]
+        assert completed[0].value == "12"
 
     def test_input_dir_fallback(self, collector, meta_dir, tmp_path):
         input_dir = tmp_path / "input"
@@ -176,7 +188,7 @@ class TestCollectLearning:
 
 class TestCollectTape:
     def test_tape_stats_from_object(self, collector):
-        mock_tape = MagicMock()
+        mock_tape = specced(LLMTape)
         mock_tape.get_stats.return_value = {
             "total_calls": 42, "error_count": 2, "error_rate": 0.048,
         }
@@ -188,7 +200,7 @@ class TestCollectTape:
         assert calls[0].value == "42"
 
     def test_tape_errors(self, collector):
-        mock_tape = MagicMock()
+        mock_tape = specced(LLMTape)
         mock_tape.get_recent_errors.return_value = [
             {"model": "llama3.1:8b", "role": "chat", "raw_response": "", "ts": time.time()},
         ]

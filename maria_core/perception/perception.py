@@ -13,6 +13,7 @@ from datetime import datetime
 from maria_core.sys.config import (
     STATUS_NEW,
     STATUS_LEARNING,
+    STATUS_DUPLICATE,
     get_timestamp,
     PRIORITY_BONUS_KEYWORDS,
     INPUT_DIR,
@@ -42,6 +43,32 @@ def calculate_file_hash(filepath: Path) -> str:
     except Exception as e:
         logger.error(f"Błąd obliczania hash dla {filepath}: {e}")
         return ""
+
+
+# P5 (#4): the web_source fetcher (content_writer.py) prepends a metadata header
+# terminated by a "# ---" separator; its URL and "Pobrano" date differ on every
+# fetch, so a whole-file hash (calculate_file_hash) never matches the SAME
+# article re-fetched under a new slug/title. Hash only the body after the
+# separator so identical content dedups across different filenames. Files with
+# no such header (e.g. expert_*, manual notes) hash whole. Kept independent of
+# content_writer.HEADER_SEPARATOR on purpose: maria_core must not import from
+# agent_core, and the no-marker fallback is safe.
+_BODY_HEADER_MARKER = "# ---"
+
+
+def calculate_body_hash(filepath: Path) -> str:
+    """SHA256 of the content body, excluding any web_source metadata header."""
+    try:
+        text = filepath.read_text(encoding='utf-8', errors='replace')
+    except Exception as e:
+        logger.error(f"Błąd obliczania body-hash dla {filepath}: {e}")
+        return ""
+    idx = text.find(_BODY_HEADER_MARKER)
+    if idx != -1:
+        newline = text.find("\n", idx)
+        if newline != -1:
+            text = text[newline + 1:]
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
 
 
 def analyze_file_structure(filepath: Path) -> Dict[str, Any]:
@@ -197,7 +224,16 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
     index = load_index(index_path)
     index_dict = {rec['id']: rec for rec in index}
 
-    stats = {"new": 0, "changed": 0, "unchanged": 0}
+    stats = {"new": 0, "changed": 0, "unchanged": 0, "duplicate": 0}
+
+    # P5 (#4): body-content hash -> canonical id, for cross-file dedup. Only
+    # non-duplicate records are canonical (no dup-of-dup chains). Grown as files
+    # are (re)scanned below, so it back-fills over a few scans on an old index.
+    body_hash_to_id = {
+        rec["body_hash"]: rec["id"]
+        for rec in index_dict.values()
+        if rec.get("body_hash") and rec.get("status") != STATUS_DUPLICATE
+    }
 
     # Znajdź wszystkie pliki .txt
     txt_files = list(base_dir.rglob("*.txt"))
@@ -211,8 +247,9 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
             filename = filepath.name
             file_id = str(relative_path).replace('\\', '/')
 
-            # Oblicz hash
+            # Oblicz hash (cały plik = edit-detekcja; body = dedup P5)
             file_hash = calculate_file_hash(filepath)
+            body_hash = calculate_body_hash(filepath)
 
             if file_id in index_dict:
                 # Plik już istnieje - sprawdź czy się zmienił
@@ -228,28 +265,66 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
                     stats['changed'] += 1
                 else:
                     stats['unchanged'] += 1
+                # P5: ensure the record carries a body_hash (back-fill for
+                # records indexed before P5) and register it as canonical.
+                if body_hash:
+                    existing['body_hash'] = body_hash
+                    if existing.get('status') != STATUS_DUPLICATE:
+                        body_hash_to_id.setdefault(body_hash, file_id)
             else:
-                # Nowy plik
-                logger.info(f"[NEW] Nowy plik: {file_id}")
-                priority = calculate_initial_priority(filepath, folder, filename)
+                # P5: identical body already indexed under a DIFFERENT id ->
+                # mark this copy inert so it is never re-learned. Its progress
+                # is credited via the canonical (completed_file_ids resolves it).
+                canonical_id = (
+                    body_hash_to_id.get(body_hash) if body_hash else None
+                )
+                if canonical_id and canonical_id != file_id:
+                    logger.info(
+                        f"[DUPLICATE] {file_id} has the same body as "
+                        f"{canonical_id} - indexed inert, not re-learned"
+                    )
+                    index_dict[file_id] = {
+                        "id": file_id,
+                        "folder": folder,
+                        "file": filename,
+                        "status": STATUS_DUPLICATE,
+                        "duplicate_of": canonical_id,
+                        "priority": 0.0,
+                        "hash": file_hash,
+                        "body_hash": body_hash,
+                        "created_at": get_timestamp(),
+                        "updated_at": get_timestamp(),
+                        "exam_attempts": 0,
+                        "last_scores": [],
+                        "chunks_learned": 0,
+                        "total_chunks": 0,
+                    }
+                    stats['duplicate'] += 1
+                else:
+                    # Nowy plik
+                    logger.info(f"[NEW] Nowy plik: {file_id}")
+                    priority = calculate_initial_priority(filepath, folder, filename)
 
-                new_record = {
-                    "id": file_id,
-                    "folder": folder,
-                    "file": filename,
-                    "status": STATUS_NEW,
-                    "priority": priority,
-                    "hash": file_hash,
-                    "created_at": get_timestamp(),
-                    "updated_at": get_timestamp(),
-                    "exam_attempts": 0,
-                    "last_scores": [],
-                    "chunks_learned": 0,
-                    "total_chunks": 0,
-                }
+                    new_record = {
+                        "id": file_id,
+                        "folder": folder,
+                        "file": filename,
+                        "status": STATUS_NEW,
+                        "priority": priority,
+                        "hash": file_hash,
+                        "body_hash": body_hash,
+                        "created_at": get_timestamp(),
+                        "updated_at": get_timestamp(),
+                        "exam_attempts": 0,
+                        "last_scores": [],
+                        "chunks_learned": 0,
+                        "total_chunks": 0,
+                    }
 
-                index_dict[file_id] = new_record
-                stats['new'] += 1
+                    index_dict[file_id] = new_record
+                    if body_hash:
+                        body_hash_to_id[body_hash] = file_id
+                    stats['new'] += 1
 
         except Exception as e:
             logger.error(f"Błąd przetwarzania {filepath}: {e}")
@@ -259,7 +334,7 @@ def scan_input_directory(base_dir: Path, index_path: Path) -> Dict[str, int]:
     updated_index = list(index_dict.values())
     save_index(updated_index, index_path)
 
-    logger.info(f"[STATS] Statystyki: nowe={stats['new']}, zmienione={stats['changed']}, niezmienione={stats['unchanged']}")
+    logger.info(f"[STATS] Statystyki: nowe={stats['new']}, zmienione={stats['changed']}, niezmienione={stats['unchanged']}, duplikaty={stats['duplicate']}")
 
     return stats
 

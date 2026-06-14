@@ -15,6 +15,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from agent_core.planner.decision_filters import is_real_action
+
 logger = logging.getLogger(__name__)
 
 # Default paths relative to project root
@@ -150,7 +152,13 @@ class StateCollector:
         return trend
 
     def _collect_knowledge_gaps(self) -> List[Dict[str, Any]]:
-        """Find low-confidence topics. Uses MemoryQuery (Phase 2) or falls back to raw JSONL."""
+        """Find low-confidence topics. Uses MemoryQuery (Phase 2) or falls back to raw JSONL.
+
+        Legacy fallback mirrors MemoryQuery.get_knowledge_gaps aggregation:
+        fact beliefs (linked via tags) and completed knowledge_index files count
+        as evidence against a gap, preventing false positives from decayed
+        observation beliefs.
+        """
         # Phase 2: unified query (includes beliefs + exam_failed files)
         if self._memory_query:
             try:
@@ -158,31 +166,73 @@ class StateCollector:
             except Exception:
                 pass  # Fall through to legacy
 
-        # Legacy: read beliefs directly
+        # Legacy: read beliefs directly + aggregate evidence
         beliefs = self._read_jsonl_all(self._meta / "beliefs.jsonl")
-
         by_id = {}
         for b in beliefs:
             bid = b.get("belief_id", "")
             if bid:
                 by_id[bid] = b
+        # Drop superseded
+        active_beliefs = [b for b in by_id.values() if not b.get("superseded_by")]
 
-        topic_confidence: Dict[str, List[float]] = {}
-        for b in by_id.values():
-            entity = b.get("entity", "")
-            conf = b.get("confidence", 0.5)
-            if entity:
-                topic_confidence.setdefault(entity, []).append(conf)
+        facts = [b for b in active_beliefs if b.get("belief_type") == "fact"]
+        candidates = [b for b in active_beliefs if b.get("belief_type") != "fact"]
+
+        # Knowledge index for file-score evidence
+        ki_records = self._read_jsonl_all(self._memory / "knowledge_index.jsonl")
+        ki_by_id: Dict[str, Dict[str, Any]] = {}
+        for r in ki_records:
+            rid = r.get("id", "")
+            if rid:
+                ki_by_id[rid] = r
 
         gaps = []
-        for topic, confs in topic_confidence.items():
-            avg_conf = sum(confs) / len(confs)
-            if avg_conf < 0.6:
-                gaps.append({
-                    "topic": topic,
-                    "confidence": round(avg_conf, 2),
-                    "belief_count": len(confs),
-                })
+        for b in candidates:
+            entity = b.get("entity", "")
+            if not entity:
+                continue
+            obs_conf = b.get("confidence", 0.5)
+            entity_lower = entity.lower()
+
+            supporting_facts = [
+                f for f in facts
+                if any(t.lower() == entity_lower for t in f.get("tags", []))
+            ]
+            max_fact_conf = max(
+                (f.get("confidence", 0.0) for f in supporting_facts),
+                default=0.0,
+            )
+
+            topic_token = entity_lower.replace(" ", "_").replace("-", "_")
+            supporting_scores: List[float] = []
+            for krec in ki_by_id.values():
+                fname = (krec.get("file") or "").lower()
+                name_match = (topic_token in fname) or (entity_lower in fname)
+                if name_match and krec.get("status") == "completed":
+                    scores = krec.get("last_scores", [])
+                    if scores:
+                        supporting_scores.append(max(scores))
+            max_file_score = max(supporting_scores, default=0.0)
+
+            effective = max(obs_conf, max_fact_conf, max_file_score)
+            if effective >= 0.5:
+                continue
+
+            has_evidence = bool(supporting_facts or supporting_scores)
+            gaps.append({
+                "topic": entity,
+                "confidence": round(effective, 2),
+                "belief_count": 1 + len(supporting_facts),
+                "reason": "low_confidence_aggregate" if has_evidence else "low_confidence_belief",
+                "evidence": {
+                    "observation_conf": round(obs_conf, 2),
+                    "fact_count": len(supporting_facts),
+                    "max_fact_conf": round(max_fact_conf, 2),
+                    "file_count": len(supporting_scores),
+                    "max_file_score": round(max_file_score, 2),
+                } if has_evidence else {},
+            })
 
         gaps.sort(key=lambda g: g["confidence"])
         return gaps[:10]
@@ -216,6 +266,11 @@ class StateCollector:
 
         dist: Dict[str, Dict[str, int]] = {}
         for d in decisions:
+            # T-LEARN-003: skip planner idle markers (rest) and skipped attempts
+            # so the distribution reflects real, attempted actions only -- not
+            # the off-window "skip" markers that drove the false "0% success" storm.
+            if not is_real_action(d):
+                continue
             action = d.get("action_type", "unknown")
             if action not in dist:
                 dist[action] = {"count": 0, "success": 0, "failed": 0}

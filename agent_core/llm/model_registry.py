@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
+from maria_core.sys.config import DEFAULT_NIM_MODEL
+
 
 class ModelRole(Enum):
     """Logical role a model fulfills in M.A.R.I.A.'s architecture."""
@@ -20,7 +22,7 @@ class ModelRole(Enum):
     CODER = "coder"           # MODEL-03: Code generation, patches, refactoring
     TRIAGE = "triage"         # MODEL-04: Intent classification, cheap routing
     MEMORY = "memory"         # MODEL-05: Summarization, fact extraction
-    EXTERNAL = "external"     # MODEL-06: NIM API (z-ai/glm5)
+    EXTERNAL = "external"     # MODEL-06: NIM API (cloud, model via config.DEFAULT_NIM_MODEL)
     ENCYCLOPEDIA = "encyclopedia"  # MODEL-07: Codex CLI (ChatGPT), interactive knowledge
 
 
@@ -125,7 +127,7 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         block_if_heavy_active=False,
     ),
     ModelRole.EXTERNAL: ModelSpec(
-        model_id="z-ai/glm5",
+        model_id=DEFAULT_NIM_MODEL,
         role=ModelRole.EXTERNAL,
         ollama_tag="",             # not an Ollama model
         ram_estimate_gb=0.0,

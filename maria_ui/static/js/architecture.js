@@ -63,7 +63,13 @@
   }
 
   function resizeCanvas() {
-    const area = document.getElementById('graphArea');
+    // Container is #view-graph; the #graphArea id was dropped in the Web UI v2
+    // template rename. The stale id returned null, so area.clientWidth threw a
+    // TypeError inside init() BEFORE the /api/architecture fetch -- aborting it
+    // and leaving the whole page blank ("ciemno"). Guard so a future rename
+    // degrades to a mis-sized canvas, not a dead page.
+    const area = document.getElementById('view-graph') || canvas.parentElement;
+    if (!area) return;
     canvas.width = area.clientWidth;
     canvas.height = area.clientHeight;
   }

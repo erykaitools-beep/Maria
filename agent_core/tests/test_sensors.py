@@ -14,6 +14,9 @@ from agent_core.homeostasis.sensors.thermal_sensor import ThermalSensor
 from agent_core.homeostasis.sensors.power_sensor import PowerSensor
 from agent_core.homeostasis.sensors.time_sensor import TimeSensor
 from agent_core.homeostasis.state_model import ResourceMetrics, CognitiveMetrics
+from agent_core.memory.manager import MemoryManager
+from agent_core.llm.manager import LLMManager
+from agent_core.tests.spec_helpers import specced
 
 
 class TestResourceSensor:
@@ -97,13 +100,13 @@ class TestCognitiveSensor:
         sensor = CognitiveSensor()
 
         # Mock managers
-        memory_manager = Mock()
+        memory_manager = specced(MemoryManager)
         memory_manager.get_semantic_coherence.return_value = 0.95
         memory_manager.get_total_entries.return_value = 100
         memory_manager.get_contradiction_count.return_value = 0
         memory_manager.get_episodic_freshness.return_value = 60
 
-        llm_manager = Mock()
+        llm_manager = specced(LLMManager)
         llm_manager.get_last_latency_ms.return_value = 150.0
         llm_manager.get_context_tokens.return_value = 1000
 
@@ -116,13 +119,13 @@ class TestCognitiveSensor:
         """Coherence should be between 0 and 1."""
         sensor = CognitiveSensor()
 
-        memory_manager = Mock()
+        memory_manager = specced(MemoryManager)
         memory_manager.get_semantic_coherence.return_value = 0.85
         memory_manager.get_total_entries.return_value = 0
         memory_manager.get_contradiction_count.return_value = 0
         memory_manager.get_episodic_freshness.return_value = 0
 
-        llm_manager = Mock()
+        llm_manager = specced(LLMManager)
         llm_manager.get_last_latency_ms.return_value = 100.0
         llm_manager.get_context_tokens.return_value = 0
 

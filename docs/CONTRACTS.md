@@ -982,7 +982,7 @@ Jak koordynowac zdarzenia miedzy modulami?
 
 ### Uzasadnienie
 
-1. **Tick loop JUZ jest agregatorem** - 9 faz sekwencyjnie, wszystkie dane przechodza przez jeden punkt w `HomeostasisCore._execute_tick()`
+1. **Tick loop JUZ jest agregatorem** - 19 faz sekwencyjnie, wszystkie dane przechodza przez jeden punkt w `HomeostasisCore._execute_tick()`
 2. **Deterministyczna kolejnosc** - fazy gwarantuja ze sensor reading jest przetworzony PRZED mode regulator. Event bus tego nie gwarantuje.
 3. **Prostota threading** - ADR-002 mowi "threading nie asyncio". Pub/sub z threading = locki, race conditions. Tick loop = 1 watek + 1 deque dla external events.
 4. **5-6 zrodel, nie setki** - event bus sie oplaca przy dziesieciach producentow. Maria ma 6.
@@ -1339,6 +1339,43 @@ PlannerCore._finalize_plan(plan):
 - 3 consecutive failures -> block
 - GUARDED blocked in non-ACTIVE mode
 - RESTRICTED/FORBIDDEN always blocked (until HITL v2)
+
+### Effector Authority Levels (Phase 5, ADR-026)
+
+DRUGA, niezalezna os autonomii. Klasa akcji (wyzej, FREE/GUARDED/RESTRICTED/FORBIDDEN)
+mowi CO to za akcja; authority level mowi JAK DALEKO Maria moze siegnac EFEKTOREM
+(OpenClaw). Dotyczy WYLACZNIE `action_type == "effector"` -- nie nauki, egzaminu,
+FS_WRITE/outbox ani zadnej innej akcji. Te dwie osie sa czesto mylone; rozjazd miedzy
+nimi pozwolil na cichy dryf (live=BOUNDED vs docs=OBSERVE) -- stad ta sekcja.
+
+| Poziom | Zachowanie efektora (`rule_effector_authority`) |
+|--------|--------------------------------------------------|
+| **OBSERVE** (domyslny) | widzi narzedzia, nigdy nie wola -> BLOCK |
+| **SUGGEST** | proponuje, operator dostaje powiadomienie, brak wykonania -> ESCALATE |
+| **CONFIRM** | proponuje, operator zatwierdza (Telegram), potem wykonanie -> ESCALATE + queue |
+| **BOUNDED** | autonomiczne dla narzedzi nie-niebezpiecznych, confirm dla niebezpiecznych |
+| **UNRESTRICTED** | pelna autonomia -- ZABLOKOWANE (gated do jawnego unlocku Phase 5) |
+
+Zmiana poziomu: TYLKO operator przez `/authority <level>`. `MAX_ALLOWED_LEVEL = BOUNDED`
+(clamp przy ladowaniu). Stan: `meta_data/authority_config.json` (runtime, gitignored).
+
+**Reconciliacja K7 (2026-06-07):** poziom spoczynkowy = **OBSERVE** (zgodny z domyslnym
+kodem i tym dokumentem). Niezmienniki, ktore czynia OBSERVE wystarczajacym:
+- Autonomiczny planer **NIGDY** nie emituje akcji EFFECTOR (zamek:
+  `TestAutonomousNeverEmitsEffector` w `test_planner.py`). Jedyne plany efektora tworzy
+  `_execute_approved_effector` -- sciezka operatora `/do` -> `/efapprove`, ktora niesie
+  `already_approved=True` i omija regule authority. Wniosek: zejscie na OBSERVE nie psuje
+  `/do`.
+- Awans poziomu mozliwy tylko operatorsko. `auto_promotion` PROPONUJE (PROPOSED goal,
+  czeka na `/approve`), nigdy nie stosuje sam (`created_by="auto_promotion"` poza
+  `AUTO_CONFIRM_SOURCES`); dodatkowo **gated OFF** flaga `AUTO_PROMOTION_ENABLED`
+  (domyslnie wylaczona) -- do swiadomego wlaczenia dopiero gdy beda autonomiczne rungi
+  efektora.
+- Podniesienie authority powyzej OBSERVE jest **swiadomym warunkiem wstepnym** przed
+  podlaczeniem jakiejkolwiek autonomicznej sciezki efektora -- nie cichym domyslnym.
+
+(Historycznie poziom ustawiono recznie na BOUNDED 2026-05-14 podczas testu 24h i nie
+ruszono przez 24 dni -- uspiony, bo brak autonomicznego triggera efektora.)
 
 ---
 

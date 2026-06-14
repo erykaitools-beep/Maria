@@ -2,6 +2,12 @@
  * Profile page - operator profile + proactive contact management.
  */
 
+// The shared API helper is MariaUI.apiFetch (maria_ui.js). profile.js was
+// written against an older global `moFetch` that no longer exists after the
+// Web UI v2 extraction (ADR-017) -- so every fetch here threw ReferenceError
+// and the page silently never loaded any data. Alias to the real helper.
+const moFetch = (url, opts) => MariaUI.apiFetch(url, opts);
+
 // ========= Tab switching (reuse pattern from tasks.js) =========
 document.querySelectorAll('.mo-tab').forEach(tab => {
   tab.addEventListener('click', () => {

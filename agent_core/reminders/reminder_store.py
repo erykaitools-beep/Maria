@@ -32,14 +32,23 @@ class ReminderStore:
         if not self._path.exists():
             return
         try:
-            for line in self._path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                data = json.loads(line)
-                rem = Reminder.from_dict(data)
-                self._reminders[rem.id] = rem
-        except Exception as e:
+            with open(self._path, "r", encoding="utf-8") as f:
+                for line_no, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        rem = Reminder.from_dict(data)
+                        self._reminders[rem.id] = rem
+                    except (json.JSONDecodeError, KeyError):
+                        logger.warning(
+                            "Skipping corrupted JSONL line in %s (line %s)",
+                            self._path,
+                            line_no,
+                        )
+                        continue
+        except OSError as e:
             logger.warning("Failed to load reminders: %s", e)
 
     def _append(self, reminder: Reminder) -> None:
@@ -122,14 +131,23 @@ class TodoStore:
         if not self._path.exists():
             return
         try:
-            for line in self._path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                data = json.loads(line)
-                todo = Todo.from_dict(data)
-                self._todos[todo.id] = todo
-        except Exception as e:
+            with open(self._path, "r", encoding="utf-8") as f:
+                for line_no, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        todo = Todo.from_dict(data)
+                        self._todos[todo.id] = todo
+                    except (json.JSONDecodeError, KeyError):
+                        logger.warning(
+                            "Skipping corrupted JSONL line in %s (line %s)",
+                            self._path,
+                            line_no,
+                        )
+                        continue
+        except OSError as e:
             logger.warning("Failed to load todos: %s", e)
 
     def _append(self, todo: Todo) -> None:

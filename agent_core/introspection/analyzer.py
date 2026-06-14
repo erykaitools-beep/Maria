@@ -53,11 +53,10 @@ class CodeAnalyzer:
     # Maria's architectural layers (for classification)
     LAYER_MAPPING = {
         "core": ["agent_core/homeostasis", "agent_core/memory", "agent_core/llm"],
-        "adapters": ["agent_core/adapters"],
         "legacy": ["maria_core"],
-        "ui": ["maria_ui", "agent_core/ui"],
+        "ui": ["maria_ui"],
         "models": ["models"],
-        "meta": ["agent_core/metacontrol", "agent_core/introspection"],
+        "meta": ["agent_core/introspection"],
     }
 
     def __init__(self, project_root: str):

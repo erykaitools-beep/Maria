@@ -89,12 +89,18 @@ class VectorStore:
         self._path = Path(store_path) if store_path else None
         self._entries: Dict[str, VectorEntry] = {}
         self._dirty_ids: set = set()
+        # When evictions or removals happen, append-only save() won't
+        # reflect them. Set this flag so the next save() rewrites the
+        # whole file instead. Prevents unbounded JSONL growth where
+        # ghost entries linger on disk after being evicted from memory.
+        self._needs_compaction: bool = False
 
     def load(self) -> int:
         """Load vectors from JSONL. Returns count loaded."""
         if not self._path or not self._path.exists():
             return 0
 
+        line_count = 0
         count = 0
         try:
             with open(self._path, "r", encoding="utf-8") as f:
@@ -102,6 +108,7 @@ class VectorStore:
                     line = line.strip()
                     if not line:
                         continue
+                    line_count += 1
                     try:
                         d = json.loads(line)
                         entry = VectorEntry.from_dict(d)
@@ -118,12 +125,35 @@ class VectorStore:
             self._evict_oldest(len(self._entries) - MAX_VECTORS)
 
         self._dirty_ids.clear()
+
+        # Auto-compact if the file is significantly bloated — more than
+        # 2x as many records as kept in memory (MERGE duplicates + ghost
+        # entries from past evictions).
+        kept = len(self._entries)
+        if kept > 0 and line_count > 2 * kept:
+            logger.info(
+                f"[SEMANTIC] File bloated ({line_count} lines vs {kept} active) "
+                f"— auto-compacting"
+            )
+            self.save_full()
+
         logger.info(f"[SEMANTIC] Loaded {count} vectors from {self._path}")
         return count
 
     def save(self) -> int:
-        """Append dirty entries to JSONL. Returns count saved."""
-        if not self._path or not self._dirty_ids:
+        """Persist pending changes. Appends dirty entries normally.
+
+        If evictions or removals have occurred (tracked via
+        _needs_compaction), performs a full rewrite instead so the
+        dropped entries actually disappear from disk.
+        """
+        if not self._path:
+            return 0
+
+        if self._needs_compaction:
+            return self.save_full()
+
+        if not self._dirty_ids:
             return 0
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,28 +177,45 @@ class VectorStore:
 
         Use after removals to persist deletions (normal save is append-only).
         Returns count of entries written.
+
+        Uses a tmp file + atomic rename so a crash mid-write cannot corrupt
+        the store.
         """
         if not self._path:
             return 0
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
         count = 0
         try:
-            with open(self._path, "w", encoding="utf-8") as f:
-                for entry in self._entries.values():
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                # list() snapshot -- concurrent add/remove from another
+                # thread must not abort a multi-second 100MB+ rewrite.
+                for entry in list(self._entries.values()):
                     line = json.dumps(entry.to_dict(), ensure_ascii=False)
                     f.write(line + "\n")
                     count += 1
+            tmp_path.replace(self._path)
             self._dirty_ids.clear()
-        except OSError as e:
+            self._needs_compaction = False
+        except Exception as e:
+            # Broad on purpose: whatever failed (OSError, RuntimeError from
+            # a race, json error), the .tmp must not stay orphaned and
+            # _needs_compaction stays True so a later save retries.
             logger.warning(f"[SEMANTIC] Failed to save_full vectors: {e}")
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            return 0
 
         return count
 
     def list_ids_by_namespace(self, namespace: str) -> List[str]:
         """Get all entry IDs in a given namespace."""
         return [
-            eid for eid, entry in self._entries.items()
+            eid for eid, entry in list(self._entries.items())
             if entry.metadata.get("namespace") == namespace
         ]
 
@@ -206,11 +253,18 @@ class VectorStore:
             entries: List of (entry_id, text, metadata) tuples.
             embedding_model: EmbeddingModel instance.
         """
-        # Filter out already-stored entries with same text
+        # Filter out already-stored entries with same text. Same text means
+        # the vector is still valid, but the METADATA may have changed (e.g.
+        # the 2026-06-10 belief metadata contract added belief_id/entity to
+        # entries indexed without them) -- refresh it in place: no re-embed,
+        # created_ts preserved, only the metadata dict is replaced.
         to_embed = []
         for entry_id, text, meta in entries:
             existing = self._entries.get(entry_id)
             if existing and existing.text == text:
+                if meta is not None and meta != existing.metadata:
+                    existing.metadata = dict(meta)
+                    self._dirty_ids.add(entry_id)
                 continue  # Already embedded with same text
             to_embed.append((entry_id, text, meta))
 
@@ -229,10 +283,16 @@ class VectorStore:
         return count
 
     def remove(self, entry_id: str) -> bool:
-        """Remove a vector entry."""
+        """Remove a vector entry.
+
+        Marks the store for compaction so the next save() rewrites the
+        file without this entry (append-only save would leave a ghost
+        record on disk that would be reloaded on restart).
+        """
         if entry_id in self._entries:
             del self._entries[entry_id]
             self._dirty_ids.discard(entry_id)
+            self._needs_compaction = True
             return True
         return False
 
@@ -258,7 +318,11 @@ class VectorStore:
             return []
 
         results: List[SearchResult] = []
-        for entry in self._entries.values():
+        # list() snapshot: the store is lock-free and the semantic-indexer
+        # thread adds/removes entries (ghost cleanup, eviction) while other
+        # threads search -- iterating the live view raises RuntimeError
+        # (dict changed size). GIL makes the snapshot itself atomic.
+        for entry in list(self._entries.values()):
             if not entry.vector:
                 continue
             if namespace and entry.metadata.get("namespace") != namespace:
@@ -285,14 +349,14 @@ class VectorStore:
     def get_by_namespace(self, namespace: str) -> List[VectorEntry]:
         """Get all entries in a namespace."""
         return [
-            e for e in self._entries.values()
+            e for e in list(self._entries.values())
             if e.metadata.get("namespace") == namespace
         ]
 
     def stats(self) -> Dict[str, Any]:
         """Store statistics."""
         namespaces: Dict[str, int] = {}
-        for e in self._entries.values():
+        for e in list(self._entries.values()):
             ns = e.metadata.get("namespace", "default")
             namespaces[ns] = namespaces.get(ns, 0) + 1
         return {
@@ -304,7 +368,11 @@ class VectorStore:
     # --- Internal ---
 
     def _evict_oldest(self, count: int) -> None:
-        """Remove oldest entries to make room."""
+        """Remove oldest entries to make room.
+
+        Marks the store for compaction — next save() will rewrite the
+        file so evicted entries actually disappear from disk.
+        """
         if count <= 0:
             return
         sorted_entries = sorted(
@@ -312,4 +380,6 @@ class VectorStore:
         )
         for entry in sorted_entries[:count]:
             del self._entries[entry.entry_id]
+            self._dirty_ids.discard(entry.entry_id)
             logger.debug(f"[SEMANTIC] Evicted oldest vector: {entry.entry_id}")
+        self._needs_compaction = True

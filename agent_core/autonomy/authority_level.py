@@ -119,7 +119,8 @@ class AuthorityManager:
     Handles loading, saving, and level changes.
     """
 
-    # UNRESTRICTED is not allowed in Phase 5
+    # 24h autonomy test 2026-05-13/14 closed (4/5 pass, opcja B plank-by-plank revert).
+    # BOUNDED to current cap: autonomous safe tools, confirm dangerous. Plank up od pre-test BOUNDED.
     MAX_ALLOWED_LEVEL = AuthorityLevel.BOUNDED
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -183,10 +184,10 @@ class AuthorityManager:
         Returns:
             True if changed, False if blocked (e.g. UNRESTRICTED)
         """
+        # R3 (Phase 5 readiness): UNRESTRICTED gated until explicit Phase-5 unlock.
         if level == AuthorityLevel.UNRESTRICTED:
             logger.warning(
-                "UNRESTRICTED authority not available in Phase 5. "
-                "Max allowed: %s", self.MAX_ALLOWED_LEVEL.value
+                "Authority level change blocked: UNRESTRICTED is gated until explicit Phase-5 unlock"
             )
             return False
 

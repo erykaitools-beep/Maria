@@ -19,6 +19,10 @@ import pytest
 from agent_core.semantic.embedding_model import EmbeddingModel
 from agent_core.semantic.vector_store import VectorStore, VectorEntry, SearchResult
 from agent_core.semantic import SemanticMemory
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.creative.creative_store import CreativeStore
+from agent_core.creative.conversation_memory import CreativeConversationMemory
+from agent_core.tests.spec_helpers import specced
 
 
 # =========================================================================
@@ -33,7 +37,7 @@ def _fake_vector(dim=768, seed=1.0):
 
 def _mock_embedding_model(vectors=None):
     """Create a mock EmbeddingModel that returns predictable vectors."""
-    model = MagicMock(spec=EmbeddingModel)
+    model = specced(EmbeddingModel)
     call_count = [0]
 
     def fake_embed(text):
@@ -294,6 +298,89 @@ class TestVectorStore:
         assert stats["namespaces"]["knowledge"] == 1
         assert stats["namespaces"]["memories"] == 1
 
+    # --- 2026-04-17 regression: ghost entries on disk after eviction/removal ---
+
+    def test_remove_rewrites_file_on_save(self, tmp_path):
+        """remove() + save() must drop the record from disk, not leave a ghost."""
+        path = str(tmp_path / "vectors.jsonl")
+        store = VectorStore(path)
+        store.add("id1", "keep", _fake_vector())
+        store.add("id2", "drop", _fake_vector())
+        store.save()
+        assert store.remove("id2") is True
+        store.save()
+
+        store2 = VectorStore(path)
+        count = store2.load()
+        assert count == 1
+        assert store2.get("id1") is not None
+        assert store2.get("id2") is None
+
+    def test_eviction_rewrites_file_on_save(self, tmp_path):
+        """When _evict_oldest fires, next save() must rewrite the file so the
+        evicted entries don't come back on restart."""
+        path = str(tmp_path / "vectors.jsonl")
+        import agent_core.semantic.vector_store as vs
+        old_cap = vs.MAX_VECTORS
+        vs.MAX_VECTORS = 3
+        try:
+            store = VectorStore(path)
+            for i in range(3):
+                store.add(f"id{i}", f"text{i}", [float(i)])
+                time.sleep(0.01)
+            store.save()
+            # Fourth add triggers eviction of oldest (id0)
+            store.add("id3", "text3", [3.0])
+            store.save()
+
+            store2 = VectorStore(path)
+            count = store2.load()
+            assert count == 3
+            ids = {e.entry_id for e in store2._entries.values()}
+            assert "id0" not in ids, "Evicted entry should not be on disk"
+            assert "id3" in ids
+        finally:
+            vs.MAX_VECTORS = old_cap
+
+    def test_load_autocompacts_bloated_file(self, tmp_path):
+        """If the JSONL has many duplicates/ghosts relative to active count,
+        load() should auto-compact the file to match memory state."""
+        path = tmp_path / "vectors.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            # One active entry repeated 100 times (MERGE keeps last)
+            for i in range(100):
+                f.write(json.dumps({
+                    "id": "x",
+                    "text": f"rev{i}",
+                    "vector": [float(i)],
+                    "metadata": {},
+                    "created_ts": float(i),
+                }) + "\n")
+
+        size_before = path.stat().st_size
+        store = VectorStore(str(path))
+        store.load()
+        size_after = path.stat().st_size
+
+        # MERGE semantics: 100 lines of same ID collapse to 1 entry
+        assert store.count() == 1
+        assert store.get("x").text == "rev99"  # last record wins
+        # File shrunk significantly — auto-compact fired
+        lines_after = sum(1 for line in path.read_text().splitlines() if line.strip())
+        assert lines_after == 1
+        assert size_after < size_before // 10
+
+    def test_save_full_uses_atomic_rename(self, tmp_path):
+        """save_full() should write via tmp + rename to survive crashes."""
+        path = tmp_path / "vectors.jsonl"
+        store = VectorStore(str(path))
+        store.add("id1", "t", _fake_vector())
+        store.save_full()
+        assert path.exists()
+        # No leftover tmp file
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        assert not tmp.exists()
+
 
 # =========================================================================
 # 3. SemanticMemory facade
@@ -377,7 +464,7 @@ class TestSemanticMemory:
 class TestTopicSuggesterSemantic:
     def _make_suggester(self, topics=None, tags=None):
         from agent_core.web_source.topic_suggester import TopicSuggester
-        analyzer = MagicMock()
+        analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_topic_file_map.return_value = topics or {"fizyka": ["f1", "f2"]}
         analyzer.get_tag_frequency_map.return_value = tags or {}
         return TopicSuggester(analyzer, project_root="/tmp/nonexistent")
@@ -412,7 +499,7 @@ class TestTopicSuggesterSemantic:
         """Semantic rerank should not crash suggest_topics on error."""
         suggester = self._make_suggester(topics={"fizyka": ["f1"]})
         # Mock semantic_memory that raises
-        sm = MagicMock()
+        sm = specced(SemanticMemory)
         sm.search = MagicMock(side_effect=RuntimeError("model unavailable"))
         suggester.set_semantic_memory(sm)
 
@@ -428,10 +515,10 @@ class TestMemoryRetrieverSemantic:
     def test_without_semantic_uses_keywords(self):
         from agent_core.creative.memory_retriever import MemoryRetriever
         from agent_core.creative.creative_model import DetectedTension, TensionCategory
-        store = MagicMock()
+        store = specced(CreativeStore)
         retriever = MemoryRetriever(store)
         # Replace conv_memory with mock to verify it's called
-        mock_conv = MagicMock()
+        mock_conv = specced(CreativeConversationMemory)
         mock_conv.retrieve_relevant = MagicMock(return_value=[])
         retriever._conv_memory = mock_conv
 
@@ -448,7 +535,7 @@ class TestMemoryRetrieverSemantic:
     def test_with_semantic_uses_embedding_search(self, tmp_path):
         from agent_core.creative.memory_retriever import MemoryRetriever
         from agent_core.creative.creative_model import DetectedTension, TensionCategory
-        store = MagicMock()
+        store = specced(CreativeStore)
         retriever = MemoryRetriever(store)
 
         # Use consistent vectors so search actually finds results
@@ -478,7 +565,7 @@ class TestMemoryRetrieverSemantic:
     def test_semantic_fallback_on_empty_results(self, tmp_path):
         from agent_core.creative.memory_retriever import MemoryRetriever
         from agent_core.creative.creative_model import DetectedTension, TensionCategory
-        store = MagicMock()
+        store = specced(CreativeStore)
         retriever = MemoryRetriever(store)
 
         sm = SemanticMemory(data_dir=str(tmp_path))

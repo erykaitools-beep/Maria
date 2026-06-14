@@ -72,6 +72,57 @@ class TestUnknownToolNames:
         )
         assert not result.allowed
         assert result.decision == "escalate"
+        # Regression (audit 2026-06-01 #4): the level is carried STRUCTURALLY so
+        # the escalation handler routes BOUNDED+dangerous to the approval queue.
+        # Before the fix it was parsed from the reason string, which for BOUNDED
+        # had no 'authority_level=' token -> the request silently fell through to
+        # a plain block and never reached HITL.
+        assert result.authority_level == "bounded"
+
+    def test_known_safe_tool_allowed_at_bounded(self, tmp_path):
+        """BOUNDED + known safe tool = ALLOW."""
+        mgr = AuthorityManager(config_path=tmp_path / "auth.json")
+        mgr.set_level(AuthorityLevel.BOUNDED)
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+            authority_manager=mgr,
+        )
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "web_fetch"},
+        )
+        assert result.allowed
+        assert result.decision == "allow"
+
+    def test_unknown_tool_dangerous_at_confirm(self, tmp_path):
+        """CONFIRM + unknown tool = ESCALATE."""
+        mgr = AuthorityManager(config_path=tmp_path / "auth.json")
+        mgr.set_level(AuthorityLevel.CONFIRM)
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+            authority_manager=mgr,
+        )
+        result = policy.check(
+            action_type="effector",
+            action_params={"tool_name": "hacktool"},
+        )
+        assert not result.allowed
+        assert result.decision == "escalate"
+
+    def test_unknown_tool_allowed_at_unrestricted(self):
+        """UNRESTRICTED + unknown tool = ALLOW."""
+        from agent_core.autonomy.policy_rules import (
+            PolicyContext,
+            rule_effector_authority,
+        )
+
+        result = rule_effector_authority(PolicyContext(
+            action_type="effector",
+            authority_level=AuthorityLevel.UNRESTRICTED.value,
+            tool_name="hacktool",
+            tool_dangerous=True,
+        ))
+        assert result is None
 
 
 class TestStaleApprovals:
