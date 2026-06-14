@@ -41,7 +41,7 @@ Maria is a **personal digital companion**, not a chatbot. She runs continuously 
 
 She remembers who you are, what you care about, and adapts to your preferences.
 
-**Core idea:** Clone, run, and she works forever. No cloud dependencies required.
+**Core idea:** clone it, run it, and it keeps running on hardware you own — no cloud account or API key required to start.
 
 ### Key Features
 
@@ -95,6 +95,17 @@ She remembers who you are, what you care about, and adapts to your preferences.
 | **Knowledge** | K6 World Model, K9 Meta-Cognition | Belief system, confidence tracking, assumptions |
 | **Safety** | K7 Autonomy, K10 Action Safety | Action classification, rate limiting, audit log |
 | **Growth** | K11 Experiments, K12 Self-Analysis, K13 Creative | Parameter tuning, reflection, tension detection |
+
+## Documentation
+
+| Topic | Document |
+|---|---|
+| Architecture & data flow | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Cognitive contracts (K1–K13) | [docs/CONTRACTS.md](docs/CONTRACTS.md) |
+| Security posture | [docs/SECURITY.md](docs/SECURITY.md) |
+| Development status (per-subsystem maturity) | [docs/SYSTEM_STATUS.md](docs/SYSTEM_STATUS.md) |
+| Funding & hardware research | [docs/funding/](docs/funding/) |
+| Hardware benchmark plan | [docs/funding/HARDWARE_BENCHMARK_PLAN.md](docs/funding/HARDWARE_BENCHMARK_PLAN.md) |
 
 ## Quick Start
 
@@ -211,7 +222,7 @@ Maria has been running continuously on a single mini PC since 2026-02-22. This i
 
 | | |
 |---|---|
-| **Hardware** | AMD Ryzen 5 7430U · 32 GB RAM · 1 TB SSD · Ubuntu 22.04 |
+| **Hardware** | AMD Ryzen 5 7430U (6c/12t, CPU-only — no NPU, no discrete GPU) · 32 GB RAM · ~100 GB system SSD + 6 TB archival volume · Ubuntu 22.04 |
 | **Deployment** | `maria.service` under systemd, auto-restart on failure |
 | **Resource ceiling** | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` (systemd drop-in, hard-capped after an incident — see below) |
 | **Archival storage** | 6 TB ext4 disk for rotated logs and daily summaries |
@@ -225,6 +236,8 @@ Live counters as of 2026-04-18 (~8 weeks in):
 | Semantic vectors (nomic-embed-text, 768-dim) | 10,030 |
 | Decision traces (episode-correlated) | 4,589 |
 | Test suite | 4,490 passing · 1 xfail · 104s runtime |
+
+> The counters above are a dated snapshot. For current, fully-sourced figures (tests, code size, models, hardware), see [docs/funding/CURRENT_PROJECT_STATUS.md](docs/funding/CURRENT_PROJECT_STATUS.md).
 
 Observed modes: `ACTIVE` most of the day, `REDUCED` briefly during LLM inference spikes, `SLEEP` during low-activity hours, `SURVIVAL` never triggered in production.
 

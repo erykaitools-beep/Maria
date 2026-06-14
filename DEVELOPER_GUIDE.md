@@ -49,7 +49,7 @@ maria/
 │   ├── critic/           # Knowledge quality gate
 │   ├── reminders/        # Time-triggered notifications
 │   ├── orchestrator/     # V3 Task orchestration
-│   └── tests/            # ~3800 tests
+│   └── tests/            # 5,700+ tests
 ├── maria_core/           # Legacy modules (migration in progress)
 ├── models/               # OllamaBrain LLM interface
 ├── maria_ui/             # Flask Web UI
