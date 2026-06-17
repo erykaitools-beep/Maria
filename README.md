@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="https://github.com/user-attachments/assets/75489ce1-1e9a-4f9f-a0ca-021c2ba2c667" width="130" alt="M.A.R.I.A. logo">
   <h1 align="center">M.A.R.I.A.</h1>
   <p align="center"><b>Meta Analysis Recalibration Intelligence Architecture</b></p>
   <p align="center">
