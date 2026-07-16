@@ -172,6 +172,22 @@ def isolated_event_logger(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def isolated_reasoning_journal(tmp_path):
+    """Prevent tests from writing to production reasoning_journal.jsonl.
+
+    The capture hooks (creative safe_llm_call, K12 analyze, teacher nim_gap)
+    reach the journal via the module singleton; any test driving those paths
+    with a stub LLM would otherwise append to the live notebook."""
+    from agent_core.tracing import reasoning_journal as rj
+
+    rj.set_reasoning_journal(
+        rj.ReasoningJournal(tmp_path / "test_reasoning_journal.jsonl")
+    )
+    yield
+    rj.set_reasoning_journal(None)
+
+
+@pytest.fixture(autouse=True)
 def always_learning_window(monkeypatch):
     """Make is_learning_window() always return True in tests.
 
@@ -182,4 +198,31 @@ def always_learning_window(monkeypatch):
         monkeypatch.setattr(env_mod, "is_learning_window", lambda now=None: True)
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def neutralize_armed_env_flags(monkeypatch):
+    """Tests must assert the CODE default, not whatever the operator has armed in
+    the live .env. load_dotenv() (via maria_core.sys.config, pulled in
+    transitively by e.g. models.ollama_brain) leaks armed flags such as
+    FS_WRITE_ENABLED into os.environ at import time, so a fragile test that reads
+    the flag without delenv sees the operator's live arming and fails depending
+    on collection order. Clear the behaviour flags here; a test that genuinely
+    wants one ON still does monkeypatch.setenv (which runs after this and wins)."""
+    for _flag in (
+        "FS_WRITE_ENABLED", "LEARNING_NOTES_ENABLED", "TELEGRAM_CHAT_ENABLED",
+        "PLAY_ENABLED",
+        # Etap B (sub-goal trees + deadlines): operator toggles read live from
+        # os.environ -> leak through load_dotenv exactly like the flags above.
+        "GOAL_ROLLUP_ENABLED", "GOAL_DEADLINE_ENABLED", "GOAL_DEADLINE_REAP_ENABLED",
+        # Etap A (effector undo): journal + execute toggles, same leak story.
+        "EFFECTOR_UNDO_JOURNAL_ENABLED", "EFFECTOR_UNDO_EXECUTE_ENABLED",
+        # Later arming (06-25..06-28): undo-suggest (observe-first), hydration
+        # nudge, Super-META situational self, self-dev bridge -- all read live
+        # from os.environ and leak through load_dotenv exactly like the above.
+        "EFFECTOR_UNDO_SUGGEST_ENABLED", "HYDRATION_NUDGE_ENABLED",
+        "SELF_CONTEXT_CHAT_ENABLED", "VISION_SUPPRESS_WHEN_PRESENT",
+        "PROACTIVE_SITUATIONAL", "SELF_DEV_BRIDGE_ENABLED",
+    ):
+        monkeypatch.delenv(_flag, raising=False)
 

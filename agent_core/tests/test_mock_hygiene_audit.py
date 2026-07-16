@@ -24,7 +24,18 @@ from pathlib import Path
 # Post-sweep count of bare `= MagicMock()` / `= Mock()` across agent_core/tests/.
 # RATCHET DOWN ONLY. Lower it as more get converted; bump it (with justification)
 # only when adding a genuine external-boundary mock.
-_CEILING = 212
+#
+# 212 -> 130 (2026-07-14 sweep: 275 actual -> 122). The ratchet had been RED for a
+# month and nobody looked: 214 (06-13) -> 229 (06-27) -> 236 (07-10) -> 275 (07-14),
+# i.e. the guard against silent mock regrowth regrew silently. Re-arming it at a
+# level that is green today is the whole point -- a permanently red ratchet guards
+# nothing. The sweep converted 153 bare mocks and the specs immediately exposed 4
+# phantom call-sites in PRODUCTION (TelegramNotifier.notify, goal.goal_type) that
+# bare mocks had been answering happily for months.
+#
+# Headroom is deliberate (122 vs 130): new external-boundary mocks in a normal
+# commit should not have to touch this file, but a batch of them still trips it.
+_CEILING = 130
 
 _BARE_MOCK = re.compile(r"=\s*(?:MagicMock|Mock)\(\)")
 _TESTS_DIR = Path(__file__).parent

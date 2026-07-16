@@ -136,4 +136,11 @@ DEFAULT_CAPABILITY_SPECS = {
         k7_classification="guarded",
         tags=("meta", "analysis"),
     ),
+    "play": CapabilitySpec(
+        name="play",
+        description="Self-time: ungraded free musing over what she already knows",
+        required_subsystems=("play_module",),
+        k7_classification="free",
+        tags=("self", "play"),
+    ),
 }

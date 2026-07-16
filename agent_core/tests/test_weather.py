@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent_core.weather.weather_sensor import WeatherData, WeatherSensor
-from agent_core.weather.salience import is_weather_salient, format_weather_line
+from agent_core.weather.salience import (
+    is_weather_salient,
+    format_weather_line,
+    needs_hydration_reminder,
+    HYDRATION_THRESHOLD_C,
+)
 from agent_core.operator.operator_model import OperatorModel
 from agent_core.tests.spec_helpers import specced
 
@@ -273,6 +278,38 @@ class TestFormatWeatherLine:
         w = _make_weather(temp=31, feels=32)
         line = format_weather_line(w, salient=True)
         assert "odczuwalna" not in line
+
+
+# =============================================================================
+# needs_hydration_reminder (hydration nudge gate)
+# =============================================================================
+
+class TestNeedsHydrationReminder:
+    def test_mild_day_no_reminder(self):
+        w = _make_weather(temp=22, feels=21)
+        assert needs_hydration_reminder(w) is False
+
+    def test_hot_actual_temp_triggers(self):
+        w = _make_weather(temp=31, feels=29)  # actual >= 30, feels below
+        assert needs_hydration_reminder(w) is True
+
+    def test_hot_feels_like_triggers_even_if_actual_below(self):
+        # Humid day: actual 28 but feels like 31 -> still nudge.
+        w = _make_weather(temp=28, feels=31)
+        assert needs_hydration_reminder(w) is True
+
+    def test_exactly_at_threshold_triggers(self):
+        w = _make_weather(temp=HYDRATION_THRESHOLD_C, feels=25)
+        assert needs_hydration_reminder(w) is True
+
+    def test_just_below_threshold_no_reminder(self):
+        w = _make_weather(temp=29.9, feels=29.0)
+        assert needs_hydration_reminder(w) is False
+
+    def test_custom_threshold(self):
+        w = _make_weather(temp=27, feels=26)
+        assert needs_hydration_reminder(w, threshold_c=25.0) is True
+        assert needs_hydration_reminder(w, threshold_c=28.0) is False
 
 
 # =============================================================================

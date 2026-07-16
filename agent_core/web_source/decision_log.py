@@ -157,6 +157,9 @@ def log_fetch_decision(
         summary_bits.append(
             f"rss_filtered={result.get('rss_filtered', 0)}"
         )
+        profile = result.get("feed_profile")
+        if profile and profile != "default":
+            summary_bits.append(f"profile={profile}")
     if skipped_reason:
         summary_bits.append(f"reason={skipped_reason}")
     if error:

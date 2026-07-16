@@ -10,6 +10,7 @@ from agent_core.planner.stuck_handler import (
     StuckDiagnosis,
     StuckCause,
     RepairAction,
+    FETCH_RETRY_CAP,
 )
 from agent_core.tests.spec_helpers import specced
 from agent_core.goals.store import GoalStore
@@ -88,6 +89,33 @@ class TestDiagnosis:
         assert diag.cause == StuckCause.NO_FILES
         assert diag.repair_action == RepairAction.TRIGGER_FETCH
 
+    def test_no_files_context_carries_goal_id(self, handler):
+        # B2 regression: _repair_trigger_fetch reads goal_id from context, so
+        # the diagnosis MUST put it there or the repair silently no-ops.
+        fp = {"action": "learn", "goal_id": "g-9", "reason": "idle"}
+        diag = handler.diagnose(fp, {"idle_reason": "no_files_to_learn"})
+        assert diag.context.get("goal_id") == "g-9"
+
+    def test_materials_exhausted_via_idle_reason(self, handler):
+        # B2: files exist but all already learned -> non_chunking skip loop.
+        fp = {"action": "learn", "goal_id": "g-1", "reason": "idle"}
+        diag = handler.diagnose(fp, {"idle_reason": "non_chunking_strategy"})
+        assert diag.cause == StuckCause.MATERIALS_EXHAUSTED
+        assert diag.repair_action == RepairAction.TRIGGER_FETCH
+        assert diag.context.get("goal_id") == "g-1"
+
+    def test_materials_exhausted_via_reason(self, handler):
+        # The exhaustion signal can ride in the failure reason (FAILED path).
+        fp = {"action": "learn", "goal_id": "g-2", "reason": "non_chunking_strategy"}
+        diag = handler.diagnose(fp, {})
+        assert diag.cause == StuckCause.MATERIALS_EXHAUSTED
+        assert diag.repair_action == RepairAction.TRIGGER_FETCH
+
+    def test_filtered_out_all_candidates_is_exhausted(self, handler):
+        fp = {"action": "learn", "goal_id": "g-3", "reason": "idle"}
+        diag = handler.diagnose(fp, {"idle_reason": "filtered_out_all_candidates"})
+        assert diag.cause == StuckCause.MATERIALS_EXHAUSTED
+
     def test_unknown_cause(self, handler):
         fp = {"action": "learn", "goal_id": "g-1", "reason": "something_weird"}
         diag = handler.diagnose(fp, {})
@@ -152,7 +180,7 @@ class TestRepair:
 
     def test_trigger_fetch(self, handler_with_deps):
         h, goal_store, _, _ = handler_with_deps
-        mock_goal = specced(Goal, metadata={})
+        mock_goal = specced(Goal, metadata={"topics": ["fizyka"]})
         goal_store.get.return_value = mock_goal
 
         diag = StuckDiagnosis(
@@ -165,6 +193,62 @@ class TestRepair:
 
         assert result.repair_succeeded is True
         assert mock_goal.metadata.get("needs_fetch") is True
+
+    def test_trigger_fetch_wires_goal_id_through(self, handler_with_deps):
+        # B2 end-to-end: diagnose materials_exhausted -> try_repair arms the
+        # flag, proving goal_id flows from fingerprint -> context -> repair.
+        h, goal_store, _, _ = handler_with_deps
+        mock_goal = specced(Goal, metadata={"topics": ["fizyka"]})
+        goal_store.get.return_value = mock_goal
+
+        diag = h.diagnose(
+            {"action": "learn", "goal_id": "g-77",
+             "reason": "non_chunking_strategy"},
+            {},
+        )
+        result = h.try_repair(diag)
+
+        assert result.repair_succeeded is True
+        assert mock_goal.metadata.get("needs_fetch") is True
+        goal_store.get.assert_called_with("g-77")
+
+    def test_trigger_fetch_skips_goal_without_topics(self, handler_with_deps):
+        # B2: arming a topicless goal would dangle needs_fetch (consumer is
+        # topic-scoped), so the repair declines instead.
+        h, goal_store, _, _ = handler_with_deps
+        mock_goal = specced(Goal, metadata={})
+        goal_store.get.return_value = mock_goal
+
+        diag = StuckDiagnosis(
+            cause=StuckCause.MATERIALS_EXHAUSTED,
+            detail="test",
+            repair_action=RepairAction.TRIGGER_FETCH,
+            context={"goal_id": "g-1"},
+        )
+        result = h.try_repair(diag)
+
+        assert result.repair_succeeded is False
+        assert mock_goal.metadata.get("needs_fetch") is not True
+
+    def test_trigger_fetch_respects_cap(self, handler_with_deps):
+        # B2: a goal that already burned its fetch budget is left to the reaper.
+        h, goal_store, _, _ = handler_with_deps
+        mock_goal = specced(
+            Goal, metadata={"topics": ["fizyka"], "fetch_attempts": FETCH_RETRY_CAP},
+        )
+        goal_store.get.return_value = mock_goal
+
+        diag = StuckDiagnosis(
+            cause=StuckCause.MATERIALS_EXHAUSTED,
+            detail="test",
+            repair_action=RepairAction.TRIGGER_FETCH,
+            context={"goal_id": "g-1"},
+        )
+        result = h.try_repair(diag)
+
+        assert result.repair_succeeded is False
+        assert mock_goal.metadata.get("needs_fetch") is not True
+        assert "reaper" in result.repair_detail.lower()
 
     def test_no_repair_action(self, handler):
         diag = StuckDiagnosis(

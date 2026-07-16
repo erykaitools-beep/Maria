@@ -505,9 +505,11 @@ class TestBuilderAssigneesPolicy:
     def test_get_autonomous_next_skips_approval_required(
         self, tmp_conductor: Conductor
     ):
+        # Generic (non-self_repair) maria builder task: approval_required=True is
+        # held; an explicitly-approved one is eligible.
         held = create_task(
             project="maria",
-            phase="self_repair",
+            phase="p9.1",
             title="needs approval",
             description="d",
             priority=0.99,
@@ -517,12 +519,13 @@ class TestBuilderAssigneesPolicy:
         tmp_conductor.add_task(held)
         approved = create_task(
             project="maria",
-            phase="self_repair",
+            phase="p9.1",
             title="approved",
             description="d",
             priority=0.5,
             assignee=Assignee.CODEX,
         )
+        approved.artifacts["approval_required"] = False  # explicit (fail-closed)
         tmp_conductor.add_task(approved)
 
         nxt = tmp_conductor.get_autonomous_next("maria")
@@ -532,10 +535,12 @@ class TestBuilderAssigneesPolicy:
     def test_get_autonomous_next_approval_flipped_becomes_eligible(
         self, tmp_conductor: Conductor
     ):
+        # Non-self_repair maria task: held until approval_required is explicitly
+        # False, then eligible.
         task = create_task(
             project="maria",
-            phase="self_repair",
-            title="repair",
+            phase="p9.1",
+            title="generic build",
             description="d",
             priority=0.9,
             assignee=Assignee.CODEX,
@@ -551,23 +556,60 @@ class TestBuilderAssigneesPolicy:
         assert nxt is not None
         assert nxt.task_id == task.task_id
 
-    def test_get_autonomous_next_missing_flag_treated_as_false(
+    def test_get_autonomous_next_maria_missing_flag_fail_closed(
         self, tmp_conductor: Conductor
     ):
-        task = tmp_conductor.add_task(
+        # Audit 2026-06-16 #2: on the LIVE repo a missing approval_required must
+        # default to HELD, not dispatched -- a forgotten flag cannot auto-run
+        # Codex on prod.
+        tmp_conductor.add_task(
             create_task(
                 project="maria",
                 phase="p",
-                title="legacy",
+                title="legacy missing flag",
                 description="d",
                 priority=0.5,
                 assignee=Assignee.CODEX,
             )
         )
+        assert tmp_conductor.get_autonomous_next("maria") is None
 
-        nxt = tmp_conductor.get_autonomous_next("maria")
+    def test_get_autonomous_next_market_missing_flag_fail_open(
+        self, tmp_conductor: Conductor
+    ):
+        # Sandboxed projects keep the fail-open default (legit autonomous builds).
+        task = tmp_conductor.add_task(
+            create_task(
+                project="market_agent",
+                phase="p",
+                title="market build",
+                description="d",
+                priority=0.5,
+                assignee=Assignee.CODEX,
+            )
+        )
+        nxt = tmp_conductor.get_autonomous_next("market_agent")
         assert nxt is not None
         assert nxt.task_id == task.task_id
+
+    def test_get_autonomous_next_self_repair_never_dispatched(
+        self, tmp_conductor: Conductor
+    ):
+        # ADR-031 + audit 2026-06-16: a self_repair task is NEVER autonomously
+        # routed, even with approval_required=False -- /approve_repair CLOSES it,
+        # it must never run Codex on prod.
+        task = create_task(
+            project="maria",
+            phase="self_repair",
+            title="repair",
+            description="d",
+            priority=0.99,
+            assignee=Assignee.CODEX,
+        )
+        task.artifacts["approval_required"] = False
+        tmp_conductor.add_task(task)
+
+        assert tmp_conductor.get_autonomous_next("maria") is None
 
     def test_get_autonomous_next_returns_none_when_only_claude(
         self, tmp_conductor: Conductor
@@ -622,3 +664,82 @@ class TestBuilderAssigneesPolicy:
         ]
         assert market.list_tasks(project="maria") == []
         assert maria.list_tasks(project="market_agent") == []
+
+
+# ============================================================
+# Boot-time stale IN_PROGRESS sweep (2026-06-30 watchdog kill)
+# ============================================================
+
+class TestRequeueStaleInProgress:
+    """A crash mid-dispatch (watchdog os._exit) strands the dispatched task
+    IN_PROGRESS forever -- the dispatcher's exception handler never ran and
+    get_autonomous_next only ever returns PENDING. The boot sweep returns
+    such orphans to the pool, with a crash-loop guard past max_requeues."""
+
+    def _orphan(self, queue: TaskQueue, **kwargs) -> Task:
+        task = _seed_task(queue, assignee=Assignee.CODEX, **kwargs)
+        queue.update(task.task_id, status=TaskStatus.IN_PROGRESS)
+        return task
+
+    def test_orphan_returns_to_pending_with_count(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        task = self._orphan(tmp_queue)
+        swept = tmp_conductor.requeue_stale_in_progress("market_agent")
+        assert [t.task_id for t in swept] == [task.task_id]
+        refreshed = tmp_queue.get(task.task_id)
+        assert refreshed.status == TaskStatus.PENDING
+        assert refreshed.artifacts["stale_requeue_count"] == 1
+
+    def test_requeued_orphan_is_dispatchable_again(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        task = self._orphan(tmp_queue)
+        tmp_conductor.requeue_stale_in_progress("market_agent")
+        nxt = tmp_conductor.get_autonomous_next("market_agent")
+        assert nxt is not None and nxt.task_id == task.task_id
+
+    def test_third_sweep_blocks_instead_of_crash_looping(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        task = self._orphan(tmp_queue)
+        for expected_count in (1, 2):
+            tmp_conductor.requeue_stale_in_progress("market_agent")
+            refreshed = tmp_queue.get(task.task_id)
+            assert refreshed.status == TaskStatus.PENDING
+            assert refreshed.artifacts["stale_requeue_count"] == expected_count
+            queue_back = tmp_queue.update(
+                task.task_id, status=TaskStatus.IN_PROGRESS
+            )
+            assert queue_back.status == TaskStatus.IN_PROGRESS
+        swept = tmp_conductor.requeue_stale_in_progress("market_agent")
+        assert len(swept) == 1
+        refreshed = tmp_queue.get(task.task_id)
+        assert refreshed.status == TaskStatus.BLOCKED
+        assert refreshed.artifacts["stale_requeue_count"] == 3
+        assert any("orphaned in_progress" in b for b in refreshed.blockers)
+
+    def test_other_assignee_left_alone(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        task = _seed_task(tmp_queue, assignee=Assignee.OPERATOR)
+        tmp_queue.update(task.task_id, status=TaskStatus.IN_PROGRESS)
+        assert tmp_conductor.requeue_stale_in_progress("market_agent") == []
+        assert tmp_queue.get(task.task_id).status == TaskStatus.IN_PROGRESS
+
+    def test_other_project_left_alone(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        task = self._orphan(tmp_queue, project="maria")
+        assert tmp_conductor.requeue_stale_in_progress("market_agent") == []
+        assert tmp_queue.get(task.task_id).status == TaskStatus.IN_PROGRESS
+
+    def test_pending_and_done_untouched(
+        self, tmp_conductor: Conductor, tmp_queue: TaskQueue
+    ):
+        pending = _seed_task(tmp_queue, assignee=Assignee.CODEX)
+        done = _seed_task(tmp_queue, assignee=Assignee.CODEX)
+        tmp_queue.update(done.task_id, status=TaskStatus.DONE)
+        assert tmp_conductor.requeue_stale_in_progress("market_agent") == []
+        assert tmp_queue.get(pending.task_id).status == TaskStatus.PENDING
+        assert tmp_queue.get(done.task_id).status == TaskStatus.DONE

@@ -16,13 +16,34 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from agent_core.planner.planner_model import ActionType, create_plan
-from agent_core.goals.goal_model import GoalType
+from agent_core.goals.goal_model import GoalStatus, GoalType, create_goal
 from agent_core.goals.store import GoalStore
+from agent_core.self_analysis import SelfAnalysis
 from agent_core.self_analysis.recommendation_model import AnalysisReport
 from agent_core.evaluation import EvaluationObserver
+from agent_core.evaluation.report import EvaluationReport
 from agent_core.experiment import ExperimentSystem
+from agent_core.experiment.experiment_model import ExperimentReport
 from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
 from agent_core.teacher.teacher_agent import TeacherAgent
+from agent_core.bulletin.expert_bridge import ExpertBridge, ExpertResponse
+from agent_core.consciousness.core import ConsciousnessCore
+from agent_core.creative.facade import CreativeModule
+from agent_core.critic import CriticAgent
+from agent_core.critic.critique_model import (
+    CritiqueReport,
+    FindingCategory,
+    FindingSeverity,
+    SuggestedCritiqueAction,
+    create_finding,
+)
+from agent_core.cross_validation.cross_validator import CrossValidator
+from agent_core.effector.openclaw_client import OpenClawClient
+from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import Mode, SystemState
+from agent_core.llm.router import LLMRouter
+from agent_core.semantic import SemanticMemory
+from agent_core.telegram.notifier import TelegramNotifier
 from agent_core.tests.spec_helpers import specced
 from agent_core.routing.handlers import (
     resolve_topics,
@@ -68,21 +89,21 @@ class TestResolveTopics:
 
     def test_no_topics_returns_none(self):
         plan = _plan(params={})
-        assert resolve_topics(plan, MagicMock()) is None
+        assert resolve_topics(plan, specced(KnowledgeAnalyzer)) is None
 
     def test_cached_resolved_ids(self):
         plan = _plan(params={"topics": ["fizyka"], "resolved_file_ids": ["f1"]})
-        result = resolve_topics(plan, MagicMock())
+        result = resolve_topics(plan, specced(KnowledgeAnalyzer))
         assert result == ["f1"]
 
     def test_direct_resolved_file_ids(self):
         plan = _plan(params={"resolved_file_ids": ["web_wiki_a.txt"]})
-        result = resolve_topics(plan, MagicMock())
+        result = resolve_topics(plan, specced(KnowledgeAnalyzer))
         assert result == ["web_wiki_a.txt"]
 
     def test_cached_empty_returns_none(self):
         plan = _plan(params={"topics": ["fizyka"], "resolved_file_ids": []})
-        result = resolve_topics(plan, MagicMock())
+        result = resolve_topics(plan, specced(KnowledgeAnalyzer))
         # Empty list is falsy -> returns None
         assert result is None
 
@@ -112,15 +133,21 @@ class TestResolveTopics:
 class TestResolveNotifier:
 
     def test_direct_notifier(self):
+        # Deliberately NOT specced: this exercises the duck-typed
+        # `hasattr(x, 'notify')` branch, and NO class in the codebase actually
+        # implements notify() -- see the phantom reported in this sweep. A
+        # specced(TelegramNotifier) would pass here through the *other* branch
+        # (not callable), silently changing what this test covers.
         notifier = MagicMock()
         notifier.notify = MagicMock()
         assert _resolve_notifier(notifier) is notifier
 
     def test_late_binding_callable(self):
-        notifier = MagicMock()
-        factory = MagicMock(return_value=notifier)
-        # factory is callable but has no 'notify' attr
-        del factory.notify
+        # A real lambda, exactly like production wires it
+        # (homeostasis_module.py:1057 `_tg = lambda: ...`) -- a plain closure,
+        # not an agent_core class, and it has no 'notify' attr by construction.
+        notifier = specced(TelegramNotifier)
+        factory = lambda: notifier
         assert _resolve_notifier(factory) is notifier
 
     def test_none(self):
@@ -334,7 +361,7 @@ class TestLearnHandler:
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 1, "strategies_executed": 1}
         }
-        semantic = MagicMock()
+        semantic = specced(SemanticMemory)
         h = make_learn_handler(teacher_agent=teacher, semantic_search=semantic)
         with patch("agent_core.routing.handlers.incremental_index") as mock_idx:
             h(_plan(ActionType.LEARN))
@@ -346,7 +373,7 @@ class TestLearnHandler:
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 4, "strategies_executed": 2}
         }
-        consc = MagicMock()
+        consc = specced(ConsciousnessCore)
         h = make_learn_handler(teacher_agent=teacher, consciousness=consc)
         h(_plan(ActionType.LEARN, {"topics": ["fizyka"]}))
         events = [c.args[0] for c in consc.record_experience.call_args_list]
@@ -358,7 +385,7 @@ class TestLearnHandler:
         teacher.run_session.return_value = {
             "stats": {"chunks_learned": 0, "idle_reason": "no_files"}
         }
-        consc = MagicMock()
+        consc = specced(ConsciousnessCore)
         h = make_learn_handler(teacher_agent=teacher, consciousness=consc)
         h(_plan(ActionType.LEARN))
         consc.record_experience.assert_not_called()
@@ -436,12 +463,17 @@ class TestUpdateLearningGoalProgress:
         return analyzer
 
     def _goal(self, metadata, progress=0.0, status="active"):
-        goal = MagicMock()
-        goal.type = MagicMock(value="learning")
+        # REAL Goal, not a mock: Goal is a dataclass whose fields have no class
+        # defaults, so create_autospec would reject `metadata`/`progress`. The
+        # real object enforces field names AND real enum types for free.
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Nauka: test",
+            priority=0.5,
+            status=GoalStatus(status),
+            metadata=metadata,
+        )
         goal.progress = progress
-        goal.metadata = metadata
-        goal.description = "Nauka: test"
-        goal.status = MagicMock(value=status)
         return goal
 
     def test_topic_goal_counts_completed(self):
@@ -612,7 +644,7 @@ class TestExamHandler:
             "stats": {"exams_run": 1, "exams_passed": 1,
                       "last_exam_score": 0.85, "last_exam_file": "f1.txt"}
         }
-        consc = MagicMock()
+        consc = specced(ConsciousnessCore)
         h = make_exam_handler(teacher_agent=teacher, consciousness=consc)
         h(_plan(ActionType.EXAM))
         consc.record_experience.assert_called_once()
@@ -625,7 +657,7 @@ class TestExamHandler:
             "stats": {"exams_run": 1, "exams_passed": 0,
                       "last_exam_score": 0.3, "last_exam_file": "f2.txt"}
         }
-        consc = MagicMock()
+        consc = specced(ConsciousnessCore)
         h = make_exam_handler(teacher_agent=teacher, consciousness=consc)
         h(_plan(ActionType.EXAM))
         consc.record_experience.assert_called_once()
@@ -649,10 +681,16 @@ class TestEvaluateHandler:
 
     def test_evaluate_success(self):
         observer = specced(EvaluationObserver)
-        report = MagicMock()
-        report.report_id = "rpt-1"
-        report.metrics = {"learning_velocity": 0.8}
-        report.recommendations = ["keep going"]
+        # REAL EvaluationReport (dataclass): enforces the field names the
+        # handler reads, unlike a mock that invents any attribute.
+        report = EvaluationReport(
+            timestamp=1000.0,
+            report_id="rpt-1",
+            period_start=0.0,
+            period_end=1000.0,
+            metrics={"learning_velocity": 0.8},
+            recommendations=["keep going"],
+        )
         observer.generate_report.return_value = report
         h = make_evaluate_handler(evaluation_observer=observer)
         r = h(_plan(ActionType.EVALUATE, {"period_hours": 2.0}))
@@ -672,11 +710,15 @@ class TestEvaluateHandler:
 class TestMaintenanceHandler:
 
     def test_maintenance_success(self):
-        core = MagicMock()
-        state = MagicMock()
-        state.health_score = 0.85
-        state.mode.value = "active"
-        state.interpreted_state = {"cpu_load": 30, "ram_available_pct": 70}
+        core = specced(HomeostasisCore)
+        # REAL SystemState: `state.mode.value` is a genuine Mode enum, so the
+        # handler's `state.mode.value` cannot silently read a phantom.
+        state = SystemState(
+            mode=Mode.ACTIVE,
+            health_score=0.85,
+            last_mode_change_time=1000.0,
+            interpreted_state={"cpu_load": 30, "ram_available_pct": 70},
+        )
         core.get_state.return_value = state
         h = make_maintenance_handler(homeostasis_core=core)
         r = h(_plan(ActionType.MAINTENANCE))
@@ -685,15 +727,21 @@ class TestMaintenanceHandler:
         assert r["mode"] == "active"
 
     def test_maintenance_updates_goal_progress(self):
-        core = MagicMock()
-        state = MagicMock()
-        state.health_score = 0.9
-        state.mode.value = "active"
-        state.interpreted_state = {}
+        core = specced(HomeostasisCore)
+        state = SystemState(
+            mode=Mode.ACTIVE,
+            health_score=0.9,
+            last_mode_change_time=1000.0,
+            interpreted_state={},
+        )
         core.get_state.return_value = state
 
-        goal = MagicMock()
-        goal.metadata = {"metric": "health_score", "threshold": 1.0}
+        goal = create_goal(
+            goal_type=GoalType.MAINTENANCE,
+            description="Utrzymaj zdrowie",
+            priority=0.5,
+            metadata={"metric": "health_score", "threshold": 1.0},
+        )
         goal_store = specced(GoalStore)
         goal_store.get.return_value = goal
 
@@ -795,7 +843,11 @@ class TestFetchHandler:
             )
             r = h(_plan(ActionType.FETCH))
 
-        assert r["success"] is True
+        # Yield-aware (2026-06-26): 0 articles + 0 errors is NOT success -- it is a
+        # skipped/idle fetch (nothing new to fetch), so the saturation pump is not
+        # falsely reinforced. Still no handoff (no files written).
+        assert r["success"] is False
+        assert r["skipped"] is True
         assert goal_store.get_active(GoalType.LEARNING) == []
 
     @patch("agent_core.environment.environment_model.is_learning_window",
@@ -876,11 +928,26 @@ class TestExperimentHandler:
 
     def test_experiment_success(self):
         system = specced(ExperimentSystem)
-        report = MagicMock()
-        report.report_id = "exp-1"
-        report.recommendation = "ADOPT"
-        report.confidence = 0.8
-        report.conclusion = "retention improved"
+        # REAL ExperimentReport (dataclass) -- real field names, no phantoms.
+        report = ExperimentReport(
+            report_id="exp-1",
+            experiment_id="e-1",
+            proposal_id="prop-1",
+            timestamp=1000.0,
+            hypothesis="retention rises",
+            method="ab",
+            parameter_id="p-1",
+            baseline_value=1,
+            test_value=2,
+            baseline_metrics={"retention": 0.5},
+            result_metrics={"retention": 0.7},
+            delta_metrics={"retention": 0.2},
+            test_cycles=3,
+            duration_sec=10.0,
+            conclusion="retention improved",
+            recommendation="ADOPT",
+            confidence=0.8,
+        )
         system.run_experiment.return_value = report
         h = make_experiment_handler(experiment_system=system)
         r = h(_plan(ActionType.EXPERIMENT, {"proposal_id": "prop-1"}))
@@ -905,7 +972,7 @@ class TestExperimentHandler:
 class TestEffectorHandler:
 
     def test_effector_success(self):
-        client = MagicMock()
+        client = specced(OpenClawClient)
         client.invoke_tool.return_value = {"ok": True, "result": "done"}
         h = make_effector_handler(openclaw_client=client)
         r = h(_plan(ActionType.EFFECTOR, {"tool_name": "exec", "tool_args": {"cmd": "ls"}}))
@@ -914,14 +981,14 @@ class TestEffectorHandler:
         assert r["tool_result"] == "done"
 
     def test_effector_no_tool_name(self):
-        client = MagicMock()
+        client = specced(OpenClawClient)
         h = make_effector_handler(openclaw_client=client)
         r = h(_plan(ActionType.EFFECTOR))
         assert r["success"] is False
         assert "tool_name" in r["error"]
 
     def test_effector_exception(self):
-        client = MagicMock()
+        client = specced(OpenClawClient)
         client.invoke_tool.side_effect = TimeoutError("timeout")
         h = make_effector_handler(openclaw_client=client)
         r = h(_plan(ActionType.EFFECTOR, {"tool_name": "exec"}))
@@ -932,7 +999,7 @@ class TestEffectorHandler:
 class TestSelfAnalyzeHandler:
 
     def test_success(self):
-        analysis = MagicMock()
+        analysis = specced(SelfAnalysis)
         # Real AnalysisReport: the analyzer's text output is raw_response, NOT
         # analysis_text (a phantom). A real dataclass makes that regress red (bug #1).
         report = AnalysisReport(
@@ -951,7 +1018,7 @@ class TestSelfAnalyzeHandler:
         analysis.run_analysis.assert_called_once_with(period_days=3)
 
     def test_error_in_report(self):
-        analysis = MagicMock()
+        analysis = specced(SelfAnalysis)
         report = AnalysisReport(report_id="sa-err", error="LLM unavailable")
         analysis.run_analysis.return_value = report
         h = make_self_analyze_handler(self_analysis=analysis)
@@ -960,7 +1027,7 @@ class TestSelfAnalyzeHandler:
         assert r["error"] == "LLM unavailable"
 
     def test_telegram_notification(self):
-        analysis = MagicMock()
+        analysis = specced(SelfAnalysis)
         # Real AnalysisReport guards bug #1: if production reads the phantom
         # analysis_text again, the notify branch raises (swallowed) and the
         # assert_called_once below fails.
@@ -973,7 +1040,7 @@ class TestSelfAnalyzeHandler:
             error=None,
         )
         analysis.run_analysis.return_value = report
-        notifier = MagicMock()
+        notifier = specced(TelegramNotifier)
         h = make_self_analyze_handler(
             self_analysis=analysis, telegram_notifier=notifier,
         )
@@ -984,7 +1051,10 @@ class TestSelfAnalyzeHandler:
 class TestCreativeHandler:
 
     def test_success(self):
-        creative = MagicMock()
+        creative = specced(CreativeModule)
+        # Explicit: an autospec'd should_reflect() still returns a truthy Mock,
+        # which would bypass the cooldown guard by accident. Say so out loud.
+        creative.should_reflect.return_value = True
         creative.reflect.return_value = {
             "success": True, "tensions": ["repetition"],
             "meta_goals_created": [],
@@ -995,7 +1065,8 @@ class TestCreativeHandler:
         creative.reflect.assert_called_once_with(trigger="planner")
 
     def test_exception(self):
-        creative = MagicMock()
+        creative = specced(CreativeModule)
+        creative.should_reflect.return_value = True
         creative.reflect.side_effect = RuntimeError("boom")
         h = make_creative_handler(creative_module=creative)
         r = h(_plan(ActionType.CREATIVE))
@@ -1003,12 +1074,13 @@ class TestCreativeHandler:
         assert "boom" in r["error"]
 
     def test_telegram_tensions(self):
-        creative = MagicMock()
+        creative = specced(CreativeModule)
+        creative.should_reflect.return_value = True
         creative.reflect.return_value = {
             "success": True, "tensions": ["t1"],
             "meta_goals_created": ["mg1"],
         }
-        notifier = MagicMock()
+        notifier = specced(TelegramNotifier)
         h = make_creative_handler(
             creative_module=creative, telegram_notifier=notifier,
         )
@@ -1016,43 +1088,116 @@ class TestCreativeHandler:
         notifier.notify_creative_tensions.assert_called_once_with(["t1"])
         notifier.notify_creative_meta_goals.assert_called_once_with(["mg1"])
 
+    # -- Cooldown guard (2026-07-06): purpose-built stubs, NOT MagicMock --
+    # a MagicMock's should_reflect() returns a truthy mock, which silently
+    # bypasses the guard -- exactly the mock-hidden-bug class.
+
+    class _CooldownFacade:
+        """Stub facade on cooldown; reflect() must never run."""
+        def should_reflect(self):
+            return False
+
+        def reflect(self, trigger="periodic"):
+            raise AssertionError("reflect() must not run on cooldown")
+
+    class _ReadyFacade:
+        """Stub facade past cooldown; records reflect() triggers."""
+        def __init__(self):
+            self.calls = []
+
+        def should_reflect(self):
+            return True
+
+        def reflect(self, trigger="periodic"):
+            self.calls.append(trigger)
+            return {"success": True, "tensions": [], "meta_goals_created": []}
+
+    def test_cooldown_skips_reflect(self):
+        h = make_creative_handler(creative_module=self._CooldownFacade())
+        r = h(_plan(ActionType.CREATIVE))
+        # success must be False: PlannerCore checks success BEFORE skipped,
+        # so True here would mark the plan COMPLETED and feed phantom
+        # successes to backoff/StrategicPlanner/K8 (review finding 07-06).
+        assert r["success"] is False
+        assert r["skipped"] is True
+        assert r["idle_reason"] == "creative_cooldown"
+
+    def test_cooldown_elapsed_runs_reflect(self):
+        facade = self._ReadyFacade()
+        h = make_creative_handler(creative_module=facade)
+        r = h(_plan(ActionType.CREATIVE, {"trigger": "planner"}))
+        assert r["success"] is True
+        assert facade.calls == ["planner"]
+
+    def test_real_facade_cooldown_skips(self, tmp_path):
+        # REAL CreativeModule: fresh reflection timestamp -> the handler must
+        # skip without starting a cycle. tmp dirs, never the CWD defaults.
+        import time
+        from agent_core.creative.facade import CreativeModule
+        module = CreativeModule(data_dir=str(tmp_path),
+                                memory_dir=str(tmp_path))
+        module._last_reflection_ts = time.time()
+        h = make_creative_handler(creative_module=module)
+        r = h(_plan(ActionType.CREATIVE))
+        assert r["success"] is False
+        assert r.get("skipped") is True
+        assert r["idle_reason"] == "creative_cooldown"
+
+    def test_fallback_exec_creative_mirrors_guard(self):
+        # The no-router fallback (_exec_creative) must behave identically --
+        # it is the path tests/dev harnesses hit when no CapabilityRouter is
+        # wired.
+        from agent_core.planner.action_executor import ActionExecutor
+        ex = ActionExecutor()
+        ex._creative_module = self._CooldownFacade()
+        r = ex._exec_creative(_plan(ActionType.CREATIVE))
+        assert r["success"] is False
+        assert r["skipped"] is True
+        assert r["idle_reason"] == "creative_cooldown"
+
 
 class TestAskExpertHandler:
 
     def test_expert_bridge_success(self):
-        bridge = MagicMock()
-        resp = MagicMock()
-        resp.success = True
-        resp.response = "Fizyka to nauka o..." * 20
-        resp.context_prompt = "Pytanie o fizyka"
-        resp.gap_action = "ASK_EXPERT"
-        resp.reason = ""
-        resp.duration_ms = 150
-        resp.metadata = {}
+        bridge = specced(ExpertBridge)
+        # REAL ExpertResponse (dataclass) -- the handler reads 7 attributes off
+        # it; a mock would happily invent any of them.
+        resp = ExpertResponse(
+            success=True,
+            topic="fizyka",
+            response="Fizyka to nauka o..." * 20,
+            context_prompt="Pytanie o fizyka",
+            gap_action="ASK_EXPERT",
+            reason="",
+            duration_ms=150,
+            metadata={},
+        )
         bridge.ask_about_topic.return_value = resp
         h = make_ask_expert_handler(
-            llm_router=MagicMock(), expert_bridge=bridge,
+            llm_router=specced(LLMRouter), expert_bridge=bridge,
         )
         r = h(_plan(ActionType.ASK_EXPERT, {"topic": "fizyka"}))
         assert r["success"] is True
         assert r["saved_to_input"] is False or r["saved_to_input"] is True
 
     def test_expert_bridge_skip(self):
-        bridge = MagicMock()
-        resp = MagicMock()
-        resp.success = False
-        resp.reason = "expert_material_already_exists"
-        resp.gap_action = ""
+        bridge = specced(ExpertBridge)
+        resp = ExpertResponse(
+            success=False,
+            topic="fizyka",
+            reason="expert_material_already_exists",
+            gap_action="",
+        )
         bridge.ask_about_topic.return_value = resp
         h = make_ask_expert_handler(
-            llm_router=MagicMock(), expert_bridge=bridge,
+            llm_router=specced(LLMRouter), expert_bridge=bridge,
         )
         r = h(_plan(ActionType.ASK_EXPERT, {"topic": "fizyka"}))
         assert r["success"] is True
         assert r["skipped"] is True
 
     def test_legacy_fallback(self):
-        router = MagicMock()
+        router = specced(LLMRouter)
         router.ask_encyclopedia.return_value = "Odpowiedz eksperta"
         h = make_ask_expert_handler(llm_router=router, expert_bridge=None)
         r = h(_plan(ActionType.ASK_EXPERT, {"topic": "chemia"}))
@@ -1060,14 +1205,14 @@ class TestAskExpertHandler:
         assert r["response_length"] > 0
 
     def test_legacy_empty_response(self):
-        router = MagicMock()
+        router = specced(LLMRouter)
         router.ask_encyclopedia.return_value = ""
         h = make_ask_expert_handler(llm_router=router)
         r = h(_plan(ActionType.ASK_EXPERT, {"topic": "chemia"}))
         assert r["success"] is False
 
     def test_no_topic_no_question(self):
-        router = MagicMock()
+        router = specced(LLMRouter)
         h = make_ask_expert_handler(llm_router=router)
         r = h(_plan(ActionType.ASK_EXPERT))
         assert r["success"] is False
@@ -1076,14 +1221,17 @@ class TestAskExpertHandler:
 class TestCritiqueHandler:
 
     def test_success(self):
-        critic = MagicMock()
-        report = MagicMock()
-        report.error = None
-        report.report_id = "cr-1"
-        report.findings = []
-        report.findings_total = 0
-        report.goals_created = 0
-        report.duration_ms = 200
+        critic = specced(CriticAgent)
+        # REAL CritiqueReport -- goals_created is a List[str] in the dataclass,
+        # so the old `= 0` mock was lying about the shape too.
+        report = CritiqueReport(
+            report_id="cr-1",
+            findings=[],
+            goals_created=[],
+            findings_total=0,
+            duration_ms=200,
+            error=None,
+        )
         critic.run_critique.return_value = report
         h = make_critique_handler(critic_agent=critic)
         r = h(_plan(ActionType.CRITIQUE))
@@ -1091,29 +1239,37 @@ class TestCritiqueHandler:
         assert r["findings"] == 0
 
     def test_error_in_report(self):
-        critic = MagicMock()
-        report = MagicMock()
-        report.error = "no beliefs"
-        report.report_id = "cr-err"
+        critic = specced(CriticAgent)
+        report = CritiqueReport(report_id="cr-err", error="no beliefs")
         critic.run_critique.return_value = report
         h = make_critique_handler(critic_agent=critic)
         r = h(_plan(ActionType.CRITIQUE))
         assert r["success"] is False
 
     def test_telegram_critical_findings(self):
-        critic = MagicMock()
-        finding = MagicMock()
-        finding.severity = "critical"
-        finding.to_dict.return_value = {"severity": "critical", "dimension": "contradiction"}
-        report = MagicMock()
-        report.error = None
-        report.report_id = "cr-2"
-        report.findings = [finding]
-        report.findings_total = 1
-        report.goals_created = 0
-        report.duration_ms = 100
+        critic = specced(CriticAgent)
+        # REAL CritiqueFinding via its factory: this is what actually pins the
+        # handler's `f.severity == "critical"` string compare to the real
+        # FindingSeverity.CRITICAL.value. A mock hand-setting the string would
+        # keep passing even if the field became an enum.
+        finding = create_finding(
+            category=FindingCategory.CONTRADICTION,
+            severity=FindingSeverity.CRITICAL,
+            topic="fizyka",
+            description="sprzecznosc",
+            suggested_action=SuggestedCritiqueAction.RESOLVE,
+        )
+        assert finding.severity == "critical"   # guards the compare above
+        report = CritiqueReport(
+            report_id="cr-2",
+            findings=[finding],
+            goals_created=[],
+            findings_total=1,
+            duration_ms=100,
+            error=None,
+        )
         critic.run_critique.return_value = report
-        notifier = MagicMock()
+        notifier = specced(TelegramNotifier)
         h = make_critique_handler(critic_agent=critic, telegram_notifier=notifier)
         h(_plan(ActionType.CRITIQUE))
         notifier.notify_critique.assert_called_once()
@@ -1132,13 +1288,13 @@ class TestValidateHandler:
 
     def test_no_file_id_no_analyzer(self):
         """Without analyzer and file_id, should fail gracefully."""
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         h = make_validate_handler(cross_validator=validator)
         r = h(_plan(ActionType.VALIDATE))
         assert r["success"] is False
 
     def test_no_candidate_returns_error(self):
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         analyzer = specced(KnowledgeAnalyzer)
         analyzer.get_knowledge_snapshot.return_value = {
             "files_by_status": {"completed": []}
@@ -1184,7 +1340,7 @@ class TestValidateHandler:
         monkeypatch.setattr(config, "INPUT_DIR", input_dir)
         monkeypatch.setattr(config, "LONGTERM_MEMORY", memory_path)
 
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         validator.validate_file.return_value = {
             "chunks_validated": 1,
             "chunks_agreed": 1,
@@ -1202,7 +1358,7 @@ class TestValidateHandler:
 
     def test_rejects_unknown_file_id_shape(self):
         """B2 regression: unsupported file_id shape returns an error."""
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         h = make_validate_handler(cross_validator=validator)
 
         r = h(_plan(ActionType.VALIDATE, params={"file_id": 123}))
@@ -1213,7 +1369,7 @@ class TestValidateHandler:
 
     def test_dict_file_id_without_id_or_file_keys(self):
         """B2 regression: malformed file_id dict returns an error."""
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         h = make_validate_handler(cross_validator=validator)
 
         r = h(_plan(ActionType.VALIDATE, params={"file_id": {"folder": "root"}}))
@@ -1268,7 +1424,7 @@ class TestValidateHandler:
         ))
         store.save()
 
-        validator = MagicMock()
+        validator = specced(CrossValidator)
         validator.validate_file.return_value = {
             "chunks_validated": 1,
             "chunks_agreed": 1,
@@ -1313,12 +1469,16 @@ class TestUpdateLearningGoal:
     def test_no_goal_id_noop(self):
         update_learning_goal(
             _plan(goal_id=None), {"chunks_learned": 1},
-            goal_store=MagicMock(), knowledge_analyzer=None, telegram_notifier=None,
+            goal_store=specced(GoalStore), knowledge_analyzer=None,
+            telegram_notifier=None,
         )
 
     def test_non_learning_goal_skipped(self):
-        goal = MagicMock()
-        goal.type.value = "meta"
+        goal = create_goal(
+            goal_type=GoalType.META,
+            description="Misja",
+            priority=1.0,
+        )
         store = specced(GoalStore)
         store.get.return_value = goal
         update_learning_goal(
@@ -1328,10 +1488,12 @@ class TestUpdateLearningGoal:
         store.update_progress.assert_not_called()
 
     def test_progress_increment_on_chunks(self):
-        goal = MagicMock()
-        goal.type.value = "learning"
-        goal.progress = 0.0
-        goal.metadata = {}
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Nauka",
+            priority=0.5,
+            metadata={},
+        )
         store = specced(GoalStore)
         store.get.return_value = goal
         update_learning_goal(
@@ -1374,3 +1536,334 @@ class TestIndependentlyVerifiedCompletedIds:
                           duplicates=[("dup.txt", "canon.txt")])
         out = independently_verified_completed_ids(snap, verified_ids=set())
         assert out == set()
+
+
+class TestFetchHandlerFeedProfile:
+    """B1 choke-point: market goals fetch from MARKET_FEEDS; None-safe."""
+
+    @staticmethod
+    def _goal(metadata):
+        return create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Fetch test",
+            priority=0.5,
+            metadata=metadata,
+        )
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_market_goal_passes_market_profile(self, _window):
+        analyzer = specced(KnowledgeAnalyzer)
+        goal_store = specced(GoalStore)
+        goal_store.get.return_value = self._goal({"source_kind": "market"})
+        with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
+            mock_fetch.return_value = {
+                "articles_fetched": 1, "topics_searched": 0, "errors": 0,
+            }
+            h = make_fetch_handler(knowledge_analyzer=analyzer, goal_store=goal_store)
+            h(_plan(ActionType.FETCH, goal_id="goal-mkt"))
+            assert mock_fetch.call_args.kwargs["feed_profile"] == "market"
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_non_market_goal_passes_no_profile(self, _window):
+        analyzer = specced(KnowledgeAnalyzer)
+        goal_store = specced(GoalStore)
+        goal_store.get.return_value = self._goal({"project_parent": "p1"})
+        with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
+            mock_fetch.return_value = {
+                "articles_fetched": 1, "topics_searched": 0, "errors": 0,
+            }
+            h = make_fetch_handler(knowledge_analyzer=analyzer, goal_store=goal_store)
+            h(_plan(ActionType.FETCH, goal_id="goal-sci"))
+            assert mock_fetch.call_args.kwargs["feed_profile"] is None
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_no_goal_store_is_none_safe(self, _window):
+        # Regression for the B1 bug the red-team caught: an unguarded
+        # goal_store.get(plan.goal_id) with goal_store=None would AttributeError,
+        # and CapabilityRouter would turn it into success=False for EVERY fetch
+        # (science too). resolve_feed_profile must return None instead.
+        analyzer = specced(KnowledgeAnalyzer)
+        with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
+            mock_fetch.return_value = {
+                "articles_fetched": 1, "topics_searched": 0, "errors": 0,
+            }
+            h = make_fetch_handler(knowledge_analyzer=analyzer)  # goal_store=None
+            r = h(_plan(ActionType.FETCH, goal_id="goal-x"))
+            assert r["success"] is True
+            assert mock_fetch.call_args.kwargs["feed_profile"] is None
+
+
+class TestProvenanceGate:
+    """Kronika TIER 1: market children credited only by provenance, scoped so
+    every other goal is unchanged; observe-first (inert until cutover)."""
+
+    # -- unit: mode --------------------------------------------------------
+    def test_mode_default_off(self, monkeypatch):
+        from agent_core.routing.handlers import _provenance_gate_mode
+        monkeypatch.delenv("KRONIKA_PROVENANCE_GATE", raising=False)
+        assert _provenance_gate_mode() == "off"
+
+    def test_mode_valid_values(self, monkeypatch):
+        from agent_core.routing.handlers import _provenance_gate_mode
+        for v in ("off", "observe", "cutover"):
+            monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", v.upper())
+            assert _provenance_gate_mode() == v
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "nonsense")
+        assert _provenance_gate_mode() == "off"
+
+    # -- unit: _credit_progress -------------------------------------------
+    def test_credit_progress_non_market(self):
+        from agent_core.routing.handlers import _credit_progress
+        g = self._goal({"topics": ["x"]})
+        assert _credit_progress(g, 2, 4) == 0.5
+        assert _credit_progress(g, 0, 0) == 0.0  # no zero-division
+
+    def test_credit_progress_market_target_n(self):
+        from agent_core.routing.handlers import _credit_progress
+        g = self._goal({"source_kind": "market", "provenance_target_n": 5})
+        assert _credit_progress(g, 3, 20) == 0.6      # 3/5, ignores the 20 total
+        assert _credit_progress(g, 9, 20) == 1.0      # capped at 1.0
+
+    # -- unit: resolve_goal_files gate ------------------------------------
+    def _goal(self, metadata, gid="g1"):
+        return create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Provenance test",
+            priority=0.5,
+            metadata=metadata,
+            goal_id=gid,
+        )
+
+    def _analyzer(self, topic_files):
+        a = specced(KnowledgeAnalyzer)
+        a.get_files_for_topics.return_value = [(f, 1.0) for f in topic_files]
+        return a
+
+    def test_resolve_non_market_unchanged(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        g = self._goal({"topics": ["chemia"]})
+        assert resolve_goal_files(g, None, self._analyzer(["c.txt"])) == ["c.txt"]
+
+    def test_resolve_market_off_uses_topic_match(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "off")
+        g = self._goal({"source_kind": "market", "topics": ["btc"]})
+        assert resolve_goal_files(g, None, self._analyzer(["junk.txt"])) == ["junk.txt"]
+
+    def test_resolve_market_cutover_no_stamp_returns_empty(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        g = self._goal({"source_kind": "market", "topics": ["btc"]})
+        # token-match WOULD return junk.txt, but the gate credits only provenance
+        assert resolve_goal_files(g, None, self._analyzer(["junk.txt"])) == []
+
+    def test_resolve_market_cutover_uses_stamped(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        g = self._goal({
+            "source_kind": "market", "topics": ["btc"],
+            "market_file_ids": ["web_rss_20260710_zloto.txt"],
+        })
+        assert resolve_goal_files(g, None, self._analyzer(["junk.txt"])) == [
+            "web_rss_20260710_zloto.txt"
+        ]
+
+    def test_resolve_market_observe_inert(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "observe")
+        g = self._goal({"source_kind": "market", "topics": ["btc"],
+                        "market_file_ids": ["stamped.txt"]})
+        # observe = current behavior (token-match), just logs
+        assert resolve_goal_files(g, None, self._analyzer(["junk.txt"])) == ["junk.txt"]
+
+    # -- unit: /project sub-goal freshness floor + provenance (2026-07-11) --
+    def _project_child(self, metadata, created_at=1000.0, gid="pc1"):
+        g = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Project child",
+            priority=0.5,
+            metadata=metadata,
+            goal_id=gid,
+        )
+        g.created_at = created_at
+        return g
+
+    def test_resolve_project_child_excludes_stale_topic_match(self, monkeypatch):
+        # gate off: a /project child must NOT credit a PRE-EXISTING token-matched
+        # file (the confirmed false-close). The freshness floor drops it.
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "off")
+        g = self._project_child({"project_parent": "p", "topics": ["timeline"]})
+        a = self._analyzer(["old.txt"])
+        a.files_created_since.return_value = set()  # old.txt predates the goal
+        assert resolve_goal_files(g, None, a) == []
+
+    def test_resolve_project_child_keeps_fresh_topic_match(self, monkeypatch):
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "off")
+        g = self._project_child({"project_parent": "p", "topics": ["timeline"]})
+        a = self._analyzer(["fresh.txt", "old.txt"])
+        a.files_created_since.return_value = {"fresh.txt"}
+        assert resolve_goal_files(g, None, a) == ["fresh.txt"]
+
+    def test_resolve_project_child_cutover_provenance_only(self, monkeypatch):
+        # gate cutover: even a NON-market /project child owns ONLY stamped
+        # provenance, never token-match; empty stamp -> [] (frozen until fetch).
+        from agent_core.routing.handlers import resolve_goal_files
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        stamped = self._project_child(
+            {"project_parent": "p", "topics": ["timeline"],
+             "market_file_ids": ["prov.txt"]})
+        assert resolve_goal_files(
+            stamped, None, self._analyzer(["junk.txt"])) == ["prov.txt"]
+        empty = self._project_child({"project_parent": "p", "topics": ["timeline"]})
+        assert resolve_goal_files(empty, None, self._analyzer(["junk.txt"])) == []
+
+    # -- unit: stamp_market_provenance ------------------------------------
+    def test_stamp_market_goal(self):
+        from agent_core.routing.handlers import stamp_market_provenance
+        goal = self._goal({"source_kind": "market"}, gid="gm")
+        store = specced(GoalStore); store.get.return_value = goal
+        stamp_market_provenance(_plan(ActionType.FETCH, goal_id="gm"),
+                                ["a.txt", "b.txt"], store)
+        assert goal.metadata["market_file_ids"] == ["a.txt", "b.txt"]
+        store.save.assert_called_once()
+
+    def test_stamp_project_child(self):
+        # 2026-07-11: a non-market /project sub-goal now records provenance too
+        # (read back by resolve_goal_files under the gate), not just market goals.
+        from agent_core.routing.handlers import stamp_market_provenance
+        goal = self._goal({"project_parent": "p1"}, gid="pc")
+        store = specced(GoalStore); store.get.return_value = goal
+        stamp_market_provenance(_plan(ActionType.FETCH, goal_id="pc"),
+                                ["a.txt", "b.txt"], store)
+        assert goal.metadata["market_file_ids"] == ["a.txt", "b.txt"]
+        store.save.assert_called_once()
+
+    def test_stamp_plain_goal_noop(self):
+        # Neither market nor /project child -> still a no-op.
+        from agent_core.routing.handlers import stamp_market_provenance
+        goal = self._goal({"topics": ["x"]}, gid="g")
+        store = specced(GoalStore); store.get.return_value = goal
+        stamp_market_provenance(_plan(ActionType.FETCH, goal_id="g"), ["a.txt"], store)
+        assert "market_file_ids" not in goal.metadata
+
+    # -- unit: files_created_since (freshness parse) ----------------------
+    def test_files_created_since_parses_and_filters(self, tmp_path):
+        import json as _json
+        from datetime import datetime, timezone
+        from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+        idx = tmp_path / "knowledge_index.jsonl"
+        idx.write_text("\n".join(_json.dumps(r) for r in [
+            {"id": "old.txt", "created_at": "2026-01-01T00:00:00.000000Z"},
+            {"id": "new.txt", "created_at": "2026-07-01T00:00:00.000000Z"},
+            {"id": "nomicro.txt", "created_at": "2026-07-01T00:00:00Z"},
+            {"id": "missing.txt"},
+            {"id": "bad.txt", "created_at": "not-a-date"},
+        ]) + "\n", encoding="utf-8")
+        a = KnowledgeAnalyzer(knowledge_index_path=idx)
+        cutoff = datetime(2026, 6, 1, tzinfo=timezone.utc).timestamp()
+        # only files first-indexed at/after cutoff; missing/malformed excluded
+        assert a.files_created_since(cutoff) == {"new.txt", "nomicro.txt"}
+
+    def test_stamp_no_files_noop(self):
+        from agent_core.routing.handlers import stamp_market_provenance
+        store = specced(GoalStore)
+        stamp_market_provenance(_plan(ActionType.FETCH, goal_id="g"), [], store)
+        store.get.assert_not_called()
+
+    # -- guard: update_learning_goal (the blast-radius protection) ---------
+    def _market_goal(self, extra=None, progress=0.0):
+        md = {"source_kind": "market", "project_parent": "p1", "topics": ["btc zloto"]}
+        md.update(extra or {})
+        g = create_goal(
+            goal_type=GoalType.USER,
+            description="Kronika",
+            priority=0.5,
+            status=GoalStatus.ACTIVE,
+            metadata=md,
+            goal_id="gm",
+        )
+        g.progress = progress
+        return g
+
+    def _mk_analyzer(self, completed_ids, topic_files, monkeypatch):
+        monkeypatch.setattr(
+            "agent_core.goals.success_criteria.independently_verified_file_ids",
+            lambda *a, **k: set(completed_ids),
+        )
+        a = specced(KnowledgeAnalyzer)
+        a.get_knowledge_snapshot.return_value = {
+            "files_by_status": {"completed": [{"id": f, "file": f} for f in completed_ids]}
+        }
+        a.get_files_for_topics.return_value = [(f, 1.0) for f in topic_files]
+        return a
+
+    def test_guard_cutover_no_stamp_not_credited(self, monkeypatch):
+        # Market child, cutover, token-match WOULD find a verified junk file,
+        # but with no provenance stamp the gate credits nothing -> no progress.
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        goal = self._market_goal()
+        store = specced(GoalStore); store.get.return_value = goal
+        analyzer = self._mk_analyzer(["junk.txt"], ["junk.txt"], monkeypatch)
+        update_learning_goal(
+            _plan(ActionType.EXAM, goal_id="gm"),
+            {"exams_passed": 5}, store, analyzer, None,
+        )
+        store.update_progress.assert_not_called()  # nudge also suppressed
+
+    def test_guard_cutover_with_stamp_is_credited(self, monkeypatch):
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        goal = self._market_goal(extra={"market_file_ids": ["gold.txt"]})
+        store = specced(GoalStore); store.get.return_value = goal
+        analyzer = self._mk_analyzer(["gold.txt"], ["junk.txt"], monkeypatch)
+        update_learning_goal(
+            _plan(ActionType.EXAM, goal_id="gm"),
+            {"exams_passed": 1}, store, analyzer, None,
+        )
+        store.update_progress.assert_called_once_with("gm", 1.0)  # 1 stamped, 1 verified
+
+    def test_guard_observe_credits_like_today(self, monkeypatch):
+        # observe = inert: market child still credited by token-match (current).
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "observe")
+        goal = self._market_goal()
+        store = specced(GoalStore); store.get.return_value = goal
+        analyzer = self._mk_analyzer(["junk.txt"], ["junk.txt"], monkeypatch)
+        update_learning_goal(
+            _plan(ActionType.EXAM, goal_id="gm"),
+            {"exams_passed": 1}, store, analyzer, None,
+        )
+        store.update_progress.assert_called_once_with("gm", 1.0)
+
+    def test_guard_non_market_project_child_gated_cutover(self, monkeypatch):
+        # 2026-07-11: a NON-market /project child is provenance-gated like market
+        # at cutover -- no stamp -> file set empty AND nudge suppressed -> no
+        # credit even on 5 passed exams over token-junk (the confirmed false-close).
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        goal = self._market_goal(extra={"source_kind": "science"})  # project child
+        store = specced(GoalStore); store.get.return_value = goal
+        analyzer = self._mk_analyzer(["junk.txt"], ["junk.txt"], monkeypatch)
+        update_learning_goal(
+            _plan(ActionType.EXAM, goal_id="gm"),
+            {"exams_passed": 5}, store, analyzer, None,
+        )
+        store.update_progress.assert_not_called()
+
+    def test_guard_plain_learning_goal_unchanged_cutover(self, monkeypatch):
+        # Regression: a plain LEARNING goal (not a /project child) closes via
+        # token-match as before even in cutover -- neither gate nor freshness apply.
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "cutover")
+        goal = self._market_goal(extra={"source_kind": "science"})
+        goal.type = GoalType.LEARNING   # learning goal, not user/project
+        goal.metadata.pop("project_parent", None)
+        store = specced(GoalStore); store.get.return_value = goal
+        analyzer = self._mk_analyzer(["c.txt"], ["c.txt"], monkeypatch)
+        update_learning_goal(
+            _plan(ActionType.EXAM, goal_id="gm"),
+            {"exams_passed": 1}, store, analyzer, None,
+        )
+        store.update_progress.assert_called_once_with("gm", 1.0)

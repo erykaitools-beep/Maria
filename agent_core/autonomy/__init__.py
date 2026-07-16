@@ -107,6 +107,7 @@ class AutonomyPolicy:
         mode: str = "active",
         retention_rate: Optional[float] = None,
         already_approved: bool = False,
+        precheck: bool = False,
     ) -> CheckResult:
         """
         Check if an action is allowed by autonomy policy.
@@ -119,6 +120,14 @@ class AutonomyPolicy:
             health_score: Current system health
             mode: Current homeostasis mode
             retention_rate: K4 retention metric
+            precheck: True when the caller is only ASKING ("would this be
+                allowed?") before planning, not attempting the action. A
+                blocked precheck returns allowed=False but does NOT go
+                through the escalation handler -- the planner asks for every
+                rotation candidate every cycle (~60s at night), and logging
+                each "no" would flood autonomy_decisions.jsonl with
+                thousands of non-events per night. Real attempts (execution
+                gate) keep full escalation logging.
 
         Returns:
             CheckResult with allowed flag and details.
@@ -139,17 +148,41 @@ class AutonomyPolicy:
                 self._consecutive_failures[action_type] = 0
                 del self._failure_timestamps[action_type]
 
-        # Step 1: Rate limit check (for GUARDED actions)
-        if classification == ActionClassification.GUARDED:
+        # Step 1: Rate limit check for the frequency-governed classes:
+        # GUARDED (mutating, e.g. fetch/effector) and ANALYTICAL (reflection,
+        # e.g. self_analyze/creative/critique/validate). FREE actions
+        # (learn/exam/review/evaluate/noop/play) stay deliberately unlimited
+        # -- learning must run freely in-window, and evaluate/review are the
+        # cheap, zero/local-LLM floor actions the design never meant to cap.
+        #
+        # Before 2026-07-07 this was gated to GUARDED only, so the configured
+        # ANALYTICAL limits (self_analyze 2/h, critique 1/h, ...) were dead:
+        # record_execution() fed the limiter but check() never asked it. The
+        # off-window night rotation then ground K12 through the 70B NIM every
+        # ~60s (~370 runs/night). Adding ANALYTICAL here arms exactly the
+        # NIM-burning reflection actions without touching the FREE-class
+        # day-paths (P4 retention REVIEW, maintenance-theme EVALUATE, the
+        # exam-deadlock forced REVIEW), which select without prechecking and
+        # would otherwise start hitting this gate as loud FAILED plans.
+        #
+        # "ANALYTICAL must run 7/7" is a MODE guarantee (policy_rules), not an
+        # unlimited-frequency guarantee -- the limiter still lets it run in
+        # reduced/sleep, just not every cycle.
+        if classification in (
+            ActionClassification.GUARDED,
+            ActionClassification.ANALYTICAL,
+        ):
             rate_ok, rate_reason = self._rate_limiter.check(action_type)
             if not rate_ok:
-                blocked = self._escalation.handle(
-                    action_type=action_type,
-                    decision=PolicyDecision.RATE_LIMITED.value,
-                    reasons=[rate_reason],
-                    rule_name="rate_limiter",
-                    goal_id=goal_id,
-                )
+                blocked = None
+                if not precheck:
+                    blocked = self._escalation.handle(
+                        action_type=action_type,
+                        decision=PolicyDecision.RATE_LIMITED.value,
+                        reasons=[rate_reason],
+                        rule_name="rate_limiter",
+                        goal_id=goal_id,
+                    )
                 return CheckResult(
                     allowed=False,
                     decision=PolicyDecision.RATE_LIMITED.value,
@@ -197,18 +230,20 @@ class AutonomyPolicy:
         result = self._engine.evaluate(ctx)
 
         if not result.allowed:
-            blocked = self._escalation.handle(
-                action_type=action_type,
-                decision=result.decision.value,
-                reasons=result.reasons,
-                rule_name=result.rule_name,
-                goal_id=goal_id,
-                context_snapshot={
-                    "health_score": health_score,
-                    "mode": mode,
-                    "consecutive_failures": ctx.consecutive_failures,
-                },
-            )
+            blocked = None
+            if not precheck:
+                blocked = self._escalation.handle(
+                    action_type=action_type,
+                    decision=result.decision.value,
+                    reasons=result.reasons,
+                    rule_name=result.rule_name,
+                    goal_id=goal_id,
+                    context_snapshot={
+                        "health_score": health_score,
+                        "mode": mode,
+                        "consecutive_failures": ctx.consecutive_failures,
+                    },
+                )
             return CheckResult(
                 allowed=False,
                 decision=result.decision.value,
@@ -225,7 +260,9 @@ class AutonomyPolicy:
             classification=classification.value,
         )
 
-    def record_execution(self, action_type: str, success: bool) -> None:
+    def record_execution(
+        self, action_type: str, success: bool, skipped: bool = False
+    ) -> None:
         """
         Record action outcome for consecutive failure tracking and rate limiting.
 
@@ -234,8 +271,22 @@ class AutonomyPolicy:
         Args:
             action_type: ActionType.value string
             success: Whether the action succeeded
+            skipped: True if the executor declined the action before doing any
+                work (e.g. no fresh material passed the candidate filter --
+                ``idle_reason="filtered_out_all_candidates"``). A skip is NEITHER
+                a success nor a failure: it must not trip the
+                consecutive_failure_breaker, and must not reset a real failure
+                streak. Counting these skips as failures is what deadlocked
+                ``learn`` -- 3 thin-material skips tripped the breaker, which then
+                blocked every learn so the counter could never reset on a success.
         """
-        # Rate limiter: record all executions (successful or not)
+        # A skipped attempt never ran -- it is a non-event for both the failure
+        # breaker and the rate budget. Leaving the failure timestamp untouched
+        # also lets FAILURE_DECAY_SEC clear a real streak during a skip drought.
+        if skipped:
+            return
+
+        # Rate limiter: record all real executions (successful or not)
         self._rate_limiter.record(action_type)
 
         # Consecutive failure tracking

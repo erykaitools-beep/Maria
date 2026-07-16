@@ -65,6 +65,7 @@ class ContentWriter:
         url: str,
         source_type: str,
         topic: Optional[str] = None,
+        dated_slug: bool = False,
     ) -> Optional[str]:
         """
         Write content to input/ and register in FetchRegistry.
@@ -75,6 +76,9 @@ class ContentWriter:
             url: Source URL
             source_type: "wikipedia" or "rss"
             topic: Topic that led to this fetch (for registry)
+            dated_slug: Prefix the slug with the UTC fetch date (YYYYMMDD).
+                Used by the market profile so a 14-day kronika's repeatable
+                titles do not collide on slug and get silently dropped.
 
         Returns:
             Filename (e.g. "web_wiki_logika.txt") or None if skipped.
@@ -96,6 +100,8 @@ class ContentWriter:
         # for ChatGPT-authored educational articles; the "web_" prefix
         # remains for fetched web content (wiki/rss).
         slug = self._slugify(title)
+        if dated_slug:
+            slug = f"{datetime.now(timezone.utc).strftime('%Y%m%d')}_{slug}"
         st = source_type.lower()
         if "codex" in st:
             filename = f"codex_{slug}.txt"

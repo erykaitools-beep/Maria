@@ -82,6 +82,10 @@ def _fast_context_enabled() -> bool:
 # more context at the cost of a slower cold/trim turn.
 _CHAT_CTX_HIGH_CHARS = int(os.environ.get("CHAT_CTX_HIGH_CHARS", "4000"))
 _CHAT_CTX_LOW_CHARS = int(os.environ.get("CHAT_CTX_LOW_CHARS", "2000"))
+# Cap for the situational tail (work + operational state) appended AFTER the
+# cached prefix. It is re-prefilled each turn on CPU, so keep it tight; on
+# overflow the oldest turns are trimmed to stay within the chat budget.
+_CHAT_TAIL_MAX_CHARS = int(os.environ.get("CHAT_TAIL_MAX_CHARS", "600"))
 
 
 # httpx underlies the ollama client. We need it to recognise a read/connect
@@ -175,6 +179,8 @@ class OllamaBrain:
         # State-grounded operator response pipeline (Phase 2)
         self._query_router = None
         self._evidence_collector = None
+        self._honesty_protocol = None  # K15.2: honest-limits hint for the tail
+        self._self_context = None  # Super-META E2: situational self for the tail
         self._response_builder = None
 
         # Session tracking for time awareness
@@ -311,6 +317,22 @@ class OllamaBrain:
         self._evidence_collector = evidence_collector
         self._response_builder = response_builder
 
+    def set_honesty_protocol(self, honesty) -> None:
+        """Wire HonestyProtocol (K15.2) so the chat tail can carry a short, honest
+        'what I can't reliably do yet' line -- grounding the model against
+        overclaiming. Consumed in _build_situational_tail, gated OFF by
+        HONESTY_HINT_ENABLED; the line lives in the tail (never the cached
+        prefix), so it can never bust the warm KV cache."""
+        self._honesty_protocol = honesty
+
+    def set_self_context(self, self_context) -> None:
+        """Wire SelfContext (Super-META E2) so the chat tail can carry Maria's
+        situational self -- who she is talking to, what she last saw, her state.
+        Consumed in _build_situational_tail, gated OFF by SELF_CONTEXT_CHAT_ENABLED;
+        the block lives in the tail (never the cached prefix), so its per-turn
+        changes (vision, mode) can never bust the warm KV cache."""
+        self._self_context = self_context
+
     def set_work_context_provider(self, provider) -> None:
         """
         Set a callable that returns current work status as text.
@@ -407,9 +429,14 @@ class OllamaBrain:
         every turn (the measured ~90-260s -> ~2s win). The volatile bits live
         in _build_situational_tail() and ride on the latest user message, so
         they sit AFTER the cached prefix and never invalidate it.
+
+        NOTE: conversation_context is NOT included here. It is read live from the
+        persisted summaries file, which Phase 20 (condense_pending_sessions)
+        appends to during an active conversation -> it would mutate the prefix
+        mid-chat and bust the KV cache. It rides in _build_situational_tail()
+        instead (continuity preserved, prefix stays byte-stable).
         """
         identity_ctx = self._get_identity_context()
-        conversation_ctx = self._get_conversation_context()
         user_ctx = ""
         if self._user_profile:
             try:
@@ -423,7 +450,7 @@ class OllamaBrain:
                 identity_context=identity_ctx,
                 user_context=user_ctx,
                 work_context="",
-                conversation_context=conversation_ctx,
+                conversation_context="",
                 awareness_context="",
                 operational_summary="",
                 grounding_active=bool(self._query_router),
@@ -436,8 +463,6 @@ class OllamaBrain:
             prompt += f"\n[Tozsamosc: {identity_ctx}]"
         if user_ctx:
             prompt += f"\n{user_ctx}"
-        if conversation_ctx:
-            prompt += f"\n{conversation_ctx}"
         return prompt
 
     def _get_coarse_time_context(self) -> str:
@@ -477,25 +502,97 @@ class OllamaBrain:
             trimmed.pop(0)
         return trimmed
 
+    def _build_situational_tail(self) -> str:
+        """Volatile per-call context (work + operational state incl. mode).
+
+        The stable prefix deliberately DROPS these (so its bytes never change and
+        the KV cache stays warm). We re-add them HERE as a SECOND system message
+        that sits AFTER the cached prefix -> it is re-prefilled each turn but
+        never invalidates the prefix. This is what lets the chat answer about
+        Maria's CURRENT state/capabilities (mode, what she is doing now) while
+        the stable identity above lists what she can do in general.
+
+        Capped to protect CPU prefill latency (~17 tok/s); on overflow the
+        oldest history turns are trimmed (see _compose_send_messages) so the
+        total stays within the chat budget.
+        """
+        parts: List[str] = []
+        # Conversation context lives HERE (not the cached prefix): it is read
+        # from the summaries file that Phase 20 mutates mid-chat, so keeping it
+        # in the prefix would bust the cache. Placed first -> continuity wins the
+        # char budget if the tail is capped.
+        conv_ctx = self._get_conversation_context()
+        if conv_ctx:
+            parts.append(conv_ctx)
+        work_ctx = self._get_work_context()
+        if work_ctx:
+            parts.append(f"[Aktualna praca: {work_ctx}]")
+        op_summary = ""
+        if self._evidence_collector:
+            try:
+                op_summary = self._evidence_collector.build_compact_summary()
+            except Exception:
+                op_summary = ""
+        if op_summary:
+            parts.append(op_summary)
+        else:
+            aw = self._get_awareness_context()
+            if aw:
+                parts.append(aw)
+        # Super-META E2: situational self (operator + last vision + state) so the
+        # chat answers as ONE situated person ("widzialam ruch 5 min temu -- to
+        # bylas Ty?"). Flag-gated OFF (SELF_CONTEXT_CHAT_ENABLED) -- built now,
+        # armed + observed later. Lives in the tail (never the cached prefix), so
+        # its per-turn changes (vision/mode) can't bust the warm KV cache.
+        if self._self_context is not None and os.environ.get(
+            "SELF_CONTEXT_CHAT_ENABLED", ""
+        ).strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                situ = self._self_context.format_for_chat()
+            except Exception:
+                situ = ""
+            if situ:
+                parts.append(situ)
+        # Honest limits (K15.2): a short "what I can't reliably do yet" line so the
+        # model is grounded against overclaiming. Flag-gated OFF
+        # (HONESTY_HINT_ENABLED) -- built now, armed + observed later. Appended
+        # LAST so continuity (conv context) wins the char budget if the tail caps;
+        # lives in the tail (never the cached prefix) so it can't bust the cache.
+        if self._honesty_protocol is not None and os.environ.get(
+            "HONESTY_HINT_ENABLED", ""
+        ).strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                limits = self._honesty_protocol.get_honest_limits_line()
+            except Exception:
+                limits = ""
+            if limits:
+                parts.append(limits)
+        tail = "\n".join(p for p in parts if p)
+        if len(tail) > _CHAT_TAIL_MAX_CHARS:
+            tail = tail[:_CHAT_TAIL_MAX_CHARS].rstrip() + " ..."
+        return tail
+
     def _compose_send_messages(self, prompt: str) -> List[Dict[str, str]]:
         """Bounded, cache-stable message list for a normal chat turn.
 
-        [stable system prefix] + [recent turns within budget] + [latest user
-        turn, CLEAN]. The new user turn is sent exactly as it will be stored
-        (no per-call decoration), so on the next turn the cached prefix matches
-        byte-for-byte through this message and Ollama re-prefills only the new
-        tokens (~2-10s) instead of the whole history (~260s -> read-timeout).
-        Sending a decorated copy while storing a clean one would diverge the
-        cache one turn back on every call -- the trap an earlier draft hit.
+        [stable system prefix] + [situational tail] + [recent turns within
+        budget] + [latest user turn, CLEAN]. The stable prefix stays byte-stable
+        so Ollama re-prefills only the tokens AFTER it (~2-10s) instead of the
+        whole history (~260s -> read-timeout). The situational tail is a separate
+        system message AFTER the prefix, so live state never busts the cache.
+        The new user turn is sent exactly as stored (no per-call decoration), so
+        the cached prefix matches byte-for-byte on the next turn -- sending a
+        decorated copy while storing a clean one would diverge the cache one turn
+        back on every call (the trap an earlier draft hit).
         """
         stable_sys = self._build_stable_system_prompt()
+        tail = self._build_situational_tail()
         turns = [m for m in self.history if m.get("role") != "system"]
-        turns = self._trim_turns_to_budget(turns, len(stable_sys))
-        return (
-            [{"role": "system", "content": stable_sys}]
-            + turns
-            + [{"role": "user", "content": prompt}]
-        )
+        turns = self._trim_turns_to_budget(turns, len(stable_sys) + len(tail))
+        messages = [{"role": "system", "content": stable_sys}]
+        if tail:
+            messages.append({"role": "system", "content": tail})
+        return messages + turns + [{"role": "user", "content": prompt}]
 
     def refresh_time_context(self) -> None:
         """Refresh time context in system prompt and history."""

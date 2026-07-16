@@ -51,8 +51,12 @@ RESPONSE_ARTIFACT_LIMIT = 5000
 # Subprocess timeout for the Codex ``exec`` call. Implementation briefs
 # (T-MA-001/002/003 references) ran 6 minutes typical, up to 30 minutes
 # tail. CodexClient's default of 120 s is suitable for Q&A but kills any
-# real implementation work mid-run. 1800 s = 30 min ceiling.
-DEFAULT_CODEX_TIMEOUT_SEC = 1800.0
+# real implementation work mid-run. Raised 2026-07-12 from 1800 to 3600 s
+# (60 min) for GPT-5.6 Sol (reasoning=high) headroom on large tasks. This
+# is an upper safety cap, not a wait time: a task that finishes in 8 min
+# still returns in 8 min. The watchdog lease (core.py) tracks this value
+# via ``codex_timeout_sec`` + slack, so the daemon stays protected.
+DEFAULT_CODEX_TIMEOUT_SEC = 3600.0
 
 
 class DispatchOutcome(Enum):
@@ -204,6 +208,7 @@ class ConductorDispatcher:
         interval_sec: float = DEFAULT_DISPATCH_INTERVAL_SEC,
         codex_timeout_sec: float = DEFAULT_CODEX_TIMEOUT_SEC,
         clock_fn: Callable[[], float] = time.time,
+        allowed_workspace_roots: Optional[List[Path]] = None,
     ):
         self._conductor = conductor
         self._codex = codex_client
@@ -213,10 +218,38 @@ class ConductorDispatcher:
         self._codex_timeout = codex_timeout_sec
         self._clock = clock_fn
         self._last_dispatch_ts: float = 0.0
+        # One-time crash-recovery sweep, run lazily on the first dispatch
+        # attempt of this process (NOT at wiring time: HomeostasisModule.init
+        # also runs under tests against the production queue paths -- a
+        # wiring-time mutation there requeued and live-dispatched a real task
+        # on 2026-07-04). Before the first dispatch of a fresh process no
+        # dispatch can be in flight, so any IN_PROGRESS task is an orphan.
+        self._stale_swept = False
+        # Workspace allowlist (audit 2026-06-16): the dispatcher fires Codex
+        # (autonomous file writes, approval_policy=never) against the workspace a
+        # task names. Without a wall a poisoned/mis-routed workspace_path could
+        # point Codex at any directory. Each resolved root is the realpath of an
+        # allowed tree; a task whose resolved workspace is not at/under one is
+        # refused (BLOCKED). None disables the check (back-compat for callers /
+        # tests that don't pass one), but production wiring MUST pass it.
+        self._allowed_roots: Optional[List[Path]] = None
+        if allowed_workspace_roots is not None:
+            self._allowed_roots = []
+            for root in allowed_workspace_roots:
+                try:
+                    self._allowed_roots.append(Path(root).expanduser().resolve())
+                except (TypeError, OSError):
+                    continue
 
     @property
     def project(self) -> str:
         return self._project
+
+    @property
+    def codex_timeout_sec(self) -> float:
+        """Hard subprocess timeout for one dispatch. The tick loop reads this
+        to size its watchdog lease (external_op_lease) around dispatch_next."""
+        return self._codex_timeout
 
     def should_dispatch(self, now: Optional[float] = None) -> bool:
         """True when at least ``interval_sec`` has elapsed since last attempt."""
@@ -227,6 +260,23 @@ class ConductorDispatcher:
         """Single dispatch attempt. Updates ``_last_dispatch_ts`` unconditionally."""
         now = self._clock() if now is None else now
         self._last_dispatch_ts = now
+
+        if not self._stale_swept:
+            self._stale_swept = True
+            try:
+                for t in self._conductor.requeue_stale_in_progress(
+                    self._project
+                ):
+                    logger.warning(
+                        "[Dispatcher] crash-recovery sweep: %s orphaned "
+                        "IN_PROGRESS -> %s", t.task_id, t.status.value,
+                    )
+                    self._notify(
+                        f"[Conductor] {t.task_id} orphaned IN_PROGRESS -> "
+                        f"{t.status.value} (crash recovery)"
+                    )
+            except Exception:
+                logger.exception("[Dispatcher] crash-recovery sweep failed")
 
         task = self._conductor.get_autonomous_next(self._project)
         if task is None:
@@ -254,45 +304,88 @@ class ConductorDispatcher:
             return self._handle_workspace_dirty(task)
 
         head_before = get_workspace_head(workspace_path)
+        if head_before is None:
+            # No commit baseline -> we could neither verify what Codex did nor
+            # safely auto-commit (a blind "git add -A" could sweep the wrong
+            # tree, and no-movement would misclassify as BLOCKED). Refuse rather
+            # than dispatch blind (audit 2026-06-16 #19).
+            self._conductor.mark_blocked(
+                task.task_id, "could not read workspace HEAD pre-dispatch"
+            )
+            self._notify(
+                f"[Conductor] {task.task_id} BLOCKED (HEAD unreadable pre-dispatch)"
+            )
+            return DispatchResult(
+                outcome=DispatchOutcome.BLOCKED,
+                task_id=task.task_id,
+                project=task.project,
+                error="head unreadable pre-dispatch",
+                response_summary="could not read workspace HEAD pre-dispatch",
+            )
+
         self._conductor.mark_in_progress(task.task_id, Assignee.CODEX)
 
-        self._notify(
-            f"[Conductor] Dispatching {task.task_id} -> Codex\n"
-            f"Project: {task.project}\n"
-            f"Title: {task.title}\n"
-            f"Workspace: {workspace_path}"
-        )
-
-        start = time.time()
-        response = self._codex.ask(
-            task.description,
-            source="conductor_dispatcher",
-            context={"task_id": task.task_id, "project": task.project},
-            cwd=workspace_path,
-            timeout_s=self._codex_timeout,
-            impl_mode=True,
-        )
-        duration = time.time() - start
-
-        if response is None:
-            return self._handle_codex_none(task, duration)
-
-        head_after = get_workspace_head(workspace_path)
-        commits: List[str] = []
-        if head_before and head_after and head_before != head_after:
-            commits = get_commits_between(workspace_path, head_before, head_after)
-
-        if commits:
-            return self._handle_done(task, response, commits, head_before,
-                                     head_after, duration)
-        # No HEAD movement. Either Codex implemented + left dirty tree
-        # ("Implemented in the working tree" pattern) → auto-commit, or
-        # nothing actually happened → BLOCKED.
-        if get_workspace_dirty(workspace_path):
-            return self._handle_auto_commit(
-                task, response, head_before, workspace_path, duration,
+        # From here the task is IN_PROGRESS; any crash (Codex client raise, git
+        # error, OOM) must not strand it there forever -- no reaper sweeps a live
+        # IN_PROGRESS task (audit 2026-06-16 #5). On exception we drop it to
+        # BLOCKED, which IS recoverable (expiry sweeps maria self-repair; the
+        # operator sees market_agent failures).
+        try:
+            self._notify(
+                f"[Conductor] Dispatching {task.task_id} -> Codex\n"
+                f"Project: {task.project}\n"
+                f"Title: {task.title}\n"
+                f"Workspace: {workspace_path}"
             )
-        return self._handle_no_commits(task, response, duration)
+
+            start = time.time()
+            response = self._codex.ask(
+                task.description,
+                source="conductor_dispatcher",
+                context={"task_id": task.task_id, "project": task.project},
+                cwd=workspace_path,
+                timeout_s=self._codex_timeout,
+                impl_mode=True,
+            )
+            duration = time.time() - start
+
+            if response is None:
+                return self._handle_codex_none(task, duration)
+
+            head_after = get_workspace_head(workspace_path)
+            commits: List[str] = []
+            if head_before and head_after and head_before != head_after:
+                commits = get_commits_between(workspace_path, head_before, head_after)
+
+            if commits:
+                return self._handle_done(task, response, commits, head_before,
+                                         head_after, duration)
+            # No HEAD movement. Either Codex implemented + left dirty tree
+            # ("Implemented in the working tree" pattern) → auto-commit, or
+            # nothing actually happened → BLOCKED.
+            if get_workspace_dirty(workspace_path):
+                return self._handle_auto_commit(
+                    task, response, head_before, workspace_path, duration,
+                )
+            return self._handle_no_commits(task, response, duration)
+        except Exception as exc:
+            logger.warning(
+                "[Dispatcher] dispatch crashed for %s: %s",
+                task.task_id, exc, exc_info=True,
+            )
+            self._conductor.mark_blocked(
+                task.task_id, f"dispatch exception: {exc}"
+            )
+            self._notify(
+                f"[Conductor] {task.task_id} BLOCKED (dispatch exception)"
+            )
+            return DispatchResult(
+                outcome=DispatchOutcome.BLOCKED,
+                task_id=task.task_id,
+                project=task.project,
+                error=f"dispatch exception: {exc}",
+                response_summary="dispatch crashed",
+            )
 
     # ── internals ───────────────────────────────────────────────────
 
@@ -324,7 +417,30 @@ class ConductorDispatcher:
                 f"[Conductor] {task.task_id} BLOCKED (workspace not found)"
             )
             return None
+        if not self._workspace_allowed(path):
+            self._conductor.mark_blocked(
+                task.task_id, f"workspace {path} outside allowlist"
+            )
+            self._notify(
+                f"[Conductor] {task.task_id} BLOCKED (workspace not allowlisted)"
+            )
+            return None
         return path
+
+    def _workspace_allowed(self, path: Path) -> bool:
+        """True when ``path`` is at/under an allowed root (realpath compared, so
+        a symlink escape is rejected). No allowlist configured -> allow (the
+        check is opt-in; production wiring passes the roots)."""
+        if self._allowed_roots is None:
+            return True
+        try:
+            real = path.resolve()
+        except OSError:
+            return False
+        for root in self._allowed_roots:
+            if real == root or root in real.parents:
+                return True
+        return False
 
     def _handle_codex_none(
         self, task: Task, duration: float

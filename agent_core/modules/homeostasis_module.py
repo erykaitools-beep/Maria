@@ -20,6 +20,149 @@ from agent_core.modules.homeostasis_telegram_commands import (
 logger = logging.getLogger(__name__)
 
 
+def _operator_quiet_now() -> bool:
+    """True when the local clock is inside the operator's quiet window.
+
+    Resolved through OperatorModel (the SSoT for the preference) on every call,
+    so a change to quiet_hours takes effect without re-wiring the notifier. The
+    daemon runs in the operator's timezone (Europe/Warsaw), so datetime.now().hour
+    is his local hour. Fail-open: any lookup error means 'not quiet' and the
+    message still goes -- muting the operator forever on a bad read is the worse
+    failure.
+    """
+    try:
+        from datetime import datetime
+        from agent_core.operator.operator_model import (
+            get_operator_model,
+            quiet_hours_window,
+            in_quiet_hours,
+        )
+
+        window = quiet_hours_window(get_operator_model().get_preferences())
+        return in_quiet_hours(datetime.now().hour, window)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("[Telegram] quiet-hours resolution failed: %s", e)
+        return False
+
+
+def wire_proactive_generators(gen, ctx, core, proactive) -> None:
+    """Connect the proactive message generators to their live data sources.
+
+    Hoisted out of HomeostasisModule.init so a test can drive it against a real
+    ctx. Every defect this wiring has shipped lived in these lambdas rather than
+    in the code on either side of them -- an all-time chunk total labelled as a
+    day, achievements sliced by insertion order so a goal from 07-05 headlined
+    the 07-15 recap -- and unit tests of the store and the generator each saw a
+    correct half.
+    """
+    if ctx.evaluation_observer:
+        gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
+    if ctx.knowledge_analyzer:
+        gen.set_knowledge_fn(lambda: ctx.knowledge_analyzer.get_knowledge_snapshot())
+        # Chunks come from long-term memory, NOT from the snapshot's lifetime
+        # total and not from the count of successful learn actions.
+        gen.set_chunks_learned_fn(
+            lambda: ctx.knowledge_analyzer.count_chunks_learned(24.0)
+        )
+    if ctx.goal_store:
+        gen.set_goal_stats_fn(lambda: ctx.goal_store.stats())
+        gen.set_active_goals_fn(
+            lambda: [
+                {"description": g.description, "id": g.id}
+                for g in ctx.goal_store.get_active()
+            ]
+        )
+        gen.set_proposed_goals_fn(
+            lambda: [
+                {"description": g.description, "id": g.id}
+                for g in ctx.goal_store.get_proposed()
+            ]
+        )
+        # Only goals achieved in the last 24h, newest first -- the store answers
+        # this from the audit trail.
+        gen.set_recent_achievements_fn(
+            lambda: [
+                g.description
+                for g in ctx.goal_store.get_recently_achieved(24.0)
+            ]
+        )
+        # Live GOAL_ACHIEVED: subscribe to the store's achievement events so
+        # Maria texts when she finishes a goal (ADR-030 path).
+        proactive.bind_goal_store(ctx.goal_store)
+    # Live LEARNING_MILESTONE: the teacher pushes passed-exam milestones into the
+    # scheduler's buffer (note_learning_milestone); the generator drains it here.
+    # Twin of the GOAL_ACHIEVED path -- Maria texts when she finishes/passes a
+    # file, not only when she completes a goal.
+    gen.set_recent_milestones_fn(proactive.drain_recent_milestones)
+    # E4: full situational picture (lazy over ctx -- SelfContext is wired later in
+    # init; read at message time, so the attr is populated).
+    gen.set_self_context_fn(
+        lambda: ctx.self_context.build()
+        if getattr(ctx, "self_context", None) else None
+    )
+    if core:
+        gen.set_health_fn(lambda: core.get_state().get("health_score", 0))
+        gen.set_mode_fn(lambda: core.get_state().get("mode", "?"))
+
+
+def _wire_executor_modules(executor, core, memory_manager, llm_manager):
+    """Register modules so homeostasis corrective signals reach REAL handlers.
+
+    Incremental wiring (2026-06-14 audit, Rank 5 -- the executor was None for
+    ~4 months, so every corrective action was silently dropped):
+
+    - ``memory``  -> MemoryManager method-dispatch. ``consolidate_episodic``
+      (now honest: success=False/not_implemented) and ``semantic_consistency_check``
+      hit real methods; unknown signals (``readonly``) fall back to a benign ack.
+    - ``learning_engine`` -> ``pause`` stops the transient teacher if one is
+      running (idempotent, guarded -- the safe self-throttle under CPU/thermal
+      pressure). ``resume`` is a no-op marker: teacher START is owned by the
+      planner / learning window, not here.
+    - ``llm`` / ``metacontroller`` -> RECORD-ONLY handlers. No real knob exists
+      yet (CPU-only box, mutex-serialized inference), but the signal is now
+      logged + kept in signal_history instead of vanishing. Real effects are a
+      follow-up once the visibility event log shows them actually firing.
+    """
+    executor.register_module("memory", memory_manager)
+
+    def _learn_pause(**_):
+        teacher = getattr(core, "_teacher_agent", None)
+        if teacher is None:
+            return {"paused": True, "teacher_stopped": False}
+        try:
+            teacher.stop()
+        except Exception as exc:  # a corrective signal must never raise
+            return {"paused": False, "error": str(exc)}
+        return {"paused": True, "teacher_stopped": True}
+
+    def _learn_resume(**_):
+        return {"resumed": True, "note": "teacher start owned by planner"}
+
+    executor.register_module(
+        "learning_engine", core,
+        {"pause": _learn_pause, "resume": _learn_resume},
+    )
+
+    def _record_only(label):
+        def _handler(**_):
+            return {"acknowledged": True, "handler": label,
+                    "effect": "recorded_only"}
+        return _handler
+
+    executor.register_module("llm", llm_manager, {
+        "minimize": _record_only("llm.minimize"),
+        "reduce_batch_size": _record_only("llm.reduce_batch_size"),
+    })
+    executor.register_module("metacontroller", core, {
+        "interrupt_goal_refinement": _record_only(
+            "metacontroller.interrupt_goal_refinement"),
+    })
+    logger.info(
+        "[Homeostasis] ModuleExecutor wired: %s",
+        ", ".join(executor.get_registered_modules()),
+    )
+
+
 class HomeostasisModule(MariaModule):
     """Homeostasis monitoring and control."""
 
@@ -38,10 +181,16 @@ class HomeostasisModule(MariaModule):
             try:
                 memory_manager = MemoryManager()
                 llm_manager = LLMManager()
+                from agent_core.executor.module_executor import ModuleExecutor
+                executor = ModuleExecutor()
                 ctx.homeostasis_core = HomeostasisCore(
                     memory_manager=memory_manager,
                     llm_manager=llm_manager,
-                    executor=None,
+                    executor=executor,
+                )
+                _wire_executor_modules(
+                    executor, ctx.homeostasis_core,
+                    memory_manager, llm_manager,
                 )
                 print("[Homeostasis] [OK] Initialized")
             except Exception as e:
@@ -224,6 +373,11 @@ class HomeostasisModule(MariaModule):
             goal_store = GoalStore(goals_path)
             goal_store.load()
             goal_store.seed_if_empty()
+            # Self-heal the always-on META mission if it was abandoned (its loss
+            # disabled the saturation->FETCH supply pump). seed_if_empty only seeds
+            # an empty store, so a non-empty store with a killed mission needs this.
+            if goal_store.ensure_meta_goal():
+                goal_store.save()
             goal_store.expire_proposed()
             if goal_store.stats()["total"] > 0:
                 goal_store.save()
@@ -346,6 +500,35 @@ class HomeostasisModule(MariaModule):
                                   f"({pruned} self-graded file beliefs pruned)")
                     except Exception as _e:
                         logger.warning(f"WorldModel trust reconcile skipped: {_e}")
+                    # Conscious-unlearn boot guard: re-apply any retraction whose
+                    # target entity is still active on disk (a crash between the
+                    # in-memory flip and save() would otherwise leave it visible
+                    # and the next build_all could re-mint it). Own try -- a
+                    # replay hiccup must not block startup.
+                    try:
+                        replayed = world_model.reapply_pending_retractions()
+                        if replayed:
+                            print(f"[Homeostasis] [OK] WorldModel retraction boot "
+                                  f"replay re-applied {replayed} record(s)")
+                    except Exception as _e:
+                        logger.warning(f"WorldModel retraction replay skipped: {_e}")
+                    # Unlearn integrity census (desync detector): an ACTIVE belief
+                    # on the denylist means the resurrection guard half-failed.
+                    try:
+                        census = world_model.census_unlearn()
+                        bs = census.get("by_status", {})
+                        if bs.get("quarantined") or bs.get("retracted") or census.get("desync_count"):
+                            print(f"[Homeostasis] [OK] Unlearn census: "
+                                  f"{bs.get('quarantined', 0)} quarantined, "
+                                  f"{bs.get('retracted', 0)} retracted, "
+                                  f"desync={census.get('desync_count', 0)}")
+                        if census.get("desync_count"):
+                            logger.warning(
+                                "[Unlearn] DESYNC: %d active belief(s) on the "
+                                "denylist -- %s", census["desync_count"],
+                                census.get("desync"))
+                    except Exception as _e:
+                        logger.warning(f"WorldModel unlearn census skipped: {_e}")
                     planner.set_world_model(world_model)
                     ctx.world_model = world_model
                     # Wire BeliefStore for sleep consolidation (NREM2/NREM3).
@@ -477,6 +660,18 @@ class HomeostasisModule(MariaModule):
                             )
                             ctx.effector_coordinator = coord
                             planner.executor.set_effector_coordinator(coord)
+                            # DH-A: a single shared undo journal so the coordinator
+                            # (which records inverses) and the operator commands
+                            # (/undo_list, /undo_preview, /undo_action) read/write
+                            # the SAME instance. Observe-only until the journal flag
+                            # is armed; execution gated separately.
+                            try:
+                                from agent_core.effector.undo_journal import EffectorUndoJournal
+                                undo_journal = EffectorUndoJournal()
+                                coord.set_undo_journal(undo_journal)
+                                ctx.undo_journal = undo_journal
+                            except Exception as e:
+                                logger.warning(f"undo journal wiring failed: {e}")
                             print("[Homeostasis] [OK] EffectorCoordinator wired (preflight+prewarm+retry)")
                         except Exception as e:
                             logger.warning(f"EffectorCoordinator init failed: {e}")
@@ -624,6 +819,38 @@ class HomeostasisModule(MariaModule):
                         print("[Homeostasis] [OK] CreativeModule expert wired (Codex/ChatGPT)")
                 except Exception as e:
                     logger.warning(f"CreativeModule not initialized: {e}")
+
+                # Self-time: PlayModule ("spacer po wlasnej glowie").
+                # Ungraded free musing over what she already knows. Wired through
+                # the STATELESS, bounded LLM API (ask_as_role/_ask_once) exactly
+                # like self_analyze/critic -- NOT ollama.think(): think() would
+                # (1) inject fake turns into the SHARED operator chat history +
+                # conversation_memory + user_profile, (2) dirty the CHAT_FAST
+                # KV-cache prefix, and (3) bypass the heavy-mutex/call_with_timeout
+                # freeze guards. ask_as_role keeps it local-first, serialized on
+                # the heavy lease, and history-free. Dormant until PLAY_ENABLED.
+                try:
+                    from agent_core.play import PlayModule
+                    from maria_core.sys.config import BASE_DIR as _PLAY_BASE
+                    play_module = PlayModule(
+                        data_dir=str(_PLAY_BASE / "meta_data"),
+                    )
+                    _play_brain = ctx.brain
+                    if hasattr(_play_brain, "ask_as_role"):
+                        def _play_llm_fn(prompt, _b=_play_brain):
+                            return _b.ask_as_role("planner", prompt, temperature=0.85)
+                        play_module.set_llm_fn(_play_llm_fn)
+                        print("[Homeostasis] [OK] PlayModule LLM wired (router ask_as_role)")
+                    elif hasattr(_play_brain, "_ask_once"):
+                        def _play_llm_fn(prompt, _b=_play_brain):
+                            return _b._ask_once(prompt, temperature=0.85)
+                        play_module.set_llm_fn(_play_llm_fn)
+                        print("[Homeostasis] [OK] PlayModule LLM wired (bare-brain _ask_once)")
+                    planner.set_play_module(play_module)
+                    ctx.play_module = play_module
+                    print("[Homeostasis] [OK] PlayModule wired (self-time)")
+                except Exception as e:
+                    logger.warning(f"PlayModule not initialized: {e}")
 
                 # Faza G: CriticAgent (knowledge quality gate)
                 try:
@@ -872,6 +1099,20 @@ class HomeostasisModule(MariaModule):
                         memory_query.set_semantic_memory(ctx.semantic_search)
                     ctx.memory_query = memory_query
                     print("[Homeostasis] [OK] MemoryQuery wired (Phase 2)")
+                    # Conscious-unlearn (rollback/quarantine): wire the LIVE
+                    # semantic memory + query into the world model so a retract
+                    # evicts the belief's vector and invalidates the in-process
+                    # query cache immediately (not just on the next boot).
+                    try:
+                        if ctx.world_model is not None:
+                            ctx.world_model.set_unlearn_handles(
+                                semantic_memory=ctx.semantic_search,
+                                memory_query=memory_query,
+                            )
+                            print("[Homeostasis] [OK] Unlearn handles wired "
+                                  "(retract evicts vectors + invalidates cache)")
+                    except Exception as _e:
+                        logger.warning(f"Unlearn handles wiring skipped: {_e}")
                 except Exception as e:
                     logger.warning(f"MemoryQuery not initialized: {e}")
 
@@ -886,7 +1127,7 @@ class HomeostasisModule(MariaModule):
                         make_self_analyze_handler, make_creative_handler,
                         make_ask_expert_handler, make_validate_handler,
                         make_critique_handler, make_noop_handler,
-                        make_fs_write_handler,
+                        make_fs_write_handler, make_play_handler,
                     )
 
                     cap_router = CapabilityRouter()
@@ -924,9 +1165,9 @@ class HomeostasisModule(MariaModule):
                         core, _goals,
                     ), DEFAULT_CAPABILITY_SPECS["maintenance"])
 
-                    # Fetch
+                    # Fetch (core -> watchdog lease for the heldout bank author)
                     cap_router.register("fetch", make_fetch_handler(
-                        _analyzer, _sem, _goals,
+                        _analyzer, _sem, _goals, core=core,
                     ), DEFAULT_CAPABILITY_SPECS["fetch"])
 
                     # Experiment (K11)
@@ -984,6 +1225,11 @@ class HomeostasisModule(MariaModule):
                         _critic, _tg,
                     ), DEFAULT_CAPABILITY_SPECS["critique"])
 
+                    # Play (self-time) -- ungraded free musing, K7 FREE
+                    _play = ctx.play_module if hasattr(ctx, 'play_module') else None
+                    cap_router.register("play", make_play_handler(_play),
+                                        DEFAULT_CAPABILITY_SPECS["play"])
+
                     # Noop
                     cap_router.register("noop", make_noop_handler(),
                                         DEFAULT_CAPABILITY_SPECS["noop"])
@@ -997,10 +1243,26 @@ class HomeostasisModule(MariaModule):
                         from agent_core.operator.capability_manifest import CapabilityManifest
                         manifest = CapabilityManifest()
                         manifest.set_capability_router(cap_router)
+                        # DH-C: the manifest checks getattr(ctx, name) for each
+                        # capability's required_subsystems. Two organs it names live
+                        # elsewhere -- the teacher on core._teacher_agent and the LLM
+                        # router as ctx.brain -- so without this learn/exam/review and
+                        # ask_expert read as unavailable, and an armed gate would skip
+                        # Maria's core learning loop. Mirror them onto ctx.
+                        if getattr(ctx, "teacher_agent", None) is None and core is not None:
+                            _teacher = getattr(core, "_teacher_agent", None)
+                            if _teacher is not None:
+                                ctx.teacher_agent = _teacher
+                        if getattr(ctx, "llm_router", None) is None and getattr(ctx, "brain", None) is not None:
+                            ctx.llm_router = ctx.brain
                         manifest.set_context(ctx)
                         if core:
                             manifest.set_mode_fn(lambda: core.current_mode.name if core.current_mode else "UNKNOWN")
                         ctx.capability_manifest = manifest
+                        # DH-C: give the planner the self-model so it can gate an
+                        # action it cannot actually do (observe unless armed).
+                        if planner is not None:
+                            planner.set_capability_manifest(manifest)
                         print(f"[Homeostasis] [OK] CapabilityManifest wired ({len(manifest.get_available())} available)")
 
                         # Wire HonestyProtocol (K15.2) - evidence-based confidence
@@ -1009,6 +1271,16 @@ class HomeostasisModule(MariaModule):
                             honesty = HonestyProtocol()
                             honesty.set_capability_manifest(manifest)
                             ctx.honesty_protocol = honesty
+                            # Let the chat brain reach honest limits for its tail
+                            # (K15.2 in chat); the tail line is flag-gated OFF.
+                            # ctx.brain is usually the LLMRouter WRAPPER (which has
+                            # .think but NOT set_honesty_protocol) -- unwrap to the
+                            # real OllamaBrain via .ollama, mirroring lines 192/243,
+                            # else the wiring silently no-ops (dead in prod).
+                            _hb = getattr(ctx, "brain", None)
+                            _hb = getattr(_hb, "ollama", _hb)
+                            if _hb is not None and hasattr(_hb, "set_honesty_protocol"):
+                                _hb.set_honesty_protocol(honesty)
                             print("[Homeostasis] [OK] HonestyProtocol (K15.2) wired")
                         except Exception as e:
                             logger.warning(f"HonestyProtocol not initialized: {e}")
@@ -1042,6 +1314,8 @@ class HomeostasisModule(MariaModule):
                                 growth.set_knowledge_analyzer(ctx.knowledge_analyzer)
                             growth.refresh()
                             ctx.growth_awareness = growth
+                            if core:
+                                core.set_growth_awareness(growth)  # Phase 18c periodic refresh
                             _target_count = len(growth.get_targets(status="identified"))
                             print(f"[Homeostasis] [OK] GrowthAwareness (K15.3) wired ({_target_count} targets)")
                         except Exception as e:
@@ -1114,6 +1388,12 @@ class HomeostasisModule(MariaModule):
                     if hasattr(ctx, 'effector_coordinator') and ctx.effector_coordinator:
                         ctx.effector_coordinator.set_telegram_notifier(telegram.notifier)
 
+                    # Enforce operator quiet hours on all cooldown-gated alerts
+                    # (everything except QUIET_HOURS_CRITICAL). Before this the
+                    # notifier had no clock: 9 of 23 messages on 07-15 landed
+                    # inside the 23-06 window.
+                    telegram.notifier.set_quiet_hours_check(_operator_quiet_now)
+
                     # Flush old messages to avoid re-processing (e.g. /restart loop)
                     telegram.bot.flush_pending()
 
@@ -1169,7 +1449,12 @@ class HomeostasisModule(MariaModule):
                                 "images": [image_b64],
                                 "stream": False,
                             },
-                            timeout=30,
+                            # LLaVA image inference is ~57s on this CPU under
+                            # model contention (qwen3+llama3.1+llava loaded); 30s
+                            # cut it off mid-flight -> describe returned None ->
+                            # no vision ping. Generous headroom; the advisor runs
+                            # in a thread so it never blocks the tick.
+                            timeout=120,
                         )
                         if resp.status_code == 200:
                             return resp.json().get("response", "")
@@ -1200,6 +1485,60 @@ class HomeostasisModule(MariaModule):
 
                 ctx.vision_cortex = vision_cortex
                 core.set_vision_cortex(vision_cortex)
+
+                # VisionAdvisor: Maria reacts to what she sees. On salient motion
+                # it runs LLaVA in a background thread and proactively pings the
+                # operator. Advisory-only (R1/K7-safe); inert without a notifier.
+                # parse_mode=None: LLaVA descriptions can contain Markdown-breaking
+                # chars that would 400 the send.
+                try:
+                    from agent_core.vision.vision_advisor import VisionAdvisor
+                    _v_notify = None
+                    _v_notifier = getattr(ctx, "telegram_notifier", None)
+                    if _v_notifier is not None and hasattr(_v_notifier, "send_raw"):
+                        _v_notify = lambda t, _n=_v_notifier: _n.send_raw(t, parse_mode=None)
+                    # Preferred delivery: send the frame as a photo so the operator
+                    # sees what Maria sees (falls back to the text notifier).
+                    _v_photo = None
+                    _v_bridge = getattr(ctx, "telegram_bridge", None)
+                    if _v_bridge is not None and getattr(_v_bridge, "bot", None) is not None:
+                        _v_photo = lambda p, c, _b=_v_bridge: _b.bot.send_photo(p, caption=c)
+                    # LLaVA describes in English; render the caption to fluent
+                    # Polish via the router (NIM-first, local fallback).
+                    _v_translate = None
+                    _v_brain = getattr(ctx, "brain", None)
+                    if _v_brain is not None and hasattr(_v_brain, "translate_to_polish"):
+                        _v_translate = _v_brain.translate_to_polish
+                    # VisionMemory (Super-META E1): so what Maria sees is remembered,
+                    # not just sent-and-forgotten. Read by SelfContext + /lastseen.
+                    try:
+                        from agent_core.vision.vision_memory import VisionMemory
+                        ctx.vision_memory = VisionMemory()
+                    except Exception as _e:
+                        logger.warning(f"VisionMemory not initialized: {_e}")
+                    vision_advisor = VisionAdvisor(
+                        vision_cortex, notify_fn=_v_notify, photo_fn=_v_photo,
+                        translate_fn=_v_translate,
+                        memory=getattr(ctx, "vision_memory", None),
+                        # E3: vision HEARS the chat organ -- consult SelfContext for
+                        # operator presence so a redundant "I saw motion" ping is
+                        # skipped while the operator is active in chat. Lazy over ctx
+                        # because SelfContext is wired later (below) than the advisor.
+                        operator_present_fn=lambda: bool(
+                            getattr(ctx, "self_context", None)
+                            and ctx.self_context.operator_active_recently()
+                        ),
+                        # Quiet hours: at night, record the motion but neither
+                        # ping nor run LLaVA (same predicate the notifier uses).
+                        # Vision was 19 of the ~19 send_raw night messages/week.
+                        quiet_hours_fn=_operator_quiet_now,
+                    )
+                    ctx.vision_advisor = vision_advisor
+                    core.set_vision_advisor(vision_advisor)
+                    _v_mode = "photo+text" if _v_photo else ("text" if _v_notify else "inert: no notifier")
+                    print(f"[Homeostasis] [OK] VisionAdvisor wired ({_v_mode})")
+                except Exception as e:
+                    logger.warning(f"VisionAdvisor not initialized: {e}")
             except Exception as e:
                 logger.warning(f"VisionCortex not initialized: {e}")
 
@@ -1326,11 +1665,25 @@ class HomeostasisModule(MariaModule):
             gen = proactive.generators
             if ctx.user_profile:
                 gen.set_user_name_fn(lambda: ctx.user_profile.get_name())
-                gen.set_user_interests_fn(lambda: ctx.user_profile.get_interests())
             om = getattr(ctx, 'operator_model', None)
             if om:
                 gen.set_operator_context_fn(lambda: om.get_context())
                 gen.set_operator_rhythm_fn(lambda: om.rhythm)
+
+                # ActiveLearner (Faza 1 / K14.1): inject "what to ask next" so the
+                # scheduler can ask ONE low-pressure question/day to fill a gap.
+                # Flag-gated in the scheduler (ACTIVE_LEARNER_ENABLED). The same
+                # ctx.active_learner captures the operator's answer in the poll loop.
+                try:
+                    from agent_core.operator.active_learner import ActiveLearner
+                    _al = ActiveLearner()
+                    ctx.active_learner = _al
+                    gen.set_operator_question_fn(
+                        lambda _a=_al, _o=om: _a.next_question(_o)
+                    )
+                    print("[Homeostasis] [OK] ActiveLearner (K14.1) wired")
+                except Exception as e:
+                    logger.warning(f"ActiveLearner not initialized: {e}")
 
             # Wire weather sensor (M3: WeatherSensor + SalienceFilter)
             _owm_key = os.environ.get("OPENWEATHERMAP_API_KEY", "")
@@ -1353,6 +1706,8 @@ class HomeostasisModule(MariaModule):
                         return format_weather_line(data, salient)
 
                     gen.set_weather_fn(_weather_accessor)
+                    # Raw WeatherData for the hydration nudge (needs temp itself).
+                    gen.set_weather_data_fn(lambda _ws=_weather_sensor: _ws.fetch())
                     print(f"[Homeostasis] [OK] WeatherSensor ({_owm_city})")
                 except Exception as e:
                     logger.warning("WeatherSensor init failed: %s", e)
@@ -1465,11 +1820,13 @@ class HomeostasisModule(MariaModule):
                 _wf_reporter = ProgressReporter()
                 if ctx.perception_buffer:
                     _wf_reporter.set_perception_buffer(ctx.perception_buffer)
-                if ctx.telegram_bridge:
+                if ctx.telegram_bridge and getattr(ctx.telegram_bridge, 'bot', None):
+                    # send_message lives on the bot, NOT on the bridge. The old
+                    # `bridge.send_message` guard was always False -> silent no-op,
+                    # so workflow progress was never delivered. parse_mode=None so
+                    # workflow IDs / step names with underscores don't trip Markdown.
                     _wf_reporter.set_telegram_notifier(
-                        lambda msg: ctx.telegram_bridge.send_message(msg)
-                        if hasattr(ctx.telegram_bridge, 'send_message')
-                        else None
+                        lambda msg: ctx.telegram_bridge.bot.send_message(msg, parse_mode=None)
                     )
                 _wf_engine.set_progress_reporter(_wf_reporter)
 
@@ -1503,39 +1860,7 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"Environment Manager not initialized: {e}")
 
-            if ctx.evaluation_observer:
-                gen.set_evaluation_fn(lambda: ctx.evaluation_observer.generate_report(24.0))
-            if ctx.knowledge_analyzer:
-                gen.set_knowledge_fn(lambda: ctx.knowledge_analyzer.get_knowledge_snapshot())
-            if ctx.goal_store:
-                gen.set_goal_stats_fn(lambda: ctx.goal_store.stats())
-                gen.set_active_goals_fn(
-                    lambda: [
-                        {"description": g.description, "id": g.id}
-                        for g in ctx.goal_store.get_active()
-                    ]
-                )
-                gen.set_proposed_goals_fn(
-                    lambda: [
-                        {"description": g.description, "id": g.id}
-                        for g in ctx.goal_store.get_proposed()
-                    ]
-                )
-                gen.set_recent_achievements_fn(
-                    lambda: [
-                        g.description
-                        for g in ctx.goal_store.get_all()
-                        if g.status.value == "achieved"
-                    ][-5:]
-                )
-            if core:
-                gen.set_health_fn(lambda: core.get_state().get("health_score", 0))
-                gen.set_mode_fn(lambda: core.get_state().get("mode", "?"))
-            if ctx.planner_core:
-                gen.set_planner_stats_fn(
-                    lambda: {"total_cycles": ctx.planner_core.state.total_cycles}
-                    if hasattr(ctx.planner_core, 'state') else {}
-                )
+            wire_proactive_generators(gen, ctx, core, proactive)
 
             ctx.proactive_scheduler = proactive
 
@@ -1642,6 +1967,83 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"SelfPerception not initialized: {e}")
 
+        # Super-META E0: SelfContext aggregator (read-only situational picture).
+        # Merges already-wired organs (operator_model, self_perception, goal_store,
+        # context_builder) into one place any organ can consult. Pure read-only;
+        # consults ctx lazily so order vs those organs only needs them set above.
+        try:
+            from agent_core.awareness import SelfContext
+            ctx.self_context = SelfContext(ctx)
+            # E3 rung2: let the planner publish its live focus into SelfContext so
+            # _mission() reports the REAL goal being worked on, not a priority guess.
+            _pc = getattr(ctx, "planner_core", None)
+            if _pc is not None and hasattr(_pc, "set_self_context"):
+                _pc.set_self_context(ctx.self_context)
+            print("[Homeostasis] [OK] SelfContext wired (Super-META E0 + E3 planner focus)")
+        except Exception as e:
+            logger.warning(f"SelfContext not initialized: {e}")
+
+        # Self-development board (read-only, advisory). Always constructed -- it
+        # only AGGREGATES the meta-goals creative already generates, so it is as
+        # low-risk as /selfstatus. The SELF_DEV_JOURNAL_ENABLED flag gates only
+        # the autonomous periodic artifact write (Phase 21, INC-5), not the
+        # /samorozwoj read command. embedding_model stays None until INC-4.
+        try:
+            from agent_core.self_development import SelfDevJournal
+            from maria_core.sys.config import BASE_DIR as _SDJ_BASE
+            ctx.self_dev_journal = SelfDevJournal(
+                data_dir=str(_SDJ_BASE / "meta_data"),
+                embedding_model=None,
+            )
+            # Flag gates ONLY the autonomous periodic artifact write (Phase 21).
+            # The /samorozwoj read command works regardless of the flag.
+            _sdj_armed = os.environ.get(
+                "SELF_DEV_JOURNAL_ENABLED", "false"
+            ).lower() in ("true", "1", "yes")
+            if core and _sdj_armed:
+                core.set_self_dev_journal(ctx.self_dev_journal)
+                print("[Homeostasis] [OK] SelfDevJournal wired + Phase 21 ARMED")
+            else:
+                print("[Homeostasis] [OK] SelfDevJournal wired (read-only; "
+                      "Phase 21 dormant, set SELF_DEV_JOURNAL_ENABLED to arm)")
+
+            # Self-development bridge: proactive nudge about a stuck recurring
+            # idea + /approve_dev closure. Constructed always (the command is
+            # safe, creates no goals); SELF_DEV_BRIDGE_ENABLED gates only the
+            # autonomous Telegram nudge (Phase 21).
+            from agent_core.self_development import SelfDevBridge
+            ctx.self_dev_bridge = SelfDevBridge(
+                board=ctx.self_dev_journal,
+                bulletin_store=getattr(ctx, "bulletin_store", None),
+                data_dir=str(_SDJ_BASE / "meta_data"),
+            )
+            _sdb_armed = os.environ.get(
+                "SELF_DEV_BRIDGE_ENABLED", "false"
+            ).lower() in ("true", "1", "yes")
+            if core and _sdb_armed:
+                core.set_self_dev_bridge(ctx.self_dev_bridge)
+                print("[Homeostasis] [OK] SelfDevBridge wired + nudge ARMED")
+            else:
+                print("[Homeostasis] [OK] SelfDevBridge wired (/approve_dev on; "
+                      "nudge dormant, set SELF_DEV_BRIDGE_ENABLED to arm)")
+        except Exception as e:
+            logger.warning(f"SelfDevJournal/Bridge not initialized: {e}")
+
+        # Conversation condenser (Phase 20 — drain idle-session summaries).
+        # Daemon-owned ConversationMemory over the SHARED history JSONL the chat
+        # brain writes to. The old condense fired only at REPL shutdown, which
+        # never happens in the 24/7 daemon, so summaries froze (Feb 2026). Default
+        # paths = the shared conversation_history / conversation_summaries files.
+        if core:
+            try:
+                from agent_core.consciousness import ConversationMemory
+                _conv_condenser = ConversationMemory(source="daemon")
+                ctx.conversation_memory = _conv_condenser
+                core.set_conversation_memory(_conv_condenser)
+                print("[Homeostasis] [OK] ConversationMemory condenser wired (Phase 20)")
+            except Exception as e:
+                logger.warning(f"ConversationMemory condenser not initialized: {e}")
+
         # Conductor (Phase 17 — delegated build orchestration, e.g. market_agent)
         try:
             from agent_core.conductor import Conductor
@@ -1707,6 +2109,45 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"SelfRepair not initialized: {e}", exc_info=True)
 
+        # Undo-Suggest (Phase 19b -- autonomous "propose undo", flag-gated). The
+        # missing autonomous side of the DH-A undo rung: a detector proposes
+        # undoing an action whose goal failed, gated STOP-AT-PENDING (ADR-030/031).
+        # Dark unless EFFECTOR_UNDO_SUGGEST_ENABLED is armed; /approve_undo executes
+        # the bounded, post-verified inverse (the same one proven live).
+        if (
+            core
+            and getattr(ctx, 'self_perception', None)
+            and getattr(ctx, 'maria_conductor', None)
+            and getattr(ctx, 'goal_store', None)
+        ):
+            try:
+                from agent_core.undo_suggest import (
+                    UndoSuggestionCreator,
+                    UndoSuggestionMonitor,
+                )
+                from agent_core.effector.undo_journal import EffectorUndoJournal
+
+                undo_journal = getattr(ctx, 'undo_journal', None) or EffectorUndoJournal()
+                undo_creator = UndoSuggestionCreator(
+                    conductor=ctx.maria_conductor,
+                    bulletin_store=getattr(ctx, 'bulletin_store', None),
+                    notifier=getattr(ctx, 'telegram_notifier', None),
+                    self_perception=ctx.self_perception,
+                )
+                undo_monitor = UndoSuggestionMonitor(
+                    self_perception=ctx.self_perception,
+                    conductor=ctx.maria_conductor,
+                    journal=undo_journal,
+                    goal_store=ctx.goal_store,
+                    suggestion_creator=undo_creator,
+                )
+                ctx.undo_suggestion_creator = undo_creator
+                ctx.undo_suggestion_monitor = undo_monitor
+                core.set_undo_suggestion_monitor(undo_monitor)
+                print("[Homeostasis] [OK] UndoSuggest wired (Phase 19b, flag-gated)")
+            except Exception as e:
+                logger.warning(f"UndoSuggest not initialized: {e}", exc_info=True)
+
         # Outbox (TIER 2 hands, Rung 2) -- operator-visible artifact via a gated
         # write. The autonomous side only PROPOSES (flag OUTBOX_WRITE_ENABLED);
         # the write happens only on /approve_note. Wired with its own try/except.
@@ -1730,33 +2171,6 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"Outbox not initialized: {e}", exc_info=True)
 
-        # Autonomous Codex dispatcher (Phase 17) — one per project.
-        # Wired AFTER Conductor with its own try/except so a telegram
-        # wiring glitch can't take Conductor down with it. Falls through
-        # silently if codex_client unavailable; manual /codex Telegram
-        # path stays operational regardless.
-        if core and getattr(ctx, 'conductor', None) and getattr(ctx, 'codex_client', None):
-            try:
-                from agent_core.conductor.dispatcher import (
-                    ConductorDispatcher,
-                )
-                notify = None
-                if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'bot'):
-                    notify = ctx.telegram_bridge.bot.send_message
-                dispatcher = ConductorDispatcher(
-                    conductor=ctx.conductor,
-                    codex_client=ctx.codex_client,
-                    project="market_agent",
-                    notify_fn=notify,
-                )
-                core.add_conductor_dispatcher(dispatcher)
-                print(
-                    "[Homeostasis] [OK] ConductorDispatcher wired "
-                    "(project=market_agent, autonomous Codex dispatch)"
-                )
-            except Exception as e:
-                logger.warning(f"ConductorDispatcher not wired: {e}")
-
         # Maria-repo dispatcher (T-SELF-003). Workspace is the maria repo
         # itself. Tasks are seeded by self_repair (T-SELF-002) or manually
         # via Conductor.add_task. Inline mode — branch refactor/homeostasis.
@@ -1766,6 +2180,7 @@ class HomeostasisModule(MariaModule):
             and getattr(ctx, 'codex_client', None)
         ):
             try:
+                from pathlib import Path as _Path
                 from agent_core.conductor.dispatcher import ConductorDispatcher
                 notify = None
                 if ctx.telegram_bridge and hasattr(ctx.telegram_bridge, 'bot'):
@@ -1775,6 +2190,10 @@ class HomeostasisModule(MariaModule):
                     codex_client=ctx.codex_client,
                     project="maria",
                     notify_fn=notify,
+                    # Last wall behind approval_required + the self_repair-phase
+                    # exclusion (audit 2026-06-16): even a maria task can only
+                    # ever run Codex inside the maria repo, nowhere else.
+                    allowed_workspace_roots=[_Path("/home/maria/maria")],
                 )
                 core.add_conductor_dispatcher(maria_dispatcher)
                 print(

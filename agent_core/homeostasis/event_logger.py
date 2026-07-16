@@ -264,8 +264,10 @@ class HomeostasisEventLogger:
                 "threshold": 5,
             }
 
-        if to_mode == Mode.REDUCED and from_mode == Mode.ACTIVE:
-            # Check what pushed us to REDUCED
+        if to_mode == Mode.REDUCED and from_mode in (Mode.ACTIVE, Mode.SLEEP):
+            # Check what pushed us to REDUCED. SLEEP->REDUCED happens when a long
+            # local inference fires a CPU spike during sleep; it used to fall
+            # through to 'unknown' because only ACTIVE->REDUCED was mapped.
             ram = state.get("ram_available_pct", 100)
             cpu = state.get("cpu_load", 0)
             temp = state.get("temp_c", 50)

@@ -111,6 +111,20 @@ class Goal:
         """Czy cel jest zakonczony."""
         return self.status in TERMINAL_STATUSES
 
+    @property
+    def achieved_at(self) -> Optional[float]:
+        """When this goal flipped to ACHIEVED, or None if it never did.
+
+        Read from the audit trail, not from updated_at: any later touch (a reap
+        sweep, a rollup, a parent recount) moves updated_at, so it answers "when
+        was this record last written", never "when was this done".
+        """
+        stamps = [
+            a.timestamp for a in self.audit_trail
+            if a.new_status == GoalStatus.ACHIEVED.value
+        ]
+        return max(stamps) if stamps else None
+
     def to_dict(self) -> dict:
         """Serializacja do dict (dla goals.jsonl)."""
         return {

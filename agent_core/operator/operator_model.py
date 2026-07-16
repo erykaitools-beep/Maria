@@ -22,7 +22,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent_core.operator.privacy_guard import PrivacyGuard
 
@@ -480,6 +480,17 @@ class OperatorModel:
                 if isinstance(raw, dict):
                     result[key] = OperatorFact.from_dict(raw)
             return result
+
+    def is_allowed(self, topic: str) -> bool:
+        """Public privacy check: may Maria ask about / store this topic or value?
+
+        Used by ActiveLearner before asking about a gap -- never ask across an
+        operator-defined boundary. Defaults to allowed when privacy can't decide
+        (boundaries are empty by default)."""
+        try:
+            return self._privacy.is_allowed(topic)
+        except Exception:
+            return True
 
     def remove_fact(self, key: str) -> bool:
         """Remove a fact. Returns True if found."""
@@ -1037,3 +1048,51 @@ def reset_operator_model_singleton() -> None:
     global _SINGLETON
     with _SINGLETON_LOCK:
         _SINGLETON = None
+
+
+# ── Quiet hours (operator's sleep) ────────────────────────────
+#
+# SSoT for "the operator is asleep, do not make noise". Lives here because
+# quiet_hours is an operator PREFERENCE, and OperatorModel owns those.
+#
+# Before 2026-07-15 every caller rolled its own: mode_detector.py:129 read
+# prefs["quiet_hours_start"]/["quiet_hours_end"] -- fields nobody writes (the
+# preference is stored as the list quiet_hours=[23, 6]), so get() returned None,
+# the guard `if quiet_start is not None` was never true and operator quiet hours
+# NEVER APPLIED. Meanwhile proactive/scheduler.py hardcoded 23-6 and
+# planner/time_context.py hardcoded 22-7 -- three definitions, one dead.
+# Read the window through these helpers; do not re-parse the preference.
+
+
+def quiet_hours_window(prefs: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    """Operator's quiet window as (start_hour, end_hour), or None if unusable.
+
+    Accepts the stored shape: ``{"quiet_hours": [23, 6]}``.
+    """
+    raw = prefs.get("quiet_hours") if isinstance(prefs, dict) else None
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return None
+    try:
+        start, end = int(raw[0]), int(raw[1])
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= start <= 23 and 0 <= end <= 23):
+        return None
+    return start, end
+
+
+def in_quiet_hours(hour: int, window: Optional[Tuple[int, int]]) -> bool:
+    """Is ``hour`` inside the quiet window? Handles wrap past midnight.
+
+    start == end means a zero-length window (never quiet), NOT all-day quiet --
+    an operator who wants silence forever would say so another way, and
+    accidentally muting the agent forever is the worse failure.
+    """
+    if window is None:
+        return False
+    start, end = window
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end      # same day, e.g. 1-5
+    return hour >= start or hour < end  # wraps midnight, e.g. 23-6

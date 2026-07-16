@@ -841,6 +841,46 @@ class TestProgressReporter:
         # Should not raise
         reporter.on_workflow_started(wf)
 
+    def test_homeostasis_wiring_targets_bot_send_message(self):
+        """Regression: the homeostasis wiring must send via bridge.bot.send_message,
+        NOT bridge.send_message (which does not exist -> hasattr False -> silent
+        no-op, so workflow progress was never delivered).
+
+        Uses a REAL TelegramBridge with a fake bot. A MagicMock bridge would
+        auto-create a .send_message attribute and hide the bug entirely.
+        """
+        from agent_core.telegram import TelegramBridge
+
+        class _FakeBot:
+            def __init__(self):
+                self.calls = []
+
+            def send_message(self, text, parse_mode="Markdown", chat_id=None):
+                self.calls.append((text, parse_mode))
+                return True
+
+        fake_bot = _FakeBot()
+        bridge = TelegramBridge(bot=fake_bot)
+
+        # The crux of the bug: send_message is on .bot, not on the bridge.
+        assert not hasattr(bridge, "send_message")
+        assert hasattr(bridge.bot, "send_message")
+
+        reporter = ProgressReporter()
+        # SAME wiring expression as homeostasis_module.py
+        reporter.set_telegram_notifier(
+            lambda msg: bridge.bot.send_message(msg, parse_mode=None)
+        )
+
+        wf = create_workflow("recon", "Recon", _make_steps(2))
+        wf.completed_at = time.time()
+        reporter.on_workflow_completed(wf)  # force=True -> no cooldown
+
+        assert len(fake_bot.calls) == 1
+        text, parse_mode = fake_bot.calls[0]
+        assert "Workflow completed: recon" in text
+        assert parse_mode is None  # avoids Markdown choking on underscores
+
 
 # ========== TEMPLATE TESTS ==========
 

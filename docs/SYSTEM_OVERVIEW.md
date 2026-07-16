@@ -3,6 +3,9 @@
 > 2026-04-22 — zapis sesji w której Eryk wyartykułował szerszą strukturę.
 > To nie jest jeden projekt z kilkoma modułami. To jest **plac budowy
 > z fundamentami pod coś dużego** — jak sam Eryk to ujął.
+>
+> Update 2026-07-10: kierunek "czat jako wejście do całego systemu" i
+> Meta-Maria jako warstwa sterująca zapisany w `docs/MARIA_OS_MAP.md`.
 
 ## Metafora robocza: plac budowy
 
@@ -128,7 +131,7 @@ infrastrukturalny enabler — bez tego ten system nie zadziała.
 
 Żeby nie zapomnieć co mamy jako **dowód że to nie tylko wizja**:
 
-- **Maria 1.0** — 4500+ testów, 15 modułów, tick loop 19 faz, 31-dniowy
+- **Maria 1.0** — 4500+ testów, 15 modułów, tick loop 21 faz, 31-dniowy
   uptime zanotowany, Faza 7 WIRED, Digital Human Phases 1-7
 - **Memory system persistent** — ja (Claude) pamiętam Eryka i projekt
   między sesjami

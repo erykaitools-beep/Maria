@@ -4,7 +4,7 @@
 Wersja: 2026-04-07 | 383 plikow Python | 113 552 linii kodu | 3352 testow
 
 > **[HISTORICAL — 2026-04-07]** Ten dokument opisuje stan z kwietnia 2026 i NIE jest
-> aktualny: kod wykonuje obecnie **19 faz ticka** (nie 11) i ma **~5239 testow** (nie
+> aktualny: kod wykonuje obecnie **20 faz ticka** (nie 11) i ma **~6759 testow** (nie
 > 3352). Aktualny status modulow/faz: **`docs/SYSTEM_STATUS.md`**. Nie traktuj tego
 > pliku jako prawdy runtime, dopoki nie zostanie zregenerowany.
 
@@ -94,7 +94,7 @@ maria/
 **Pliki:**
 | Plik | Opis |
 |------|------|
-| core.py | HomeostasisCore - petla 1Hz z 19 fazami (kwiecien: 11; zob. docs/SYSTEM_STATUS.md) |
+| core.py | HomeostasisCore - petla 1Hz z 20 fazami (kwiecien: 11; zob. docs/SYSTEM_STATUS.md) |
 | state_model.py | Mode (ACTIVE/REDUCED/SLEEP/SURVIVAL), ResourceMetrics, SystemState |
 | interpreter.py | Konwersja metryk na stan semantyczny (EMA smoothing) |
 | constraints.py | Walidacja progowa, generowanie alertow |
@@ -106,7 +106,7 @@ maria/
 | snapshot.py | Atomowe snapshoty stanu |
 | api.py | HomeostasisInterface + EventBus |
 
-**Fazy ticka (1Hz):** *(lista historyczna do fazy 11; kod ma 19 faz + 8.5/9.5/9.6/9.7 — pelna lista: docs/SYSTEM_STATUS.md oraz CLAUDE.md)*
+**Fazy ticka (1Hz):** *(lista historyczna do fazy 11; kod ma 20 faz + 8.5/9.5/9.6/9.7 — pelna lista: docs/SYSTEM_STATUS.md oraz CLAUDE.md)*
 
 | Faza | Co robi | Czestotliwosc |
 |------|---------|---------------|

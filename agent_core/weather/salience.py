@@ -13,6 +13,24 @@ from agent_core.weather.weather_sensor import WeatherData
 # Icon prefixes that indicate precipitation or storm
 _PRECIP_ICONS = {"09", "10", "11", "13"}  # rain, heavy rain, thunderstorm, snow
 
+# Hydration nudge: feels-like OR actual temp at/above this is "hot enough" to
+# remind the operator to drink water during the day (proactive care feature).
+HYDRATION_THRESHOLD_C = 30.0
+
+
+def needs_hydration_reminder(
+    weather: WeatherData, threshold_c: float = HYDRATION_THRESHOLD_C
+) -> bool:
+    """True when it is hot enough to nudge the operator about drinking water.
+
+    Uses the hotter of actual vs feels-like temperature so dry/windy days
+    (where feels-like can dip below the real reading) still trigger on a
+    genuinely hot day. Distinct from is_weather_salient(): salience decides
+    whether to mention weather at all (also cold/rain/storm); this is the
+    heat-specific gate for the during-day hydration nudge.
+    """
+    return max(weather.temp_c, weather.feels_like_c) >= threshold_c
+
 
 def is_weather_salient(weather: WeatherData, operator_model=None) -> bool:
     """Check if weather is worth mentioning to operator.

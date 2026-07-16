@@ -606,6 +606,17 @@ def main():
         except Exception as e:
             logger.debug(f"Could not share vision cortex with Web UI: {e}")
 
+    # Share live SelfContext (Super-META E2) so the chat brain consults the SAME
+    # situational picture the daemon builds (fresh vision memory, mode). The chat
+    # tail stays dormant until SELF_CONTEXT_CHAT_ENABLED is armed.
+    if getattr(ctx, 'self_context', None):
+        try:
+            from maria_ui.app import set_self_context
+            set_self_context(ctx.self_context)
+            logger.info("SelfContext shared with Web UI (Super-META E2)")
+        except Exception as e:
+            logger.debug(f"Could not share SelfContext with Web UI: {e}")
+
     # Share the live approval stores with the Web UI so in-app approve/reject
     # (Skrzynka layer 2) writes through the SAME store instances as the tick +
     # Telegram threads -- one lock per store, no cross-instance race.

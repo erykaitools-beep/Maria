@@ -230,3 +230,39 @@ def test_reject_note_drops_without_writing(tmp_path):
     assert "Odrzucono" in resp
     assert store.list_pending() == []
     assert not _outbox_dir(tmp_path).exists() or not any(_outbox_dir(tmp_path).iterdir())
+
+
+def test_notify_outbox_deferred_during_quiet_hours(tmp_path):
+    # Quiet hours: the proposal is already PENDING, so /list_notes surfaces it in
+    # the morning -- the ping is deferred, nothing buzzes at 3am.
+    rec = {"id": "obx-1", "filename": "maria_status_1", "content": "c"}
+    calls = []
+    notifier = SimpleNamespace(
+        send_raw=lambda text, parse_mode="Markdown": calls.append(text),
+        in_quiet_hours=lambda: True,
+    )
+    _notify_outbox(SimpleNamespace(telegram_notifier=notifier), rec)
+    assert calls == []  # deferred
+
+
+def test_notify_outbox_sent_outside_quiet_hours(tmp_path):
+    rec = {"id": "obx-1", "filename": "maria_status_1", "content": "c"}
+    calls = []
+    notifier = SimpleNamespace(
+        send_raw=lambda text, parse_mode="Markdown": calls.append(text),
+        in_quiet_hours=lambda: False,
+    )
+    _notify_outbox(SimpleNamespace(telegram_notifier=notifier), rec)
+    assert len(calls) == 1 and "/approve_note obx-1" in calls[0]
+
+
+def test_proposal_persists_when_ping_deferred_at_night(tmp_path):
+    # The whole safety argument: suppressing the ping must not lose the note.
+    ctx, store, _ = _ctx(tmp_path)
+    ctx.telegram_notifier = SimpleNamespace(
+        send_raw=lambda text, parse_mode="Markdown": None,
+        in_quiet_hours=lambda: True,
+    )
+    rec = _propose_outbox_status_note(ctx, reason="drill")
+    assert rec is not None
+    assert len(store.list_pending()) == 1  # still there for /list_notes at dawn

@@ -38,6 +38,7 @@ class ActionType(Enum):
     VALIDATE = "validate"        # Cross-validate learned knowledge (Faza F)
     CRITIQUE = "critique"        # Faza G: Knowledge quality gate
     FS_WRITE = "fs_write"        # B2: first real effector primitive (sandboxed file write)
+    PLAY = "play"                # Self-time: ungraded free musing ("spacer po wlasnej glowie")
 
 
 @dataclass
@@ -132,6 +133,7 @@ class PlannerState:
     last_critique_ts: float = 0.0         # Faza G: Last knowledge critique
     last_experiment_scan_ts: float = 0.0  # K11: Last experiment proposal scan
     last_belief_build_ts: float = 0.0     # K6: Throttle periodic rebuilds
+    last_belief_maintenance_ts: float = 0.0  # K6: Throttle maintain() after EVALUATE
     total_cycles: int = 0
     total_plans_executed: int = 0
     consecutive_noop_count: int = 0         # Backoff: NOOPs in a row
@@ -150,6 +152,7 @@ class PlannerState:
     # when GOAL_CYCLE_THRESHOLD is reached.
     actions_since_progress: Dict[str, int] = field(default_factory=dict)
     last_creative_ts: float = 0.0    # K13 creative reflection cooldown
+    last_play_ts: float = 0.0        # Self-time (PLAY) cooldown
     # 8b rhythm/budget: cap on learn-family actions executed OUTSIDE the
     # learning window per day. Replaces the all-or-nothing window block so the
     # organism still learns a little on weekends/nights, while the daily cap
@@ -168,6 +171,7 @@ class PlannerState:
             "last_critique_ts": self.last_critique_ts,
             "last_experiment_scan_ts": self.last_experiment_scan_ts,
             "last_belief_build_ts": self.last_belief_build_ts,
+            "last_belief_maintenance_ts": self.last_belief_maintenance_ts,
             "total_cycles": self.total_cycles,
             "total_plans_executed": self.total_plans_executed,
             "consecutive_noop_count": self.consecutive_noop_count,
@@ -178,6 +182,7 @@ class PlannerState:
             "goal_action_repeat_count": self.goal_action_repeat_count,
             "actions_since_progress": dict(self.actions_since_progress),
             "last_creative_ts": self.last_creative_ts,
+            "last_play_ts": self.last_play_ts,
             "off_window_learn_date": self.off_window_learn_date,
             "off_window_learn_used": self.off_window_learn_used,
         }
@@ -193,6 +198,7 @@ class PlannerState:
             last_critique_ts=d.get("last_critique_ts", 0.0),
             last_experiment_scan_ts=d.get("last_experiment_scan_ts", 0.0),
             last_belief_build_ts=d.get("last_belief_build_ts", 0.0),
+            last_belief_maintenance_ts=d.get("last_belief_maintenance_ts", 0.0),
             total_cycles=d.get("total_cycles", 0),
             total_plans_executed=d.get("total_plans_executed", 0),
             consecutive_noop_count=d.get("consecutive_noop_count", 0),
@@ -203,6 +209,7 @@ class PlannerState:
             goal_action_repeat_count=d.get("goal_action_repeat_count", 0),
             actions_since_progress=d.get("actions_since_progress", {}),
             last_creative_ts=d.get("last_creative_ts", 0.0),
+            last_play_ts=d.get("last_play_ts", 0.0),
             off_window_learn_date=d.get("off_window_learn_date", ""),
             off_window_learn_used=d.get("off_window_learn_used", 0),
         )

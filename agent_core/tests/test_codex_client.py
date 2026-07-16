@@ -6,8 +6,6 @@ All subprocess calls mocked - zero external dependencies.
 
 import json
 import time
-import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from agent_core.llm.codex_client import (
@@ -18,6 +16,12 @@ from agent_core.tests.spec_helpers import specced
 
 class TestCodexClientAvailability:
     """Tests for CLI availability detection."""
+
+    @patch("agent_core.llm.codex_client.shutil.which")
+    def test_default_binary_uses_path_at_runtime(self, mock_which):
+        mock_which.return_value = "/opt/bin/codex"
+        client = CodexClient()
+        assert client._codex_bin == "/opt/bin/codex"
 
     @patch("agent_core.llm.codex_client.shutil.which")
     def test_available_when_installed(self, mock_which):
@@ -77,6 +81,79 @@ class TestCodexClientAsk:
         client = CodexClient(log_path=tmp_path / "log.jsonl")
         result = client.ask("test")
         assert result is None
+
+
+class TestCodexCliFlags:
+    """Guard Codex exec flags used by Maria automation."""
+
+    def _captured_run(self, tmp_path, *, impl_mode=False, **client_kwargs):
+        client = CodexClient(
+            codex_bin="/usr/local/bin/codex",
+            log_path=tmp_path / "log.jsonl",
+            **client_kwargs,
+        )
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "ok"
+            result.stderr = ""
+            return result
+
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        with patch("agent_core.llm.codex_client.subprocess.run", fake_run):
+            assert client._invoke("test prompt", cwd=cwd, impl_mode=impl_mode) == "ok"
+        return captured
+
+    def test_read_mode_is_noninteractive_and_read_only(self, tmp_path):
+        captured = self._captured_run(tmp_path)
+        cmd = captured["cmd"]
+        assert cmd[:2] == ["/usr/local/bin/codex", "exec"]
+        assert "--color" in cmd
+        assert cmd[cmd.index("--color") + 1] == "never"
+        assert "--sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+        assert 'approval_policy="never"' in cmd
+        assert cmd[-1] == "-"
+        assert captured["kwargs"]["input"].endswith("test prompt")
+
+    def test_impl_mode_is_noninteractive_and_workspace_writable(self, tmp_path):
+        captured = self._captured_run(tmp_path, impl_mode=True)
+        cmd = captured["cmd"]
+        assert "--sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
+        assert 'approval_policy="never"' in cmd
+        assert "--cd" in cmd
+        assert cmd[cmd.index("--cd") + 1] == str(tmp_path / "repo")
+
+    def test_impl_sandbox_is_configurable(self, tmp_path):
+        captured = self._captured_run(
+            tmp_path,
+            impl_mode=True,
+            impl_sandbox="danger-full-access",
+        )
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("--sandbox") + 1] == "danger-full-access"
+
+    def test_empty_query_sandbox_fails_closed_to_read_only(self, tmp_path):
+        # Fail closed: an empty flag value must NOT omit --sandbox (that would
+        # fall through to codex's writable trusted-dir default in Maria's repo).
+        captured = self._captured_run(tmp_path, query_sandbox="")
+        cmd = captured["cmd"]
+        assert "--sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+
+    def test_empty_impl_sandbox_fails_closed_to_workspace_write(self, tmp_path):
+        captured = self._captured_run(
+            tmp_path, impl_mode=True, impl_sandbox=""
+        )
+        cmd = captured["cmd"]
+        assert "--sandbox" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "workspace-write"
 
 
 class TestCodexClientRateLimit:

@@ -19,6 +19,15 @@ from agent_core.consciousness.dream_generator import DreamGenerator
 from agent_core.consciousness.sleep_processor import SleepProcessor
 
 
+@pytest.fixture(autouse=True)
+def _isolate_dream_log(tmp_path, monkeypatch):
+    """Never let SleepProcessor tests append to the live meta_data/dream_log.jsonl.
+    A SleepProcessor built without dream_log_path falls back to DEFAULT_DREAM_LOG;
+    redirect that default to a temp file so _save_dreams can't poison production."""
+    from agent_core.consciousness import sleep_processor as _sp
+    monkeypatch.setattr(_sp, "DEFAULT_DREAM_LOG", tmp_path / "dream_log.jsonl")
+
+
 # ============================================================
 # Mock BeliefStore (mirrors real BeliefStore API)
 # ============================================================
@@ -30,6 +39,7 @@ class MockBelief:
     belief_type: str = "observation"
     confidence: float = 0.5
     evidence: list = field(default_factory=list)
+    entity: str = "koncept"  # real Belief has .entity (dream curiosity topic)
 
 
 class MockBeliefStore:
@@ -308,6 +318,35 @@ class TestSleepPhases:
         result = proc._phase_nrem3()
         assert result["beliefs_pruned"] == 0
 
+    # -- mutate_beliefs decoupling (2026-06-21): REM/NREM1 read, NREM2/3 mutate --
+
+    def test_nrem2_skipped_when_throttled(self, belief_store):
+        # mutate_beliefs=False: NREM2 must NOT boost (the 20h throttle protects
+        # confidence calibration) even though a belief qualifies.
+        b = belief_store._beliefs["belief-0002"]
+        b.evidence = [("src1", "ref1", 1.0), ("src2", "ref2", 0.8)]
+        old_conf = b.confidence
+        proc = SleepProcessor(belief_store=belief_store, mutate_beliefs=False)
+        result = proc._phase_nrem2()
+        assert result["beliefs_boosted"] == 0
+        assert result["skipped"] == "throttled"
+        assert b.confidence == old_conf  # untouched
+
+    def test_nrem3_skipped_when_throttled(self, belief_store):
+        proc = SleepProcessor(belief_store=belief_store, mutate_beliefs=False)
+        result = proc._phase_nrem3()
+        assert result["beliefs_pruned"] == 0
+        assert result["skipped"] == "throttled"
+        assert belief_store._compacted is False  # forgetting did NOT run
+
+    def test_rem_dreams_fire_even_when_throttled(self, belief_store):
+        # THE FIX: REM only READS beliefs, so dreams must still fire when belief
+        # mutation is throttled -- this was broken for every overnight sleep.
+        proc = SleepProcessor(belief_store=belief_store, mutate_beliefs=False)
+        result = proc._phase_rem()
+        assert result["phase"] == "rem"
+        assert result["dreams_generated"] >= 1
+
 
 # ============================================================
 # TestSleepProcessor (full cycle)
@@ -413,3 +452,21 @@ class TestIntegration:
             assert "beliefs" in dream
             assert len(dream["beliefs"]) >= 1
             assert dream["beliefs"][0].startswith("belief-")
+
+
+def test_curiosity_topics_only_topic_entities():
+    """2026-06-20 (review MF1): dream curiosity topics come ONLY from TOPIC-type
+    entities (clean tag labels); CONCEPT sentences and FILE ids are dropped."""
+    from types import SimpleNamespace
+    from agent_core.consciousness.sleep_processor import _curiosity_topics
+    from agent_core.world_model.belief_model import EntityType
+
+    topic_b = SimpleNamespace(entity="mechanika", entity_type=EntityType.TOPIC)
+    sentence_b = SimpleNamespace(
+        entity="Dla liczb nieparzystych: c_{n+1} = 3/2 * c_n",
+        entity_type=EntityType.CONCEPT,
+    )
+    file_b = SimpleNamespace(entity="web_rss_x.txt", entity_type=EntityType.FILE)
+
+    assert _curiosity_topics(topic_b, sentence_b, file_b) == ["mechanika"]
+    assert _curiosity_topics(sentence_b, file_b) == []

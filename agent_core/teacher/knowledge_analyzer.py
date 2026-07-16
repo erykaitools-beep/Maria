@@ -9,11 +9,45 @@ Used by TeacherAgent to make informed decisions about what to learn next.
 
 import json
 import logging
+import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
+from agent_core.world_model.belief_builder import _source_group
+
 logger = logging.getLogger(__name__)
+
+# Window for the "recent" exam figures. A daily frame quoting the lifetime mean
+# cannot move: on 07-12..07-15 it printed 83% four days running while the real
+# recent scores drifted, because 1347 historical exams outvote a day's worth.
+EXAM_WINDOW_HOURS = 24.0
+
+
+def _parse_iso_utc(value: Any) -> Optional[float]:
+    """ISO-8601 stamp (as written by the teacher, trailing 'Z') -> epoch seconds.
+
+    Returns None when absent or unparseable, so callers can skip the record
+    rather than silently count it as 1970.
+
+    The 'Z' is mapped to +00:00 rather than stripped: stripping leaves a naive
+    datetime that .timestamp() then reads as LOCAL time, shifting every stamp by
+    the UTC offset (2h in Berlin summer) and quietly moving the window edges.
+    """
+    if not value:
+        return None
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
 
 # Tag normalization
 _TAG_STOP_WORDS = {
@@ -25,6 +59,16 @@ _TAG_MAX_LEN = 40
 
 # Cache TTL for topic map (seconds)
 _TOPIC_MAP_CACHE_TTL = 60
+
+# Function words carrying no topical signal when a multi-word topic phrase
+# (a project sub-goal name) is matched by token overlap. PL + EN.
+_TOPIC_STOPWORDS = frozenset({
+    "i", "a", "o", "u", "w", "z", "za", "ze", "we", "na", "do", "od", "po",
+    "pod", "nad", "przy", "bez", "dla", "jak", "czy", "co", "to", "sie",
+    "się", "oraz", "albo", "lub", "jest", "sa", "są", "byc", "być", "ten",
+    "ta", "te", "tym", "tego", "ich", "ktore", "które",
+    "the", "an", "of", "in", "on", "and", "or", "for", "with",
+})
 
 
 class KnowledgeAnalyzer:
@@ -111,7 +155,9 @@ class KnowledgeAnalyzer:
             - total_files: int
             - total_chunks_learned: int
             - total_chunks_available: int
-            - average_exam_score: float
+            - average_exam_score: float (lifetime)
+            - average_exam_score_24h: float (last EXAM_WINDOW_HOURS)
+            - exam_count_24h: int (sample size behind average_exam_score_24h)
             - hard_topics: List[Dict]
             - new_files_available: List[Dict]
             - learning_in_progress: List[Dict]
@@ -131,9 +177,25 @@ class KnowledgeAnalyzer:
             total_chunks_learned += rec.get("chunks_learned", 0)
             total_chunks_available += rec.get("total_chunks", 0)
 
-        # Average exam score
+        # Average exam score (lifetime -- kept for callers that want the all-time
+        # picture; anything reporting on a day must use the _24h pair below).
         all_scores = [e.get("score", 0) for e in exams if "score" in e]
         avg_score = sum(all_scores) / len(all_scores) if all_scores else 0.0
+
+        # Same average over the recent window. The count travels with it because
+        # a mean over 2 exams and a mean over 200 are not the same claim, and the
+        # reader cannot tell them apart from the percentage alone.
+        cutoff = time.time() - EXAM_WINDOW_HOURS * 3600
+        recent_scores = []
+        for e in exams:
+            if "score" not in e:
+                continue
+            ts = _parse_iso_utc(e.get("timestamp"))
+            if ts is not None and ts >= cutoff:
+                recent_scores.append(e["score"])
+        avg_score_24h = (
+            sum(recent_scores) / len(recent_scores) if recent_scores else 0.0
+        )
 
         # Count input files and detect unindexed ones
         input_count = 0
@@ -166,6 +228,8 @@ class KnowledgeAnalyzer:
             "total_chunks_learned": total_chunks_learned,
             "total_chunks_available": total_chunks_available,
             "average_exam_score": avg_score,
+            "average_exam_score_24h": avg_score_24h,
+            "exam_count_24h": len(recent_scores),
             "hard_topics": files_by_status.get("hard_topic", []),
             "new_files_available": new_from_index + new_from_disk,
             "learning_in_progress": files_by_status.get("learning", []),
@@ -274,6 +338,27 @@ class KnowledgeAnalyzer:
         gaps.sort(key=lambda g: g["priority"], reverse=True)
         return gaps
 
+    def count_chunks_learned(self, hours: float = EXAM_WINDOW_HOURS) -> int:
+        """How many chunks actually landed in long-term memory in the last `hours`.
+
+        Counted from the memory file itself, because that is the only record of a
+        chunk being learned. The tempting proxy -- successful learn/fill_gap
+        actions in teacher_plans.jsonl -- overcounts: learn_next_chunk returns
+        True when a file's chunks are already all in memory, so a no-op logs as a
+        success. On 2026-07-16 that gap was 101 actions vs 83 chunks (+22%), all
+        18 of them fill_gap retries against one already-completed file.
+
+        Deliberately NOT part of get_knowledge_snapshot(): that runs on the
+        planner tick path, and this reads a file an order of magnitude larger.
+        """
+        cutoff = time.time() - hours * 3600
+        count = 0
+        for rec in self._load_jsonl(self.memory_path):
+            ts = _parse_iso_utc(rec.get("timestamp"))
+            if ts is not None and ts >= cutoff:
+                count += 1
+        return count
+
     def get_review_candidates(self, min_age_hours: int = 48) -> List[Dict[str, Any]]:
         """
         Completed files that may benefit from review.
@@ -369,12 +454,16 @@ class KnowledgeAnalyzer:
                 if normalized is not None:
                     topic_files.setdefault(normalized, set()).add(source)
 
-        # Sort by file count descending, convert sets to sorted lists
+        # Rank by INDEPENDENT sources, not raw file count: a tag carried by 100
+        # expert_*.txt files is one LLM voice, not 100 (cross-source WYDMUSZKA,
+        # audit 2026-06-16). The file LISTS are preserved unchanged (membership
+        # consumers need them) -- only the ordering collapses single-origin
+        # corpora, so deepen/expand ranking reflects real breadth.
         result = {
             topic: sorted(files)
             for topic, files in sorted(
                 topic_files.items(),
-                key=lambda x: len(x[1]),
+                key=lambda x: len({_source_group(f) for f in x[1]}),
                 reverse=True,
             )
         }
@@ -392,8 +481,8 @@ class KnowledgeAnalyzer:
         Scoring (deterministic):
         - exact tag match: +3.0
         - prefix match (tag starts with topic): +2.0
-        - substring match (topic in tag): +1.0
-        - filename contains topic: +0.5
+        - whole-word match (topic is a token of tag): +1.0
+        - filename contains topic as a whole word (or topic IS the file): +0.5
 
         All comparisons case-insensitive.
 
@@ -424,29 +513,82 @@ class KnowledgeAnalyzer:
         if not topics_lower:
             return []
 
-        # Score from tag matching
+        # Multi-word topics (project sub-goal names are SENTENCES, e.g.
+        # "podstawy funding rate na perpetual futures") can never equal a tag,
+        # prefix one, or be a single token -- the branches below make them
+        # unmatchable to any material. For such topics, match by significant
+        # token overlap instead: a tag whose content tokens are contained in
+        # the topic's content tokens describes a sub-aspect of it.
+        topic_sig: Dict[str, set] = {}
+        for topic in topics_lower:
+            toks = set(re.findall(r"[^\W_]+", topic, flags=re.UNICODE))
+            sig = {
+                t for t in toks
+                if t not in _TOPIC_STOPWORDS and len(t) >= 3
+            }
+            if len(sig) >= 2:
+                topic_sig[topic] = sig
+
+        # Score from tag matching.
+        # The +1.0 branch used to be a raw SUBSTRING test (`topic in tag`), which
+        # for a short token like "rna" matched the inside of dozens of unrelated
+        # Polish words -- "hepbu(rna)", "alte(rna)tywa", "nadmie(rna)" -- pulling
+        # ~50 off-topic files into the pool and poisoning the learn/exam scope and
+        # the progress denominator. It now requires a WHOLE-WORD (token) match:
+        # "rna" matches the tag "kwas rna" but not the substring inside "hepburna".
+        # Exact (+3.0) and prefix (+2.0) keep their broader reach. (2026-06-20)
         for tag, files in topic_map.items():
+            # [^\W_]+ tokenizes on whitespace AND underscore (\w keeps "a_b" whole)
+            tag_tokens = set(re.findall(r"[^\W_]+", tag, flags=re.UNICODE))
             for topic in topics_lower:
                 score = 0.0
                 if tag == topic:
                     score = 3.0
                 elif tag.startswith(topic):
                     score = 2.0
-                elif topic in tag:
+                elif topic in tag_tokens:
                     score = 1.0
+                elif topic in topic_sig:
+                    # Multi-word topic: tag's content tokens ⊆ topic's content
+                    # tokens. >=2 common tokens, or a single-token tag whose
+                    # token is long enough (>=5) to be a real term ("carry"),
+                    # so short generic tags ("rate") do not pull noise.
+                    tag_sig = {
+                        t for t in tag_tokens
+                        if t not in _TOPIC_STOPWORDS and len(t) >= 3
+                    }
+                    common = tag_sig & topic_sig[topic]
+                    if len(common) >= 2 or (
+                        len(common) == 1 and len(tag_sig) == 1
+                        and len(next(iter(common))) >= 5
+                    ):
+                        score = 1.0
 
                 if score > 0:
                     for fid in files:
                         file_scores[fid] = file_scores.get(fid, 0.0) + score
 
-        # Score from filename matching
+        # Score from filename matching -- whole-word too, so web_wiki_rna.txt
+        # scores but web_wiki_transkrypcja_hepburna.txt no longer does. The
+        # `topic == fid` self-match keeps filename-shaped topics working (e.g. a
+        # fetch-handoff goal "learn web_wiki_x.txt").
         for fid in all_file_ids:
             fid_lower = fid.lower()
+            fid_tokens = set(re.findall(r"[^\W_]+", fid_lower, flags=re.UNICODE))
+            fid_stem = fid_lower.rsplit(".", 1)[0]
             for topic in topics_lower:
-                if topic in fid_lower:
+                if topic in fid_tokens or topic in (fid_lower, fid_stem):
+                    file_scores[fid] = file_scores.get(fid, 0.0) + 0.5
+                elif (topic in topic_sig
+                      and len(fid_tokens & topic_sig[topic]) >= 2):
+                    # expert_funding_rate.txt <- "podstawy funding rate na..."
                     file_scores[fid] = file_scores.get(fid, 0.0) + 0.5
 
-        # Sort by score descending, then alphabetically for stability
+        # Sort by score descending, then alphabetically for stability.
+        # No top-N cap: whole-word matching already removes the substring noise
+        # that used to blow a topic up to 50+ files, and a genuinely broad topic's
+        # full set is the honest progress denominator (capping it would silently
+        # drop already-verified files and block graduation -- review M3, 06-20).
         results = [
             (fid, score)
             for fid, score in file_scores.items()
@@ -454,6 +596,41 @@ class KnowledgeAnalyzer:
         ]
         results.sort(key=lambda x: (-x[1], x[0]))
         return results
+
+    def files_created_since(self, cutoff_epoch: float) -> set:
+        """File ids whose index record was FIRST created at/after ``cutoff_epoch``.
+
+        Freshness floor for /project sub-goals (2026-07-11): a project child must
+        not inherit credit from files that pre-existed its own creation -- the
+        confirmed false-close vector, where a pre-existing independently-verified
+        file merely shares topic tokens with the goal sentence. ``created_at`` is
+        stamped only at FIRST index and preserved across re-scans, so a
+        pre-existing file keeps its OLD timestamp and is correctly excluded.
+
+        The index ``created_at`` is an ISO-8601 UTC string ('...Z'); a Goal's
+        ``created_at`` is a float epoch -- parsed here once. Fail-closed: a record
+        with a missing/malformed ``created_at`` is EXCLUDED (an untimestamped file
+        cannot prove freshness), which only ever tightens the owned set.
+        """
+        from datetime import datetime, timezone
+        fresh = set()
+        for rec in self._load_jsonl(self.index_path, merge_key="id"):
+            fid = rec.get("id") or rec.get("file")
+            ca = rec.get("created_at")
+            if not fid or not isinstance(ca, str):
+                continue
+            try:
+                iso = ca[:-1] if ca.endswith("Z") else ca
+                dt = datetime.fromisoformat(iso)
+                # 'Z'/naive -> assume UTC; a real offset (e.g. +02:00) is kept.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                ts = dt.timestamp()
+            except (ValueError, TypeError):
+                continue
+            if ts >= cutoff_epoch:
+                fresh.add(fid)
+        return fresh
 
     def get_compact_summary(self) -> str:
         """

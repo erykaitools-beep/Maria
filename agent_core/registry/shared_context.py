@@ -20,6 +20,7 @@ class SharedContext:
     # Core objects (set during init_brain)
     brain: Any = None
     brain_loop: Any = None
+    llm_router: Any = None  # LLMRouter; alias of `brain`, exposed so the K15 CapabilityManifest resolves ask_expert (DH-C)
     semantic_memory: Any = None
     episodic_memory: Any = None
 
@@ -34,6 +35,7 @@ class SharedContext:
     evaluation_observer: Any = None  # EvaluationObserver (Kontrakt K4)
     planner_core: Any = None         # PlannerCore (Warstwa 2, Kontrakt K5)
     knowledge_analyzer: Any = None   # KnowledgeAnalyzer (topic awareness)
+    teacher_agent: Any = None        # TeacherAgent (canonical copy on core._teacher_agent; mirrored for K15 CapabilityManifest, DH-C)
     world_model: Any = None          # WorldModel (Kontrakt K6)
     autonomy_policy: Any = None      # AutonomyPolicy (Kontrakt K7)
     deliberation: Any = None         # Deliberation (Kontrakt K8)
@@ -52,6 +54,7 @@ class SharedContext:
     trace_store: Any = None            # TraceStore (Phase 1 decision traceability)
     memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
     vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
+    vision_memory: Any = None          # VisionMemory (Super-META E1: remembers what was seen)
     code_agent: Any = None             # CodeAgent (autonomous coding)
 
     # Faza F/G + Learning Upgrade
@@ -75,6 +78,9 @@ class SharedContext:
     limitation_reporter: Optional[Any] = None  # LimitationReporter (V3 Module 13)
     tool_capability_registry: Optional[Any] = None  # ToolCapabilityRegistry (V3 Module 11)
     self_perception: Optional[Any] = None  # SelfPerception (T-SELF-001)
+    self_context: Optional[Any] = None  # SelfContext (Super-META E0 aggregator)
+    self_dev_journal: Optional[Any] = None  # SelfDevJournal (curated self-dev board)
+    self_dev_bridge: Optional[Any] = None  # SelfDevBridge (nudge + /approve_dev)
     system_failure_monitor: Optional[Any] = None  # SystemFailureMonitor (T-SELF-002)
     repair_task_creator: Optional[Any] = None  # RepairTaskCreator (T-SELF-002)
     maria_conductor: Optional[Any] = None  # Conductor for project=maria

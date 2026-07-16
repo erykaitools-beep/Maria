@@ -72,6 +72,13 @@ _HINT_JARGON = re.compile(
     re.IGNORECASE,
 )
 _HINT_ERROR_HANDLING = re.compile(r"obsług[ai]\s+błęd", re.IGNORECASE)
+# 2026-06-15: K12's freetext fallback parser mis-split markdown and emitted
+# topics like "*Najpierw" / "**" / "**Przerwa w naukach**" that passed every
+# filter above and polluted the live fetch queue. Wikipedia topics never carry
+# markdown markers, so any asterisk/backtick, a leading heading ("# "), or a
+# leading bullet ("- "/"+ "/"> ") is junk. '#' is only rejected as a leading
+# heading marker, so a mid-string '#' (e.g. "Jezyk C#") still passes.
+_HINT_MARKDOWN = re.compile(r"[*`]|^\s*#{1,6}\s|^\s*[-+>]\s")
 _HINT_MAX_WORDS = 5
 _HINT_MIN_LEN = 3
 
@@ -100,6 +107,10 @@ def _is_searchable_topic(topic: str) -> bool:
     if _HINT_JARGON.search(text):
         return False
     if _HINT_ERROR_HANDLING.search(text):
+        return False
+    if _HINT_MARKDOWN.search(text):
+        return False
+    if not re.search(r"\w", text):  # only punctuation/markers (e.g. "**", "---")
         return False
     if len(text.split()) > _HINT_MAX_WORDS:
         return False

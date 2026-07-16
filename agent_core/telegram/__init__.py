@@ -14,6 +14,7 @@ Usage:
 """
 
 import logging
+import threading
 
 from agent_core.telegram.bot import TelegramBot
 from agent_core.telegram.notifier import TelegramNotifier
@@ -43,6 +44,18 @@ class TelegramBridge:
         # Last poll raw texts (for OperatorModel learning)
         self.last_poll_texts = []
 
+        # Optional fallback for plain (non-slash) operator text -> Maria's chat
+        # brain. None = historical "command console" behaviour (free-text gets no
+        # reply). Installed by register_telegram_commands when TELEGRAM_CHAT_ENABLED.
+        self._chat_handler = None
+        # Chat replies run on detached threads so a slow (cold-CPU, up to ~240s)
+        # brain reply never blocks the single poll loop -- otherwise the is_alive
+        # guard in the tick suppresses ALL subsequent polls and even slash commands
+        # stall. One reply composed at a time (the brain history is shared).
+        self._chat_lock = threading.Lock()
+        self._last_chat_thread = None  # for tests to join
+        self._last_file_thread = None  # for tests to join (file-delivery dispatch)
+
     @property
     def configured(self):
         return self.bot.configured
@@ -56,6 +69,81 @@ class TelegramBridge:
             handler: Callable(args_str) -> str (response text)
         """
         self._command_handlers[command.lower()] = handler
+
+    def set_chat_handler(self, handler):
+        """Install the plain-text fallback: a callable(text) -> reply_text routed
+        to Maria's chat brain. Without it, non-command messages are still consumed
+        for OperatorModel learning but get no reply (the command-console default).
+        Only plain (non-slash) text reaches it; slash commands stay untouched.
+        """
+        self._chat_handler = handler
+
+    def _dispatch_chat_reply(self, text):
+        """Answer plain text on a detached daemon thread, so a slow brain reply
+        never blocks the poll loop (and thus never stalls slash-command intake).
+        Replies serialize under _chat_lock so the shared brain history isn't raced
+        and the cold CPU isn't piled on. Failures degrade to a soft 'busy' line."""
+        handler = self._chat_handler
+        if handler is None:  # defensive: never spawn a worker for a missing handler
+            return
+
+        def _worker():
+            with self._chat_lock:
+                try:
+                    reply = handler(text)
+                except Exception as e:
+                    logger.warning("Telegram chat handler failed: %s", e)
+                    reply = None
+                if reply:
+                    # Compose bridge: a "write X and send it as a file" request
+                    # gets the reply written to a real file + sent for real; any
+                    # phantom /wyslij Maria invents is stripped (2026-06-22).
+                    try:
+                        from agent_core.telegram.compose_bridge import (
+                            maybe_deliver_compose,
+                        )
+                        reply = maybe_deliver_compose(
+                            text, reply, send_document=self.bot.send_document,
+                        )
+                    except Exception as e:
+                        logger.warning("Telegram compose bridge failed: %s", e)
+                try:
+                    self.bot.send_message(
+                        reply or "Jestem teraz zajeta, sprobuj za chwile."
+                    )
+                except Exception as e:
+                    logger.warning("Telegram chat send failed: %s", e)
+
+        t = threading.Thread(target=_worker, daemon=True, name="TelegramChatReply")
+        self._last_chat_thread = t
+        t.start()
+
+    def _dispatch_file_request(self, fr):
+        """Fulfil a detected file-delivery request on a detached thread (a 30s
+        upload must never block the poll loop). 'send' actually delivers the
+        whitelisted document via the bot; 'redirect' replies with honest guidance
+        (the /wyslij command) instead of letting the chat brain confabulate that
+        it sent a file -- the 2026-06-22 morning failure. Serialized under
+        _chat_lock so it cannot race the chat brain / pile on the cold CPU."""
+        def _worker():
+            with self._chat_lock:
+                try:
+                    if fr.kind == "send" and fr.path:
+                        ok = self.bot.send_document(
+                            fr.path, caption=(fr.message or "")[:1024]
+                        )
+                        if not ok:
+                            self.bot.send_message(
+                                "Nie udalo sie wyslac pliku (blad Telegrama)."
+                            )
+                    else:
+                        self.bot.send_message(fr.message)
+                except Exception as e:
+                    logger.warning("Telegram file-request dispatch failed: %s", e)
+
+        t = threading.Thread(target=_worker, daemon=True, name="TelegramFileSend")
+        self._last_file_thread = t
+        t.start()
 
     def poll_and_respond(self):
         """
@@ -134,6 +222,27 @@ class TelegramBridge:
                     self.bot.send_message(
                         f"Nieznana komenda: /{cmd}. Wyslij /help po liste komend."
                     )
+                elif self._chat_handler is not None and not doc:
+                    # Plain (non-slash) text = genuine chat -> Maria's brain, on a
+                    # detached thread so a slow reply never blocks the poll loop
+                    # (and thus never stalls slash-command intake). Documents are
+                    # excluded: their caption carries an injected "[plik: ...]"
+                    # token meant for /claude-style flows, not a chat prompt.
+                    #
+                    # First, a conservative check: if this is a "send me file X"
+                    # request, fulfil it for real (or redirect to /wyslij) instead
+                    # of letting the brain confabulate "przesylam plik..." for a
+                    # file it cannot send -- the 2026-06-22 morning failure.
+                    fr = None
+                    try:
+                        from agent_core.telegram.doc_sender import detect_file_request
+                        fr = detect_file_request(text)
+                    except Exception as e:
+                        logger.warning("Telegram file-request detect failed: %s", e)
+                    if fr is not None:
+                        self._dispatch_file_request(fr)
+                    else:
+                        self._dispatch_chat_reply(text)
                 unhandled.append(msg)
                 self.last_poll_texts.append(text)
 

@@ -115,7 +115,12 @@ def save_state(path: Path, state: Dict[str, Any]) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False)
         tmp.replace(path)
-    except OSError as e:
+    except Exception as e:
+        # OSError (disk) is the common case, but a corrupt in-memory state
+        # (non-JSON-serializable value in history) makes json.dump raise
+        # TypeError -- which must NOT escape this helper, or it propagates
+        # to the caller while the shared _synthesis_lock is held and leaks
+        # it for the process lifetime. Persistence is best-effort by design.
         logger.warning("[SynthPicker] state persist failed: %s", e)
 
 

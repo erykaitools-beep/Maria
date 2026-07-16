@@ -162,3 +162,102 @@ def test_update_from_exam_real_file_still_promotes(tmp_path):
     )
     got = store.get_by_entity_type(EntityType.CONCEPT)[0]
     assert got.belief_type == BeliefType.FACT  # control
+
+
+# --- build_topic_beliefs: synthesis must not create/inflate topics -----------
+# (audit 2026-06-15 #2). The TOPIC layer historically had NO _is_synthetic_source
+# guard and NO source-denylist check, so synthetic provenance leaked uncapped
+# into it and /forget_source could not unwind it. These lock the parity with the
+# file/concept builders.
+
+def _topic(store, entity):
+    for b in store.get_by_entity_type(EntityType.TOPIC):
+        if b.entity == entity:
+            return b
+    return None
+
+
+def test_build_topic_skips_tag_that_exists_only_via_synthesis(tmp_path):
+    """A tag the NIM fabricated (present ONLY in a synthesis record) must not
+    be minted as a brand-new TOPIC entity."""
+    longterm = [
+        {"source_file": "wiki_a.txt", "folder": "general", "tags": ["fizyka"]},
+        {"source_file": "synthesis_x_1", "folder": "synthesis",
+         "tags": ["techniki"]},  # fabricated tag, synthesis-only
+    ]
+    store, builder = _make(tmp_path, [], longterm, [])
+    builder.build_topic_beliefs(store)
+    assert _topic(store, "fizyka") is not None      # real tag still minted
+    assert _topic(store, "techniki") is None        # synthesis-only tag dropped
+
+
+def test_build_topic_synthesis_does_not_inflate_real_topic(tmp_path):
+    """A synthesis sharing a real topic's tag must not bump its source-count
+    (hence confidence) -- only the real, independent sources count."""
+    longterm = [
+        {"source_file": "wiki_a.txt", "folder": "general", "tags": ["fizyka"]},
+        {"source_file": "wiki_b.txt", "folder": "general", "tags": ["fizyka"]},
+        {"source_file": "synthesis_x_1", "folder": "synthesis",
+         "tags": ["fizyka"]},  # self-referential, must not count
+    ]
+    store, builder = _make(tmp_path, [], longterm, [])
+    builder.build_topic_beliefs(store)
+    b = _topic(store, "fizyka")
+    assert b is not None
+    # 2 real files -> 2/5 = 0.4, NOT 3/5 = 0.6 (the synthesis is excluded).
+    assert b.confidence == pytest.approx(0.4)
+    assert "synthesis_x_1" not in b.related_entities
+
+
+def test_build_topic_denylisted_source_dropped(tmp_path, monkeypatch):
+    """/forget_source must reach the TOPIC layer: a denylisted source_file is
+    dropped from the topic's count, mirroring the file/concept builders."""
+    longterm = [
+        {"source_file": "wiki_a.txt", "folder": "general", "tags": ["fizyka"]},
+        {"source_file": "wiki_b.txt", "folder": "general", "tags": ["fizyka"]},
+    ]
+    store, builder = _make(tmp_path, [], longterm, [])
+    monkeypatch.setattr(
+        builder, "_load_denylist",
+        lambda: {"source": {"wiki_b.txt"}, "entity": set()},
+    )
+    builder.build_topic_beliefs(store)
+    b = _topic(store, "fizyka")
+    assert b is not None
+    # Only wiki_a.txt counts -> 1/5 = 0.2.
+    assert b.confidence == pytest.approx(0.2)
+    assert "wiki_b.txt" not in b.related_entities
+
+
+def test_build_topic_confidence_collapses_single_corpus(tmp_path):
+    """Topic confidence must reflect INDEPENDENT sources, not raw file count: a
+    tag carried by N expert_*.txt files is one LLM voice (gap_planner
+    ASK_EXPERT), not N corroborating sources (cross-source WYDMUSZKA, audit
+    2026-06-16). Old code: min(1, 10/5)=1.0; fixed: min(1, 1/5)=0.2."""
+    longterm = [
+        {"source_file": f"expert_t{i}.txt", "folder": "general",
+         "tags": ["fizyka"]}
+        for i in range(10)  # 10 expert files == ONE logical source
+    ]
+    store, builder = _make(tmp_path, [], longterm, [])
+    builder.build_topic_beliefs(store)
+    b = _topic(store, "fizyka")
+    assert b is not None
+    assert b.confidence == pytest.approx(0.2)   # 1 logical source, not 10
+    assert "(1 zrodel)" in b.content            # honest source count surfaced
+    assert "w 10 plikach" in b.content          # true file count preserved
+
+
+def test_build_topic_confidence_counts_independent_sources(tmp_path):
+    """Independently fetched documents each count: 5 distinct web files are 5
+    sources, so confidence is not deflated by the corpus-collapse rule."""
+    longterm = [
+        {"source_file": f"web_wiki_{i}.txt", "folder": "general",
+         "tags": ["fizyka"]}
+        for i in range(5)
+    ]
+    store, builder = _make(tmp_path, [], longterm, [])
+    builder.build_topic_beliefs(store)
+    b = _topic(store, "fizyka")
+    assert b is not None
+    assert b.confidence == pytest.approx(1.0)   # 5 distinct logical sources

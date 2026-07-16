@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from agent_core.teacher.teaching_strategy import TeachingStrategy, SpacedRepetitionScheduler
-from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer, _parse_iso_utc
 from agent_core.teacher.teacher_agent import TeacherAgent
 from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.homeostasis.state_model import Mode
@@ -746,6 +746,42 @@ class TestTeacherExecution:
         assert agent._stats["exams_run"] == 1
         assert agent._stats["exams_passed"] == 0
 
+    def test_milestone_fn_fires_on_pass(self, tmp_path):
+        """A passed exam forwards (file_id, score) to the milestone callback."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(
+            lambda fid: {"success": True, "passed": True, "score": 0.85, "file_id": fid}
+        )
+        seen = []
+        agent.set_milestone_fn(lambda fid, score: seen.append((fid, score)))
+
+        agent._execute_strategy(TeachingStrategy(TeachingStrategy.REVIEW, "astronomia.txt"))
+
+        assert seen == [("astronomia.txt", 0.85)]
+
+    def test_milestone_fn_silent_on_fail(self, tmp_path):
+        """A failed exam must NOT fire the milestone callback."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": True, "passed": False, "score": 0.4})
+        seen = []
+        agent.set_milestone_fn(lambda fid, score: seen.append((fid, score)))
+
+        agent._execute_strategy(TeachingStrategy(TeachingStrategy.REVIEW, "file.txt"))
+
+        assert seen == []
+
+    def test_milestone_fn_exception_does_not_break_exam(self, tmp_path):
+        """A throwing milestone callback must not corrupt the exam result."""
+        agent = _make_teacher(tmp_path)
+        agent.set_exam_fn(lambda fid: {"success": True, "passed": True, "score": 0.9})
+        agent.set_milestone_fn(lambda fid, score: (_ for _ in ()).throw(RuntimeError("boom")))
+
+        result = agent._execute_strategy(TeachingStrategy(TeachingStrategy.REVIEW, "f.txt"))
+
+        assert result["success"] is True
+        assert result["passed"] is True
+        assert agent._stats["exams_passed"] == 1
+
     def test_exec_review_pipeline_failure_tracks_attempt(self, tmp_path):
         """BUG A (2026-05-25): when exam pipeline fails (success=False),
         exams_run must NOT increment but exam_pipeline_failures must, so K9/K12
@@ -1434,6 +1470,35 @@ class TestTopicFileMap:
         assert "inne" not in topic_map
         assert "wiedza" not in topic_map
 
+    def test_ranks_by_independent_sources_not_file_count(self, tmp_path):
+        """Cross-source WYDMUSZKA (audit 2026-06-16): a tag in many expert_*.txt
+        files is one LLM voice (gap_planner ASK_EXPERT). Ranking must place a
+        genuinely cross-source topic above an expert monoculture even when the
+        monoculture has MORE files -- else the deepen/expand queue is dominated
+        by single-voice topics. File LISTS stay intact for membership."""
+        mem_path = tmp_path / "memory.jsonl"
+        _write_jsonl(mem_path, [
+            # 'monokultura': 3 expert files == 1 logical source
+            _make_memory_record("expert_a.txt", ["monokultura"]),
+            _make_memory_record("expert_b.txt", ["monokultura"]),
+            _make_memory_record("expert_c.txt", ["monokultura"]),
+            # 'realny': 2 independently fetched documents == 2 logical sources
+            _make_memory_record("web_wiki_x.txt", ["realny"]),
+            _make_memory_record("web_rss_y.txt", ["realny"]),
+        ])
+        analyzer = KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "idx.jsonl",
+            longterm_memory_path=mem_path,
+            exam_results_path=tmp_path / "exam.jsonl",
+            input_dir=tmp_path / "input",
+        )
+        topic_map = analyzer.get_topic_file_map()
+        order = list(topic_map.keys())
+        # 'realny' (2 sources) outranks 'monokultura' (3 files, 1 source).
+        assert order.index("realny") < order.index("monokultura")
+        # File lists preserved unchanged for membership consumers.
+        assert len(topic_map["monokultura"]) == 3
+
 
 class TestGetFilesForTopics:
     """Tests for KnowledgeAnalyzer.get_files_for_topics() with scoring."""
@@ -1463,17 +1528,54 @@ class TestGetFilesForTopics:
         assert results[0][0] == "exact.txt"
         assert results[0][1] > results[1][1]
 
-    def test_prefix_vs_substring_scoring(self, tmp_path):
-        """'fizyk' should prefer 'fizyka kwantowa' (prefix=2) over 'metafizyka' (substring=1)."""
+    def test_prefix_matches_wholeword_substring_does_not(self, tmp_path):
+        """'fizyk' prefix-matches 'fizyka kwantowa' but NOT the substring inside
+        'metafizyka' (2026-06-20: +1.0 branch is whole-word, not substring)."""
         analyzer = self._make_analyzer(tmp_path, [
             _make_memory_record("fizyka_file.txt", ["fizyka kwantowa"]),
             _make_memory_record("meta_file.txt", ["metafizyka"]),
         ])
         results = analyzer.get_files_for_topics(["fizyk"])
-        assert len(results) == 2
-        # fizyka_file scores higher: prefix(2) > substring(1)
-        assert results[0][0] == "fizyka_file.txt"
-        assert results[0][1] > results[1][1]
+        # only the prefix match survives; 'metafizyka' substring noise is dropped
+        assert [fid for fid, _ in results] == ["fizyka_file.txt"]
+
+    def test_wholeword_match_excludes_substring_noise(self, tmp_path):
+        """The live 'rna' bug: 'rna' must NOT match inside 'hepburna'/'alternatywa'
+        but MUST match the tag 'kwas rna' (token) and exact tag 'rna'."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("hepburn.txt", ["transkrypcja hepburna"]),
+            _make_memory_record("alt.txt", ["alternatywa"]),
+            _make_memory_record("quantum.txt", ["mechanika kwantowa"]),
+            _make_memory_record("genetyka.txt", ["rna", "genetyka"]),
+            _make_memory_record("kwas.txt", ["kwas rna"]),
+        ])
+        ids = [fid for fid, _ in analyzer.get_files_for_topics(["rna"])]
+        assert "genetyka.txt" in ids        # exact tag 'rna'
+        assert "kwas.txt" in ids            # whole-word token 'rna' in 'kwas rna'
+        assert "hepburn.txt" not in ids     # substring noise -> dropped
+        assert "alt.txt" not in ids
+        assert "quantum.txt" not in ids
+
+    def test_no_cap_keeps_full_relevant_set(self, tmp_path):
+        """A broad topic keeps ALL its whole-word matches (no top-N cap) so the
+        progress denominator stays honest and verified files are never evicted
+        (review M3, 2026-06-20)."""
+        records = [_make_memory_record(f"f{i}.txt", ["rna"]) for i in range(20)]
+        analyzer = self._make_analyzer(tmp_path, records)
+        results = analyzer.get_files_for_topics(["rna"])
+        assert len(results) == 20
+
+    def test_filename_shaped_topic_self_matches(self, tmp_path):
+        """A topic that IS a filename (fetch-handoff goals) still resolves to that
+        file via the filename self-match, despite whole-word tokenization."""
+        analyzer = self._make_analyzer(tmp_path, [], idx_records=[
+            _make_index_record("web_wiki_klasyfikacja_wiedenska.txt"),
+            _make_index_record("other.txt"),
+        ])
+        results = analyzer.get_files_for_topics(
+            ["web_wiki_klasyfikacja_wiedenska.txt"]
+        )
+        assert [fid for fid, _ in results] == ["web_wiki_klasyfikacja_wiedenska.txt"]
 
     def test_filename_fallback(self, tmp_path):
         """File with matching name gets +0.5 even without tag match."""
@@ -1485,6 +1587,60 @@ class TestGetFilesForTopics:
         assert len(results) == 1
         assert results[0][0] == "fizyka_intro.txt"
         assert results[0][1] == 0.5
+
+    def test_multiword_topic_matches_tag_subset(self, tmp_path):
+        """Project sub-goal names are SENTENCES ('podstawy funding rate na
+        perpetual futures') -- unmatchable by exact/prefix/single-token
+        branches. A tag whose content tokens sit inside the topic phrase
+        (>=2 common, stopwords out) must match (2026-07-05)."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("funding.txt", ["funding rate"]),
+            _make_memory_record("carry.txt", ["carry"]),
+            _make_memory_record("noise.txt", ["transkrypcja hepburna"]),
+        ])
+        ids = [fid for fid, _ in analyzer.get_files_for_topics(
+            ["podstawy funding rate na perpetual futures"]
+        )]
+        assert "funding.txt" in ids       # tag {funding, rate} ⊆ topic
+        assert "noise.txt" not in ids
+        # single-token tag 'carry' matches ONLY a topic containing it
+        ids2 = [fid for fid, _ in analyzer.get_files_for_topics(
+            ["strategie carry na funding rate"]
+        )]
+        assert "carry.txt" in ids2        # 1 wspolny token, ale dlugi termin
+        assert "noise.txt" not in ids2
+
+    def test_multiword_topic_short_generic_tag_no_noise(self, tmp_path):
+        """A 1-token tag shorter than 5 chars ('rate') must NOT match a
+        multi-word topic -- too generic, would pull noise files."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("generic.txt", ["rate"]),
+        ])
+        assert analyzer.get_files_for_topics(
+            ["podstawy funding rate na perpetual futures"]
+        ) == []
+
+    def test_multiword_topic_matches_filename_tokens(self, tmp_path):
+        """expert_funding_rate.txt resolves for the funding sub-goal via >=2
+        filename tokens inside the topic phrase (+0.5 branch)."""
+        analyzer = self._make_analyzer(tmp_path, [], idx_records=[
+            _make_index_record("expert_funding_rate.txt"),
+            _make_index_record("expert_fizyka.txt"),
+        ])
+        results = analyzer.get_files_for_topics(
+            ["podstawy funding rate na perpetual futures"]
+        )
+        assert [fid for fid, _ in results] == ["expert_funding_rate.txt"]
+        assert results[0][1] == 0.5
+
+    def test_multiword_topic_stopwords_carry_no_signal(self, tmp_path):
+        """Shared function words ('jak', 'na') never count as overlap."""
+        analyzer = self._make_analyzer(tmp_path, [
+            _make_memory_record("noise.txt", ["jak na wojnie"]),
+        ])
+        assert analyzer.get_files_for_topics(
+            ["jak funding wplywa na pozycje long i short"]
+        ) == []
 
     def test_empty_topics(self, tmp_path):
         analyzer = self._make_analyzer(tmp_path, [
@@ -1606,16 +1762,16 @@ class TestLearningWindow:
         assert is_learning_window(dt) is True
 
     def test_is_learning_window_outside(self):
-        """Outside learning hours returns False (test profile data directly)."""
+        """Night hours are outside the (08-22) learning window."""
         from agent_core.environment.environment_model import PROFILE_LEARNING
-        # Monday 18:00 UTC - outside (7,8,9,12,13,14)
-        assert 18 not in PROFILE_LEARNING.auto_trigger_hours
+        assert 23 not in PROFILE_LEARNING.auto_trigger_hours
+        assert 3 not in PROFILE_LEARNING.auto_trigger_hours
 
     def test_is_learning_window_weekend(self):
-        """Weekend not in learning days."""
+        """2026-06-20: window is 7-day, so weekends are learning days too."""
         from agent_core.environment.environment_model import PROFILE_LEARNING
-        # Saturday = weekday 5, not in (0,1,2,3,4)
-        assert 5 not in PROFILE_LEARNING.auto_trigger_days
+        assert 5 in PROFILE_LEARNING.auto_trigger_days  # Saturday
+        assert 6 in PROFILE_LEARNING.auto_trigger_days  # Sunday
 
     def test_is_learning_window_afternoon(self):
         """Afternoon window (12-14 UTC = 14-16 Berlin) returns True."""
@@ -1780,3 +1936,164 @@ class TestLearningWindow:
         assert strategy is not None
         assert strategy.target_file_id == "web_order_flow.txt"
         assert strategy.params.get("reason") == "critic_gap"
+
+
+class TestExamWindow:
+    """The 24h exam figures behind the daily frames.
+
+    The lifetime mean sits on 1347 exams: a day of real scores moves it by
+    fractions of a percent, so a frame quoting it repeats itself for weeks.
+    """
+
+    @pytest.fixture
+    def analyzer(self, tmp_path):
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "input").mkdir()
+        return KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "memory" / "knowledge_index.jsonl",
+            longterm_memory_path=tmp_path / "memory" / "longterm_memory.jsonl",
+            exam_results_path=tmp_path / "memory" / "exam_results.jsonl",
+            input_dir=tmp_path / "input",
+        )
+
+    @staticmethod
+    def _write_exams(analyzer, rows):
+        """rows: list of (hours_ago, score), written in the teacher's ISO-Z format."""
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        with open(analyzer.exam_path, "w") as f:
+            for hours_ago, score in rows:
+                stamp = (now - timedelta(hours=hours_ago)).isoformat().replace(
+                    "+00:00", "Z"
+                )
+                f.write(json.dumps({
+                    "file": "t.txt", "timestamp": stamp, "score": score,
+                }) + "\n")
+
+    def test_window_excludes_older_exams(self, analyzer):
+        self._write_exams(analyzer, [(1, 1.0), (2, 1.0), (100, 0.0), (200, 0.0)])
+
+        snap = analyzer.get_knowledge_snapshot()
+
+        assert snap["exam_count_24h"] == 2
+        assert snap["average_exam_score_24h"] == 1.0
+        assert snap["average_exam_score"] == 0.5      # lifetime still all four
+
+    def test_zero_when_no_exams_in_window(self, analyzer):
+        self._write_exams(analyzer, [(100, 0.9)])
+
+        snap = analyzer.get_knowledge_snapshot()
+
+        assert snap["exam_count_24h"] == 0
+        assert snap["average_exam_score_24h"] == 0.0
+
+    @pytest.mark.parametrize("tz", ["UTC", "Europe/Warsaw", "America/New_York"])
+    def test_utc_stamps_are_not_read_as_local_time(self, analyzer, monkeypatch, tz):
+        """An exam 23h old belongs in the window whatever the daemon's offset.
+
+        Stripping the 'Z' yields a naive datetime that .timestamp() reads as
+        LOCAL time, shifting every stamp by the UTC offset -- 2h in Berlin
+        summer -- which silently moves both window edges. The host TZ is forced
+        here rather than inherited: on a UTC runner the offset is 0 and the bug
+        is invisible, so an unparametrised version of this test would pass
+        against the broken parser and guard nothing.
+        """
+        monkeypatch.setenv("TZ", tz)
+        time.tzset()
+        try:
+            self._write_exams(analyzer, [(23, 1.0), (25, 0.0)])
+
+            snap = analyzer.get_knowledge_snapshot()
+
+            assert snap["exam_count_24h"] == 1
+            assert snap["average_exam_score_24h"] == 1.0
+        finally:
+            monkeypatch.undo()
+            time.tzset()
+
+    @pytest.mark.parametrize("tz", ["UTC", "Europe/Warsaw", "Pacific/Auckland"])
+    def test_parse_iso_utc_maps_a_stamp_to_one_instant(self, monkeypatch, tz):
+        """The same 'Z' stamp is the same instant in every host timezone."""
+        monkeypatch.setenv("TZ", tz)
+        time.tzset()
+        try:
+            assert _parse_iso_utc("2026-07-15T12:00:00Z") == 1784116800.0
+        finally:
+            monkeypatch.undo()
+            time.tzset()
+
+    def test_unparseable_stamp_is_skipped_not_counted_as_1970(self, analyzer):
+        with open(analyzer.exam_path, "w") as f:
+            f.write(json.dumps({"file": "a.txt", "timestamp": "", "score": 0.1}) + "\n")
+            f.write(json.dumps({"file": "b.txt", "score": 0.2}) + "\n")
+            f.write(json.dumps({"file": "c.txt", "timestamp": "junk", "score": 0.3}) + "\n")
+
+        snap = analyzer.get_knowledge_snapshot()
+
+        assert snap["exam_count_24h"] == 0
+        assert snap["average_exam_score_24h"] == 0.0
+
+
+class TestCountChunksLearned:
+    """count_chunks_learned: chunks that really landed, not actions that claimed to.
+
+    Guard for the daily frame. The obvious proxy -- successful learn/fill_gap
+    actions -- overcounts, because learn_next_chunk returns True when a file's
+    chunks are already all in memory. Live on 2026-07-16: 101 actions vs 83
+    chunks (+22%), the whole gap being 18 fill_gap retries on one finished file.
+    """
+
+    @pytest.fixture
+    def analyzer(self, tmp_path):
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "input").mkdir()
+        return KnowledgeAnalyzer(
+            knowledge_index_path=tmp_path / "memory" / "knowledge_index.jsonl",
+            longterm_memory_path=tmp_path / "memory" / "longterm_memory.jsonl",
+            exam_results_path=tmp_path / "memory" / "exam_results.jsonl",
+            input_dir=tmp_path / "input",
+        )
+
+    @staticmethod
+    def _write_memory(analyzer, hours_ago_list):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        with open(analyzer.memory_path, "w") as f:
+            for i, hours_ago in enumerate(hours_ago_list):
+                stamp = (now - timedelta(hours=hours_ago)).isoformat().replace(
+                    "+00:00", "Z"
+                )
+                f.write(json.dumps({
+                    "source_file": "t.txt", "chunk_id": f"c{i}",
+                    "chunk_index": i, "timestamp": stamp, "summary": "x",
+                }) + "\n")
+
+    def test_counts_only_the_window(self, analyzer):
+        self._write_memory(analyzer, [1, 5, 23, 30, 400])
+
+        assert analyzer.count_chunks_learned(24.0) == 3
+
+    def test_zero_on_a_day_with_no_learning(self, analyzer):
+        self._write_memory(analyzer, [100, 200])
+
+        assert analyzer.count_chunks_learned(24.0) == 0
+
+    def test_zero_when_memory_file_absent(self, analyzer):
+        assert analyzer.count_chunks_learned(24.0) == 0
+
+    def test_does_not_read_the_action_log(self, analyzer):
+        """The count must come from memory, so a no-op action cannot inflate it.
+
+        Mirrors production: teacher_plans logs a success for an already-complete
+        file while nothing reaches long-term memory.
+        """
+        self._write_memory(analyzer, [2])
+        plans = analyzer.index_path.parent / "teacher_plans.jsonl"
+        with open(plans, "w") as f:
+            for _ in range(18):
+                f.write(json.dumps({
+                    "timestamp": time.time(),
+                    "result": {"success": True, "type": "fill_gap", "file_id": "done.txt"},
+                }) + "\n")
+
+        assert analyzer.count_chunks_learned(24.0) == 1

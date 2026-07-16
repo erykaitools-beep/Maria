@@ -30,6 +30,11 @@ def _notify_outbox(ctx, rec):
     )
     try:
         notifier = getattr(ctx, "telegram_notifier", None)
+        # Quiet hours: the proposal is already PENDING (propose_if_none_pending
+        # ran before this ping), so /list_notes surfaces it in the morning --
+        # defer the ping rather than buzz the operator at 3am. Nothing is lost.
+        if notifier is not None and getattr(notifier, "in_quiet_hours", lambda: False)():
+            return
         if notifier is not None and hasattr(notifier, "send_raw"):
             notifier.send_raw(msg, parse_mode=None)
         else:

@@ -235,6 +235,24 @@ class TestOpenClawClientInvokeNode:
         assert "--json" in call_args
 
     @patch("subprocess.run")
+    def test_invoke_exec_argv_not_resplit(self, mock_run, client):
+        # FIX-2: an explicit argv list passes each element as ONE argument, so a
+        # path containing spaces (the undo 'rm -- <path>' inverse) is NOT re-split.
+        mock_run.return_value = _make_subprocess_result(
+            stdout=_make_node_result(stdout=""),
+        )
+        # The real undo inverse carries BOTH argv (safe exec form) and command
+        # (legacy/display); validation requires command, _invoke_node prefers argv.
+        client.invoke_tool("exec", {"argv": ["rm", "--", "/x/has space.txt"],
+                                    "command": "rm -- '/x/has space.txt'"})
+        call_args = mock_run.call_args[0][0]
+        # the full path survives as a single argv element (not 'has' + 'space.txt')
+        assert "/x/has space.txt" in call_args
+        assert "rm" in call_args
+        # the broken whitespace-split fragments must NOT appear
+        assert "space.txt" not in call_args
+
+    @patch("subprocess.run")
     def test_invoke_read_success(self, mock_run, client):
         mock_run.return_value = _make_subprocess_result(
             stdout=_make_node_result(stdout="file contents here\n"),

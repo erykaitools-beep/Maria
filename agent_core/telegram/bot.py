@@ -274,6 +274,87 @@ class TelegramBot:
             )
             return False
 
+    def send_photo(
+        self,
+        file_path: str,
+        caption: Optional[str] = None,
+        chat_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Send a photo (rendered inline) to the operator.
+
+        Like send_document but uses sendPhoto so the image shows inline rather
+        than as a file attachment. Used by VisionAdvisor so the operator can
+        SEE what Maria sees alongside her description.
+
+        Args:
+            file_path: Local path to the image to send
+            caption: Optional caption (max 1024 chars)
+            chat_id: Override default chat_id
+
+        Returns:
+            True if sent successfully, False otherwise.
+        """
+        target = chat_id or self._chat_id
+        if not self.configured:
+            self._record_outbox(
+                kind="send_photo",
+                success=False,
+                chat_id=target,
+                text=caption,
+                file_path=file_path,
+                error="not_configured",
+            )
+            return False
+
+        caption_to_send = caption[:1024] if caption else None
+
+        try:
+            with open(file_path, "rb") as f:
+                data = {"chat_id": target}
+                if caption_to_send:
+                    data["caption"] = caption_to_send
+                resp = requests.post(
+                    self._api_url("sendPhoto"),
+                    data=data,
+                    files={"photo": f},
+                    timeout=(5, 30),
+                )
+            result = resp.json()
+            if result.get("ok"):
+                logger.debug("TelegramBot: photo sent: %s", file_path)
+                self._record_outbox(
+                    kind="send_photo",
+                    success=True,
+                    chat_id=target,
+                    text=caption_to_send,
+                    file_path=file_path,
+                    telegram_message_id=_message_id(result),
+                )
+                return True
+            error = str(result.get("description", "send_photo_failed"))
+            logger.warning("TelegramBot: sendPhoto failed: %s", error)
+            self._record_outbox(
+                kind="send_photo",
+                success=False,
+                chat_id=target,
+                text=caption_to_send,
+                file_path=file_path,
+                error=error,
+            )
+            return False
+        except Exception as e:
+            logger.warning("TelegramBot: sendPhoto error: %s", e)
+            self._record_outbox(
+                kind="send_photo",
+                success=False,
+                chat_id=target,
+                text=caption_to_send,
+                file_path=file_path,
+                error=str(e),
+            )
+            return False
+
     def get_updates(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Poll for new messages from operator.

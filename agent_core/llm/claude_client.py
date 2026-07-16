@@ -13,6 +13,7 @@ Pattern: follows codex_client.py (subprocess wrapper, rate-limited, logged).
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -27,6 +28,61 @@ except ImportError:
     _CONTEXT_BRIEF = ""
 
 logger = logging.getLogger(__name__)
+
+# Read-only tool set for the backend. Restores /claude's ability to actually
+# read+analyse code (the 2026-06-12 audit's bare --tools "" left it tool-less, so
+# it confabulated answers it could not verify -- confirmed live 2026-06-22:
+# tool-less Claude invented a wrong heading; read-only Claude read the real one).
+# CRITICAL: keep this READ-ONLY (Read/Grep/Glob) -- no Bash/Edit/Write means no
+# exec/write on the live repo, preserving the audit's intent. Adding Bash/Write/
+# Edit here reopens that hole. Env-overridable (operator owns .env).
+_ALLOWED_TOOLS = os.environ.get("CLAUDE_ALLOWED_TOOLS", "Read,Grep,Glob")
+
+# Markers of a hallucinated tool call emitted as plain TEXT (see
+# looks_like_tool_hallucination). Even with read-only tools, a request the model
+# cannot fulfil (write/exec/send) makes it print one of these as text instead of
+# acting. The CLI's format varies by version -- 2026-06-22 it emits "<tool_use>"
+# (older logs showed "<tool_call>"), so list every variant. ("<parameter name="
+# dropped -- too generic, it appears in legitimate code/markup discussion.)
+_TOOL_CALL_MARKERS = (
+    "<tool_use", "<tool_call", "<tool_calls", "<tool_name", "<tool_input",
+    "<invoke", "<function_call", '"type":"tool_use"', '"type": "tool_use"',
+)
+
+
+def looks_like_tool_hallucination(text: Optional[str]) -> bool:
+    """True when CLI output is DOMINATED by hallucinated tool-call syntax.
+
+    The /claude backend runs ``claude --tools ""`` (no tools at all, per the
+    2026-06-12 security audit). Asked to DO something -- read a file, send to
+    Telegram -- the model emits ``<tool_call>{...}</tool_call>`` pseudo-syntax as
+    plain TEXT. That text is non-empty and the process exits 0, so it used to be
+    returned as a 'successful' result: a false COMPLETED that shipped gibberish
+    to the operator (the 2026-06-22 morning failure). Detect it so the caller
+    treats it as no-result and answers honestly instead.
+
+    Tuned to avoid false positives: /claude IS a text analyst that may quote a
+    ``<tool_call>`` tag while discussing code. We strip xml-ish tags and JSON
+    blocks (iteratively, innermost-first, so a NESTED ``{"arguments": {...}}`` is
+    fully removed -- a flat regex cannot), then flag ONLY when the surviving prose
+    is BOTH short in absolute terms (<200 chars) AND a small fraction (<1/3) of
+    the output -- i.e. tool-call syntax dominates. A substantial analysis, or a
+    short answer that merely quotes a tag, survives.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    if not any(m in low for m in _TOOL_CALL_MARKERS):
+        return False
+    stripped = re.sub(r"<[^>]+>", " ", text)             # drop xml-ish tags
+    prev = None
+    while prev != stripped:                              # remove {json} innermost-first
+        prev = stripped
+        stripped = re.sub(r"\{[^{}]*\}", " ", stripped)
+    prose = re.sub(r"\s+", " ", stripped).strip()
+    total = len(text.strip())
+    return len(prose) < 200 and total > 0 and len(prose) * 3 < total
+
 
 # Rate limit: strict to avoid overuse
 MAX_CALLS_PER_HOUR = int(os.environ.get("CLAUDE_MAX_CALLS_PER_HOUR", "3"))
@@ -113,9 +169,14 @@ class ClaudeClient:
         duration_ms = (time.time() - start) * 1000
 
         self._total_calls += 1
+        # The subprocess ran (we passed the availability + rate-limit gates), so
+        # it spent a real call against the operator's subscription regardless of
+        # whether the output was usable -- count it toward the limit. A None
+        # result (timeout, error, or a discarded tool-call hallucination) still
+        # means a real CLI call happened (ban-risk safety, 2026-06-22 review).
+        self._record_call()
 
         if result is not None:
-            self._record_call()
             self._log_interaction(
                 prompt=prompt, response=result, source=source,
                 context=context, success=True, error=None,
@@ -136,15 +197,17 @@ class ClaudeClient:
         try:
             # Prepend context brief so Claude knows it's helping M.A.R.I.A.
             full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
-            # Audyt 2026-06-12: --dangerously-skip-permissions na zywym repo
-            # dawalo kazdemu, kto dosiegnie .ask() (webui /api/tasks za samym
-            # PIN-em, telegram), agenta z dowolnym exec/write. Wszyscy
-            # konsumenci .ask() (K12, code_agent, taski) chca CZYSTEGO TEKSTU
-            # -- --tools "" wylacza wszystkie narzedzia, wiec nie ma czego
-            # bypassowac i nic nie wisi na promptach uprawnien.
+            # Audyt 2026-06-12 wylaczyl WSZYSTKIE narzedzia (--tools "") bo
+            # --dangerously-skip-permissions na zywym repo dawal kazdemu z
+            # dostepem do .ask() (webui za PIN-em, telegram) exec/write. Ale to
+            # zostawilo /claude SLEPYM -- nie umial przeczytac pliku, wiec
+            # konfabulowal (2026-06-22). READ-ONLY (Read/Grep/Glob) przywraca
+            # analize kodu BEZ exec/write -- intencja audytu zachowana. NIE
+            # dawac tu Bash/Edit/Write (otwiera dziure). Brak
+            # --dangerously-skip-permissions: read-only auto-allowuje sie w -p.
             cmd = [
                 self._claude_bin,
-                "--tools", "",
+                "--tools", _ALLOWED_TOOLS,
                 "-p", full_prompt,
                 "--output-format", "text",
             ]
@@ -158,7 +221,17 @@ class ClaudeClient:
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                out = result.stdout.strip()
+                if looks_like_tool_hallucination(out):
+                    # Tool-less backend tried to "act" and emitted pseudo
+                    # tool-calls as text. Not a real answer -> treat as no-result
+                    # so the caller stays honest instead of shipping gibberish.
+                    logger.warning(
+                        "[Claude] Output looks like hallucinated tool-calls "
+                        "(tool-less backend cannot act); treating as no-result."
+                    )
+                    return None
+                return out
 
             if result.stderr:
                 logger.warning("[Claude] stderr: %s", result.stderr[:300])

@@ -102,8 +102,8 @@ niej będą realne dane "jak to będzie działać". Wracamy do 2.0, gdy 1.0 da d
 
 ## Stale docs — NIE traktować jako prawdy runtime
 
-- `docs/ARCHITECTURE.md` — kwiecień 2026, mówi 11 faz / 3352 testy. Kod robi 19 faz,
-  5239 testów. Historyczny, dopóki nie zregenerowany.
+- `docs/ARCHITECTURE.md` — kwiecień 2026, mówi 11 faz / 3352 testy. Kod robi 20 faz
+  (Phase 20 = conversation condense, 06-21), ~6759 testów. Historyczny, dopóki nie zregenerowany.
 - Web UI `_JSONL_DATA_FLOW` (`maria_ui/app.py:2469`) — ręczna mapa, pomija m.in.
   `self_state_snapshots`, `maria_task_queue`, `creative_events`, `cognitive_bulletin`.
   Do regeneracji ze store'ów albo zdjąć z paneli "truth".

@@ -125,10 +125,17 @@ class ModeRegulator:
 
         # SLEEP: If idle long enough and resources OK
         if idle_time > self.IDLE_FOR_SLEEP_SEC and ram_available_pct > 60:
-            # Don't go to sleep during learning windows
-            if self._is_learning_window():
-                return self.current_mode  # Stay in current mode
-            return Mode.SLEEP
+            # Don't go to sleep during learning windows.
+            if not self._is_learning_window():
+                return Mode.SLEEP
+            # In a learning window we must stay awake -- but must NOT freeze in
+            # the current mode. Returning current_mode here used to trap a
+            # CPU-spike-demoted REDUCED state for the entire window: the
+            # REDUCED->ACTIVE recovery below was never reached, so a healthy
+            # idle box sat in REDUCED (light-only) and the learning window this
+            # guard exists to protect was wasted (observed 2026-06-15, afternoon
+            # window 14-16: 11/12 learns blocked by mode=reduced). Fall through
+            # so the recovery logic can lift a healthy box back to ACTIVE.
 
         # REDUCED: If resource pressure
         # RAM is persistent — trigger immediately. CPU is bursty (LLM inference) —

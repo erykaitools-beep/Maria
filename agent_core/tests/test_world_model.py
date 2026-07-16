@@ -31,6 +31,20 @@ from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
 from agent_core.planner.action_executor import ActionExecutor
 
 
+@pytest.fixture(autouse=True)
+def _clean_gate_env(monkeypatch):
+    """Isolate CONCEPT_TRUST_GATE so belief-build tests see the default (off) gate.
+
+    The live ``.env`` ships ``CONCEPT_TRUST_GATE=armed`` and ``load_dotenv()``
+    leaks it into the pytest process; sibling modules (test_synthesis_belief_cap,
+    test_concept_trust_gate) also toggle it. With the gate armed, update_from_exam
+    keeps file beliefs at OBSERVATION instead of promoting to FACT, so
+    test_update_from_exam_pass fails out of isolation. Mirror the same autouse
+    delenv guard those sibling modules already use.
+    """
+    monkeypatch.delenv("CONCEPT_TRUST_GATE", raising=False)
+
+
 # ============================================================
 # belief_model.py
 # ============================================================
@@ -350,6 +364,38 @@ class TestBeliefStore:
         store.add(self._make_belief("c", tags=["python"]))
         results = store.get_by_tag("python")
         assert len(results) == 2
+
+    def test_index_is_ordered_set_no_dupes(self, tmp_path):
+        # Regression (2026-07-13): indexes are dict-backed ordered sets, not
+        # lists. Guards against the O(n^2) `bid not in list` scan on the huge
+        # _by_entity_type buckets that made a full build/prune take ~27s.
+        store = self._make_store(tmp_path)
+        beliefs = [
+            self._make_belief(f"t{i}", entity_type=EntityType.CONCEPT,
+                              source_id=f"s{i}")
+            for i in range(5)
+        ]
+        for b in beliefs:
+            store.add(b)
+        # Insertion order preserved by the dict-backed buckets.
+        got = store.get_by_entity_type(EntityType.CONCEPT)
+        assert [b.entity for b in got] == [f"t{i}" for i in range(5)]
+        # Buckets are dicts (ordered set), keyed by belief_id.
+        bucket = store._by_entity_type[EntityType.CONCEPT]
+        assert isinstance(bucket, dict)
+        assert list(bucket) == [b.belief_id for b in beliefs]
+        # Re-indexing an already-present belief is idempotent (no dup key).
+        store._index_belief(beliefs[0])
+        assert list(store._by_entity_type[EntityType.CONCEPT]).count(
+            beliefs[0].belief_id
+        ) == 1
+        # Drop removes from every index cleanly; empty bucket is deleted.
+        store.drop_belief(beliefs[2].belief_id)
+        assert beliefs[2].belief_id not in store._by_entity_type[EntityType.CONCEPT]
+        assert store._by_entity.get("t2") is None
+        assert [b.entity for b in store.get_by_entity_type(EntityType.CONCEPT)] == [
+            "t0", "t1", "t3", "t4"
+        ]
 
     def test_get_current_excludes_superseded(self, tmp_path):
         store = self._make_store(tmp_path)

@@ -19,6 +19,16 @@ MIN_ARTICLE_CHARS = 200
 RATE_LIMIT_SEC = 2.0  # polite crawling
 
 
+class WikiTransientError(RuntimeError):
+    """Wikipedia could not be asked (network error, 429, 5xx, malformed JSON).
+
+    Carries no information about whether an article exists. Kept distinct from
+    an empty search result because callers treat "no results" as a permanent
+    verdict on the topic; conflating the two lets a rate-limit erase a live
+    topic forever.
+    """
+
+
 class WikiClient:
     """
     Fetches article content from Polish Wikipedia API.
@@ -48,7 +58,15 @@ class WikiClient:
             limit: Max results (1-10)
 
         Returns:
-            List of article titles. Empty on error.
+            List of article titles. EMPTY MEANS "Wikipedia has no such article"
+            and nothing else -- callers act on that permanently (see
+            FetchRegistry.mark_topic_dead), so a transient failure must never
+            be flattened into it.
+
+        Raises:
+            WikiTransientError: the request failed or Wikipedia refused it
+                (429/5xx/timeout/bad JSON). Says nothing about whether the
+                article exists; retry later.
         """
         if not query or not query.strip():
             return []
@@ -76,8 +94,15 @@ class WikiClient:
             return []
 
         except (requests.RequestException, ValueError) as e:
+            # NIE zwracaj [] -- run_fetch_session czyta puste wyniki jako
+            # "Wikipedia nie ma takiego hasla" i kasuje temat NA ZAWSZE
+            # (mark_topic_dead, one-strike). Przy 429 od pl.wikipedia.org
+            # (15x samego 2026-07-14) kasowalo to zywe tematy przez chwilowy
+            # rate-limit. Wyjatek ląduje w `except Exception` sesji, ktory juz
+            # ustawia had_error i pomija mark_topic_dead -- czyli robi to, co
+            # jego komentarz obiecywal od poczatku.
             logger.warning(f"Wikipedia search failed for '{query}': {e}")
-            return []
+            raise WikiTransientError(f"Wikipedia search failed for '{query}': {e}") from e
 
     def fetch_article(self, title: str) -> Optional[Dict[str, Any]]:
         """

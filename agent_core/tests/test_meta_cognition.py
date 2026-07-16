@@ -748,6 +748,16 @@ class TestMetaCognitionFacade:
         mc = MetaCognition(reflections_path=tmp_path / "r.jsonl")
         assert mc.need_human() is False
 
+    def test_needs_human_alias_exists_and_delegates(self, tmp_path):
+        # Regression guard: call sites (core/planner/limitation_reporter) and the
+        # Telegram notifier use the plural 'needs_human'. The method was only
+        # defined as 'need_human', so their hasattr() guards were False and the
+        # K9 signal was silently dead. The alias must exist and delegate.
+        mc = MetaCognition(reflections_path=tmp_path / "r.jsonl")
+        assert hasattr(mc, "needs_human")
+        assert mc.needs_human() == mc.need_human()
+        assert mc.needs_human() is False
+
     def test_analyze_patterns_empty(self, tmp_path):
         mc = MetaCognition(reflections_path=tmp_path / "r.jsonl")
         patterns = mc.analyze_patterns()
@@ -806,3 +816,40 @@ class TestSharedContextK9:
         ctx = SharedContext()
         assert hasattr(ctx, "meta_cognition")
         assert ctx.meta_cognition is None
+
+
+class TestReflectorSkipExclusion:
+    """K9 fix: a skipped attempt (planner rest / no fresh material) must NOT be
+    reflected as a failure -- otherwise it tanks decision-confidence and trips
+    the false 'Spadek pewnosci w decyzjach' needs_human signal. Genuine outcomes
+    (success AND real failure) must still be reflected."""
+
+    def _reflector(self, tmp_path):
+        store = ReflectionStore(path=tmp_path / "r.jsonl")
+        return Reflector(store, ConfidenceTracker(store)), store
+
+    def test_skipped_result_leaves_reflection_pending(self, tmp_path):
+        reflector, store = self._reflector(tmp_path)
+        store.append(create_reflection(plan_id="p-skip", action_type="learn"))
+        out = reflector.reflect(
+            "p-skip", actual_success=False,
+            result={"skipped": True, "idle_reason": "filtered_out_all_candidates"},
+        )
+        assert out is None  # no completion happened
+        # Pending reflection -> excluded by ConfidenceTracker's is_reflected filter.
+        assert store.get_by_plan_id("p-skip").is_reflected is False
+
+    def test_real_success_still_reflected(self, tmp_path):
+        reflector, store = self._reflector(tmp_path)
+        store.append(create_reflection(plan_id="p-ok", action_type="learn"))
+        out = reflector.reflect("p-ok", actual_success=True, result={"chunks_learned": 3})
+        assert out is not None
+        assert store.get_by_plan_id("p-ok").is_reflected is True
+
+    def test_genuine_failure_still_reflected(self, tmp_path):
+        """A real (non-skipped) failure must STILL count -- only skips are excluded."""
+        reflector, store = self._reflector(tmp_path)
+        store.append(create_reflection(plan_id="p-fail", action_type="learn"))
+        out = reflector.reflect("p-fail", actual_success=False, result={"chunks_learned": 0})
+        assert out is not None
+        assert store.get_by_plan_id("p-fail").is_reflected is True

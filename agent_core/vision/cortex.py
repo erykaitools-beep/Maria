@@ -236,6 +236,66 @@ class VisionCortex:
 
         return None
 
+    def describe_snapshot(
+        self,
+        prompt: Optional[str] = None,
+        save_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Thread-safe one-shot LLaVA scene description for the autonomous path.
+
+        describe_scene_llava() temporarily mutates the SHARED SceneModule's
+        _llava_fn, which races the per-tick scene run: the tick would pick up
+        the LLaVA fn and run a ~30s call inline (tick_overrun) and the result
+        comes back garbled (None -> no ping). This variant calls LLaVA directly
+        on its own captured frame WITHOUT touching the shared module, so it is
+        safe to run from VisionAdvisor's background thread.
+
+        Args:
+            prompt: override prompt for LLaVA (defaults to the SceneModule's
+                structured prompt). VisionAdvisor passes a short natural-language
+                prompt for a clean one-sentence ping.
+            save_path: if set and a description is produced, the exact frame
+                LLaVA looked at is written there (JPEG) so the operator can be
+                sent the image alongside the description.
+        """
+        scene_mod = self._modules.get("scene")
+        if not isinstance(scene_mod, SceneModule):
+            return None
+        llava_fn = getattr(scene_mod, "_llava_describe", None) or getattr(
+            scene_mod, "_llava_fn", None
+        )
+        prompt_to_use = prompt or getattr(scene_mod, "_prompt", None)
+        if llava_fn is None or prompt_to_use is None:
+            return None
+
+        sensor = self._select_best_sensor()
+        if sensor is None:
+            return None
+        frame = sensor.capture_frame()
+        if frame is None:
+            return None
+        processed = self._preprocessor.process(frame)
+        if processed.quality.overall < _QUALITY_FOR_SCENE:
+            return None
+
+        try:
+            from agent_core.vision.modules.scene.analyzer import _image_to_base64
+            b64 = _image_to_base64(processed.image)
+            result = llava_fn(prompt_to_use, b64)
+            if not result or not result.strip():
+                return None
+            if save_path:
+                try:
+                    import base64 as _b64
+                    with open(save_path, "wb") as f:
+                        f.write(_b64.b64decode(b64))
+                except Exception as e:
+                    logger.warning(f"describe_snapshot frame save failed: {e}")
+            return result.strip()
+        except Exception as e:
+            logger.warning(f"describe_snapshot LLaVA call failed: {e}")
+            return None
+
     def reset(self) -> None:
         """Reset internal state (preprocessor + modules)."""
         self._preprocessor.reset()

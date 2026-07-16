@@ -121,6 +121,29 @@ class TestAdapterMotionEvents:
         types = [e.event_type for e in events]
         assert "vision_motion" not in types
 
+    def test_camera_shake_no_event(self):
+        """Wind/foliage/sensor noise (shake) must not ping the operator."""
+        adapter = VisionPerceptionAdapter()
+        events = adapter.adapt(_percept(
+            motion_detected=True,
+            motion_class=MotionClassification.CAMERA_SHAKE,
+            alert_level=AlertLevel.ATTENTION,
+        ))
+
+        types = [e.event_type for e in events]
+        assert "vision_motion" not in types
+
+    def test_object_movement_emits_event(self):
+        adapter = VisionPerceptionAdapter()
+        events = adapter.adapt(_percept(
+            motion_detected=True,
+            motion_class=MotionClassification.OBJECT_MOVEMENT,
+            alert_level=AlertLevel.ATTENTION,
+        ))
+
+        types = [e.event_type for e in events]
+        assert "vision_motion" in types
+
     def test_no_motion_no_event(self):
         adapter = VisionPerceptionAdapter()
         events = adapter.adapt(_percept(motion_detected=False))

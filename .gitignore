@@ -101,8 +101,19 @@ docs/plans/DESIGN_*.md
 docs/incoming/
 maria_core/sys/memory/
 config/
-models/
+models/*
+!models/__init__.py
+!models/ollama_brain.py
 scripts/generate_project_summary_pdf.py
 
 # M.A.R.I.A. Mobile web preview (temporary ~41MB build artifact, served at :5000/static/mobile)
 maria_ui/static/mobile/
+
+# Private funding/strategy docs -- NEVER publish (ADR-029). Kept on disk, out of git.
+# The PUBLIC funding docs in docs/funding/ (README, FUNDING_BRIEF, CURRENT_PROJECT_STATUS,
+# HARDWARE_BENCHMARK_PLAN, PUBLIC_DELIVERABLES) ARE tracked so the public snapshot keeps them.
+docs/funding/FUNDING_STRATEGY_MARIA.md
+docs/funding/GRANT_READINESS_CHECKLIST.md
+docs/funding/NEXT_30_DAYS_FUNDING_PLAN.md
+docs/funding/COLLABORATOR_PROFILE_RUST_ML.md
+docs/funding/MARIA_ONE_PAGE_GRANT_PITCH.md

@@ -5,9 +5,8 @@ Types of proactive contact:
 - MORNING_SUMMARY: Daily briefing (7:00-9:00)
 - EVENING_RECAP: Day summary (20:00-21:00)
 - WEEKLY_REVIEW: Weekly stats (Sunday 19:00-20:00)
-- GOAL_ACHIEVED: Goal completion notification
-- LEARNING_MILESTONE: Knowledge coverage milestones
-- INTEREST_MATCH: New content matching user interests
+- GOAL_ACHIEVED: Goal completion notification (fired live via GoalStore observer)
+- GOAL_PROPOSED: New PROPOSED goal needs operator approval
 - IDLE_CHECKIN: Check-in after 48h+ of no contact
 
 Integration:

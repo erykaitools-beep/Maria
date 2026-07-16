@@ -4,7 +4,7 @@ import json
 import tempfile
 import shutil
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import patch
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -29,6 +29,7 @@ from agent_core.routing.capability_router import CapabilityRouter
 from agent_core.awareness.context_builder import ContextBuilder
 from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.registry.shared_context import SharedContext
+from agent_core.llm.nim_client import NIMClient
 
 
 # ===========================================================================
@@ -191,9 +192,7 @@ class TestUserFacingSelfModelIdentity:
         assert "nauka" in identity["purpose"]
 
     def test_identity_fallback_without_store(self):
-        ctx = MagicMock()
-        ctx.identity_store = None
-        ctx.consciousness = None
+        ctx = specced(SharedContext, identity_store=None, consciousness=None)
         model = UserFacingSelfModel(ctx)
         identity = model.get_identity()
         assert identity["name"] == "Maria"
@@ -225,8 +224,7 @@ class TestUserFacingSelfModelPersonality:
         assert personality["trait_scores"]["ciekawska"]["score"] == 0.85
 
     def test_personality_fallback_no_consciousness(self):
-        ctx = MagicMock()
-        ctx.consciousness = None
+        ctx = specced(SharedContext, consciousness=None)
         model = UserFacingSelfModel(ctx)
         personality = model.get_personality()
         assert personality["traits"] == []
@@ -268,9 +266,7 @@ class TestUserFacingSelfModelCapabilities:
         assert caps[0]["name"] == "self_analyze"
 
     def test_empty_without_router(self):
-        ctx = MagicMock()
-        ctx.consciousness = None
-        ctx.identity_store = None
+        ctx = specced(SharedContext, consciousness=None, identity_store=None)
         del ctx.capability_router  # AttributeError -> getattr returns None
         model = UserFacingSelfModel(ctx)
         assert model.get_capabilities() == []
@@ -306,7 +302,7 @@ class TestUserFacingSelfModelAwareness:
         assert awareness["input_files_count"] == 4
 
     def test_awareness_empty_without_builder(self):
-        ctx = MagicMock()
+        ctx = specced(SharedContext)
         del ctx.context_builder
         model = UserFacingSelfModel(ctx)
         awareness = model.get_awareness()
@@ -323,8 +319,7 @@ class TestUserFacingSelfModelMode:
         assert self_model.get_current_mode() == "ACTIVE"
 
     def test_mode_unknown_without_core(self):
-        ctx = MagicMock()
-        ctx.homeostasis_core = None
+        ctx = specced(SharedContext, homeostasis_core=None)
         model = UserFacingSelfModel(ctx)
         assert model.get_current_mode() == "UNKNOWN"
 
@@ -349,7 +344,7 @@ class TestUserFacingSelfModelMode:
         with patch(
             "agent_core.llm.nim_client.NIMClient"
         ) as MockNim:
-            instance = MagicMock()
+            instance = specced(NIMClient)
             instance.is_available.return_value = False
             MockNim.return_value = instance
             lims = self_model.get_limitations()
@@ -361,7 +356,7 @@ class TestUserFacingSelfModelMode:
         with patch(
             "agent_core.llm.nim_client.NIMClient"
         ) as MockNim:
-            instance = MagicMock()
+            instance = specced(NIMClient)
             instance.is_available.return_value = True
             MockNim.return_value = instance
             lims = self_model.get_limitations()
@@ -508,8 +503,7 @@ class TestOnboardingFlowDetection:
         assert onboarding.is_completed() is True
 
     def test_should_run_without_identity(self):
-        ctx = MagicMock()
-        ctx.identity_store = None
+        ctx = specced(SharedContext, identity_store=None)
         model = UserFacingSelfModel(ctx)
         flow = OnboardingFlow(ctx, model)
         assert flow.should_run() is True
@@ -636,8 +630,7 @@ class TestOnboardingFlowPersistence:
         assert onboarding.should_run() is True
 
     def test_mark_completed_without_identity(self):
-        ctx = MagicMock()
-        ctx.identity_store = None
+        ctx = specced(SharedContext, identity_store=None)
         model = UserFacingSelfModel(ctx)
         flow = OnboardingFlow(ctx, model)
         # Should not raise
@@ -651,16 +644,18 @@ class TestOnboardingFlowPersistence:
 class TestOnboardingFlowEdgeCases:
 
     def test_flow_with_no_capabilities(self):
-        ctx = MagicMock()
-        ctx.identity_store = MagicMock()
-        ctx.identity_store._data = {}
-        ctx.identity_store.get_identity_dict.return_value = {
+        identity_store = specced(IdentityStore, _data={})
+        identity_store.get_identity_dict.return_value = {
             "session_count": 1,
             "birth_date": "2025-11-14",
         }
-        ctx.consciousness = None
-        ctx.homeostasis_core = None
-        ctx.openclaw_client = None
+        ctx = specced(
+            SharedContext,
+            identity_store=identity_store,
+            consciousness=None,
+            homeostasis_core=None,
+            openclaw_client=None,
+        )
         del ctx.capability_router
         del ctx.context_builder
         model = UserFacingSelfModel(ctx)
@@ -672,19 +667,23 @@ class TestOnboardingFlowEdgeCases:
         assert caps_step["data"]["total"] == 0
 
     def test_flow_with_empty_awareness(self):
-        ctx = MagicMock()
-        ctx.identity_store = MagicMock()
-        ctx.identity_store._data = {}
-        ctx.identity_store.get_identity_dict.return_value = {}
-        ctx.consciousness = None
-        ctx.homeostasis_core = None
-        ctx.openclaw_client = None
-        ctx.capability_router = MagicMock()
-        ctx.capability_router.list_capabilities.return_value = []
-        ctx.capability_router.is_available.return_value = False
-        ctx.context_builder = MagicMock()
-        ctx.context_builder.get_detailed_file_list.return_value = []
-        ctx.context_builder.get_input_files.return_value = []
+        identity_store = specced(IdentityStore, _data={})
+        identity_store.get_identity_dict.return_value = {}
+        capability_router = specced(CapabilityRouter)
+        capability_router.list_capabilities.return_value = []
+        capability_router.is_available.return_value = False
+        context_builder = specced(ContextBuilder)
+        context_builder.get_detailed_file_list.return_value = []
+        context_builder.get_input_files.return_value = []
+        ctx = specced(
+            SharedContext,
+            identity_store=identity_store,
+            consciousness=None,
+            homeostasis_core=None,
+            openclaw_client=None,
+            capability_router=capability_router,
+            context_builder=context_builder,
+        )
         model = UserFacingSelfModel(ctx)
         flow = OnboardingFlow(ctx, model)
         result = flow.run()

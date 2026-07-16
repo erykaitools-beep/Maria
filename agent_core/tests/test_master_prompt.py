@@ -50,6 +50,20 @@ class TestBasePrompt:
         result = build_base_prompt()
         assert "fallback" in result.lower()
 
+    def test_base_prompt_declares_real_capabilities(self):
+        """The identity must reflect the SHIPPED subsystems, not the stale
+        'see + plan + delegate' text -- so the chat does not under-claim."""
+        result = build_base_prompt().lower()
+        assert "ruch" in result          # reacts to motion (vision-reacts)
+        assert "zdjecie" in result       # sends a photo
+        assert "pierwsza" in result      # texts first (proactive)
+        assert "plik" in result and "sandbox" in result  # FS_WRITE hand
+
+    def test_base_prompt_guards_against_over_and_under_claim(self):
+        result = build_base_prompt().lower()
+        # explicit guard: don't say "can't" when you can, don't exaggerate
+        assert "nie umiem" in result or "nie wyolbrzymiaj" in result
+
 
 class TestFullPrompt:
     """Full prompt (OllamaBrain) tests."""

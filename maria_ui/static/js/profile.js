@@ -184,8 +184,7 @@ function renderProactive(data) {
     evening_recap: 'Wieczorne podsumowanie',
     weekly_review: 'Przeglad tygodnia',
     goal_achieved: 'Cel osiagniety',
-    learning_milestone: 'Kamien milowy nauki',
-    interest_match: 'Dopasowanie zainteresowan',
+    goal_proposed: 'Nowy cel (do zatwierdzenia)',
     idle_checkin: 'Check-in po przerwie',
   };
 
@@ -237,8 +236,7 @@ function renderHistory(contacts) {
     evening_recap: 'Wieczorne podsumowanie',
     weekly_review: 'Przeglad tygodnia',
     goal_achieved: 'Cel osiagniety',
-    learning_milestone: 'Kamien milowy',
-    interest_match: 'Dopasowanie zainteresowan',
+    goal_proposed: 'Nowy cel (do zatwierdzenia)',
     idle_checkin: 'Check-in',
   };
 

@@ -10,6 +10,7 @@ import time
 from typing import Any, Dict, Optional
 
 from agent_core.planner.planner_model import ActionType, Plan
+from agent_core.planner.decision_filters import creative_cooldown_skip
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class ActionExecutor:
         self._effector_coordinator = None
         self._self_analysis = None
         self._creative_module = None
+        self._play_module = None
         self._telegram_notifier = None
         self._cross_validator = None
         self._critic_agent = None
@@ -143,6 +145,10 @@ class ActionExecutor:
         """Set Creative module for K13 reflection cycle."""
         self._creative_module = creative
 
+    def set_play_module(self, play_module) -> None:
+        """Set Play module for self-time (ungraded free musing)."""
+        self._play_module = play_module
+
     def set_cross_validator(self, validator) -> None:
         """Set CrossValidator for multi-source learning (Faza F)."""
         self._cross_validator = validator
@@ -175,6 +181,7 @@ class ActionExecutor:
         ActionType.ASK_EXPERT: "_exec_ask_expert",
         ActionType.VALIDATE: "_exec_validate",
         ActionType.CRITIQUE: "_exec_critique",
+        ActionType.PLAY: "_exec_play",
     }
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
@@ -303,6 +310,12 @@ class ActionExecutor:
                     "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
+        # Project sub-goal whose topic matches NO file -> no_files skip so the
+        # B2 FETCH pump arms; mirrors handlers.make_learn_handler (SSoT).
+        if (not filter_ids and plan.action_params.get("topics")
+                and (getattr(plan, "metadata", None) or {}).get("project_child")):
+            return {"success": False, "skipped": True, "reason": "no_files",
+                    "chunks_learned": 0}
         status = self._teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
         )
@@ -320,6 +333,14 @@ class ActionExecutor:
         if stats.get("idle_reason"):
             result["idle_reason"] = stats["idle_reason"]
             result["filtered_out_count"] = stats.get("filtered_out_count", 0)
+            # "idle != failed": a learn that produced 0 chunks because there was
+            # no fresh material (every candidate already completed/filtered) was
+            # declined before any real work -- mark it skipped so planner *rest*
+            # does not tank learn-confidence (the K9 needs_human signal) the way a
+            # genuine failure should. A 0-chunk learn WITHOUT an idle_reason (a
+            # real teacher error) stays a failure. Mirrors exam's window skip.
+            if learned == 0:
+                result["skipped"] = True
 
         # Re-index after learning (update vector embedding with new status)
         if result["success"] and self._semantic_search:
@@ -342,6 +363,12 @@ class ActionExecutor:
                     "reason": "outside_learning_window"}
 
         filter_ids = self._resolve_topics(plan)
+        # Project sub-goal whose topic matches NO file -> no_files skip so the
+        # B2 FETCH pump arms; mirrors handlers.make_exam_handler (SSoT).
+        if (not filter_ids and plan.action_params.get("topics")
+                and (getattr(plan, "metadata", None) or {}).get("project_child")):
+            return {"success": False, "skipped": True, "reason": "no_files",
+                    "exams_run": 0}
         status = self._teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
         )
@@ -414,16 +441,25 @@ class ActionExecutor:
                     "reason": "outside_learning_window"}
 
         try:
-            from agent_core.web_source import run_fetch_session
+            from agent_core.web_source import (
+                run_fetch_session, resolve_feed_profile,
+            )
 
             max_articles = plan.action_params.get("max_articles", 3)
             # Pass user-requested topics from conversation goals
             override_topics = plan.action_params.get("topics")
+            # B1 parity: mirror the CapabilityRouter path so a market goal never
+            # silently drifts onto the science feeds when the router is absent
+            # (tests / future). Single source of truth = resolve_feed_profile.
+            feed_profile = resolve_feed_profile(
+                self._goal_store, getattr(plan, "goal_id", None)
+            )
             result = run_fetch_session(
                 knowledge_analyzer=self._knowledge_analyzer,
                 max_articles=max_articles,
                 semantic_memory=self._semantic_search,
                 override_topics=override_topics,
+                feed_profile=feed_profile,
             )
             errors = result.get("errors", 0)
 
@@ -452,7 +488,13 @@ class ActionExecutor:
                 )
 
             return {
-                "success": errors == 0,
+                # Yield-aware: a fetch that wrote 0 articles is NOT a win. 0 articles
+                # + no error = nothing NEW to fetch this session (corpus frontier dry)
+                # -> idle rest, marked skipped so the saturation fetch pump stops being
+                # falsely reinforced AND fetch-confidence isn't tanked (same idle!=failed
+                # contract as the learn fix). 0 articles WITH errors stays a failure.
+                "success": fetched > 0 and errors == 0,
+                "skipped": fetched == 0 and errors == 0,
                 "articles_fetched": fetched,
                 "fetched_files": result.get("fetched_files", []),
                 "learn_handoff_files": handoff_files,
@@ -590,12 +632,14 @@ class ActionExecutor:
             # Notify operator about analysis results
             if self._telegram_notifier and report.recommendations:
                 try:
-                    # AnalysisReport has no analysis_text field; the analyzer's text
-                    # output lives in raw_response. The old phantom read fell into the
-                    # bare except below -> self-analysis Telegram summary was always
-                    # silently dropped (audyt 2026-06-13).
-                    summary = report.raw_response[:300] if report.raw_response else ""
-                    recs = [r if isinstance(r, str) else str(r) for r in report.recommendations]
+                    # Clean (summary, recs) instead of dumping raw_response (raw
+                    # JSON / prose) and str(dataclass) reprs into Telegram
+                    # (operator-facing junk, audyt 2026-06-15). Shared formatter
+                    # so the two call sites cannot drift.
+                    from agent_core.self_analysis.recommendation_model import (
+                        format_report_for_telegram,
+                    )
+                    summary, recs = format_report_for_telegram(report)
                     self._telegram_notifier.notify_self_analysis(summary, recs)
                 except Exception:
                     pass
@@ -621,6 +665,12 @@ class ActionExecutor:
             return {"success": False, "error": "No creative module configured"}
 
         try:
+            # Cooldown guard (2026-07-06): ask-first before the NIM-heavy
+            # reflect(); shape and rationale live in the shared helper.
+            skip = creative_cooldown_skip(self._creative_module)
+            if skip is not None:
+                return skip
+
             trigger = plan.action_params.get("trigger", "planner")
             result = self._creative_module.reflect(trigger=trigger)
 
@@ -641,6 +691,17 @@ class ActionExecutor:
                 self._complete_oneshot_goal(plan, result)
 
             return result
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _exec_play(self, plan: Plan) -> Dict[str, Any]:
+        """Run one self-time play cycle (ungraded). No goal completion -- PLAY
+        is goalless leisure, not work."""
+        if self._play_module is None:
+            return {"success": False, "error": "No play module configured"}
+        try:
+            trigger = plan.action_params.get("trigger", "planner_idle")
+            return self._play_module.play(trigger=trigger)
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -964,6 +1025,21 @@ class ActionExecutor:
         try:
             from agent_core.goals.goal_model import GoalStatus
             goal = self._goal_store.get(plan.goal_id)
+            # Option C: a heldout-mode goal closes ONLY on mechanical held-out
+            # verdicts (verified/N) -- one-shot completion would ACHIEVE it with
+            # zero evidence. Unconditional (unlike the gate check below): the
+            # heldout contract must not depend on a mutable env flag.
+            if goal and str(
+                ((goal.metadata or {}).get("verification_mode")) or ""
+            ).strip().lower() == "heldout":
+                return
+            # Kronika TIER 1: a market child must not be one-shot-completed --
+            # that would ACHIEVE it bypassing the provenance gate. It closes only
+            # via verified provenance under cutover; inert otherwise.
+            if goal and (goal.metadata or {}).get("source_kind") == "market":
+                from agent_core.routing.handlers import _provenance_gate_mode
+                if _provenance_gate_mode() == "cutover":
+                    return
             mutated = False
             if goal and goal.status.value in ("pending", "active"):
                 self._goal_store.update_progress(plan.goal_id, 1.0)

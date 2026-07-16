@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from agent_core.goals.goal_model import (
     Goal,
@@ -23,6 +23,7 @@ from agent_core.goals.goal_model import (
     TERMINAL_STATUSES,
     MAX_ACTIVE_GOALS,
     MAX_PROPOSED_GOALS,
+    MAX_HIERARCHY_DEPTH,
     PROPOSED_TIMEOUT_SECONDS,
 )
 
@@ -57,6 +58,11 @@ class GoalStore:
         self._goals_path = goals_path
         self._goals: Dict[str, Goal] = {}  # id -> Goal (in-memory cache)
         self._dirty_ids: set = set()  # ids that need saving
+        # Observers fired on a real status transition (e.g. ACTIVE -> ACHIEVED).
+        # Callback signature: (goal, old_status: str, new_status: str). Used by
+        # the proactive scheduler to fire GOAL_ACHIEVED contacts live.
+        self._status_observers: List[Callable] = []
+        self._observer_failure_logged = False  # one-shot WARNING throttle
 
     # ---- Load / Save ----
 
@@ -184,6 +190,104 @@ class GoalStore:
     def _mark_dirty(self, goal_id: str) -> None:
         self._dirty_ids.add(goal_id)
 
+    # ---- Hierarchy guard (Plank B0) ----
+
+    def _hierarchy_violation(self, goal: Goal) -> Optional[str]:
+        """Return a reason string if ``goal``'s parent link is invalid, else None.
+
+        Pure read over the in-memory index; MUST run BEFORE the goal is inserted
+        (so its own id is not yet an ancestor). Enforces three invariants of the
+        sub-goal tree:
+          - the parent id exists (no dangling reference),
+          - no cycle (the goal is not its own ancestor, no repeated ancestor id),
+          - the ancestor chain length stays within ``MAX_HIERARCHY_DEPTH``.
+
+        A flat goal (``parent_goal_id is None``) is always valid -- this is the
+        only behaviour for every goal in the system today, so the guard is a
+        no-op for the existing population and only constrains NEW trees.
+        """
+        parent_id = goal.parent_goal_id
+        if parent_id is None:
+            return None
+        if parent_id == goal.id:
+            return f"self-parent ({goal.id})"
+        parent = self._goals.get(parent_id)
+        if parent is None:
+            return f"parent {parent_id} does not exist"
+        # Walk up from the parent. The new goal sits one level below it, so start
+        # the depth count at 1 and seed ``seen`` with the new goal's id to catch a
+        # link that would route back through it.
+        depth = 1
+        seen = {goal.id}
+        cursor: Optional[Goal] = parent
+        while cursor is not None:
+            depth += 1
+            if cursor.id in seen:
+                return f"cycle through {cursor.id}"
+            seen.add(cursor.id)
+            if depth > MAX_HIERARCHY_DEPTH:
+                return (
+                    f"depth {depth} exceeds MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}"
+                )
+            cursor = (
+                self._goals.get(cursor.parent_goal_id)
+                if cursor.parent_goal_id
+                else None
+            )
+        return None
+
+    def _enforce_hierarchy(self, goal: Goal) -> None:
+        """Drop an invalid parent link (orphan the goal flat) with a loud log.
+
+        Fail-SAFE rather than fail-closed: ``create()``/``propose()`` keep their
+        total return contract (callers always get an id), but a too-deep or
+        cyclic tree can never be persisted -- the goal is created flat instead.
+        The operator-facing producer (e.g. /project) validates strictly upfront,
+        so a dropped link here only ever signals a buggy producer.
+        """
+        if goal.parent_goal_id is None:
+            return
+        violation = self._hierarchy_violation(goal)
+        if violation:
+            logger.error(
+                "[GOALS] hierarchy violation for %s: %s -> orphaning (parent dropped)",
+                goal.id,
+                violation,
+            )
+            goal.parent_goal_id = None
+
+    # ---- Status observers ----
+
+    def register_status_observer(self, callback: Callable) -> None:
+        """Register a callback fired on every real status transition.
+
+        Callback signature: (goal, old_status: str, new_status: str), where the
+        statuses are GoalStatus.value strings. Fired only when the status
+        actually changes (no-op re-sets are skipped). Observer exceptions are
+        swallowed so a subscriber can never corrupt a store write.
+
+        IMPORTANT: observers run synchronously inside the class-level _io_lock
+        critical section (shared by the daemon and every per-request Web-UI
+        GoalStore). They MUST be non-blocking and MUST NOT perform external I/O
+        or call back into a GoalStore -- a slow observer serializes every goal
+        write process-wide. The intended pattern is a cheap in-memory enqueue
+        (see ProactiveScheduler.bind_goal_store).
+        """
+        self._status_observers.append(callback)
+
+    def _notify_status_observers(self, goal: Goal, old_status: str, new_status: str) -> None:
+        for cb in self._status_observers:
+            try:
+                cb(goal, old_status, new_status)
+            except Exception as e:  # observers must never break store writes
+                # First failure at WARNING so a permanently-broken observer is
+                # discoverable in journalctl; later ones at DEBUG to avoid spam.
+                if not self._observer_failure_logged:
+                    logger.warning("Goal status observer failed: %s", e)
+                    self._observer_failure_logged = True
+                else:
+                    logger.debug("Goal status observer failed: %s", e)
+
     # ---- Create ----
 
     @_synchronized
@@ -192,6 +296,7 @@ class GoalStore:
 
         Enforces MAX_ACTIVE_GOALS: if at limit, abandons lowest PENDING.
         """
+        self._enforce_hierarchy(goal)
         if goal.status in ACTIVE_STATUSES:
             active_count = sum(1 for g in self._goals.values() if g.is_active)
             if active_count >= MAX_ACTIVE_GOALS:
@@ -218,6 +323,7 @@ class GoalStore:
         PROPOSED goal when the new goal has higher priority (displacement).
         Returns None only if new goal cannot displace any existing one.
         """
+        self._enforce_hierarchy(goal)
         # Auto-confirm low-risk learning goals
         if self._should_auto_confirm(goal):
             goal.status = GoalStatus.PENDING
@@ -317,6 +423,24 @@ class GoalStore:
         ]
 
     @_synchronized
+    def get_recently_achieved(self, hours: float = 24.0) -> List[Goal]:
+        """Goals that reached ACHIEVED within the last `hours`, newest first.
+
+        Ordered by the audit-trail achievement time, so "recent" means recent in
+        time rather than late in the store: goals are keyed by id, and a goal
+        finished ten days ago can sit anywhere in insertion order.
+        """
+        cutoff = time.time() - hours * 3600
+        recent = [
+            (g.achieved_at, g)
+            for g in self._goals.values()
+            if g.status == GoalStatus.ACHIEVED
+            and g.achieved_at is not None
+            and g.achieved_at >= cutoff
+        ]
+        return [g for _, g in sorted(recent, key=lambda pair: pair[0], reverse=True)]
+
+    @_synchronized
     def get_children(self, parent_goal_id: str) -> List[Goal]:
         """Get child goals of a parent."""
         return [
@@ -392,11 +516,25 @@ class GoalStore:
         goal.status = status
         goal.updated_at = now
         self._mark_dirty(goal_id)
+
+        # Notify observers only on a genuine transition (e.g. ACTIVE -> ACHIEVED),
+        # so a redundant re-set never re-fires a proactive contact.
+        if old_status != status.value:
+            self._notify_status_observers(goal, old_status, status.value)
+
         return True
+
+    # Perpetual goals never auto-achieve at progress 1.0: MAINTENANCE recurs each
+    # session, and META is the always-on learning MISSION. Letting META "complete"
+    # when the library is fully learned made it terminal -> no active META -> the
+    # saturation->FETCH supply pump stalled until the next boot (2026-06-16 ->
+    # 06-23 throughput regression). A mission is never "done"; when material runs
+    # out it stays active so it can FETCH more.
+    _NEVER_AUTO_ACHIEVE = (GoalType.MAINTENANCE, GoalType.META)
 
     @_synchronized
     def update_progress(self, goal_id: str, progress: float) -> bool:
-        """Update progress. Auto-ACHIEVED at >= 1.0 for ACTIVE goals."""
+        """Update progress. Auto-ACHIEVED at >= 1.0 for ACTIVE non-perpetual goals."""
         goal = self._goals.get(goal_id)
         if not goal:
             return False
@@ -405,10 +543,9 @@ class GoalStore:
         goal.updated_at = time.time()
         self._mark_dirty(goal_id)
 
-        # Auto-ACHIEVED
+        # Auto-ACHIEVED (perpetual MAINTENANCE / META missions are exempt).
         if goal.progress >= 1.0 and goal.status == GoalStatus.ACTIVE:
-            # MAINTENANCE goals never auto-achieve
-            if goal.type != GoalType.MAINTENANCE:
+            if goal.type not in self._NEVER_AUTO_ACHIEVE:
                 self.update_status(
                     goal_id, GoalStatus.ACHIEVED,
                     "progress >= 1.0", "system"
@@ -528,6 +665,39 @@ class GoalStore:
         count += 1
 
         return count
+
+    @_synchronized
+    def ensure_meta_goal(self) -> bool:
+        """Guarantee the always-on META mission goal is active (self-heal on boot).
+
+        seed_if_empty() only seeds an EMPTY store, so a META mission that was
+        abandoned (e.g. by the non-productive-loop detector before it was exempted)
+        would never return -- silently disabling the saturation->FETCH supply pump
+        and leaving the learner to idle on no_goals once the backlog drained. This
+        reactivates the canonical seed META goal (or recreates it) whenever no META
+        goal is currently active. Returns True if it had to restore the mission."""
+        if any(g.type == GoalType.META and g.is_active
+               for g in self._goals.values()):
+            return False
+        existing = self._goals.get("goal-meta-learn")
+        if existing is not None:
+            self.update_status(
+                "goal-meta-learn", GoalStatus.ACTIVE,
+                "restored always-on mission (was inactive)", "system",
+            )
+            logger.warning("[GOALS] Reactivated META mission goal-meta-learn")
+            return True
+        meta = create_goal(
+            goal_type=GoalType.META,
+            description="Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych",
+            priority=1.0,
+            status=GoalStatus.ACTIVE,
+            created_by="system",
+            goal_id="goal-meta-learn",
+        )
+        self.create(meta)
+        logger.warning("[GOALS] Recreated missing META mission goal-meta-learn")
+        return True
 
     # ---- Stats ----
 

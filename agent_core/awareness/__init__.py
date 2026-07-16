@@ -15,5 +15,6 @@ Usage:
 """
 
 from agent_core.awareness.context_builder import ContextBuilder
+from agent_core.awareness.self_context import SelfContext
 
-__all__ = ["ContextBuilder"]
+__all__ = ["ContextBuilder", "SelfContext"]

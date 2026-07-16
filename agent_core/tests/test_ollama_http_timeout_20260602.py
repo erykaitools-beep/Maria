@@ -38,6 +38,7 @@ from agent_core.llm.execution_budget import (
 from agent_core.llm import router as router_mod
 from agent_core.llm import model_scheduler as scheduler_mod
 from agent_core.llm.model_scheduler import ModelScheduler, EnsureResult
+from agent_core.llm.nim_client import NIMClient
 from agent_core.tests.spec_helpers import specced
 
 
@@ -157,12 +158,16 @@ class TestTimeoutSizing:
         assert OLLAMA_HTTP_TIMEOUT < watchdog
 
     def test_env_override(self):
+        import importlib
+        from maria_core.sys import config as cfg
         with patch.dict(os.environ, {"OLLAMA_HTTP_TIMEOUT": "90"}):
-            import importlib
-            from maria_core.sys import config as cfg
             importlib.reload(cfg)
             assert cfg.OLLAMA_HTTP_TIMEOUT == 90
-            importlib.reload(cfg)  # restore module state
+        # Restore module state OUTSIDE the patch so cfg.OLLAMA_HTTP_TIMEOUT returns
+        # to its real value (240). Reloading while the env is still patched leaves
+        # cfg polluted at 90 and breaks every later test that reads the timeout
+        # (e.g. test_http_timeout_defaults_to_shared_when_none).
+        importlib.reload(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +233,11 @@ class TestSharedClientHelper:
 # ---------------------------------------------------------------------------
 class TestRouterUsesSharedClient:
     def _router(self):
-        r = router_mod.LLMRouter(MagicMock(), MagicMock())
+        # ollama_brain/nim_client are our own classes -> specced, so a phantom
+        # method or a wrong signature on the fallback path goes red.
+        r = router_mod.LLMRouter(
+            specced(ollama_brain.OllamaBrain), specced(NIMClient)
+        )
         r.ollama.model = "llama3.1:8b"
         return r
 
@@ -266,7 +275,9 @@ class TestExceptionContract:
         # TimeoutError -- if the guard only caught TimeoutError it would escape.
         import httpx
 
-        r = router_mod.LLMRouter(MagicMock(), MagicMock())
+        r = router_mod.LLMRouter(
+            specced(ollama_brain.OllamaBrain), specced(NIMClient)
+        )
         r.ollama.model = "llama3.1:8b"
         r.ollama._ask_once.side_effect = httpx.ReadTimeout("inner http timeout")
 

@@ -38,6 +38,10 @@ from maria_core.learning.llm_utils import call_ollama, extract_json_from_respons
 logger = logging.getLogger(__name__)
 
 HELDOUT_GRADER_MODEL = "heldout:static@v1"
+# A held-out exam below this many bank rows is statistically meaningless (a
+# 1-row exam is a coin flip) -- fewer rows -> honest fallback to the LLM
+# examiner, loudly logged + stamped heldout_fallback in the record (C3).
+HELDOUT_MIN_BANK_ROWS = 3
 
 
 # ========== PROMPTY EGZAMINACYJNE ==========
@@ -134,15 +138,16 @@ Dane wejściowe:
 {qa_pairs}
 --------------------
 
-Odpowiedz w JSON (bez markdown):
+Odpowiedz w JSON (bez markdown). Lista "graded" MUSI mieć dokładnie
+{num_questions} elementów -- po jednym na każde pytanie, w tej samej kolejności.
+Nie podawaj wyniku koncowego: liczy go egzamin, nie ty.
 {{
   "graded": [
     {{
       "score": 0.8,
       "explanation": "..."
     }}
-  ],
-  "final_score": 0.83
+  ]
 }}"""
 
 
@@ -518,6 +523,15 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], l
 
     Returns:
         Słownik z 'graded' (lista ocen) i 'final_score' (średnia) lub None
+
+    final_score is ALWAYS recomputed from graded[] here -- the grader LLM's own
+    final_score is discarded. Reason (production audit 2026-07-15): the prompt
+    used to carry a worked example ending in "final_score": 0.83, and the model
+    echoed that literal instead of averaging -- 447/1344 historical exams (33.3%)
+    scored EXACTLY 0.83, and 52.5% disagreed with their own graded[] mean, which
+    flipped 15 verdicts across the pass threshold. Both other graders
+    (_parse_exam_grading_fallback, grade_heldout) already averaged; only this
+    path trusted the model. Do not reintroduce a model-supplied final_score.
     """
     # Zbuduj pary pytanie-odpowiedź wzorcowa-odpowiedź ucznia
     qa_pairs = []
@@ -529,7 +543,8 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], l
 
     qa_text = "\n".join(qa_pairs)
 
-    prompt = PROMPT_GRADE_EXAM.format(qa_pairs=qa_text)
+    prompt = PROMPT_GRADE_EXAM.format(qa_pairs=qa_text,
+                                      num_questions=len(questions))
 
     logger.debug(f"Oceniam {len(questions)} odpowiedzi")
 
@@ -538,8 +553,9 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], l
     if not response:
         return None
 
-    parsed = extract_json_from_response(response, expected_keys={'graded', 'final_score'})
-    if not parsed or 'graded' not in parsed or 'final_score' not in parsed:
+    # 'graded' is the only required key -- final_score is computed, not parsed.
+    parsed = extract_json_from_response(response, expected_keys={'graded'})
+    if not parsed or 'graded' not in parsed:
         fallback = _parse_exam_grading_fallback(response, len(questions))
         if fallback:
             logger.info(f"[EXAM] Fallback: parsed grading for {len(fallback['graded'])} answers from text")
@@ -547,7 +563,73 @@ def grade_exam(questions: List[Dict[str, str]], answers: List[Dict[str, str]], l
         logger.error("Brak wymaganych pól w ocenie (fallback nie zadzialal)")
         return None
 
+    scored = _mean_of_graded(parsed.get('graded'), len(questions))
+    if scored is None:
+        fallback = _parse_exam_grading_fallback(response, len(questions))
+        if fallback:
+            logger.info(f"[EXAM] Fallback: graded[] unusable, parsed grading from text")
+            return fallback
+        logger.error("Oceny nie zawieraja zadnego uzytecznego score (fallback nie zadzialal)")
+        return None
+
+    graded, final_score = scored
+    llm_claim = parsed.get('final_score')
+    if isinstance(llm_claim, (int, float)) and not isinstance(llm_claim, bool):
+        if abs(float(llm_claim) - final_score) > 0.005:
+            logger.info(
+                f"[EXAM] Grader final_score={llm_claim} rozjechany ze srednia "
+                f"{final_score:.3f} - liczy sie srednia"
+            )
+
+    parsed['graded'] = graded
+    parsed['final_score'] = final_score
     return parsed
+
+
+def _mean_of_graded(graded: Any, num_questions: int) -> Optional[Tuple[List[Dict[str, Any]], float]]:
+    """Average graded[] scores, padding missing per-question grades with 0.0.
+
+    A grader that returns fewer grades than questions has silently dropped the
+    questions it could not handle; averaging only what it returned would reward
+    that omission (14 historical exams graded fewer answers than they asked).
+    Missing grades therefore count as 0.0, mirroring answer_exam's under-count
+    padding. Returns None when graded[] carries no usable score at all, so the
+    caller can fall back to text parsing.
+    """
+    if not isinstance(graded, list):
+        return None
+
+    clean: List[Dict[str, Any]] = []
+    for item in graded:
+        if not isinstance(item, dict):
+            continue
+        score = item.get('score')
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            continue
+        item = dict(item)
+        item['score'] = max(0.0, min(1.0, float(score)))
+        clean.append(item)
+
+    if not clean:
+        return None
+
+    if 0 < len(clean) < num_questions:
+        logger.warning(
+            f"[EXAM] Grader ocenil {len(clean)}/{num_questions} pytan - "
+            f"brakujace licze jako 0.0"
+        )
+        for _ in range(num_questions - len(clean)):
+            clean.append({"score": 0.0,
+                          "explanation": "brak oceny od egzaminatora"})
+    elif len(clean) > num_questions > 0:
+        logger.warning(
+            f"[EXAM] Grader ocenil {len(clean)}/{num_questions} pytan - "
+            f"nadmiarowe obcinam"
+        )
+        clean = clean[:num_questions]
+
+    final_score = round(sum(g['score'] for g in clean) / len(clean), 3)
+    return clean, final_score
 
 
 def load_heldout_bank(bank_path: Path = HELDOUT_BANK) -> List[Dict[str, Any]]:
@@ -574,7 +656,14 @@ def load_heldout_bank(bank_path: Path = HELDOUT_BANK) -> List[Dict[str, Any]]:
 
 
 def select_heldout_rows(file_id: str, bank_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Select rows matching a file id directly, or a topic contained in the id."""
+    """Select rows matching a file id directly, or a topic contained in the id.
+
+    v3 rows (authored at fetch, C1) carry a ``source_hash``: a re-fetched body
+    re-authors under a new hash, so grading uses ONLY the newest key -- answers
+    graded against a stale body's facts would false-FAIL. v3 selection is also
+    capped at 6 rows (EXAM_MAX_QUESTIONS parity: the student's 300s CPU answer
+    budget). Legacy v2 rows (no hash) keep the old behavior byte-for-byte.
+    """
     file_norm = _normalize_match_text(Path(file_id).stem.replace("_", " "))
     selected = []
     for row in bank_rows:
@@ -585,6 +674,17 @@ def select_heldout_rows(file_id: str, bank_rows: List[Dict[str, Any]]) -> List[D
         topic = row.get("topic")
         if topic and _normalize_match_text(str(topic)) in file_norm:
             selected.append(row)
+    hashed = [r for r in selected if r.get("source_hash")]
+    if hashed:
+        def _created_key(r):
+            # Type-safe: a hand-edited row with a string created_at must not
+            # TypeError the exam (the author always writes floats).
+            v = r.get("created_at")
+            return float(v) if isinstance(v, (int, float)) \
+                and not isinstance(v, bool) else 0.0
+        newest = max(hashed, key=_created_key)
+        current = newest.get("source_hash")
+        return [r for r in hashed if r.get("source_hash") == current][:6]
     return selected
 
 
@@ -632,13 +732,25 @@ def _score_heldout_answer(row: Dict[str, Any], answer: str) -> Tuple[float, str]
 
     if match_type == "numeric":
         expected = _first_number(canonical or pattern)
-        actual = _first_number(answer)
+        candidates = _all_numbers(answer)
         tolerance = float(row.get("tolerance", 0.0) or 0.0)
-        passed = expected is not None and actual is not None and abs(actual - expected) <= tolerance
+        # ANY number in the answer may match, not the first one found: concise
+        # Polish answers routinely open with a year/date ("W 2029 roku ... 500000
+        # USD"), and first-number matching graded the year against the price --
+        # a systematic false-FAIL on exactly the market content the bank holds.
+        matched = None
+        if expected is not None:
+            for cand in candidates:
+                if abs(cand - expected) <= tolerance:
+                    matched = cand
+                    break
+        passed = matched is not None
+        closest = min(candidates, key=lambda c: abs(c - expected)) \
+            if (candidates and expected is not None) else None
         detail = (
-            f"numeric within tolerance ({actual} vs {expected}, tol={tolerance})"
+            f"numeric within tolerance ({matched} vs {expected}, tol={tolerance})"
             if passed else
-            f"numeric mismatch ({actual} vs {expected}, tol={tolerance})"
+            f"numeric mismatch (closest {closest} vs {expected}, tol={tolerance})"
         )
         return _score(passed), detail
 
@@ -655,22 +767,71 @@ def _normalize_match_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
-_NUMBER_RE = re.compile(r"[-+]?\d+(?:[,.]\d+)?")
+# Number shapes, most specific first so grouped forms win over their fragments:
+#   1 234 567,89  - space/nbsp thousands (Polish print style; '68 250' must parse
+#                   as 68250, not 68 -- red-team 2026-07-11 blocker)
+#   1.234.567     - multi-group dot thousands
+#   68250.5/68,25 - plain int/decimal; ',' and '.' both read as the decimal
+#                   separator (Polish comma), single '68.250' stays 68.25
+_NUMBER_RE = re.compile(
+    "[-+]?\\d{1,3}(?:[ \u00a0]\\d{3})+(?:[,.]\\d+)?"  # space-grouped thousands
+    "|[-+]?\\d{1,3}(?:\\.\\d{3}){2,}(?:,\\d+)?"      # multi-group dot thousands
+    "|[-+]?\\d+(?:[,.]\\d+)?"                        # plain int / decimal
+)
 
 
-def _first_number(text: str) -> Optional[float]:
-    match = _NUMBER_RE.search(text)
-    if not match:
-        return None
+def _parse_number(token: str) -> Optional[float]:
+    token = token.strip()
+    if " " in token or "\u00a0" in token:
+        # space-grouped: drop group separators, comma/dot is the decimal part
+        token = token.replace(" ", "").replace("\u00a0", "")
+    elif token.count(".") >= 2:
+        # multi-group dot thousands: drop dots, comma is the decimal part
+        token = token.replace(".", "")
     try:
-        return float(match.group(0).replace(",", "."))
+        return float(token.replace(",", "."))
     except ValueError:
         return None
 
 
+def _first_number(text: str) -> Optional[float]:
+    for number in _iter_numbers(text):
+        return number
+    return None
+
+
+def _all_numbers(text: str) -> List[float]:
+    return list(_iter_numbers(text))
+
+
+def _iter_numbers(text: str):
+    for match in _NUMBER_RE.finditer(text):
+        token = match.group(0)
+        # Date-component guard: '2026-07-12' must not yield 7.0 and 12.0 --
+        # a sign glued to the PREVIOUS digit is a date/range separator, and the
+        # fragment behind it is junk that false-matches small-int canonicals.
+        if token[0] in "+-" and match.start() > 0 \
+                and text[match.start() - 1].isdigit():
+            continue
+        number = _parse_number(token)
+        if number is not None:
+            yield number
+
+
 def check_for_looping(record: Dict[str, Any]) -> bool:
     """
-    Sprawdza czy system się zapętlił (podobne wyniki egzaminów).
+    Sprawdza czy system się zapętlił (podobne wyniki egzaminów PONIŻEJ progu).
+
+    Looping means STUCK: retried, and still not passing. Stable scores that PASS
+    are mastery, not a loop -- branding them HARD_TOPIC drops the file from the
+    candidate pool and costs the priority penalty for the crime of being learned.
+
+    Before 2026-07-15 this checked similarity alone, and the grader echoed a
+    literal 0.83 from its prompt (see grade_exam), so identical passing scores
+    were the NORMAL case: all 3 files ever branded hard_topic had PASSED every
+    exam -- e.g. expert_interpretacja.txt [0.83, 0.83, 0.83] -> HARD TOPIC
+    (2026-07-15 09:47). The grader echo is fixed at the source; this gate is the
+    second line of defence, so a future echo cannot brand good work again.
 
     Args:
         record: Rekord z indeksu
@@ -684,7 +845,7 @@ def check_for_looping(record: Dict[str, Any]) -> bool:
     if len(scores) >= 3:
         recent = scores[-3:]
         max_diff = max(recent) - min(recent)
-        if max_diff < 0.05:
+        if max_diff < 0.05 and max(recent) < EXAM_PASS_THRESHOLD:
             logger.warning(f"Wykryto zapętlenie dla {record['id']}: wyniki {recent}")
             return True
 
@@ -795,9 +956,9 @@ def _execute_heldout_exam(
     When ``semantic_memory`` is wired the student answers CLOSED-BOOK: its
     context is built by real retrieval over ALL learned summaries (the production
     recall path) instead of being spoon-fed this file's own summary (open-book).
-    An alpha control (empty context = bare parametric knowledge) is also scored,
-    so the lift retrieval adds over priors is visible. Falls back to open-book
-    when no semantic memory is provided (backward compatible).
+    Production passes None -> open-book (C5); closed-book is a drill mode. An
+    alpha control (empty context = bare parametric knowledge) is scored in BOTH
+    modes, so context lift / parroting rate is always measurable.
 
     Returns the same tuple as _execute_exam:
         (score, exam_questions, answers, grading) or (None, ...) on failure.
@@ -820,11 +981,25 @@ def _execute_heldout_exam(
         return None, None, None, None
 
     # Student context: CLOSED-BOOK retrieval (beta) when a semantic memory is
-    # wired, else legacy OPEN-BOOK (this file's own learned summary).
+    # wired, else OPEN-BOOK (this file's own learned summary). Production
+    # (2026-07-12, C5): the teacher passes semantic_memory=None for held-out
+    # drills -> open-book; closed-book stays a drill mode (offline scripts).
     closed_book = semantic_memory is not None
+    context = ""
     if closed_book:
         context = build_context_from_retrieval(semantic_memory, exam)
-    else:
+        if not context:
+            # Guard: a fresh file's summary chunks are indexed only at boot
+            # (index_summaries has one call site, run_initial_indexing), so
+            # closed-book retrieval can come back EMPTY -- grading a blind
+            # student against the bank would be a guaranteed FAIL and, via B4
+            # retries, a burn loop. Fall back to open-book and say so.
+            logger.warning(
+                "[HELDOUT] closed-book retrieval empty for %s; "
+                "falling back to open-book", file_id,
+            )
+            closed_book = False
+    if not closed_book:
         memories = get_memories_for_file(file_id, memory_path)
         if not memories:
             logger.error(f"Brak pamięci dla {file_id}!")
@@ -841,36 +1016,68 @@ def _execute_heldout_exam(
         logger.error("Nie udalo sie ocenic held-out exam")
         return None, exam, answers, None
 
-    # Provenance + alpha control (closed-book EMPTY context = bare parametric
-    # knowledge). Diagnostic only; the reported score stays the retrieval run.
+    # Provenance + alpha control (EMPTY context = bare parametric knowledge).
+    # Diagnostic only; the reported score stays the contextful run. Runs in
+    # BOTH modes (C5, 2026-07-12): open-book contains-grading over a handed
+    # summary is the most parroting-prone configuration, so score-vs-alpha is
+    # exactly the parroting-rate measurement calibration (C7) needs. The extra
+    # student call is cheap: empty context = tiny prompt-eval, concise output.
     grading["closed_book"] = closed_book
     grading["context_chars"] = len(context)
-    if closed_book:
-        try:
-            alpha_answers = answer_exam("", exam, llm_fn=llm_fn, concise=True)
-            alpha_grading = grade_heldout(bank_rows, alpha_answers) if alpha_answers else None
-            grading["alpha_score"] = (
-                alpha_grading["final_score"] if alpha_grading else None
-            )
-        except Exception as e:
-            logger.warning(f"[HELDOUT] alpha control failed: {e}")
-            grading["alpha_score"] = None
+    try:
+        alpha_answers = answer_exam("", exam, llm_fn=llm_fn, concise=True)
+        alpha_grading = grade_heldout(bank_rows, alpha_answers) if alpha_answers else None
+        grading["alpha_score"] = (
+            alpha_grading["final_score"] if alpha_grading else None
+        )
+    except Exception as e:
+        logger.warning(f"[HELDOUT] alpha control failed: {e}")
+        grading["alpha_score"] = None
 
     return grading["final_score"], exam, answers, grading
 
 
-def _update_status_after_exam(target, final_score, passed, is_spaced_repetition):
+def _update_status_after_exam(target, final_score, passed, is_spaced_repetition,
+                              heldout=False):
     """
     Update file status in index based on exam result.
 
     Rules:
+    - held-out fail: status untouched (C5, red-team 2026-07-11: a B4 drill sets
+      is_spaced, whose fail branch stamped COMPLETED on a LEARNED file -- an
+      index lie -- and auto-select fails branded fresh files HARD_TOPIC; the
+      held-out verdict lives in exam_results, the index must not lie for it)
     - spaced repetition: always keep COMPLETED
     - passed: COMPLETED
     - 1st fail: EXAM_FAILED (second chance)
     - 2nd+ fail or looping: HARD_TOPIC
+
+    is_spaced_repetition means "this file was ALREADY completed and is being
+    re-examined" -- keeping COMPLETED then is honest, because a shaky rerun does
+    not unlearn the material. It must NOT mean "a caller named a file": every
+    production caller names one, which turned this branch into an unconditional
+    COMPLETED stamp applied before `passed` was ever consulted (fixed 2026-07-15).
     """
     target['exam_attempts'] += 1
     target['last_scores'].append(final_score)
+
+    if heldout:
+        # Held-out verdicts must not mutate index status beyond the honest
+        # minimum: FAIL leaves status untouched; PASS promotes to COMPLETED and
+        # SKIPS check_for_looping below -- repeated similar held-out scores are
+        # a property of mechanical grading, and a HARD_TOPIC brand would drop
+        # the file from the 'completed' bucket, silently wedging the heldout
+        # goal's verified/N credit (diff-review 2026-07-12).
+        if passed:
+            target['status'] = STATUS_COMPLETED
+            logger.info(f"[HELDOUT PASS] Egzamin held-out ZALICZONY ({final_score:.2%})")
+        else:
+            logger.warning(
+                f"[HELDOUT FAIL] Egzamin held-out NIEZALICZONY ({final_score:.2%}) "
+                f"- status bez zmian"
+            )
+        target['updated_at'] = get_timestamp()
+        return
 
     if is_spaced_repetition:
         target['status'] = STATUS_COMPLETED
@@ -929,23 +1136,46 @@ def run_exam_if_ready(
     if target is None:
         return no_exam
 
+    # Spaced repetition = re-examining material ALREADY passed. Captured here,
+    # before anything can mutate the record. Do NOT infer it from
+    # target_file_id: production always names a file (teacher_module.py:487,
+    # synthesis, /egzamin), so that test called every first exam a repeat and
+    # stamped COMPLETED on files that had just failed their only exam
+    # (audit 2026-07-15: web_rss_francuski_naukowiec, 0.55 vs 0.6 threshold,
+    # indexed as completed).
+    is_spaced = target.get('status') == STATUS_COMPLETED
+
     logger.info(f"[EXAM] Egzamin z: {file_id}")
 
     # 2. Execute exam pipeline
     used_heldout = False
+    heldout_fallback = False
     if use_heldout:
         bank_rows = select_heldout_rows(
             file_id,
             load_heldout_bank(heldout_bank_path or HELDOUT_BANK),
         )
-        if bank_rows:
+        if len(bank_rows) >= HELDOUT_MIN_BANK_ROWS:
+            # C9 arming marker: greppable in journalctl, so the FIRST
+            # mechanically graded exam after a flip is identifiable.
+            logger.info(
+                "[HELDOUT] armed: mechanical grading for %s (%d bank rows)",
+                file_id, len(bank_rows),
+            )
             final_score, exam, answers, grading = _execute_heldout_exam(
                 file_id, memory_path, bank_rows, llm_fn=llm_fn,
                 semantic_memory=semantic_memory,
             )
             used_heldout = True
         else:
-            logger.info("[HELDOUT] No bank rows for %s; falling back to LLM examiner", file_id)
+            # C3: no silent identity-blur -- a caller asked for the mechanical
+            # grader and did not get it. WARNING (greppable) + stamped in the
+            # record below, so the fallback rate is visible in the trust data.
+            heldout_fallback = True
+            logger.warning(
+                "[HELDOUT] %d bank rows for %s (min %d); falling back to LLM "
+                "examiner", len(bank_rows), file_id, HELDOUT_MIN_BANK_ROWS,
+            )
             final_score, exam, answers, grading = _execute_exam(
                 file_id, memory_path, llm_fn, grader_llm_fn=grader_llm_fn,
                 generator_llm_fn=generator_llm_fn,
@@ -971,12 +1201,22 @@ def run_exam_if_ready(
 
     # 3. Save exam result
     _gm = grader_meta or {}
+    # Actual-backend cells (see teacher_module._make_nim_first_examiner_fn):
+    # read AFTER grading, so the record shows which model REALLY authored and
+    # graded ("nim:<model>" / "local:<model>") instead of the constant planned
+    # label -- the NIM-vs-fallback split used to be invisible in trust data.
+    _grader_cell = _gm.get("grader_cell") or {}
+    _author_cell = _gm.get("author_cell") or {}
+    grader_model = _grader_cell.get("backend") or _gm.get("grader")
+    author_model = _author_cell.get("backend")
     if used_heldout:
         _gm = {
             "independent": True,
             "grader": HELDOUT_GRADER_MODEL,
             "student": _gm.get("student") or ollama_model,
         }
+        grader_model = HELDOUT_GRADER_MODEL
+        author_model = None  # questions come from the frozen bank, not an LLM
     append_exam_result({
         "file": file_id,
         "timestamp": get_timestamp(),
@@ -989,16 +1229,22 @@ def run_exam_if_ready(
         # Keystone provenance: was this graded by an INDEPENDENT model (not the
         # student grading its own homework)? Makes score trustworthiness visible.
         "grader_independent": bool(_gm.get("independent", False)),
-        "grader_model": _gm.get("grader"),
+        "grader_model": grader_model,
+        "author_model": author_model,
         "student_model": _gm.get("student"),
         # Closed-book (retrieval) provenance + alpha control (empty-context score)
         "closed_book": bool(grading.get("closed_book", False)),
         "alpha_score": grading.get("alpha_score"),
+        # C3: held-out was requested but the bank had too few rows -> the LLM
+        # examiner graded instead. Without this stamp such a record is
+        # bit-identical to a regular exam and the fallback rate is invisible.
+        "heldout_fallback": heldout_fallback,
     }, exam_path)
 
-    # 4. Update status
-    is_spaced = target_file_id is not None
-    _update_status_after_exam(target, final_score, passed, is_spaced)
+    # 4. Update status (is_spaced captured pre-exam, see above)
+    _update_status_after_exam(target, final_score, passed, is_spaced,
+                              heldout=used_heldout)
     save_index(index, index_path)
 
-    return {"executed": True, "passed": passed, "score": final_score, "file_id": file_id}
+    return {"executed": True, "passed": passed, "score": final_score,
+            "file_id": file_id, "heldout_fallback": heldout_fallback}

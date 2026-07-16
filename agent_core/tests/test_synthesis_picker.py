@@ -112,3 +112,13 @@ class TestStatePersistence:
         # And an empty state means a cycle is allowed immediately.
         d = decide_synthesis(_eligible(("fizyka", 3)), state, NOW, in_window=True)
         assert d["action"] == "synthesize"
+
+    def test_save_state_swallows_non_serializable_state(self, tmp_path):
+        """A non-JSON-serializable value in history makes json.dump raise
+        TypeError (not OSError). save_state MUST swallow it -- otherwise it
+        propagates to the caller while the SHARED _synthesis_lock is held and
+        leaks the lock for the process lifetime (audit 2026-06-15, finding #1b).
+        Persistence is best-effort by design; a failed write must not raise."""
+        path = tmp_path / "state.json"
+        bad_state = {"last_run_ts": NOW, "history": {"fizyka": object()}}
+        save_state(path, bad_state)  # must NOT raise

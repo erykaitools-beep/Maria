@@ -116,18 +116,18 @@ class TestCapabilitySpec:
         assert s1 == s2
 
     def test_default_specs_complete(self):
-        """All 15 known action types have specs."""
+        """All 16 known action types have specs."""
         expected = {
             "learn", "exam", "review", "evaluate", "noop",
             "maintenance", "fetch", "experiment", "effector",
             "self_analyze", "creative", "ask_expert", "validate",
-            "critique", "fs_write",
+            "critique", "fs_write", "play",
         }
         assert set(DEFAULT_CAPABILITY_SPECS.keys()) == expected
 
     def test_default_specs_k7_values(self):
         """K7 classifications match action_class.py."""
-        free = {"learn", "exam", "review", "evaluate", "noop"}
+        free = {"learn", "exam", "review", "evaluate", "noop", "play"}
         guarded = {
             "maintenance", "fetch", "experiment", "self_analyze",
             "creative", "ask_expert", "validate", "fs_write",
@@ -615,12 +615,12 @@ class TestImports:
 
 class TestFullFlow:
     def test_register_all_defaults_and_dispatch(self):
-        """Register all 15 default capabilities and dispatch noop."""
+        """Register all 16 default capabilities and dispatch noop."""
         router = CapabilityRouter()
         for name, spec in DEFAULT_CAPABILITY_SPECS.items():
             router.register(name, _ok_handler, spec)
 
-        assert router.registered_count == 15
+        assert router.registered_count == 16
         plan = MockPlan(MockActionType.NOOP, {})
         result = router.dispatch(plan)
         assert result["success"] is True
@@ -642,9 +642,9 @@ class TestFullFlow:
             router.register(name, _ok_handler, spec)
 
         status = router.get_status()
-        assert status["registered"] == 15
+        assert status["registered"] == 16
         free_count = sum(
             1 for c in status["capabilities"]
             if c["classification"] == "free"
         )
-        assert free_count == 5  # learn, exam, review, evaluate, noop
+        assert free_count == 6  # learn, exam, review, evaluate, noop, play

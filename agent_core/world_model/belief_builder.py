@@ -90,6 +90,33 @@ def _is_synthetic_source(rec: Dict[str, Any]) -> bool:
     return str(fid).startswith("synthesis_")
 
 
+# Provenance prefixes whose files share ONE logical origin. Every
+# expert_<topic>.txt is the SAME expert LLM (NIM/Codex) answering a different
+# knowledge-gap query (gap_planner ASK_EXPERT) -- so 100 expert_*.txt files are
+# one voice, not 100 corroborating sources. Counting each as distinct
+# manufactured a fake "cross-source" signal: it inflated synthesis
+# eligibility/ranking AND topic-belief confidence (len(files)/5) on what is
+# really a single source (audit 2026-06-16). Web/wiki/rss/input/edu files are
+# independently fetched documents, so each stays its own logical source.
+_CORPUS_PREFIXES = ("expert_",)
+
+
+def _source_group(source_file: str) -> str:
+    """Map a source_file to its LOGICAL source key for independence counting.
+
+    Files from a single-origin corpus (see _CORPUS_PREFIXES) collapse to one
+    shared key; every other file is its own source (returned unchanged). Use
+    this -- never the raw distinct source_file count -- wherever a count is
+    meant to represent INDEPENDENT sources (cross-source synthesis gate,
+    topic-belief confidence). Kept here so the rule has one home, alongside the
+    tag and synthetic-source rules (synthesis_agent imports it)."""
+    sf = source_file or ""
+    for prefix in _CORPUS_PREFIXES:
+        if sf.startswith(prefix):
+            return prefix.rstrip("_")
+    return sf
+
+
 def _concept_trust_mode() -> str:
     """Concept trust-gate mode: ``off`` (default), ``observe``, or ``armed``.
 
@@ -129,10 +156,16 @@ class BeliefBuilder:
         knowledge_index_path: Path,
         longterm_memory_path: Path,
         exam_results_path: Path,
+        denylist_path: Optional[Path] = None,
     ):
         self._knowledge_index_path = Path(knowledge_index_path)
         self._longterm_memory_path = Path(longterm_memory_path)
         self._exam_results_path = Path(exam_results_path)
+        # Resurrection guard (rollback/quarantine): build_all is a pure
+        # projection of the source JSONLs, so a store-only retract is undone
+        # within one cycle unless the source/entity is on the denylist. None =
+        # no denylist (tests, legacy callers) -> nothing is blocked.
+        self._denylist_path = Path(denylist_path) if denylist_path else None
         # Watermark of the last completed build_all (per process). The
         # build enumerates ~32k candidates that the 2000-belief cap then
         # prunes right back out, so re-running it with UNCHANGED sources
@@ -156,6 +189,14 @@ class BeliefBuilder:
             except OSError:
                 marks.append((str(p), 0, 0))
         return tuple(marks)
+
+    def _load_denylist(self) -> Dict[str, set]:
+        """Net active denylist {'source': set, 'entity': set}. Empty when no
+        denylist path is configured (tests/legacy) -- blocks nothing."""
+        if self._denylist_path is None:
+            return {"source": set(), "entity": set()}
+        from agent_core.world_model.retraction_log import load_denylist
+        return load_denylist(self._denylist_path)
 
     def build_all(
         self, store: BeliefStore, force: bool = False,
@@ -295,10 +336,26 @@ class BeliefBuilder:
         if not records:
             return 0
 
-        # Count tag occurrences and track source files
+        denylist = self._load_denylist()
+
+        # Count tag occurrences and track source files. SYNTHETIC records
+        # (closed-loop synthesis output) are EXCLUDED from the topic source
+        # set, mirroring the file/concept builders which already cap synthesis
+        # via _is_synthetic_source. Without this, a synthesis could (a) create
+        # a brand-new TOPIC entity from a tag the NIM fabricated, and (b)
+        # inflate an existing topic's source-count/confidence with its own
+        # self-referential file -- synthetic provenance leaking UNCAPPED into
+        # the topic layer (topic beliefs are OBSERVATION, but the bypass also
+        # means /forget_source could not unwind it). Denylisted sources are
+        # dropped too so /forget_source reaches this layer (audit 2026-06-15 #2).
+        denied_sources = denylist["source"]
         tag_files: Dict[str, set] = defaultdict(set)
         for rec in records:
+            if _is_synthetic_source(rec):
+                continue
             source_file = rec.get("source_file", "")
+            if source_file in denied_sources:
+                continue
             for tag in rec.get("tags", []):
                 normalized = _normalize_tag(tag)
                 if normalized:
@@ -306,16 +363,27 @@ class BeliefBuilder:
 
         created = 0
         for tag, files in tag_files.items():
+            # Resurrection guard: a retracted/quarantined topic belief must not
+            # be re-minted by the next build (entity scope).
+            if tag in denylist["entity"]:
+                continue
             # Dedup: skip if belief already exists for this topic
             if store.find_by_entity_and_source(tag, f"topic:{tag}"):
                 continue
 
-            confidence = min(1.0, len(files) / 5.0)
+            # Confidence reflects INDEPENDENT sources, not raw file count: a tag
+            # carried by 100 expert_*.txt files is one LLM voice, not 100 (audit
+            # 2026-06-16). related_entities/content keep the true file list.
+            n_sources = len({_source_group(f) for f in files})
+            confidence = min(1.0, n_sources / 5.0)
             belief = create_belief(
                 entity=tag,
                 entity_type=EntityType.TOPIC,
                 belief_type=BeliefType.OBSERVATION,
-                content=f"Temat '{tag}' wystepuje w {len(files)} plikach",
+                content=(
+                    f"Temat '{tag}' wystepuje w {len(files)} plikach "
+                    f"({n_sources} zrodel)"
+                ),
                 confidence=confidence,
                 source=BeliefSource.LEARNING,
                 source_id=f"topic:{tag}",
@@ -357,9 +425,16 @@ class BeliefBuilder:
             results_path=str(self._exam_results_path)
         )
 
+        denylist = self._load_denylist()
         created = 0
         for file_id, rec in by_id.items():
             status = rec.get("status", "new")
+
+            # Resurrection guard: /forget_source <file_id> (source scope) or a
+            # by-id /retract of this file belief (entity scope) blocks re-mint,
+            # even when the file still passes the independent-exam gate below.
+            if file_id in denylist["source"] or file_id in denylist["entity"]:
+                continue
 
             # Un-examined OR only self-graded knowledge (new / learning /
             # learned / exam_failed, or 'completed' without an independent pass)
@@ -450,9 +525,14 @@ class BeliefBuilder:
         # FACT from the whole concept layer (concepts are ~57% of the cap).
         enforce = _concept_trust_mode() == "armed" and bool(exam_scores_indep)
 
+        denylist = self._load_denylist()
         created = 0
         for rec in records:
             source_file = rec.get("source_file", "")
+            # Resurrection guard: /forget_source <source_file> blocks every
+            # concept belief derived from it (root-and-branch cut of a synthesis).
+            if source_file and source_file in denylist["source"]:
+                continue
             chunk_id = rec.get("chunk_id", source_file)
             key_points = rec.get("key_points", [])
             tags = rec.get("tags", [])
@@ -469,6 +549,11 @@ class BeliefBuilder:
                 # Truncate very long key points
                 kp_short = kp[:200] if len(kp) > 200 else kp
                 concept_id = f"concept:{chunk_id}:{i}"
+
+                # Resurrection guard: a by-id /retract of this concept belief
+                # (entity scope) blocks just this key point's re-mint.
+                if kp_short in denylist["entity"]:
+                    continue
 
                 # Dedup
                 if store.find_by_entity_and_source(kp_short, concept_id):

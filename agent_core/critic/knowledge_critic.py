@@ -38,8 +38,40 @@ from agent_core.critic.critique_model import (
     create_finding,
     _normalize_topic,
 )
+from agent_core.world_model.belief_builder import _source_group
 
 logger = logging.getLogger(__name__)
+
+
+def _belief_logical_source(source_id: str) -> Optional[str]:
+    """Underlying LOGICAL source for a belief's source_id, or None if the id is
+    not a document source.
+
+    Belief source_ids are ``file:<file_id>``, ``concept:<chunk_id>:<i>`` (where
+    chunk_id is ``<source_file>#chunk_N`` or ``<source_file>``), ``topic:<tag>``
+    (self-referential -- the topic belief is derived, not a source), or a bare
+    id in tests. We strip the prefix/keypoint-index/chunk fragment to recover the
+    source_file, then pass it through ``_source_group`` so single-origin corpora
+    (expert_*, one LLM voice) collapse to one. This keeps the shallow-knowledge
+    detector from being defeated by the cross-source WYDMUSZKA: counting raw
+    per-keypoint source_ids made ``len(sources) <= 1`` impossible to reach for an
+    expert-monoculture topic, so the "all from single source" branch never fired
+    (audit 2026-06-16)."""
+    if not source_id:
+        return None
+    kind, sep, body = source_id.partition(":")
+    if not sep:
+        # Bare id (no prefix, e.g. in tests): treat the whole thing as a source.
+        return _source_group(source_id)
+    if kind == "topic":
+        return None  # the topic belief's own id is not an independent source
+    if kind == "concept":
+        # concept:<chunk_id>:<keypoint-index> -- drop the trailing integer index.
+        head, _, tail = body.rpartition(":")
+        if head and tail.isdigit():
+            body = head
+    body = body.split("#", 1)[0]  # drop the '#chunk_N' fragment
+    return _source_group(body) if body else None
 
 # Decay constants (mirrored from belief_maintenance.py, read-only use)
 _DECAY_HALF_LIVES = {
@@ -432,7 +464,15 @@ class KnowledgeCritic:
             ]
 
             fact_count = bt_vals.count("fact")
-            sources = set(b.source_id for b in group)
+            # Count INDEPENDENT (logical) sources, not raw per-keypoint
+            # source_ids: a topic backed entirely by expert_*.txt files is one
+            # LLM voice, yet each keypoint yields a distinct source_id -- so the
+            # raw count never hit <=1 and the single-source branch was dead
+            # (cross-source WYDMUSZKA, audit 2026-06-16).
+            sources = {
+                s for s in (_belief_logical_source(b.source_id) for b in group)
+                if s
+            }
             has_exam = any(b.source_id in exam_map for b in group)
             has_dispute_resolution = any(
                 b.source_id in dispute_files for b in group
@@ -701,7 +741,12 @@ class KnowledgeCritic:
     # ═══════════════════════════════════════════════════════
 
     def _get_current_beliefs(self) -> list:
-        """Get non-superseded beliefs from store."""
+        """Get non-superseded, active beliefs from store.
+
+        Excludes quarantined/retracted beliefs (status != active) so the
+        coherence/calibration audit never scores a soft-hidden or retracted
+        belief.
+        """
         if self._belief_store is None:
             return []
         try:
@@ -709,6 +754,7 @@ class KnowledgeCritic:
             return [
                 b for b in all_beliefs.values()
                 if b.superseded_by is None
+                and getattr(b, "status", "active") == "active"
             ]
         except Exception:
             return []

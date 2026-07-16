@@ -158,7 +158,11 @@ def build_belief_entries(beliefs_path: Path) -> List[Tuple[str, str, Dict]]:
     beliefs = {}
     for rec in _load_jsonl(beliefs_path):
         entity = rec.get("entity", "")
-        if entity and rec.get("superseded_by") is None:
+        # Skip quarantined/retracted (status != active) so a re-index never
+        # re-adds the vector of a soft-hidden/retracted belief. Missing status
+        # key on an old record means active (backward compatible).
+        if (entity and rec.get("superseded_by") is None
+                and rec.get("status", "active") == "active"):
             beliefs[entity] = rec
 
     for entity, rec in beliefs.items():
@@ -456,10 +460,15 @@ def cleanup_stale_belief_vectors(semantic_memory, beliefs_path: str) -> int:
     if not bp.exists():
         return 0
 
+    # "current" = has at least one ACTIVE non-superseded belief. An entity whose
+    # only beliefs are quarantined/retracted is no longer current, so its vector
+    # is cleaned up on the next boot (matches the runtime eviction guard:
+    # keep the vector only while an active belief remains for the entity).
     current_entities = set()
     for rec in _load_jsonl(bp):
         entity = rec.get("entity", "")
-        if entity and rec.get("superseded_by") is None:
+        if (entity and rec.get("superseded_by") is None
+                and rec.get("status", "active") == "active"):
             current_entities.add(entity)
 
     # Empty current set = unreadable/empty file; never wipe the namespace.

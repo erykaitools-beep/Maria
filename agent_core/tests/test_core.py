@@ -10,6 +10,7 @@ import threading
 from unittest.mock import Mock, patch, MagicMock
 
 from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.event_logger import HomeostasisEventLogger
 from agent_core.homeostasis.state_model import Mode, SystemState
 from agent_core.memory.manager import MemoryManager
 from agent_core.llm.manager import LLMManager
@@ -114,6 +115,109 @@ class TestTickExecution:
         # Note: _execute_tick doesn't increment, main_loop does
         # This test verifies the counter exists
         assert hasattr(core, '_tick_count')
+
+    def test_stale_bulletin_prune_wired_into_tick(self, core):
+        """The 7-day bulletin auto-resolve (prune_stale) must fire from the tick,
+        not only the /board prune Telegram command -- otherwise K12 advisories
+        pile up unresolved for weeks and resurface as stale 'advice'."""
+        bs = MagicMock()
+        bs.prune_stale.return_value = 0
+        core.set_bulletin_store(bs)
+
+        core._tick_count = 1800  # multiple of BULLETIN_PRUNE_INTERVAL
+        core._execute_tick()
+        assert bs.prune_stale.called
+
+        bs.prune_stale.reset_mock()
+        core._tick_count = 1801  # not a multiple -> no prune this tick
+        core._execute_tick()
+        assert not bs.prune_stale.called
+
+
+class TestSenseSubPhaseTiming:
+    """Per-sensor timing inside 01_sense (2026-07-12 diagnostic).
+
+    01_sense stalled 7-20s sporadically while every call in the path looks
+    cheap, so the overrun event must name WHICH sensor blocked (01a-01d),
+    and unaccounted_ms must not double-count sub-phases against their parent.
+    """
+
+    @pytest.fixture
+    def core(self):
+        memory_manager = specced(MemoryManager)
+        memory_manager.get_semantic_coherence.return_value = 0.95
+        memory_manager.get_total_entries.return_value = 100
+        memory_manager.get_contradiction_count.return_value = 0
+        memory_manager.get_episodic_freshness.return_value = 60.0
+        memory_manager.get_recent_errors_count.return_value = 0
+
+        llm_manager = specced(LLMManager)
+        llm_manager.get_last_latency_ms.return_value = 150.0
+        llm_manager.get_context_tokens.return_value = 1000
+
+        return HomeostasisCore(
+            memory_manager=memory_manager,
+            llm_manager=llm_manager,
+        )
+
+    def test_tick_records_sense_sub_phases(self, core):
+        """A tick records all four sensor sub-timings plus the parent."""
+        core._execute_tick()
+
+        for key in ("01a_resource", "01b_thermal", "01c_time",
+                    "01d_cognitive", "01_sense"):
+            assert key in core._phase_ms
+        subs_ms = sum(
+            v for k, v in core._phase_ms.items()
+            if k.startswith("01") and k != "01_sense"
+        )
+        # Parent covers the subs plus the metric merge, which deliberately
+        # sits outside the sub-timers (parent-minus-subs gap = the merge).
+        assert core._phase_ms["01_sense"] >= subs_ms - 1
+
+    def test_slow_sensor_lands_in_its_own_sub_phase(self, core):
+        """An artificially slowed sensor is named by its sub-timing."""
+        real_read = core.thermal_sensor.read_metrics
+
+        def slow_read():
+            time.sleep(0.05)
+            return real_read()
+
+        core.thermal_sensor.read_metrics = slow_read
+        core._execute_tick()
+
+        assert core._phase_ms["01b_thermal"] >= 45
+        assert core._phase_ms["01a_resource"] < 45
+
+    def test_unaccounted_excludes_sub_phases(self, core):
+        """unaccounted_ms is computed against top-level phases only.
+
+        Sub-phases re-measure time already inside 01_sense; summing both
+        would understate unaccounted by the whole sense duration.
+        """
+        events = []
+        core.event_logger = MagicMock()
+        core.event_logger._write_event = lambda e: events.append(e)
+        core._last_timing_log_ts = 0.0  # force a baseline timing sample
+
+        real_read = core.thermal_sensor.read_metrics
+
+        def slow_read():
+            time.sleep(0.05)
+            return real_read()
+
+        core.thermal_sensor.read_metrics = slow_read
+        core._execute_tick()
+
+        timing = [e for e in events
+                  if e.get("event") in ("tick_timing_sample", "tick_overrun")]
+        assert timing, "expected a timing event from the forced baseline"
+        event = timing[-1]
+        expected = event["tick_ms"] - sum(
+            v for k, v in event["phase_ms"].items()
+            if k in ("01_sense", "08.5_vision", "10_planner", "11_telegram")
+        )
+        assert abs(event["unaccounted_ms"] - expected) < 20
 
 
 class TestModeTransitions:
@@ -543,3 +647,311 @@ class TestPhaseErrorThrottle:
                 core._log_phase_error("12 reminder", e)
 
         assert any("scheduler down" in r.getMessage() for r in caplog.records)
+
+
+class TestOperatorRhythmReanalyze:
+    """Phase 18b: periodic rhythm re-analysis on the live, seeded detector.
+
+    record_contact() feeds the detector during Telegram polls, but the persisted
+    DayRhythm was only computed at boot. These tests use REAL RhythmDetector +
+    OperatorModel (never mocks -- a mock's get_rhythm returns a truthy Mock that
+    set_rhythm would swallow, hiding the bug).
+    """
+
+    def _build(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        # Avoid migrating production user_profile.json into the tmp model.
+        monkeypatch.setattr(
+            "agent_core.operator.operator_model.LEGACY_PROFILE_PATH",
+            tmp_path / "nonexistent_legacy.json",
+        )
+        core = HomeostasisCore(
+            memory_manager=specced(MemoryManager),
+            llm_manager=specced(LLMManager),
+        )
+        rd = RhythmDetector()
+        om = OperatorModel(path=tmp_path / "operator_model.json")
+        core._shared_context = SimpleNamespace(rhythm_detector=rd, operator_model=om)
+        return core, rd, om
+
+    def test_cold_detector_does_not_clobber(self, tmp_path, monkeypatch):
+        core, rd, om = self._build(tmp_path, monkeypatch)
+        before = om.rhythm.sample_count
+        rd.seed([1_700_000_000.0 + i * 3600 for i in range(3)])  # 3 < 5
+        assert core._reanalyze_operator_rhythm() is False
+        assert om.rhythm.sample_count == before  # boot rhythm untouched
+
+    def test_warm_detector_refreshes_and_advances(self, tmp_path, monkeypatch):
+        core, rd, om = self._build(tmp_path, monkeypatch)
+        base = 1_700_000_000.0
+        rd.seed([base + i * 3600 for i in range(5)])  # exactly MIN_SAMPLES_BASIC
+        assert core._reanalyze_operator_rhythm() is True
+        assert om.rhythm.sample_count == 5
+        assert om.rhythm.last_analyzed
+        # A new live contact must move the persisted rhythm WITHOUT a restart.
+        rd.record_contact(base + 6 * 3600)
+        assert core._reanalyze_operator_rhythm() is True
+        assert om.rhythm.sample_count == 6
+
+    def test_missing_context_is_safe(self, tmp_path, monkeypatch):
+        core, rd, om = self._build(tmp_path, monkeypatch)
+        core._shared_context = None
+        assert core._reanalyze_operator_rhythm() is False
+
+
+class TestGrowthRefreshPhase:
+    """Phase 18c: the tick refreshes growth targets on the self-perception
+    cadence (SELF_PERCEPTION_TICK_INTERVAL). Without it refresh() ran once at
+    boot and the live growth numbers froze."""
+
+    @pytest.fixture
+    def core(self, tmp_path):
+        mm = specced(MemoryManager)
+        mm.get_semantic_coherence.return_value = 0.95
+        mm.get_total_entries.return_value = 100
+        mm.get_contradiction_count.return_value = 0
+        mm.get_episodic_freshness.return_value = 60.0
+        mm.get_recent_errors_count.return_value = 0
+        llm = specced(LLMManager)
+        llm.get_last_latency_ms.return_value = 150.0
+        llm.get_context_tokens.return_value = 1000
+        # tmp event logger so the tick's escalator/audit writes (Phase 9.6 fires
+        # at % 1800 == 0) never touch the live homeostasis_events.jsonl.
+        ev = HomeostasisEventLogger(log_path=tmp_path / "events.jsonl")
+        return HomeostasisCore(memory_manager=mm, llm_manager=llm, event_logger=ev)
+
+    def test_refresh_fires_on_cadence(self, core):
+        from agent_core.homeostasis.core import SELF_PERCEPTION_TICK_INTERVAL
+
+        class _Growth:
+            def __init__(self):
+                self.calls = 0
+
+            def refresh(self):
+                self.calls += 1
+
+        g = _Growth()
+        core.set_growth_awareness(g)
+        core._tick_count = SELF_PERCEPTION_TICK_INTERVAL  # exact multiple -> fires
+        core._execute_tick()
+        assert g.calls == 1
+
+    def test_refresh_silent_off_cadence(self, core):
+        class _Growth:
+            def __init__(self):
+                self.calls = 0
+
+            def refresh(self):
+                self.calls += 1
+
+        g = _Growth()
+        core.set_growth_awareness(g)
+        core._tick_count = 1  # not a multiple of the interval
+        core._execute_tick()
+        assert g.calls == 0
+
+    def test_refresh_exception_does_not_break_tick(self, core):
+        from agent_core.homeostasis.core import SELF_PERCEPTION_TICK_INTERVAL
+
+        class _Boom:
+            def refresh(self):
+                raise RuntimeError("growth down")
+
+        core.set_growth_awareness(_Boom())
+        core._tick_count = SELF_PERCEPTION_TICK_INTERVAL
+        core._execute_tick()  # must not raise -- phase wraps errors
+
+
+class TestConversationCondensePhase:
+    """Phase 20: the tick drains idle-session conversation condensation on the
+    CONVERSATION_CONDENSE_INTERVAL cadence. Without it condense fired only at
+    REPL shutdown -> dead in the 24/7 daemon, so summaries froze (Feb 2026)."""
+
+    @pytest.fixture
+    def core(self, tmp_path):
+        from types import SimpleNamespace
+        mm = specced(MemoryManager)
+        mm.get_semantic_coherence.return_value = 0.95
+        mm.get_total_entries.return_value = 100
+        mm.get_contradiction_count.return_value = 0
+        mm.get_episodic_freshness.return_value = 60.0
+        mm.get_recent_errors_count.return_value = 0
+        llm = specced(LLMManager)
+        llm.get_last_latency_ms.return_value = 150.0
+        llm.get_context_tokens.return_value = 1000
+        ev = HomeostasisEventLogger(log_path=tmp_path / "events.jsonl")
+        c = HomeostasisCore(memory_manager=mm, llm_manager=llm, event_logger=ev)
+        # Phase 20 reads the brain off the shared context (maria_conductor access
+        # in the tick is getattr-guarded, so a sparse namespace is safe).
+        c._shared_context = SimpleNamespace(brain=object())
+        return c
+
+    def test_condense_fires_on_cadence(self, core):
+        from agent_core.homeostasis.core import CONVERSATION_CONDENSE_INTERVAL
+
+        class _Cond:
+            def __init__(self):
+                self.calls = 0
+
+            def condense_pending_sessions(self, brain):
+                self.calls += 1
+                return 0
+
+        cond = _Cond()
+        core.set_conversation_memory(cond)
+        core._tick_count = CONVERSATION_CONDENSE_INTERVAL  # exact multiple
+        core._execute_tick()
+        # Condense runs in a transient thread (so it never blocks the tick) --
+        # join before asserting it ran.
+        assert core._condense_thread is not None
+        core._condense_thread.join(timeout=2)
+        assert cond.calls == 1
+
+    def test_condense_silent_off_cadence(self, core):
+        from agent_core.homeostasis.core import CONVERSATION_CONDENSE_INTERVAL
+
+        class _Cond:
+            def __init__(self):
+                self.calls = 0
+
+            def condense_pending_sessions(self, brain):
+                self.calls += 1
+                return 0
+
+        cond = _Cond()
+        core.set_conversation_memory(cond)
+        core._tick_count = CONVERSATION_CONDENSE_INTERVAL + 1  # off cadence
+        core._execute_tick()
+        assert cond.calls == 0
+
+    def test_condense_skipped_without_brain(self, core):
+        from types import SimpleNamespace
+        from agent_core.homeostasis.core import CONVERSATION_CONDENSE_INTERVAL
+
+        class _Cond:
+            def __init__(self):
+                self.calls = 0
+
+            def condense_pending_sessions(self, brain):
+                self.calls += 1
+                return 0
+
+        core._shared_context = SimpleNamespace()  # no brain attribute
+        cond = _Cond()
+        core.set_conversation_memory(cond)
+        core._tick_count = CONVERSATION_CONDENSE_INTERVAL
+        core._execute_tick()
+        assert cond.calls == 0  # no brain -> skip, never crashes
+
+    def test_condense_exception_does_not_break_tick(self, core):
+        from agent_core.homeostasis.core import CONVERSATION_CONDENSE_INTERVAL
+
+        class _Boom:
+            def condense_pending_sessions(self, brain):
+                raise RuntimeError("condense down")
+
+        core.set_conversation_memory(_Boom())
+        core._tick_count = CONVERSATION_CONDENSE_INTERVAL
+        core._execute_tick()  # spawn is non-blocking; tick must not raise
+        # The error is raised + swallowed inside the thread, not the tick.
+        if core._condense_thread:
+            core._condense_thread.join(timeout=2)
+
+    def test_condense_does_not_block_the_tick(self, core):
+        """The whole point of the thread: a SLOW condense batch must not stall
+        the tick. Inline it overran 30-55s/cadence (tick_overrun)."""
+        import threading
+        import time as _time
+        from agent_core.homeostasis.core import CONVERSATION_CONDENSE_INTERVAL
+
+        started = threading.Event()
+        release = threading.Event()
+
+        class _Slow:
+            def condense_pending_sessions(self, brain):
+                started.set()
+                release.wait(2)  # hold the "LLM" until the test releases it
+                return 0
+
+        core.set_conversation_memory(_Slow())
+        core._tick_count = CONVERSATION_CONDENSE_INTERVAL
+        t0 = _time.perf_counter()
+        core._execute_tick()
+        elapsed = _time.perf_counter() - t0
+
+        assert started.wait(2)   # condense actually started (in the thread)
+        assert elapsed < 1.0     # but the tick returned WITHOUT waiting for it
+        release.set()
+        if core._condense_thread:
+            core._condense_thread.join(timeout=2)
+
+
+class TestVisionAdvisorPhase:
+    """Phase 8.5 passes the adapted vision events to vision_advisor.maybe_react,
+    so a salient visual event can trigger a reaction. Guards the
+    'wired but never called' bug class (vision was write-only before)."""
+
+    @pytest.fixture
+    def core(self, tmp_path):
+        mm = specced(MemoryManager)
+        mm.get_semantic_coherence.return_value = 0.95
+        mm.get_total_entries.return_value = 100
+        mm.get_contradiction_count.return_value = 0
+        mm.get_episodic_freshness.return_value = 60.0
+        mm.get_recent_errors_count.return_value = 0
+        llm = specced(LLMManager)
+        llm.get_last_latency_ms.return_value = 150.0
+        llm.get_context_tokens.return_value = 1000
+        ev = HomeostasisEventLogger(log_path=tmp_path / "events.jsonl")
+        return HomeostasisCore(memory_manager=mm, llm_manager=llm, event_logger=ev)
+
+    @staticmethod
+    def _wire_vision(core, advisor):
+        from types import SimpleNamespace
+        events = [SimpleNamespace(event_type="vision_motion")]
+
+        class _Cortex:
+            def perceive(self):
+                return object()  # non-None percept
+
+        class _Adapter:
+            def adapt(self, percept):
+                return events
+
+        class _Buf:
+            def __init__(self):
+                self.pushed = None
+
+            def push_many(self, evs):
+                self.pushed = evs
+
+        core._vision_cortex = _Cortex()
+        core._vision_adapter = _Adapter()
+        core._perception_buffer = _Buf()
+        core._write_vision_state = lambda percept: None  # no live file write
+        core._vision_interval = 1
+        core._vision_last_tick = 0
+        core._tick_count = 1
+        if advisor is not None:
+            core.set_vision_advisor(advisor)
+        return events
+
+    def test_perceive_vision_calls_advisor_with_events(self, core):
+        class _Advisor:
+            def __init__(self):
+                self.seen = None
+
+            def maybe_react(self, evs):
+                self.seen = evs
+
+        advisor = _Advisor()
+        events = self._wire_vision(core, advisor)
+        core._perceive_vision()
+        assert core._perception_buffer.pushed is events
+        assert advisor.seen is events  # the advisor saw the same adapted events
+
+    def test_perceive_vision_safe_without_advisor(self, core):
+        self._wire_vision(core, advisor=None)
+        core._perceive_vision()  # no advisor wired -> must not raise
+        assert core._perception_buffer.pushed is not None

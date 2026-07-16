@@ -20,8 +20,10 @@ ADR-009: Tick Aggregator (perception via tick loop, not event bus)
 
 import json
 import os
+import re
 import time
 import threading
+from contextlib import contextmanager
 import logging
 from collections import deque
 from pathlib import Path
@@ -52,6 +54,9 @@ SELF_REPAIR_SCAN_INTERVAL = 600       # ticks (≈10 min at 1 tick/sec)
 SELF_REPAIR_EXPIRY_INTERVAL = 120     # ticks (≈2 min at 1 tick/sec)
 WARM_RECOVERY_WRITE_INTERVAL = 120    # ticks (≈2 min) -- Klocek 9a periodic persist
 OUTBOX_PROPOSE_CHECK_INTERVAL = 1800  # ticks (≈30 min) -- Rung 2 autonomous proposer check (self-throttles to ~20h)
+CONVERSATION_CONDENSE_INTERVAL = 300  # ticks (≈5 min) -- drain idle conversation-condense backlog
+SELF_DEV_JOURNAL_TICK_INTERVAL = 1800  # ticks (≈30 min) -- regenerate self-dev board off-tick
+BULLETIN_PRUNE_INTERVAL = 1800         # ticks (≈30 min) -- auto-resolve bulletin entries stale >7d (prune_stale)
 
 
 class HomeostasisCore:
@@ -178,6 +183,15 @@ class HomeostasisCore:
         self._watchdog_stop = threading.Event()
         self._watchdog_stall_sec = float(os.environ.get("WATCHDOG_STALL_SEC", "300"))
         self._watchdog_check_sec = float(os.environ.get("WATCHDOG_CHECK_SEC", "30"))
+        # External-op lease: a declared, bounded blocking call in the tick loop
+        # (e.g. Phase 17 Codex dispatch, 30 min budget). While the lease is
+        # live the watchdog must not treat the stalled heartbeat as a wedge --
+        # on 2026-06-30 it force-restarted mid-dispatch and killed Codex.
+        # Written only by the tick thread, read by TickWatchdog (float write is
+        # atomic under the GIL, same contract as _last_tick_monotonic).
+        self._external_op_deadline: Optional[float] = None
+        self._external_op_label: str = ""
+        self._external_op_logged: bool = False
 
         # Model Scheduler (multi-organ model stack)
         self._model_scheduler = None
@@ -187,6 +201,7 @@ class HomeostasisCore:
         self._vision_adapter = None
         self._vision_interval = 1  # perceive every N ticks
         self._vision_last_tick = 0
+        self._vision_advisor = None  # reacts to salient motion (threaded LLaVA)
 
         # Telegram bridge (operator notifications)
         self._telegram_bridge = None
@@ -218,11 +233,30 @@ class HomeostasisCore:
         # Self-Perception (Phase 18 - periodic self-state snapshots)
         self._self_perception: Optional[Any] = None
 
+        # Growth-Awareness (Phase 18c - periodic growth-target refresh)
+        self._growth_awareness: Optional[Any] = None
+
+        # Conversation condenser (Phase 20 - idle-session summary drain).
+        # Condensation makes slow LLM calls, so it runs in a transient thread
+        # (like the planner) -- inline it blocked the tick 30-55s/cadence.
+        self._conversation_memory: Optional[Any] = None
+        self._condense_thread: Optional[threading.Thread] = None
+
+        # Self-development board (Phase 21 - regenerate artifact off-tick).
+        # Read-only aggregation of creative meta-goals; gated by the setter
+        # (only wired when SELF_DEV_JOURNAL_ENABLED). Runs in a transient
+        # thread (embedding cold-load + file scan would overrun the tick).
+        self._self_dev_journal: Optional[Any] = None
+        self._self_dev_bridge: Optional[Any] = None
+        self._dev_thread: Optional[threading.Thread] = None
+
         # Self-Repair (Phase 19 - systemic failure detection + gate)
         self._system_failure_monitor: Optional[Any] = None
         self._maria_conductor: Optional[Any] = None
         self._bulletin_store: Optional[Any] = None
         self._telegram_notifier: Optional[Any] = None
+        # Undo-suggest (Phase 19 sibling - autonomous "propose undo", flag-gated)
+        self._undo_suggestion_monitor: Optional[Any] = None
 
         # Outbox (TIER 2 hands, Rung 2): autonomous status-note PROPOSER callback
         # (only proposes; the write is operator-gated). Set via set_outbox_proposer.
@@ -336,9 +370,37 @@ class HomeostasisCore:
         """Set SelfPerception for Phase 18 periodic snapshots."""
         self._self_perception = self_perception
 
+    def set_growth_awareness(self, growth_awareness: Any) -> None:
+        """Set GrowthAwareness for Phase 18c periodic growth-target refresh."""
+        self._growth_awareness = growth_awareness
+
+    def set_conversation_memory(self, conversation_memory: Any) -> None:
+        """Set ConversationMemory for Phase 20 idle-session condensation."""
+        self._conversation_memory = conversation_memory
+
+    def set_self_dev_journal(self, self_dev_journal: Any) -> None:
+        """Set SelfDevJournal for Phase 21 periodic artifact regeneration.
+
+        Only called when SELF_DEV_JOURNAL_ENABLED is armed -- leaving it unset
+        keeps Phase 21 dormant (the /samorozwoj read command works regardless,
+        building its cache lazily)."""
+        self._self_dev_journal = self_dev_journal
+
+    def set_self_dev_bridge(self, self_dev_bridge: Any) -> None:
+        """Set SelfDevBridge for Phase 21 proactive self-dev nudges.
+
+        Only called when SELF_DEV_BRIDGE_ENABLED is armed (the autonomy step:
+        Maria proactively pings the operator about a stuck recurring idea).
+        The /approve_dev command works regardless of this flag."""
+        self._self_dev_bridge = self_dev_bridge
+
     def set_system_failure_monitor(self, monitor: Any) -> None:
         """Set SystemFailureMonitor for Phase 19 self-repair scans."""
         self._system_failure_monitor = monitor
+
+    def set_undo_suggestion_monitor(self, monitor: Any) -> None:
+        """Set UndoSuggestionMonitor for Phase 19 autonomous undo proposals."""
+        self._undo_suggestion_monitor = monitor
 
     def set_maria_conductor(self, conductor: Any) -> None:
         """Set the project=maria conductor for self-repair expiry sweeps."""
@@ -369,6 +431,41 @@ class HomeostasisCore:
         if dispatcher is not None:
             self._conductor_dispatchers.append(dispatcher)
 
+    def _dispatch_conductor_tasks(self) -> None:
+        """Phase 17 body: fire at most one Codex dispatch across the
+        registered dispatchers, under a watchdog external-op lease."""
+        if not self._conductor_dispatchers:
+            return
+        for dispatcher in self._conductor_dispatchers:
+            try:
+                if not dispatcher.should_dispatch():
+                    continue
+                # A real dispatch blocks this tick for up to the Codex
+                # subprocess timeout (30 min) -- far past the watchdog
+                # stall deadline (300s). Lease the allowance up front,
+                # sized to the dispatcher's own hard timeout + slack,
+                # so the watchdog does not kill the process mid-build
+                # (2026-06-30: Brick-0 dispatch died at exactly +300s).
+                lease_sec = getattr(
+                    dispatcher, "codex_timeout_sec", 3600.0
+                ) + 120.0
+                with self.external_op_lease(
+                    lease_sec,
+                    label=f"codex-dispatch:{dispatcher.project}",
+                ):
+                    result = dispatcher.dispatch_next()
+                logger.info(
+                    "[Phase17] dispatched project=%s outcome=%s task=%s",
+                    dispatcher.project, result.outcome.value,
+                    result.task_id,
+                )
+                break  # one Codex call per tick
+            except Exception as e:
+                logger.exception(
+                    "[Phase17] dispatcher error project=%s: %s",
+                    getattr(dispatcher, "project", "?"), e,
+                )
+
     def set_telegram_bridge(self, bridge) -> None:
         """
         Set Telegram bridge for operator notifications.
@@ -392,6 +489,10 @@ class HomeostasisCore:
             self._vision_adapter = VisionPerceptionAdapter()
         except Exception as e:
             logger.debug(f"VisionPerceptionAdapter not created: {e}")
+
+    def set_vision_advisor(self, advisor) -> None:
+        """Set VisionAdvisor: reacts to salient motion in Phase 8.5 (threaded)."""
+        self._vision_advisor = advisor
 
     def set_perception_buffer(self, buffer) -> None:
         """
@@ -520,10 +621,22 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         # PHASE 1: SENSE
         # ──────────────────────────────────────
+        # Sub-timed per sensor: 01_sense stalls for 7-20s sporadically
+        # (2026-07-12) while every call in this path looks cheap on paper,
+        # so the overrun log must name which sensor actually blocked.
         _t_phase = time.perf_counter()
+        _t_sub = _t_phase
         resource_metrics = self.resource_sensor.read_metrics()
+        _t_now = time.perf_counter()
+        self._phase_ms["01a_resource"] = round((_t_now - _t_sub) * 1000, 1)
+        _t_sub = _t_now
         thermal_metrics = self.thermal_sensor.read_metrics()
+        _t_now = time.perf_counter()
+        self._phase_ms["01b_thermal"] = round((_t_now - _t_sub) * 1000, 1)
+        _t_sub = _t_now
         time_metrics = self.time_sensor.read_metrics()
+        _t_now = time.perf_counter()
+        self._phase_ms["01c_time"] = round((_t_now - _t_sub) * 1000, 1)
 
         # Merge thermal into resource metrics
         if resource_metrics and thermal_metrics:
@@ -544,11 +657,16 @@ class HomeostasisCore:
                 inference_latency_ms=resource_metrics.inference_latency_ms,
             )
 
+        _t_sub = time.perf_counter()
         cognitive_metrics = self.cognitive_sensor.read_metrics(
             memory_manager=self.memory,
             llm_manager=self.llm,
         )
-        self._phase_ms["01_sense"] = round((time.perf_counter() - _t_phase) * 1000, 1)
+        _t_now = time.perf_counter()
+        self._phase_ms["01d_cognitive"] = round((_t_now - _t_sub) * 1000, 1)
+        # NB: the metric-merge between 01c and 01d is deliberately outside the
+        # sub-timers, so 01_sense exceeding the 01a-01d sum = the merge itself.
+        self._phase_ms["01_sense"] = round((_t_now - _t_phase) * 1000, 1)
 
         # ──────────────────────────────────────
         # PHASE 2: INTERPRET
@@ -769,8 +887,8 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         # PHASE 17: CONDUCTOR (delegated build orchestration)
         # ──────────────────────────────────────
-        # Refreshes BuildStatus snapshots so /market_status and the Web
-        # UI see fresh numbers without scanning the whole task queue.
+        # Refreshes BuildStatus snapshots so the Web UI sees fresh
+        # numbers without scanning the whole task queue.
         # Read-only — never writes to TaskQueue, never invokes LLMs.
         if self._conductor and self._tick_count % 180 == 0:
             try:
@@ -793,22 +911,7 @@ class HomeostasisCore:
         # exists. Cap at one dispatch per tick (round-robin across
         # registered dispatchers) so a Codex burn loop on one project
         # cannot starve another and the rate-limit window has room.
-        if self._conductor_dispatchers:
-            for dispatcher in self._conductor_dispatchers:
-                try:
-                    if dispatcher.should_dispatch():
-                        result = dispatcher.dispatch_next()
-                        logger.info(
-                            "[Phase17] dispatched project=%s outcome=%s task=%s",
-                            dispatcher.project, result.outcome.value,
-                            result.task_id,
-                        )
-                        break  # one Codex call per tick
-                except Exception as e:
-                    logger.exception(
-                        "[Phase17] dispatcher error project=%s: %s",
-                        getattr(dispatcher, "project", "?"), e,
-                    )
+        self._dispatch_conductor_tasks()
 
         # ──────────────────────────────────────
         # PHASE 18: SELF-PERCEPTION (periodic self-state snapshot)
@@ -823,6 +926,32 @@ class HomeostasisCore:
                 logger.warning(
                     f"[Phase18] self-perception snapshot error: {e}",
                     exc_info=True,
+                )
+
+        # ──────────────────────────────────────
+        # PHASE 18b: OPERATOR RHYTHM RE-ANALYZE (same cadence as the snapshot)
+        # ──────────────────────────────────────
+        if self._tick_count % SELF_PERCEPTION_TICK_INTERVAL == 0:
+            try:
+                self._reanalyze_operator_rhythm()
+            except Exception as e:
+                logger.warning(
+                    f"[Phase18b] rhythm re-analyze error: {e}", exc_info=True
+                )
+
+        # ──────────────────────────────────────
+        # PHASE 18c: GROWTH-TARGET REFRESH (same cadence as the snapshot)
+        # Without this refresh() ran once at boot -> live numbers froze.
+        # ──────────────────────────────────────
+        if (
+            self._growth_awareness
+            and self._tick_count % SELF_PERCEPTION_TICK_INTERVAL == 0
+        ):
+            try:
+                self._growth_awareness.refresh()
+            except Exception as e:
+                logger.warning(
+                    f"[Phase18c] growth refresh error: {e}", exc_info=True
                 )
 
         # ──────────────────────────────────────
@@ -855,6 +984,110 @@ class HomeostasisCore:
                     logger.info(f"[Phase19] expired self-repair tasks: {expired}")
             except Exception as e:
                 logger.warning(f"[Phase19] expiry sweep error: {e}", exc_info=True)
+
+        # Bulletin prune (Phase 19 sibling): auto-resolve entries untouched >7d
+        # (STALE_TIMEOUT_SEC). The 7-day auto-resolve was only reachable via the
+        # `/board prune` Telegram command, so K12 IMPROVEMENT advisories piled up
+        # unresolved for weeks -- the planner kept surfacing 70+-day-old "low
+        # learn/exam success" complaints as current advice. Wiring prune_stale
+        # into the tick makes the documented auto-resolve actually fire.
+        if (
+            self._bulletin_store is not None
+            and self._tick_count % BULLETIN_PRUNE_INTERVAL == 0
+        ):
+            try:
+                pruned = self._bulletin_store.prune_stale()
+                if pruned:
+                    logger.info(
+                        f"[Phase19] pruned {pruned} stale bulletin entries"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[Phase19] bulletin prune error: {e}", exc_info=True
+                )
+
+        # ──────────────────────────────────────
+        # PHASE 19b: UNDO-SUGGEST (autonomous "propose undo", flag-gated)
+        # The whole sibling subsystem is dark unless EFFECTOR_UNDO_SUGGEST_ENABLED
+        # is armed: the scan self-gates on the flag, and the expiry only runs when
+        # armed, so a healthy/unarmed daemon pays nothing. Same STOP-AT-PENDING
+        # discipline as self-repair -- Maria proposes, /approve_undo executes.
+        # ──────────────────────────────────────
+        if self._undo_suggestion_monitor is not None:
+            from agent_core.undo_suggest import undo_suggest_enabled
+
+            # Scan/propose ONLY when armed (the monitor also self-gates on the flag).
+            if (
+                undo_suggest_enabled()
+                and self._tick_count % SELF_REPAIR_SCAN_INTERVAL == 0
+            ):
+                try:
+                    proposed = self._undo_suggestion_monitor.scan_and_create()
+                    if proposed:
+                        logger.info(f"[Phase19b] undo suggestions: {proposed}")
+                except Exception as e:
+                    logger.warning(
+                        f"[Phase19b] undo-suggest scan error: {e}", exc_info=True
+                    )
+
+            # Expiry runs REGARDLESS of the flag (review F4): a BLOCKED task (a
+            # failed /approve_undo) or a /drill_suggest_undo task must be swept even
+            # when SUGGEST is off, else it zombifies. Cheap -- only effector_undo
+            # tasks are touched; a clean queue is a no-op.
+            if (
+                self._maria_conductor
+                and self._tick_count % SELF_REPAIR_EXPIRY_INTERVAL == 0
+            ):
+                try:
+                    from agent_core.undo_suggest import expire_stale_undo_suggestions
+
+                    swept = expire_stale_undo_suggestions(
+                        self._maria_conductor,
+                        self._bulletin_store,
+                        self._telegram_notifier,
+                    )
+                    if swept:
+                        logger.info(f"[Phase19b] expired undo suggestions: {swept}")
+                except Exception as e:
+                    logger.warning(
+                        f"[Phase19b] undo-suggest expiry error: {e}", exc_info=True
+                    )
+
+        # ──────────────────────────────────────
+        # PHASE 20: CONVERSATION CONDENSE (drain idle-session summaries)
+        # Condense used to fire only at REPL shutdown -> dead in the 24/7 daemon,
+        # so conversation summaries froze (last one Feb 2026). Drain from durable
+        # history on a cadence instead; only closed (idle) sessions are touched,
+        # so the live conversation is never condensed mid-flight. Runs in a
+        # transient thread (LLM calls take 30-55s/batch -> would overrun the
+        # tick); the is_alive guard prevents stacking if a batch outlives the
+        # cadence.
+        # ──────────────────────────────────────
+        if (
+            self._conversation_memory
+            and self._tick_count % CONVERSATION_CONDENSE_INTERVAL == 0
+            and not (self._condense_thread and self._condense_thread.is_alive())
+        ):
+            brain = getattr(self._shared_context, "brain", None)
+            if brain is not None:
+                self._start_condense_cycle(brain)
+
+        # ──────────────────────────────────────
+        # PHASE 21: SELF-DEV BOARD REGENERATE (curated self-development board)
+        # Read-only aggregation of the meta-goals creative already generates,
+        # into ~5-7 themes with ask-count, age and a "stuck" flag. Runs in a
+        # transient thread because a board rebuild scans a multi-MB JSONL (and,
+        # later, may embed) -- inline it would overrun the 1.0s tick budget
+        # (same lineage as the rejected Phase-18d pre-warm). The is_alive guard
+        # prevents stacking. Only fires when SELF_DEV_JOURNAL_ENABLED wired the
+        # setter; the /samorozwoj read command works regardless.
+        # ──────────────────────────────────────
+        if (
+            (self._self_dev_journal or self._self_dev_bridge)
+            and self._tick_count % SELF_DEV_JOURNAL_TICK_INTERVAL == 0
+            and not (self._dev_thread and self._dev_thread.is_alive())
+        ):
+            self._start_dev_cycle()
 
         # Klocek 9a: periodic warm-recovery persist (flag-gated; cheap no-op
         # when off). Captures state between mode transitions so a hard crash
@@ -891,6 +1124,14 @@ class HomeostasisCore:
             _baseline_due = (_now - getattr(self, "_last_timing_log_ts", 0.0)) >= 300
             if _overrun or _baseline_due:
                 _phase_ms = getattr(self, "_phase_ms", {})
+                # Sub-phase keys carry a letter suffix on the number ("01a_...")
+                # and re-measure time already inside their parent ("01_...");
+                # summing them too would double-count and push unaccounted
+                # negative.
+                _top_ms = sum(
+                    v for k, v in _phase_ms.items()
+                    if not re.match(r"^\d+(?:\.\d+)?[a-z]_", k)
+                )
                 # cpu_percent + load_avg expose CPU-starvation: a tick whose
                 # measured phases are trivial but wall-clock is seconds means the
                 # thread was descheduled (e.g. concurrent Ollama inference pegging
@@ -902,7 +1143,7 @@ class HomeostasisCore:
                     "tick_count": self._tick_count,
                     "tick_ms": round(_tick_ms, 1),
                     "phase_ms": _phase_ms,
-                    "unaccounted_ms": round(_tick_ms - sum(_phase_ms.values()), 1),
+                    "unaccounted_ms": round(_tick_ms - _top_ms, 1),
                     "cpu_percent": round(getattr(_rm, "cpu_percent", 0.0) or 0.0, 1),
                     "load_avg_1m": round(getattr(_rm, "load_avg_1m", 0.0) or 0.0, 2),
                     "mode": self.state.mode.value,
@@ -994,6 +1235,12 @@ class HomeostasisCore:
                 events = self._vision_adapter.adapt(percept)
                 if events:
                     self._perception_buffer.push_many(events)
+                    # Maria reacts to what she sees: salient motion spawns a
+                    # background LLaVA describe + proactive ping. maybe_react is
+                    # cheap (cooldown/guard check) and threads the slow LLaVA,
+                    # so Phase 8.5 stays fast.
+                    if self._vision_advisor is not None:
+                        self._vision_advisor.maybe_react(events)
                 # Write state for Web UI (every perception, not every tick)
                 self._write_vision_state(percept)
         except Exception as e:
@@ -1131,6 +1378,7 @@ class HomeostasisCore:
                     from_mode=old_mode.value,
                     to_mode=new_mode.value,
                     trigger=", ".join(self.state.alerts[:3]),
+                    alerts=list(self.state.alerts or []),
                 )
             except Exception:
                 pass
@@ -1194,12 +1442,34 @@ class HomeostasisCore:
         """
         for action in actions:
             try:
+                # Visibility first: record EVERY generated corrective action to
+                # the event log, whether or not anything acts on it. For ~4
+                # months (executor=None) these were computed then silently
+                # dropped -- the self-regulation spine looked alive but did
+                # nothing under real pressure, with no trace. Logging here makes
+                # firing frequency measurable (2026-06-14 audit, Rank 5).
+                self.event_logger.log_corrective_action(
+                    action_type=action.action_type.value,
+                    target=action.target,
+                    action=action.action,
+                    reason=action.reason,
+                    urgency=action.urgency.value,
+                )
                 if action.action_type.value == "signal_module":
                     if self.executor:
-                        self.executor.signal_module(
+                        resp = self.executor.signal_module(
                             action.target,
                             action.action,
                             **action.parameters,
+                        )
+                        logger.info(
+                            "Corrective %s.%s -> %s (%s)",
+                            action.target, action.action, resp, action.reason,
+                        )
+                    else:
+                        logger.warning(
+                            "Corrective %s.%s DROPPED (no executor): %s",
+                            action.target, action.action, action.reason,
                         )
                 elif action.action_type.value == "trigger_snapshot":
                     self._trigger_snapshot()
@@ -1272,17 +1542,27 @@ class HomeostasisCore:
                 belief_skip_reason = "throttled"
             else:
                 belief_skip_reason = None
-            use_store = (
-                self._belief_store if belief_skip_reason is None else None
-            )
+            # REM (dreams) and NREM1 (stats) only READ beliefs, so they run on
+            # every sleep that isn't racing a live planner write -- only the
+            # MUTATING phases (NREM2 boost, NREM3 prune) are gated by the 20h
+            # throttle. Decoupling dreams from that throttle is what lets them
+            # fire on overnight sleeps (2026-06-21): previously a throttled sleep
+            # nulled the store for the whole processor and produced zero dreams.
+            # planner_alive still skips the read too (avoids a torn get_current()
+            # snapshot while the planner mutates the lock-free store).
+            use_store = self._belief_store if not planner_alive else None
+            mutate_beliefs = belief_skip_reason is None
 
             processor = SleepProcessor(
                 belief_store=use_store,
+                mutate_beliefs=mutate_beliefs,
                 session_id=self._session_id,
             )
             report = processor.process_sleep_cycle()
             self._last_sleep_report = report
-            if use_store is not None:
+            # Advance the 20h throttle stamp only when the mutating phases
+            # actually ran -- a REM-only (throttled) sleep must not reset it.
+            if mutate_beliefs:
                 self._last_belief_sleep_ts = now
                 self._save_belief_sleep_ts(now)
 
@@ -1306,7 +1586,7 @@ class HomeostasisCore:
                 "dream_count": dream_count,
                 "phases_completed": report.get("phases_completed", 0),
                 "belief_store_wired": self._belief_store is not None,
-                "belief_phases_ran": use_store is not None,
+                "belief_phases_ran": mutate_beliefs,
                 "belief_skip_reason": belief_skip_reason,
                 "beliefs_boosted": _phase_int("nrem2", "beliefs_boosted"),
                 "beliefs_before": _phase_int("nrem3", "beliefs_before"),
@@ -1400,8 +1680,29 @@ class HomeostasisCore:
                         rd.record_contact(_time.time())
                     if om:
                         # Learn from last messages (non-command texts)
-                        for msg_text in getattr(self._telegram_bridge, 'last_poll_texts', []):
+                        texts = getattr(self._telegram_bridge, 'last_poll_texts', [])
+                        # ActiveLearner (K14.1): if Maria asked a question, the
+                        # operator's next free-text reply is its answer -> store it
+                        # on the asked fact before generic learning. Gated on BOTH
+                        # the flag AND a fresh pending question, so disarming the
+                        # feature can never leak a captured answer from a pending
+                        # state persisted during a prior armed run.
+                        al = getattr(ctx, 'active_learner', None)
+                        _al_on = os.environ.get(
+                            "ACTIVE_LEARNER_ENABLED", ""
+                        ).strip().lower() in ("1", "true", "yes", "on")
+                        if _al_on and al is not None and texts and al.has_pending():
+                            try:
+                                al.consume_answer(texts[0], om)
+                            except Exception:
+                                pass
+                        for msg_text in texts:
                             om.learn_from_message(msg_text)
+                        # Bump operator stats once per active poll (last_seen +
+                        # total_messages). Telegram never recorded this before, so
+                        # /profile stats only ever moved from the Web UI.
+                        if texts:
+                            om.record_interaction("telegram")
             except Exception as e:
                 self._log_phase_error("11 telegram-poll", e)
 
@@ -1471,6 +1772,73 @@ class HomeostasisCore:
         )
         self._planner_thread_started = time.monotonic()
         self._planner_thread.start()
+
+    def _start_condense_cycle(self, brain) -> None:
+        """Drain idle-session conversation condensation in a background thread.
+
+        condense_pending_sessions makes slow LLM calls (30-55s/batch); running
+        it inline in the tick stalled the whole homeostasis loop (tick_overrun).
+        Mirror the planner's transient-thread pattern so the heartbeat never
+        blocks; the Phase 20 is_alive guard prevents a new batch from stacking
+        on a still-running one.
+        """
+
+        def _run():
+            try:
+                n = self._conversation_memory.condense_pending_sessions(brain)
+                if n:
+                    logger.info(f"[Phase20] condensed {n} past conversation(s)")
+            except Exception as e:
+                logger.warning(
+                    f"[Phase20] conversation condense error: {e}", exc_info=True
+                )
+
+        self._condense_thread = threading.Thread(
+            target=_run, daemon=True, name="ConversationCondense"
+        )
+        self._condense_thread.start()
+
+    def _start_dev_cycle(self) -> None:
+        """Regenerate the self-development board in a background thread.
+
+        refresh_and_write() scans a multi-MB JSONL (and may embed) -- running it
+        inline would stall the heartbeat. Mirror the condense transient-thread
+        pattern; the Phase 21 is_alive guard prevents batches stacking."""
+
+        def _run():
+            # 1) regenerate the board artifact (if armed)
+            if self._self_dev_journal is not None:
+                try:
+                    themes = self._self_dev_journal.refresh_and_write()
+                    logger.info(
+                        "[Phase21] self-dev board: %d themes, %d stuck",
+                        len(themes), sum(1 for t in themes if t.stuck),
+                    )
+                except Exception as e:
+                    self._log_phase_error("21 self-dev-journal", e)
+            # 2) proactive nudge about one stuck recurring idea (if armed)
+            if self._self_dev_bridge is not None:
+                try:
+                    notify = self._resolve_self_dev_notify_fn()
+                    if notify is not None:
+                        self._self_dev_bridge.maybe_alert(notify)
+                except Exception as e:
+                    self._log_phase_error("21 self-dev-bridge", e)
+
+        self._dev_thread = threading.Thread(
+            target=_run, daemon=True, name="SelfDevJournal"
+        )
+        self._dev_thread.start()
+
+    def _resolve_self_dev_notify_fn(self):
+        """Telegram raw-send fn for proactive self-dev nudges, or None.
+
+        Same channel the proactive scheduler uses (telegram notifier.send_raw).
+        Resolved lazily so wiring order vs the telegram bridge does not matter.
+        """
+        bridge = self._telegram_bridge
+        notifier = getattr(bridge, "notifier", None) if bridge else None
+        return getattr(notifier, "send_raw", None) if notifier else None
 
     def _check_teacher_trigger(self) -> None:
         """
@@ -1577,6 +1945,26 @@ class HomeostasisCore:
         # (mode transitions + corrective action). Flag-gated, best-effort.
         self._write_recovery_snapshot()
 
+    def _reanalyze_operator_rhythm(self) -> bool:
+        """Re-run the operator day-rhythm analysis on the live, seeded detector.
+
+        record_contact() feeds ctx.rhythm_detector during Telegram polls, but the
+        persisted DayRhythm was only computed once at boot (homeostasis_module).
+        Re-analyze on the SAME detector the poll feeds -- the tick loop only runs
+        in the daemon, so ctx.rhythm_detector is always the seeded object, never a
+        fresh Web-UI singleton. Returns True if the rhythm was refreshed.
+
+        Guards sample_count >= 5: calling set_rhythm() on a cold detector would
+        clobber the good boot rhythm with a zero-confidence default DayRhythm.
+        """
+        ctx = getattr(self, "_shared_context", None)
+        rd = getattr(ctx, "rhythm_detector", None)
+        om = getattr(ctx, "operator_model", None)
+        if rd is None or om is None or rd.sample_count < 5:
+            return False
+        om.set_rhythm(rd.get_rhythm())
+        return True
+
     def _write_recovery_snapshot(self) -> None:
         """Persist warm-recovery operational state (Klocek 9a), flag-gated.
 
@@ -1642,27 +2030,19 @@ class HomeostasisCore:
 
         Returns:
             Health score from 0.0 (critical) to 1.0 (healthy)
+
+        Note:
+            The formula (alert penalties + resource multipliers) lives in
+            ``agent_core.homeostasis.health`` so the live score and the
+            ``/api/status/full`` breakdown share one source of truth.
         """
-        score = 1.0
+        from agent_core.homeostasis.health import compute_health_score
 
-        # Penalty for alerts
-        for alert in alerts:
-            if "CRITICAL" in alert:
-                score -= 0.5
-            elif "ALERT" in alert:
-                score -= 0.15
-            elif "WARNING" in alert:
-                score -= 0.05
-
-        # Factor in resource utilization
-        memory_pressure = state.get("memory_pressure", 0)
-        cpu_load = state.get("cpu_load", 0)
-
-        score *= (1.0 - memory_pressure / 100 * 0.3)
-        score *= (1.0 - cpu_load / 100 * 0.2)
-
-        # Clamp to [0, 1]
-        return max(0.0, min(1.0, score))
+        return compute_health_score(
+            alerts,
+            memory_pressure=state.get("memory_pressure", 0),
+            cpu_load=state.get("cpu_load", 0),
+        )
 
     def _log_state(self, state: Dict[str, Any]) -> None:
         """
@@ -1757,6 +2137,39 @@ class HomeostasisCore:
             return None
         return time.monotonic() - self._last_tick_monotonic
 
+    @contextmanager
+    def external_op_lease(self, seconds: float, label: str = ""):
+        """Declare a bounded blocking external operation inside the tick loop.
+
+        The tick loop is synchronous by design (ADR-002); a legitimate long
+        call (Codex dispatch runs up to DEFAULT_CODEX_TIMEOUT_SEC = 30 min)
+        stalls the heartbeat exactly like a wedge would. The lease tells the
+        watchdog how long that stall is *intentional*. Past the lease deadline
+        the watchdog trips normally, so a wedge inside the leased call (the
+        2026-06-02 class: subprocess select() stuck beyond its own timeout)
+        is still bounded instead of silent for hours.
+
+        ``seconds`` should be the callee's own hard timeout plus slack --
+        the lease is a watchdog allowance, not a kill mechanism.
+        """
+        self._external_op_deadline = time.monotonic() + max(0.0, seconds)
+        self._external_op_label = label
+        self._external_op_logged = False
+        try:
+            yield
+        finally:
+            self._external_op_deadline = None
+            self._external_op_label = ""
+            self._external_op_logged = False
+            # Restamp the heartbeat on release. The tick started before the
+            # lease and the stall clock (_last_tick_monotonic) is now minutes
+            # old; without this, the tick TAIL (phases after the leased op)
+            # runs with no lease and an already-blown stall clock, so the
+            # watchdog would trip mid-tick. Restamping gives the tail a fresh
+            # full window; if the tail itself wedges the clock never advances
+            # (the next tick cannot start) and the watchdog still trips on time.
+            self._last_tick_monotonic = time.monotonic()
+
     def get_thread_health(self) -> List[Dict[str, Any]]:
         """Per-thread liveness for the 7b heartbeat detector (Phase 19).
 
@@ -1817,12 +2230,34 @@ class HomeostasisCore:
         if not self._running:
             return False
         stalled = self._tick_stalled_for()
-        return stalled is not None and stalled >= self._watchdog_stall_sec
+        if stalled is None or stalled < self._watchdog_stall_sec:
+            return False
+        # Stalled past the base deadline -- but a declared external op
+        # (Codex dispatch) may legitimately hold the loop. Honor its lease.
+        deadline = self._external_op_deadline
+        return deadline is None or time.monotonic() >= deadline
 
     def _watchdog_loop(self) -> None:
         while not self._watchdog_stop.wait(self._watchdog_check_sec):
             if self._watchdog_should_trip():
                 self._trip_watchdog(self._tick_stalled_for() or 0.0)
+                continue
+            # Observability: the loop is stalled past the base deadline but a
+            # lease is holding fire -- say so once per lease, not every 30s.
+            stalled = self._tick_stalled_for()
+            if (
+                stalled is not None
+                and stalled >= self._watchdog_stall_sec
+                and self._external_op_deadline is not None
+                and not self._external_op_logged
+            ):
+                self._external_op_logged = True
+                remaining = self._external_op_deadline - time.monotonic()
+                logger.info(
+                    "[WATCHDOG] tick stalled %.0fs under external-op lease "
+                    "'%s' (%.0fs of allowance left) -- holding fire",
+                    stalled, self._external_op_label, max(0.0, remaining),
+                )
 
     def _trip_watchdog(self, stalled: float) -> None:
         """Last resort: the tick loop is wedged. Record where, then hard-exit so

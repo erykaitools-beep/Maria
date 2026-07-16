@@ -20,8 +20,10 @@ from agent_core.self_analysis.recommendation_model import (
     SuggestedAction,
     AnalyzerBackend,
     MAX_RECOMMENDATIONS_PER_REPORT,
+    format_report_for_telegram,
     _gen_id,
 )
+from agent_core.self_analysis.recommendation_applier import _is_searchable_topic
 from agent_core.self_analysis.state_collector import StateCollector
 from agent_core.self_analysis.external_analyzer import ExternalAnalyzer
 from agent_core.self_analysis.recommendation_applier import RecommendationApplier
@@ -300,6 +302,30 @@ class TestStateCollector:
         assert progress["by_status"]["completed"] == 2
         assert progress["by_status"]["new"] == 2
 
+    def test_learning_progress_excludes_skips(self, tmp_path):
+        """recent_learn_success_rate counts ATTEMPTED learns only -- skipped
+        teacher plans (declined, no material) are neither success nor failure,
+        so they must not deflate the rate (T-LEARN-003 phantom-failure guard)."""
+        meta = tmp_path / "meta_data"
+        meta.mkdir(parents=True)
+        (tmp_path / "memory").mkdir()
+        plans = [
+            {"result": {"success": True}},
+            {"result": {"success": True}},
+            {"result": {"success": False}},                    # real failure
+            {"result": {"skipped": True, "success": False}},   # skip -> excluded
+            {"result": {"skipped": True, "success": False}},   # skip -> excluded
+            {"result": {"skipped": True}},                     # skip -> excluded
+        ]
+        with open(meta / "teacher_plans.jsonl", "w", encoding="utf-8") as f:
+            for p in plans:
+                f.write(json.dumps(p) + "\n")
+        prog = StateCollector(str(tmp_path))._collect_learning_progress()
+        # 3 attempted (2 success, 1 fail); the 3 skips are excluded from both
+        # numerator and denominator -> 0.67, NOT 2/6 = 0.33.
+        assert prog["recent_learn_count"] == 3
+        assert prog["recent_learn_success_rate"] == round(2 / 3, 2)
+
     def test_collect_with_prompt(self, populated_project):
         collector = StateCollector(str(populated_project))
         result = collector.collect_with_prompt()
@@ -399,6 +425,131 @@ class TestExternalAnalyzer:
         assert len(report.recommendations) >= 2
         topics = [r.topic for r in report.recommendations]
         assert any("fizyka" in t for t in topics)
+
+    def test_freetext_markdown_headings_not_emitted_as_junk(self):
+        """Regression (2026-06-15): markdown headings/emphasis in the freetext
+        fallback used to become junk recs (topic='*Najpierw', description='**').
+        A bullet now needs a space after the marker, and topics are stripped of
+        markdown, so '**Najpierw:**' is never a recommendation."""
+        response = """**Najpierw:**
+1. fizyka kwantowa: needs foundational materials
+**Przerwa w naukach**
+2. chemia organiczna: new topic to explore"""
+        analyzer = ExternalAnalyzer(llm_fn=MagicMock(return_value=response))
+        report = analyzer.analyze({"input_hash": "t", "analysis_prompt": "a"})
+
+        topics = [r.topic for r in report.recommendations]
+        # No markdown leaked into any topic.
+        assert all("*" not in t and "#" not in t for t in topics), topics
+        assert all(t.strip() for t in topics), topics
+        # The real items still parsed.
+        assert any("fizyka" in t for t in topics), topics
+
+    def test_is_searchable_topic_rejects_markdown_junk(self):
+        """The fetch-queue filter must reject markdown artifacts while keeping
+        real Wikipedia-shaped topics."""
+        assert _is_searchable_topic("Mechanika kwantowa") is True
+        assert _is_searchable_topic("Jezyk C#") is True  # mid-string '#' ok
+        for junk in ("*Najpierw", "**", "**Przerwa w naukach**", "# Heading",
+                     "- bullet", "---", "`code`"):
+            assert _is_searchable_topic(junk) is False, junk
+
+    def test_format_report_for_telegram_is_clean(self):
+        """The K12 Telegram card must carry a clean summary + recommendation
+        lines, never raw_response JSON or str(dataclass) reprs (2026-06-15)."""
+        report = AnalysisReport(
+            analyzer="local_planner",
+            model="qwen3:8b",
+            raw_response='{"recommendations": [{"topic": "x"}]}  <-- must NOT appear',
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id="rec-1", category="knowledge_gap", topic="fizyka",
+                    description="brak podstaw mechaniki", priority=0.8,
+                    suggested_action="learn",
+                ),
+            ],
+        )
+        summary, recs = format_report_for_telegram(report)
+        assert "raw_response" not in summary and "{" not in summary
+        assert "qwen3:8b" in summary and "1" in summary
+        assert recs == ["fizyka -> learn: brak podstaw mechaniki"]
+        assert all("AnalysisRecommendation(" not in r for r in recs)
+
+    def test_format_report_keeps_the_finding_and_its_number(self):
+        """Regression (2026-07-16): the description carries WHAT is wrong and HOW
+        bad. Dropping it turned "exam success rate is low (0.19)" into a bare
+        "exam strategy -> experiment" -- the operator's optimism filter."""
+        report = AnalysisReport(
+            model="dracarys",
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id="rec-1", category="retention_problem",
+                    topic="exam strategy",
+                    description="exam success rate is low (0.19), adjust strategy",
+                    priority=0.9, suggested_action="experiment",
+                ),
+            ],
+        )
+        _, recs = format_report_for_telegram(report)
+        assert recs == [
+            "exam strategy -> experiment: exam success rate is low (0.19), adjust strategy"
+        ]
+        assert "0.19" in recs[0]
+
+    def test_format_report_head_survives_long_description(self):
+        """A very long reason is trimmed; the 'topic -> action' head stays whole."""
+        long_desc = "x" * 400
+        report = AnalysisReport(
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id="rec-1", category="knowledge_gap", topic="fizyka",
+                    description=long_desc, priority=0.5, suggested_action="learn",
+                ),
+            ],
+        )
+        _, recs = format_report_for_telegram(report)
+        line = recs[0]
+        assert line.startswith("fizyka -> learn: ")
+        assert line.endswith("...")
+        assert len(line) <= 240
+
+    def test_format_report_falls_back_when_no_description(self):
+        """Empty description degrades to the old 'topic -> action' form."""
+        report = AnalysisReport(
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id="rec-1", category="knowledge_gap", topic="fizyka",
+                    description="", priority=0.5, suggested_action="learn",
+                ),
+            ],
+        )
+        _, recs = format_report_for_telegram(report)
+        assert recs == ["fizyka -> learn"]
+
+    def test_format_report_neutralises_telegram_markdown(self):
+        """Snake_case topics and stray markers from the LLM must not become
+        formatting -- 'system_stability' would italicise or be eaten silently
+        (no API error, so the bot's plain-text fallback never fires). 32% of live
+        recommendations carry an underscore."""
+        report = AnalysisReport(
+            model="local_planner",
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id="rec-1", category="strategy_change",
+                    topic="system_stability",
+                    description="CPU/ram at *90%* `high`, see [ref]",
+                    priority=0.7, suggested_action="experiment",
+                ),
+            ],
+        )
+        summary, recs = format_report_for_telegram(report)
+        for bad in ("_", "*", "`", "[", "]"):
+            assert bad not in recs[0], f"{bad!r} leaked into a recommendation line"
+            assert bad not in summary, f"{bad!r} leaked into the summary"
+        # readable, not mangled: underscores became spaces, content intact
+        assert "system stability -> experiment" in recs[0]
+        assert "90%" in recs[0] and "high" in recs[0]
+        assert "local planner" in summary
 
     def test_analyze_empty_response(self):
         mock_llm = MagicMock(return_value="")
@@ -1141,9 +1292,11 @@ class TestPlannerIntegration:
         assert cls == ActionClassification.ANALYTICAL
 
     def test_k7_rate_limit(self):
+        # 1/h od 07-07: limiter jest jedynym hamulcem nocnej rotacji
+        # (dzienny 4h-cooldown w _maybe_self_analyze jej nie dotyczy).
         from agent_core.autonomy.rate_limiter import DEFAULT_RATE_LIMITS
         assert "self_analyze" in DEFAULT_RATE_LIMITS
-        assert DEFAULT_RATE_LIMITS["self_analyze"] == 2
+        assert DEFAULT_RATE_LIMITS["self_analyze"] == 1
 
     def test_k10_safety_profile(self):
         from agent_core.action_safety.safety_classifier import get_safety_profile

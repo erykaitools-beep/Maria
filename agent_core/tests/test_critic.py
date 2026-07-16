@@ -63,6 +63,8 @@ def _make_belief(
     superseded_by=None,
     related_entities=(),
     evidence=(),
+    status="active",
+    retraction=None,
 ):
     """Create a mock belief object."""
     from enum import Enum
@@ -97,6 +99,8 @@ def _make_belief(
     b.superseded_by = superseded_by
     b.related_entities = related_entities
     b.evidence = evidence
+    b.status = status
+    b.retraction = retraction
     return b
 
 
@@ -516,6 +520,31 @@ class TestShallowKnowledge:
         findings, _ = critic.analyze()
         shallow = [f for f in findings if f.category == "shallow_knowledge"]
         assert len(shallow) >= 1
+        assert "single source" in str(shallow[0].evidence.get("reasons", []))
+
+    def test_detects_expert_monoculture_as_single_source(self, tmp_project):
+        """Cross-source WYDMUSZKA in the critic (audit 2026-06-16): facts backed
+        ONLY by expert_*.txt files are one LLM voice, but each keypoint yields a
+        distinct source_id (concept:expert_X#chunk_0:0). Raw counting made
+        len(sources)>1, so the single-source branch was DEAD for every expert
+        monoculture -- the safety net meant to catch exactly this was blind.
+        Logical-source counting collapses expert_* to one, so it now fires."""
+        from enum import Enum
+        class BT(Enum):
+            FACT = "fact"
+
+        b1 = _make_belief(belief_id="b1", entity="x", tags=("entropia",),
+                          belief_type=BT.FACT, confidence=0.8,
+                          source_id="concept:expert_fizyka.txt#chunk_0:0")
+        b2 = _make_belief(belief_id="b2", entity="y", tags=("entropia",),
+                          belief_type=BT.FACT, confidence=0.7,
+                          source_id="concept:expert_chemia.txt#chunk_2:1")
+        store = _make_belief_store([b1, b2])
+
+        critic = KnowledgeCritic(belief_store=store, project_root=str(tmp_project))
+        findings, _ = critic.analyze()
+        shallow = [f for f in findings if f.category == "shallow_knowledge"]
+        assert len(shallow) >= 1, "expert monoculture must be flagged shallow"
         assert "single source" in str(shallow[0].evidence.get("reasons", []))
 
     def test_shallow_requires_min_beliefs(self, tmp_project):

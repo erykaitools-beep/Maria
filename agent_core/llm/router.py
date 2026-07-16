@@ -148,6 +148,45 @@ class LLMRouter:
                           route_reason=reason)
         return response
 
+    def translate_to_polish(self, text: str, temperature: float = 0.2) -> str:
+        """Render an English description as natural, fluent Polish, NIM-first.
+
+        Used by the vision advisor: LLaVA describes the scene in English (its
+        strength) and this turns it into clean Polish for the operator ping --
+        LLaVA 7B writes broken Polish (invented words, English fragments), whereas
+        NIM (dracarys-70b) is fluent. Budget/rate-guarded NIM-first; on any failure
+        falls back to the local model, then to the original English text, so a ping
+        is never empty or garbled."""
+        if not text or not text.strip():
+            return text
+        prompt = (
+            "Translate the following image/scene description into natural, fluent "
+            "Polish. Output ONLY the Polish translation, 1-2 sentences, no preamble, "
+            "no quotes, no English:\n\n" + text.strip()
+        )
+        # NIM-first (fluent Polish), guarded by availability + budget.
+        if self._should_use_nim():
+            try:
+                start = time.time()
+                out = self.nim._ask_once(prompt, temperature=temperature)
+                self._record_nim_usage()
+                self._nim_calls += 1
+                self._record_tape("vision_translate", self.nim.model, prompt, out,
+                                  start, route_reason="vision_translate_nim")
+                if out and out.strip():
+                    return out.strip()
+            except Exception as e:
+                logger.warning(f"[LLMRouter] vision translate NIM failed: {e}")
+                self._nim_fallbacks += 1
+        # Local fallback: weaker Polish, but far better than broken LLaVA Polish.
+        try:
+            out = self.ollama.think(prompt, temperature=temperature)
+            if out and out.strip():
+                return out.strip()
+        except Exception as e:
+            logger.warning(f"[LLMRouter] vision translate local failed: {e}")
+        return text  # last resort: honest English beats garbled Polish
+
     def _is_grounded_query(self, prompt: str) -> bool:
         """Check if prompt needs grounding pipeline (vision, status, etc).
 

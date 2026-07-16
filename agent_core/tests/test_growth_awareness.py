@@ -106,6 +106,62 @@ class TestGrowthAwareness:
         assert count1 > 0
         assert count2 == 0  # no new targets on second refresh
 
+    def test_refresh_updates_existing_in_place(self, growth):
+        """Re-refresh must UPDATE descriptive fields of an existing target,
+        not freeze them at first-scan values (the bug: append-only refresh
+        discarded the freshly-generated target because the id already existed)."""
+        ka = _make_knowledge(new_count=6)
+        growth.set_knowledge_analyzer(ka)
+        growth.refresh()
+        backlog = [t for t in growth.get_targets() if t.target_id == "kn-backlog"]
+        assert len(backlog) == 1
+        assert "6" in backlog[0].description
+
+        # Backlog grew to 9 -> a re-refresh must reflect the new number.
+        ka.get_knowledge_snapshot.return_value = {
+            "total_files": 30,
+            "files_by_status": {
+                "completed": ["f"] * 20, "new": ["f"] * 9, "hard_topic": [],
+            },
+        }
+        new = growth.refresh()
+        assert new == 0  # same target_id -> not counted as new
+        backlog = [t for t in growth.get_targets() if t.target_id == "kn-backlog"]
+        assert len(backlog) == 1            # not duplicated
+        assert "9" in backlog[0].description  # number refreshed in place
+        assert "6" not in backlog[0].description
+
+    def test_refresh_preserves_operator_status(self, growth):
+        """Operator-set status (deferred/achieved) must survive a refresh;
+        only the descriptive fields update."""
+        ka = _make_knowledge(new_count=6)
+        growth.set_knowledge_analyzer(ka)
+        growth.refresh()
+        assert growth.mark_deferred("kn-backlog") is True
+
+        ka.get_knowledge_snapshot.return_value = {
+            "total_files": 30,
+            "files_by_status": {
+                "completed": ["f"] * 20, "new": ["f"] * 12, "hard_topic": [],
+            },
+        }
+        growth.refresh()
+        t = [g for g in growth.get_targets() if g.target_id == "kn-backlog"][0]
+        assert t.status == "deferred"     # preserved, NOT reset to identified
+        assert "12" in t.description      # but description refreshed
+
+    def test_refresh_copies_hardware_globals(self, growth):
+        """Hardware targets are module globals -- refresh must copy them, never
+        mutate the shared instances (the old code stamped created_at on the
+        global, leaking across GrowthAwareness instances)."""
+        from agent_core.operator import growth_awareness as ga_mod
+        growth.refresh()
+        hw_persisted = [t for t in growth.get_targets() if t.target_id == "hw-gpu"][0]
+        hw_global = ga_mod._HARDWARE_TARGETS[0]
+        assert hw_persisted is not hw_global   # a copy, not the shared global
+        assert hw_global.created_at == 0.0     # global never stamped
+        assert hw_persisted.created_at > 0     # the copy got a timestamp
+
     # -- targets from reliability --
 
     def test_targets_from_low_confidence(self, growth):

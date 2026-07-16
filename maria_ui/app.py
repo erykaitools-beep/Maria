@@ -12,6 +12,8 @@ import time
 import json
 import re
 import html
+import hmac
+import secrets
 import psutil
 import threading
 from pathlib import Path
@@ -119,6 +121,20 @@ def set_vision_cortex(cortex) -> None:
     """Set vision cortex for evidence collector (called from maria.py)."""
     global _vision_cortex
     _vision_cortex = cortex
+
+
+# Live SelfContext (Super-META E2), shared from maria.py in unified mode so the
+# chat brain consults the SAME situational picture the daemon builds (fresh
+# vision memory, current mode). None in UI-only mode -> chat tail simply omits it.
+_self_context = None
+
+
+def set_self_context(self_context) -> None:
+    """Share the daemon's live SelfContext with the chat brain (called from
+    maria.py). Wired into OllamaBrain so the situational-self tail is available
+    once SELF_CONTEXT_CHAT_ENABLED is armed."""
+    global _self_context
+    _self_context = self_context
 
 
 # Live approval stores, shared from maria.py in unified mode so the in-app
@@ -341,9 +357,86 @@ def check_rate_limit(session_id: str):
         return True, 0
 
 
+_api_token_cache = None
+_api_token_lock = threading.Lock()
+
+
+def get_api_token() -> str:
+    """Return the long-lived API token used by the native app (Bearer auth).
+
+    Resolution order:
+      1. MARIA_API_TOKEN env var (explicit override), else
+      2. persisted file meta_data/api_token.txt (auto-generated once, 0600).
+
+    The native APK talks to Maria over a different origin (Tailscale) where the
+    session cookie does not apply, so it authenticates with this token instead.
+    Issued to the app by POST /api/auth/login after a correct PIN.
+    """
+    global _api_token_cache
+    if _api_token_cache:
+        return _api_token_cache
+    with _api_token_lock:
+        if _api_token_cache:
+            return _api_token_cache
+        env_token = os.environ.get("MARIA_API_TOKEN", "").strip()
+        if env_token:
+            _api_token_cache = env_token
+            return _api_token_cache
+        path = PROJECT_ROOT / "meta_data" / "api_token.txt"
+
+        def _mint_and_store() -> str:
+            tok = secrets.token_urlsafe(32)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(tok, encoding="utf-8")
+            os.chmod(path, 0o600)
+            return tok
+
+        try:
+            if path.exists():
+                # meta_data/ is world-writable on the mini PC, so a local actor
+                # could pre-seed api_token.txt with a known secret. Only trust an
+                # existing file that we own and that is not group/world-writable;
+                # otherwise (or if blank/corrupt) mint a fresh secret over it.
+                st = path.stat()
+                owned = (not hasattr(os, "getuid")) or st.st_uid == os.getuid()
+                not_writable_by_others = not (st.st_mode & 0o022)
+                token = (
+                    path.read_text(encoding="utf-8").strip()
+                    if (owned and not_writable_by_others)
+                    else ""
+                )
+                if not token:
+                    token = _mint_and_store()
+                else:
+                    os.chmod(path, 0o600)  # re-assert tight perms
+            else:
+                token = _mint_and_store()
+        except OSError as e:
+            # Fall back to a process-local token rather than crashing auth.
+            logger.warning("[AUTH] Could not persist API token: %s", e)
+            token = secrets.token_urlsafe(32)
+        _api_token_cache = token
+        return _api_token_cache
+
+
+def _bearer_token_valid() -> bool:
+    """True if the current request carries a valid 'Authorization: Bearer' token."""
+    try:
+        auth = request.headers.get("Authorization", "")
+    except RuntimeError:
+        # No request context (should not happen for auth checks, but be safe).
+        return False
+    if not auth.startswith("Bearer "):
+        return False
+    token = auth[7:].strip()
+    return bool(token) and hmac.compare_digest(token, get_api_token())
+
+
 def is_authenticated() -> bool:
-    """Check if current session is authenticated."""
-    return session.get('authenticated', False)
+    """Check if current request is authenticated (session cookie OR API token)."""
+    if session.get('authenticated', False):
+        return True
+    return _bearer_token_valid()
 
 
 def require_auth(f):
@@ -694,6 +787,17 @@ def get_maria_brain():
                     except Exception as e:
                         print(f"[UI] Work context provider not wired: {e}")
 
+                    # Wire SelfContext (Super-META E2) so the chat tail can carry
+                    # Maria's situational self (operator + last vision + state).
+                    # Flag-gated by SELF_CONTEXT_CHAT_ENABLED; shared live from the
+                    # daemon (same process) so vision/mode are always fresh.
+                    if _self_context is not None:
+                        try:
+                            brain.set_self_context(_self_context)
+                            print("[UI] [OK] SelfContext wired to chat (Super-META E2)")
+                        except Exception as e:
+                            print(f"[UI] SelfContext not wired: {e}")
+
                     # Wrap with LLM Router if NIM available
                     router = _create_ui_router(brain)
                     _maria_brain = router if router else brain
@@ -980,6 +1084,45 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """Token login for the native app (cross-origin, no session cookie).
+
+    Body: {"pin": "..."}. On a correct PIN, returns the long-lived API token
+    the app stores and sends as 'Authorization: Bearer <token>'. Throttled by
+    IP exactly like the browser PIN login.
+    """
+    ip = request.remote_addr or "unknown"
+    allowed, wait_s = check_login_allowed(ip)
+    if not allowed:
+        logger.warning("[AUTH] Token login throttled for %s (retry %ds)", ip, wait_s)
+        return jsonify({
+            "ok": False,
+            "error": f"Za duzo prob. Sprobuj ponownie za {max(wait_s // 60, 1)} min.",
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    pin = str(data.get('pin', ''))
+    if UI_PIN and hmac.compare_digest(pin, UI_PIN):
+        clear_login_failures(ip)
+        return jsonify({"ok": True, "token": get_api_token()})
+
+    record_login_failure(ip)
+    logger.warning("[AUTH] Failed token login (bad PIN) from %s", ip)
+    return jsonify({"ok": False, "error": "Nieprawidlowy PIN"}), 401
+
+
+@app.route('/api/auth/ping')
+@require_auth
+def api_auth_ping():
+    """Lightweight check that a stored token (or session) is still valid.
+
+    Used by the native app on launch to decide whether to show the login
+    screen. Returns 200 only when authenticated (session or Bearer token).
+    """
+    return jsonify({"ok": True})
+
+
 @app.route('/')
 @require_auth
 def index():
@@ -1159,13 +1302,20 @@ def api_status_full():
         "health_score": 1.0,
         "recent_events": [],
         "mode_changes_count": 0,
-        "alerts": {"CRITICAL": 0, "ALERT": 0, "WARNING": 0}
+        "alerts": {"CRITICAL": 0, "ALERT": 0, "WARNING": 0},
+        # Decomposed health score (base/alerts/resource factors) so the mobile
+        # System screen can explain "where the number comes from". Filled below.
+        "health_breakdown": None,
     }
 
     if HOMEOSTASIS_AVAILABLE:
         try:
             event_logger = get_event_logger()
             events = event_logger.get_recent_events(limit=20)
+
+            # Resource metrics from the snapshot that set health_score (memory_pressure,
+            # cpu_load) -- needed to reconstruct the health breakdown.
+            snapshot_metrics = {}
 
             # Process events
             for event in events:
@@ -1179,6 +1329,7 @@ def api_status_full():
                 elif evt_type == "state_snapshot" and homeostasis_data["health_score"] == 1.0:
                     homeostasis_data["mode"] = event.get("mode", "ACTIVE")
                     homeostasis_data["health_score"] = event.get("health_score", 1.0)
+                    snapshot_metrics = event.get("metrics", {}) or {}
 
                 # Count alerts
                 if evt_type == "alert":
@@ -1194,6 +1345,18 @@ def api_status_full():
                         "datetime": datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "-",
                         "details": _get_event_details(event)
                     })
+
+            # Reconstruct the health breakdown from the SAME constants the tick
+            # loop uses (agent_core.homeostasis.health), so it can never drift.
+            try:
+                from agent_core.homeostasis.health import compute_health_breakdown
+                homeostasis_data["health_breakdown"] = compute_health_breakdown(
+                    homeostasis_data["alerts"],
+                    memory_pressure=snapshot_metrics.get("memory_pressure", 0),
+                    cpu_load=snapshot_metrics.get("cpu_load", 0),
+                )
+            except Exception as e:
+                print(f"[UI] [WARN] Could not build health breakdown: {e}")
 
         except Exception as e:
             print(f"[UI] [WARN] Could not read homeostasis: {e}")
@@ -1293,6 +1456,9 @@ def api_status_full():
                     "monthly_used": monthly.get("used", 0),
                     "monthly_limit": monthly_limit,
                     "monthly_percent": (monthly.get("used", 0) / monthly_limit * 100) if monthly_limit > 0 else 0,
+                    # RPM (requests/min) sliding-window state {current, limit, headroom};
+                    # already computed by TokenBudget.get_status_dict, just unwired.
+                    "rpm": budget_info.get("rpm", {}),
                 }
             })
         except Exception as e:
@@ -1342,7 +1508,9 @@ def api_status_full():
             },
             "cpu": {
                 "percent": cpu_percent,
-                "cores": psutil.cpu_count()
+                "cores": psutil.cpu_count(),
+                "cores_physical": psutil.cpu_count(logical=False),
+                "model": _get_cpu_model(),
             },
             "disk": {
                 "percent": disk.percent,
@@ -1371,6 +1539,79 @@ def api_status_full():
         "introspection": introspection_data,
         "learning_queue": _get_learning_queue(),
         "vision": _get_vision_status_data(),
+    })
+
+
+_CPU_MODEL_CACHE = None
+
+
+def _get_cpu_model():
+    """CPU model name from /proc/cpuinfo (cached; falls back to platform)."""
+    global _CPU_MODEL_CACHE
+    if _CPU_MODEL_CACHE is not None:
+        return _CPU_MODEL_CACHE
+    model = ""
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                if line.lower().startswith("model name"):
+                    model = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    if not model:
+        try:
+            import platform
+            model = platform.processor() or ""
+        except Exception:
+            model = ""
+    _CPU_MODEL_CACHE = model
+    return model
+
+
+@app.route('/api/system/memory')
+@require_auth
+def api_system_memory():
+    """RAM split: Maria daemon vs Ollama LLM processes vs other vs free.
+
+    The Web UI shares one process with the daemon (ADR), so the daemon RSS is
+    this process's own RSS. Ollama loads models in a separate 'ollama' process
+    tree (serve + 'ollama runner' children) -- summed by EXACT name match, never
+    a naive substring (which false-positives on shells mentioning 'ollama').
+    """
+    import os as _os
+    vm = psutil.virtual_memory()
+    total_mb = vm.total / (1024 ** 2)
+    used_mb = vm.used / (1024 ** 2)
+
+    try:
+        maria_mb = psutil.Process(_os.getpid()).memory_info().rss / (1024 ** 2)
+    except Exception:
+        maria_mb = 0.0
+
+    ollama_mb = 0.0
+    ollama_procs = 0
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            name = (proc.info.get('name') or '').lower()
+            cmdline = proc.info.get('cmdline') or []
+            cmd0 = _os.path.basename(cmdline[0]).lower() if cmdline else ''
+            if name == 'ollama' or cmd0 == 'ollama':
+                ollama_mb += proc.memory_info().rss / (1024 ** 2)
+                ollama_procs += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, IndexError):
+            continue
+
+    other_mb = max(0.0, used_mb - maria_mb - ollama_mb)
+    return jsonify({
+        "total_mb": round(total_mb, 1),
+        "used_mb": round(used_mb, 1),
+        "available_mb": round(vm.available / (1024 ** 2), 1),
+        "percent": vm.percent,
+        "maria_daemon_mb": round(maria_mb, 1),
+        "ollama_mb": round(ollama_mb, 1),
+        "ollama_processes": ollama_procs,
+        "other_mb": round(other_mb, 1),
     })
 
 
@@ -2098,11 +2339,23 @@ def _get_traits_data():
 # WEBSOCKET EVENTS
 # =============================================================================
 
+def _socket_token_valid(auth) -> bool:
+    """True if the SocketIO handshake carries a valid API token in its auth payload.
+
+    socket_io_client (native app) sends {'token': '...'} via setAuth; the browser
+    PWA relies on the session cookie instead and passes no auth here.
+    """
+    if not isinstance(auth, dict):
+        return False
+    token = str(auth.get('token', '')).strip()
+    return bool(token) and hmac.compare_digest(token, get_api_token())
+
+
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None):
     """Handle client connection."""
-    # Check authentication via session
-    if not is_authenticated():
+    # Authenticate via session cookie (browser), Bearer header, or auth token (native app).
+    if not (is_authenticated() or _socket_token_valid(auth)):
         print("[UI] [SOCKET] Unauthorized connection attempt")
         return False  # Reject connection
 
@@ -2167,7 +2420,11 @@ def handle_chat_message(data):
     # fact learned in the Web UI now reaches the operational model too.
     try:
         from agent_core.operator.operator_model import get_operator_model
-        get_operator_model().learn_from_message(user_message)
+        _om = get_operator_model()
+        _om.learn_from_message(user_message)
+        # Bump operator stats (last_seen + total_messages) on every UI message;
+        # neither channel recorded this before, so /profile stats were stale.
+        _om.record_interaction("web")
     except Exception as _om_err:
         print(f"[UI][WARN] OperatorModel learn failed: {_om_err}")
 

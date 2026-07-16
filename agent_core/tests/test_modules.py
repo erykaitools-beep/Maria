@@ -1,9 +1,12 @@
 """Tests for extracted REPL modules."""
 
+import time
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import Mode, SystemState
+from agent_core.llm.router import LLMRouter
 from agent_core.tests.spec_helpers import specced
 from agent_core.registry import (
     MariaModule,
@@ -12,24 +15,46 @@ from agent_core.registry import (
     ModuleRegistry,
     CommandDispatcher,
 )
+from maria_core.memory_engine.brain_memory_integration import BrainMemoryLoop
+from maria_core.memory_engine.semantic.semantic_graph import SemanticGraph
 
 
 # ====== Mock SharedContext factory ======
 
+def make_state(**overrides):
+    """Real SystemState (dataclass) - no mock needed, cheap to construct.
+
+    `mode_duration_seconds` is a read-only property derived from
+    `last_mode_change_time`, so it is seeded via that field.
+    """
+    kwargs = dict(
+        mode=Mode.ACTIVE,
+        health_score=0.95,
+        last_mode_change_time=time.time() - 100,
+        alerts=[],
+        idle_seconds=10,
+    )
+    kwargs.update(overrides)
+    return SystemState(**kwargs)
+
+
 def make_ctx(**overrides):
     """Create a SharedContext with mock objects."""
-    mock_brain = MagicMock()
+    # brain = LLMRouter (main.init_brain: active_brain = router if router else OllamaBrain)
+    mock_brain = specced(LLMRouter)
     mock_brain.think.return_value = "Mock response"
 
-    mock_brain_loop = MagicMock()
+    mock_brain_loop = specced(BrainMemoryLoop)
     mock_brain_loop.process_perception.return_value = {"reasoning": "test"}
 
-    mock_semantic = MagicMock()
-    mock_semantic.nodes = {
-        "n1": {"label": "test", "type": "concept", "source": "self_learning",
-               "confidence": 0.9, "attributes": {"definition": "a test"}},
-    }
-    mock_semantic.edges = {"e1": {}}
+    mock_semantic = specced(
+        SemanticGraph,
+        nodes={
+            "n1": {"label": "test", "type": "concept", "source": "self_learning",
+                   "confidence": 0.9, "attributes": {"definition": "a test"}},
+        },
+        edges={"e1": {}},
+    )
 
     ctx = SharedContext(
         brain=mock_brain,
@@ -169,12 +194,7 @@ class TestHomeostasisModule:
         # Need to init first for get_commands to work
         ctx = make_ctx()
         # Provide a mock homeostasis_core
-        mock_core = specced(HomeostasisCore, state=MagicMock())
-        mock_core.state.mode.value = "active"
-        mock_core.state.health_score = 0.95
-        mock_core.state.mode_duration_seconds = 100
-        mock_core.state.idle_seconds = 10
-        mock_core.state.alerts = []
+        mock_core = specced(HomeostasisCore, state=make_state())
         mock_core.get_telemetry.return_value = {}
         ctx.homeostasis_core = mock_core
         m.init(ctx)
@@ -186,12 +206,7 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        mock_core = specced(HomeostasisCore, state=MagicMock())
-        mock_core.state.mode.value = "active"
-        mock_core.state.health_score = 0.95
-        mock_core.state.mode_duration_seconds = 100
-        mock_core.state.idle_seconds = 10
-        mock_core.state.alerts = []
+        mock_core = specced(HomeostasisCore, state=make_state())
         mock_core.get_telemetry.return_value = {}
         ctx.homeostasis_core = mock_core
         m.init(ctx)
@@ -204,7 +219,7 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        ctx.homeostasis_core = specced(HomeostasisCore, state=MagicMock())
+        ctx.homeostasis_core = specced(HomeostasisCore, state=make_state())
         m.init(ctx)
         m._cmd_homeostasis(["xyz"])
         output = capsys.readouterr().out
@@ -242,7 +257,7 @@ class TestHomeostasisModule:
         from agent_core.modules.homeostasis_module import HomeostasisModule
         m = HomeostasisModule()
         ctx = make_ctx()
-        ctx.homeostasis_core = specced(HomeostasisCore, state=MagicMock())
+        ctx.homeostasis_core = specced(HomeostasisCore, state=make_state())
         m.init(ctx)
         m._cmd_homeostasis(["stop"])
         output = capsys.readouterr().out

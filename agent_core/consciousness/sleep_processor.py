@@ -57,6 +57,27 @@ EXPLORATION_TEMPLATES = [
 ]
 
 
+def _curiosity_topics(*beliefs) -> List[str]:
+    """Fetchable concept labels from beliefs -> the TopicSuggester DREAM strategy.
+
+    Only TOPIC-type entities qualify: they are tag-derived clean labels
+    ("mechanika", "dedukcja"). CONCEPT/FILE/OBSERVATION entities are frequently
+    sentence- or file-id-shaped ("Dla liczb nieparzystych: c_{n+1}=...",
+    "web_rss_x.txt") which Wikipedia opensearch returns nothing for, so they are
+    dropped at the source. (2026-06-20, review MF1)
+    """
+    try:
+        from agent_core.world_model.belief_model import EntityType
+        topic_type = EntityType.TOPIC
+    except Exception:
+        return []
+    out = []
+    for b in beliefs:
+        if getattr(b, "entity_type", None) == topic_type and getattr(b, "entity", ""):
+            out.append(b.entity)
+    return out
+
+
 def _get_archiver():
     """Lazy-init LogArchiver (only if /mnt/storage is mounted)."""
     global _log_archiver
@@ -89,10 +110,15 @@ class SleepProcessor:
         knowledge_index_path: Optional[Path] = None,
         session_id: int = 0,
         dream_log_path: Optional[Path] = None,
+        mutate_beliefs: bool = True,
         # Legacy compat: accept semantic_memory but ignore internals
         semantic_memory=None,
     ):
         self._belief_store = belief_store
+        # When False, the belief-MUTATING phases (NREM2 boost, NREM3 prune) are
+        # skipped while the READ-only phases (NREM1 stats, REM dreams) still run.
+        # Lets dreams fire on a throttled sleep without re-saturating confidence.
+        self._mutate_beliefs = mutate_beliefs
         self._ki_path = Path(knowledge_index_path or KNOWLEDGE_INDEX_PATH)
         self.session_id = session_id
         self._dream_log_path = Path(dream_log_path or DEFAULT_DREAM_LOG)
@@ -179,10 +205,10 @@ class SleepProcessor:
     # -- NREM2: Strengthen (reinforce good memories) --
 
     def _phase_nrem2(self) -> Dict[str, Any]:
-        """NREM2 - Boost confidence of well-evidenced beliefs."""
+        """NREM2 - Boost confidence of well-evidenced beliefs (mutating phase)."""
         boosted = 0
 
-        if self._belief_store:
+        if self._belief_store and self._mutate_beliefs:
             beliefs = self._belief_store.get_current()
             for belief in beliefs:
                 # Beliefs with evidence from multiple sources get a small boost
@@ -196,17 +222,19 @@ class SleepProcessor:
             "phase": "nrem2",
             "beliefs_boosted": boosted,
         }
+        if not self._mutate_beliefs:
+            result["skipped"] = "throttled"
         logger.debug(f"NREM2: boosted {boosted} beliefs")
         return result
 
     # -- NREM3: Forgetting (decay, prune, cleanup) --
 
     def _phase_nrem3(self) -> Dict[str, Any]:
-        """NREM3 - Compact and prune weak beliefs. THIS IS FORGETTING."""
+        """NREM3 - Compact and prune weak beliefs (mutating phase). FORGETTING."""
         before = 0
         pruned = 0
 
-        if self._belief_store:
+        if self._belief_store and self._mutate_beliefs:
             try:
                 before = len(self._belief_store.get_current())
                 self._belief_store.compact()
@@ -218,9 +246,11 @@ class SleepProcessor:
 
         result = {
             "phase": "nrem3",
-            "beliefs_before": before if self._belief_store else 0,
+            "beliefs_before": before,
             "beliefs_pruned": pruned,
         }
+        if not self._mutate_beliefs:
+            result["skipped"] = "throttled"
         logger.debug(f"NREM3: pruned {pruned}")
         return result
 
@@ -292,10 +322,15 @@ class SleepProcessor:
             template = random.choice(EXPLORATION_TEMPLATES)
             dream_type = "exploration"
             content = template.format(a=label_a)
+            # 2026-06-20: surface the (clean, TOPIC-type) concept she dreamed about
+            # so the fetcher can chase curiosity (TopicSuggester DREAM strategy).
+            topics = _curiosity_topics(a)
             return {
                 "type": dream_type,
                 "content": content,
                 "beliefs": [a.belief_id],
+                "topics": topics,
+                "to_explore": bool(topics),
                 "timestamp": time.time(),
             }
         else:
@@ -303,10 +338,13 @@ class SleepProcessor:
             dream_type = "connection"
 
         content = template.format(a=label_a, b=label_b)
+        topics = _curiosity_topics(a, b)
         return {
             "type": dream_type,
             "content": content,
             "beliefs": [a.belief_id, b.belief_id],
+            "topics": topics,
+            "to_explore": bool(topics),
             "timestamp": time.time(),
         }
 

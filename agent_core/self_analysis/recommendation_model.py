@@ -117,3 +117,75 @@ class AnalysisReport:
 # Limits
 MAX_RECOMMENDATIONS_PER_REPORT = 5
 MAX_PROPOSED_GOALS_FROM_ANALYSIS = 3
+
+# Max length of one composed recommendation line. Five of these sit comfortably
+# inside Telegram's message limit; long enough that a real finding + its number
+# ("exam success rate is low (0.19)") survives intact.
+REC_LINE_MAX = 240
+
+
+def _markdown_safe(text: str) -> str:
+    """Neutralise Telegram-Markdown metacharacters in operator-facing prose.
+
+    Recommendation text is prose and snake_case identifiers from an LLM, never
+    intended markdown. Telegram reads _ * ` [ as formatting: a topic like
+    'system_stability' (32% of live recommendations carry '_') italicises, or,
+    when the underscores balance across the message, is silently eaten with no
+    API error -- so the bot's markdown->plain fallback never fires. Underscore
+    becomes a space (keeps snake_case readable); the rest are dropped. This is
+    what the docstring's "markdown-clean" promise always claimed but never did.
+    """
+    text = text.replace("_", " ")
+    for ch in ("*", "`", "[", "]"):
+        text = text.replace(ch, "")
+    return text
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Trim to `limit` chars on a word boundary, marking the cut with '...'."""
+    text = text.strip()
+    if limit <= 0 or len(text) <= limit:
+        return text
+    cut = text[: limit - 3].rstrip()
+    # Prefer breaking at the last space so a word is not sliced mid-token.
+    space = cut.rfind(" ")
+    if space > limit // 2:
+        cut = cut[:space].rstrip()
+    return cut + "..."
+
+
+def format_report_for_telegram(report: "AnalysisReport") -> tuple:
+    """Build a clean (summary, recommendations) pair for the K12 Telegram card.
+
+    The notifier used to receive ``report.raw_response[:300]`` (raw JSON / model
+    prose) as the summary and ``str(recommendation)`` dataclass reprs as the
+    items -- operator-facing junk seen in Telegram on 2026-06-15. This returns a
+    one-line provenance + count, and one line per recommendation, both already
+    markdown-clean (the parser strips markers).
+
+    Each line is "topic -> action: description". The description is the finding
+    and its number -- "exam success rate is low (0.19)". Dropping it (as this
+    did before 2026-07-16) left the operator with "Exam Success Rate -> review":
+    a label with no idea of what was wrong or how bad. The "topic -> action" head
+    stays as the scannable prefix; the reason rides behind it.
+    """
+    recs = []
+    for r in report.recommendations:
+        if isinstance(r, str):
+            line = r.strip()
+        else:
+            topic = (getattr(r, "topic", "") or "").strip()
+            action = (getattr(r, "suggested_action", "") or "").strip()
+            description = (getattr(r, "description", "") or "").strip()
+            head = f"{topic} -> {action}" if (topic and action) else (topic or action)
+            if head and description:
+                # Trim only the reason, never the head -- the label must stay whole.
+                budget = REC_LINE_MAX - len(head) - 2  # ": "
+                line = f"{head}: {_truncate(description, budget)}"
+            else:
+                line = _truncate(head or description, REC_LINE_MAX)
+        if line:
+            recs.append(_markdown_safe(line))
+    provenance = report.model or report.analyzer or "?"
+    summary = _markdown_safe(f"{provenance}: {len(recs)} rekomendacji")
+    return summary, recs

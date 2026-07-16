@@ -41,6 +41,34 @@ from agent_core.autonomy.auto_promotion import (
     PROMOTION_COOLDOWN_SEC,
     REGRESSION_THRESHOLD,
 )
+
+
+def _learning_goals(achieved: int, failed: int = 0):
+    """Build REAL Goal objects for trust scoring.
+
+    These tests used to build a FakeGoal dataclass carrying a `goal_type` field.
+    Goal has no such field (it declares `type`; `goal_type` is only create_goal's
+    kwarg name), so the fake matched the phantom that trust_scorer.py:435 read --
+    and 121 tests stayed green while _goal_matches_action returned False for
+    every real goal in production, since 2026-04-12. A fake shaped like the bug
+    proves nothing: build the real thing (fix 2026-07-15).
+    """
+    from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
+
+    goals = []
+    for _ in range(achieved):
+        goals.append(create_goal(
+            goal_type=GoalType.LEARNING, description="nauka", priority=0.5,
+            status=GoalStatus.ACHIEVED,
+        ))
+    for _ in range(failed):
+        goals.append(create_goal(
+            goal_type=GoalType.LEARNING, description="nauka", priority=0.5,
+            status=GoalStatus.FAILED,
+        ))
+    return goals
+
+
 from agent_core.autonomy.authority_level import (
     AuthorityLevel,
     AuthorityManager,
@@ -313,22 +341,7 @@ class TestTrustScorer:
 
     def test_trust_with_good_goals(self, mock_goal_store):
         """High goal success rate = high trust."""
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-
-        goals = []
-        for i in range(15):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
-        for i in range(2):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="failed")
-            goals.append(g)
+        goals = _learning_goals(achieved=15, failed=2)
 
         mock_goal_store.get_all.return_value = goals
 
@@ -404,17 +417,7 @@ class TestTrustScorer:
     ):
         """Promotion suggested when trust exceeds threshold."""
         # Create enough successful goals
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-
-        goals = []
-        for i in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
 
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.9
@@ -531,17 +534,7 @@ class TestAutoPromotion:
         self, mock_authority, mock_goal_store, mock_confidence_tracker, tmp_path
     ):
         """Tick creates promotion proposal when trust is high."""
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-
-        goals = []
-        for i in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
 
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.95
@@ -690,17 +683,7 @@ class TestAutoPromotion:
         self, mock_authority, mock_goal_store, mock_confidence_tracker, tmp_path
     ):
         """Notification function called on proposal."""
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-
-        goals = []
-        for i in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
 
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.95
@@ -799,16 +782,7 @@ class TestAutoPromotion:
     ):
         """Explicit enabled=False short-circuits before any work -- no proposal
         even with a high-trust track record."""
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-        goals = []
-        for _ in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.95
         mock_confidence_tracker.get_confidence_map.return_value = {"learn": 0.95}
@@ -840,16 +814,7 @@ class TestAutoPromotion:
         from agent_core.goals.store import GoalStore
         from agent_core.goals.goal_model import GoalStatus
 
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-        goals = []
-        for _ in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.95
         mock_confidence_tracker.get_confidence_map.return_value = {"learn": 0.95}
@@ -920,17 +885,7 @@ class TestTrustIntegration:
         auth = AuthorityManager(config_path=tmp_path / "auth.json")
 
         # Build good track record
-        @dataclass
-        class FakeGoal:
-            goal_type: MagicMock = None
-            status: MagicMock = None
-
-        goals = []
-        for i in range(20):
-            g = FakeGoal()
-            g.goal_type = MagicMock(value="learning")
-            g.status = MagicMock(value="achieved")
-            goals.append(g)
+        goals = _learning_goals(achieved=20)
         mock_goal_store.get_all.return_value = goals
         mock_confidence_tracker.get_action_confidence.return_value = 0.95
         mock_confidence_tracker.get_confidence_map.return_value = {"learn": 0.95}
@@ -987,3 +942,100 @@ class TestTrustIntegration:
         d = e.to_dict()
         assert d["event_type"] == "approved"
         assert d["trust_score"] == 0.85
+
+
+class TestGoalOutcome:
+    """abandoned != failure (fix 2026-07-15).
+
+    On live data 1140/1192 goals (95.6%) are abandoned, and 922 of those were
+    dropped by planner_stale_cleanup as "stale: pending 72h with no progress" --
+    nobody ever started them (0/926 had progress > 0). Counting those as
+    failures made goal_success_rate measure goal EXPIRY, not ability: `learn`
+    read 0.021 (24/1133). Excluding no-evidence goals it reads 0.209 (24/115).
+
+    A failure requires evidence she TRIED: progress > 0, or the planner's own
+    non-productive-loop verdict (20 consecutive actions going nowhere).
+    """
+
+    @staticmethod
+    def _goal(status, progress=0.0, abandon_actor=None):
+        from agent_core.goals.goal_model import (
+            create_goal, GoalType, GoalStatus, AuditEntry,
+        )
+        g = create_goal(goal_type=GoalType.LEARNING, description="nauka",
+                        priority=0.5, status=GoalStatus.PENDING)
+        g.status = status
+        g.progress = progress
+        if abandon_actor is not None:
+            g.audit_trail.append(AuditEntry(
+                timestamp=time.time(), old_status="pending",
+                new_status="abandoned", reason="x", actor=abandon_actor,
+            ))
+        return g
+
+    def test_achieved_is_success(self):
+        from agent_core.goals.goal_model import GoalStatus
+        assert TrustScorer._goal_outcome(self._goal(GoalStatus.ACHIEVED)) is True
+
+    def test_failed_is_failure(self):
+        from agent_core.goals.goal_model import GoalStatus
+        assert TrustScorer._goal_outcome(self._goal(GoalStatus.FAILED)) is False
+
+    def test_stale_abandoned_goal_is_not_counted_at_all(self):
+        """THE bug: 922 goals nobody ever ran, scored against her ability."""
+        from agent_core.goals.goal_model import GoalStatus
+        g = self._goal(GoalStatus.ABANDONED, progress=0.0,
+                       abandon_actor="planner_stale_cleanup")
+        assert TrustScorer._goal_outcome(g) is None, \
+            "a goal that never started is no evidence -- not a failure"
+
+    def test_nonproductive_loop_is_a_real_failure(self):
+        """Trying 20 times and going nowhere is the realest failure there is."""
+        from agent_core.goals.goal_model import GoalStatus
+        g = self._goal(GoalStatus.ABANDONED, progress=0.0,
+                       abandon_actor="planner_nonproductive_detector")
+        assert TrustScorer._goal_outcome(g) is False
+
+    def test_abandoned_with_progress_is_a_failure(self):
+        """Moved the needle, never finished -- she tried."""
+        from agent_core.goals.goal_model import GoalStatus
+        g = self._goal(GoalStatus.ABANDONED, progress=0.4,
+                       abandon_actor="planner_stale_cleanup")
+        assert TrustScorer._goal_outcome(g) is False
+
+    def test_proposal_lapsed_by_operator_is_not_her_failure(self):
+        from agent_core.goals.goal_model import GoalStatus
+        g = self._goal(GoalStatus.ABANDONED, progress=0.0, abandon_actor="system")
+        assert TrustScorer._goal_outcome(g) is None
+
+    def test_displaced_by_better_proposal_is_not_a_failure(self):
+        from agent_core.goals.goal_model import GoalStatus
+        g = self._goal(GoalStatus.ABANDONED, progress=0.0, abandon_actor="creative")
+        assert TrustScorer._goal_outcome(g) is None
+
+    def test_in_flight_goals_have_no_verdict_yet(self):
+        from agent_core.goals.goal_model import GoalStatus
+        for st in (GoalStatus.ACTIVE, GoalStatus.PENDING, GoalStatus.PROPOSED):
+            assert TrustScorer._goal_outcome(self._goal(st)) is None
+
+    def test_cancelled_is_not_a_failure(self):
+        from agent_core.goals.goal_model import GoalStatus
+        assert TrustScorer._goal_outcome(self._goal(GoalStatus.CANCELLED)) is None
+
+    def test_rate_excludes_no_evidence_goals(self, mock_goal_store):
+        """End-to-end: 2 achieved + 1 real loop failure + 50 never-started
+        must read 0.667 (2/3), not 0.038 (2/53)."""
+        from agent_core.goals.goal_model import GoalStatus
+        goals = [self._goal(GoalStatus.ACHIEVED) for _ in range(2)]
+        goals.append(self._goal(GoalStatus.ABANDONED, 0.0,
+                                "planner_nonproductive_detector"))
+        goals += [self._goal(GoalStatus.ABANDONED, 0.0, "planner_stale_cleanup")
+                  for _ in range(50)]
+        mock_goal_store.get_all.return_value = goals
+
+        score = TrustScorer(goal_store=mock_goal_store).calculate_trust("learn")
+
+        assert score.successful_actions == 2
+        assert score.failed_actions == 1
+        assert score.total_actions == 3, "50 never-started goals must not count"
+        assert round(score.goal_success_rate, 3) == 0.667

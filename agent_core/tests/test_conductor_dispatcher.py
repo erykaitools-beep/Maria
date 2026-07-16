@@ -32,6 +32,7 @@ from agent_core.conductor import (
 from agent_core.conductor.dispatcher import (
     ConductorDispatcher,
     DispatchOutcome,
+    DispatchResult,
     auto_commit_codex_work,
     get_commits_between,
     get_workspace_dirty,
@@ -96,12 +97,29 @@ def git_workspace(tmp_path: Path) -> Path:
     return work
 
 
+def _git_init(path: Path) -> Path:
+    """Initialize ``path`` as a git repo with one commit (a readable HEAD).
+
+    Post-audit the dispatcher refuses to run Codex when it cannot read a HEAD
+    baseline pre-dispatch (audit 2026-06-16 #19), so dispatch tests need real
+    repos, not bare mkdir dirs."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@test"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=path, check=True)
+    (path / "README.md").write_text("init")
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True)
+    return path
+
+
 def _seed_codex_task(
     conductor: Conductor,
     *,
     workspace: Optional[Path] = None,
     description: str = "Read brief X and implement",
     project: str = "market_agent",
+    approval_required: bool = False,
 ):
     task = create_task(
         project=project,
@@ -111,6 +129,10 @@ def _seed_codex_task(
         assignee=Assignee.CODEX,
         priority=0.9,
     )
+    # Default approved/dispatchable: post-audit the maria dispatcher is
+    # fail-closed on a MISSING flag (a forgotten flag must not auto-dispatch on
+    # the live repo), so seeded maria tasks must opt in explicitly to dispatch.
+    task.artifacts["approval_required"] = approval_required
     if workspace is not None:
         task.artifacts["workspace_path"] = str(workspace)
     conductor.add_task(task)
@@ -154,10 +176,8 @@ def test_two_dispatchers_independent_throttling(tmp_path):
         queue=TaskQueue(path=tmp_path / "maria_queue.jsonl"),
         status_store=BuildStatusStore(path=tmp_path / "maria_status.json"),
     )
-    market_workspace = tmp_path / "market_workspace"
-    maria_workspace = tmp_path / "maria_workspace"
-    market_workspace.mkdir()
-    maria_workspace.mkdir()
+    market_workspace = _git_init(tmp_path / "market_workspace")
+    maria_workspace = _git_init(tmp_path / "maria_workspace")
     market_codex = FakeCodex(response="ok")
     maria_codex = FakeCodex(response="ok")
     market_dispatcher = ConductorDispatcher(
@@ -352,8 +372,7 @@ def test_codex_receives_workspace_cwd(conductor, git_workspace):
 
 
 def test_dispatcher_with_maria_project(conductor, tmp_path):
-    workspace = tmp_path / "fake_maria_workspace"
-    workspace.mkdir()
+    workspace = _git_init(tmp_path / "fake_maria_workspace")
     _seed_codex_task(conductor, workspace=workspace, project="maria")
     codex = FakeCodex(response="ok")
     d = ConductorDispatcher(conductor, codex, "maria")
@@ -377,12 +396,12 @@ def test_codex_receives_source_and_context(conductor, git_workspace):
 
 
 def test_codex_receives_extended_timeout(conductor, git_workspace):
-    """Default 1800s for implementation briefs (not the 120s Q&A default)."""
+    """Default 3600s for implementation briefs (not the 120s Q&A default)."""
     _seed_codex_task(conductor, workspace=git_workspace)
     codex = FakeCodex(response="ok")
     d = ConductorDispatcher(conductor, codex, "market_agent")
     d.dispatch_next()
-    assert codex.calls[0]["timeout_s"] == 1800.0
+    assert codex.calls[0]["timeout_s"] == 3600.0
 
 
 def test_codex_timeout_override(conductor, git_workspace):
@@ -685,3 +704,189 @@ def test_codex_clean_tree_response_still_blocks(conductor, git_workspace):
 
     assert result.outcome is DispatchOutcome.BLOCKED
     assert "no commits" in (result.error or "")
+
+
+# ============================================================
+# Audit 2026-06-16 -- workspace allowlist + crash/HEAD hardening
+# ============================================================
+
+
+def test_dispatch_blocks_workspace_outside_allowlist(
+    conductor, git_workspace, tmp_path
+):
+    """A1: a task whose resolved workspace is outside the allowlist is BLOCKED
+    and Codex is NEVER fired (the hard wall against Codex-on-prod escape)."""
+    allowed = tmp_path / "allowed_root"
+    allowed.mkdir()
+    _seed_codex_task(conductor, workspace=git_workspace)  # NOT under allowed
+    codex = FakeCodex(response="ok")
+    d = ConductorDispatcher(
+        conductor, codex, "market_agent",
+        allowed_workspace_roots=[allowed],
+    )
+
+    result = d.dispatch_next()
+
+    assert result.outcome is DispatchOutcome.BLOCKED
+    assert codex.calls == []  # Codex must not run outside the allowlist
+    assert conductor.list_tasks()[0].status is TaskStatus.BLOCKED
+
+
+def test_dispatch_allows_workspace_inside_allowlist(conductor, git_workspace):
+    """A1 counterpart: an allowlisted workspace dispatches normally."""
+    _seed_codex_task(conductor, workspace=git_workspace)
+    codex = FakeCodex(response="ok")
+    d = ConductorDispatcher(
+        conductor, codex, "market_agent",
+        allowed_workspace_roots=[git_workspace.parent],
+    )
+
+    result = d.dispatch_next()
+
+    # Codex ran -> the allowlist permitted dispatch (outcome is BLOCKED only
+    # because FakeCodex makes no commit, which is the no-commits path).
+    assert len(codex.calls) == 1
+    assert result.outcome is DispatchOutcome.BLOCKED
+
+
+def test_dispatch_exception_marks_blocked_not_stuck_in_progress(
+    conductor, git_workspace
+):
+    """D1 (#5): a crash mid-dispatch must drop the task to BLOCKED, never leave
+    it wedged IN_PROGRESS forever."""
+    class RaisingCodex(FakeCodex):
+        def ask(self, *a, **k):
+            raise RuntimeError("boom")
+
+    _seed_codex_task(conductor, workspace=git_workspace)
+    d = ConductorDispatcher(conductor, RaisingCodex(), "market_agent")
+
+    result = d.dispatch_next()
+
+    assert result.outcome is DispatchOutcome.BLOCKED
+    task = conductor.list_tasks()[0]
+    assert task.status is TaskStatus.BLOCKED  # NOT stuck IN_PROGRESS
+
+
+def test_dispatch_blocks_when_head_unreadable_predispatch(
+    conductor, git_workspace, monkeypatch
+):
+    """D2 (#19): if HEAD can't be read pre-dispatch there's no commit baseline,
+    so refuse rather than dispatch Codex blind (and risk a wrong auto-commit)."""
+    import agent_core.conductor.dispatcher as disp
+    monkeypatch.setattr(disp, "get_workspace_head", lambda ws: None)
+    _seed_codex_task(conductor, workspace=git_workspace)
+    codex = FakeCodex(response="ok")
+    d = ConductorDispatcher(conductor, codex, "market_agent")
+
+    result = d.dispatch_next()
+
+    assert result.outcome is DispatchOutcome.BLOCKED
+    assert codex.calls == []  # never dispatched without a baseline
+
+
+# ---------------------------------------------------------------------------
+# Watchdog lease wiring (2026-06-30: watchdog killed the process mid-dispatch)
+# ---------------------------------------------------------------------------
+
+def test_codex_timeout_sec_property_exposes_hard_timeout(conductor):
+    d = ConductorDispatcher(
+        conductor, FakeCodex(response="ok"), "market_agent",
+        codex_timeout_sec=1234.0,
+    )
+    assert d.codex_timeout_sec == 1234.0
+
+
+def test_phase17_runs_dispatch_under_an_active_watchdog_lease():
+    """The tick phase must lease the watchdog allowance BEFORE calling
+    dispatch_next and release it after -- otherwise a >300s Codex build gets
+    force-restarted mid-flight (the 2026-06-30 Brick-0 kill)."""
+    import time as _time
+    from agent_core.homeostasis.core import HomeostasisCore
+
+    core = HomeostasisCore.__new__(HomeostasisCore)
+    core._running = True
+    core._watchdog_stall_sec = 300.0
+    core._external_op_deadline = None
+    core._external_op_label = ""
+    core._external_op_logged = False
+    # Simulate the exact incident geometry: the tick heartbeat is already
+    # stale past the 300s deadline while the dispatch is still running.
+    core._last_tick_monotonic = _time.monotonic() - 999
+
+    seen = {}
+
+    class RecordingDispatcher:
+        project = "market_agent"
+        codex_timeout_sec = 1800.0
+
+        def should_dispatch(self):
+            return True
+
+        def dispatch_next(self):
+            seen["deadline_during"] = core._external_op_deadline
+            seen["would_trip_during"] = core._watchdog_should_trip()
+            return DispatchResult(
+                outcome=DispatchOutcome.SKIPPED, project=self.project,
+            )
+
+    core._conductor_dispatchers = [RecordingDispatcher()]
+    core._dispatch_conductor_tasks()
+
+    assert seen["deadline_during"] is not None  # lease was live during the call
+    assert seen["would_trip_during"] is False   # watchdog held fire
+    assert core._external_op_deadline is None   # and released afterwards
+    # Release restamps the heartbeat, so the tick TAIL after dispatch is NOT
+    # instantly tripped on the now-stale clock (2026-07-07 residual). Normal
+    # tripping returns only if the tail itself then stalls past the deadline.
+    assert core._watchdog_should_trip() is False
+    core._last_tick_monotonic = _time.monotonic() - 999
+    assert core._watchdog_should_trip() is True
+
+
+def test_first_dispatch_sweeps_orphaned_in_progress_and_dispatches_it(
+    conductor, git_workspace
+):
+    """Crash mid-dispatch (2026-06-30 watchdog os._exit) strands the task
+    IN_PROGRESS. The first dispatch attempt of a fresh process must requeue
+    the orphan and may then dispatch it immediately in the same call."""
+    task = _seed_codex_task(conductor, workspace=git_workspace)
+    conductor.mark_in_progress(task.task_id, Assignee.CODEX)
+
+    class CommittingCodex:
+        _call_timestamps: deque = deque()
+
+        def ask(self, prompt, source="unknown", context=None,
+                cwd=None, timeout_s=None, impl_mode=False):
+            (cwd / "new.py").write_text("# new")
+            subprocess.run(["git", "add", "-A"], cwd=cwd, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "from codex"],
+                cwd=cwd, check=True,
+            )
+            return "implemented and committed"
+
+    d = ConductorDispatcher(conductor, CommittingCodex(), "market_agent")
+    result = d.dispatch_next()
+
+    assert result.outcome is DispatchOutcome.DONE
+    assert result.task_id == task.task_id
+    refreshed = conductor.list_tasks(project="market_agent")[0]
+    assert refreshed.artifacts["stale_requeue_count"] == 1
+
+
+def test_sweep_runs_once_per_dispatcher_lifetime(conductor, git_workspace):
+    task = _seed_codex_task(conductor, workspace=git_workspace)
+    conductor.mark_in_progress(task.task_id, Assignee.CODEX)
+
+    d = ConductorDispatcher(conductor, FakeCodex(response=None), "market_agent")
+    d.dispatch_next()  # sweep + dispatch attempt (codex None -> blocked)
+    conductor.mark_in_progress(task.task_id, Assignee.CODEX)
+    result = d.dispatch_next()
+
+    # Second call must NOT sweep again: the task we just put IN_PROGRESS
+    # stays untouched and there is nothing PENDING to dispatch.
+    assert result.outcome is DispatchOutcome.SKIPPED
+    refreshed = conductor.list_tasks(project="market_agent")[0]
+    assert refreshed.status is TaskStatus.IN_PROGRESS
+    assert refreshed.artifacts["stale_requeue_count"] == 1

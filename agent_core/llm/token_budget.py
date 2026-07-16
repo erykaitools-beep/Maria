@@ -221,13 +221,16 @@ class TokenBudget:
 
     def can_use_nim(self) -> bool:
         """
-        Check if RPM limit allows NIM API usage.
+        Check whether NIM API usage is allowed right now.
 
-        Primary gate: RPM sliding window (40 req/min).
-        Token tracking remains for observability only.
+        Gates on BOTH the RPM sliding window (40 req/min) AND the token budget
+        (daily/monthly). When either token budget is exhausted the caller falls
+        back to local Ollama (router._can_use_nim), so a wider awake window cannot
+        silently overrun the NIM bill -- cost throttles, not the clock. (2026-06-20:
+        token budget was previously tracked "for observability only".)
 
         Returns:
-            True if RPM limit not exceeded
+            True if RPM and token budget both allow a NIM call.
         """
         current_rpm = self._get_current_rpm()
         if current_rpm >= self.RPM_LIMIT:
@@ -235,24 +238,37 @@ class TokenBudget:
                 f"NIM RPM limit reached: {current_rpm}/{self.RPM_LIMIT}"
             )
             return False
+        if self.get_remaining_today() <= 0:
+            logger.warning(
+                "NIM daily token budget exhausted (%d/%d) -> Ollama fallback",
+                self.get_today_usage()["total_tokens"], self.daily_limit,
+            )
+            return False
+        if self.get_remaining_month() <= 0:
+            logger.warning(
+                "NIM monthly token budget exhausted (%d/%d) -> Ollama fallback",
+                self.get_month_usage()["total_tokens"], self.monthly_limit,
+            )
+            return False
         return True
 
     def get_budget_status(self) -> str:
         """
-        Get overall budget status based on RPM.
+        Get overall budget status from RPM AND token usage.
 
         Returns:
-            "OK" - RPM healthy (<80% of limit)
-            "LOW" - RPM getting high (>=80% of limit)
-            "DEPLETED" - RPM limit reached
+            "OK" - healthy (<80% of every limit)
+            "LOW" - RPM or daily token usage >=80% of limit
+            "DEPLETED" - RPM limit reached OR token budget exhausted
         """
         if not self.can_use_nim():
             return "DEPLETED"
 
         current_rpm = self._get_current_rpm()
         rpm_ratio = current_rpm / max(self.RPM_LIMIT, 1)
+        day_used_ratio = 1.0 - (self.get_remaining_today() / max(self.daily_limit, 1))
 
-        if rpm_ratio >= 0.8:
+        if rpm_ratio >= 0.8 or day_used_ratio >= 0.8:
             return "LOW"
 
         return "OK"

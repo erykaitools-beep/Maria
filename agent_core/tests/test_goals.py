@@ -419,6 +419,107 @@ class TestGoalStoreChildren:
         assert len(children) == 2
 
 
+class TestGoalStoreHierarchyGuard:
+    """Plank B0: depth/cycle guard on parent_goal_id (fail-safe orphaning)."""
+
+    def test_flat_goal_unaffected(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.LEARNING, "Flat", 0.7)
+        store.create(g)
+        assert store.get(g.id).parent_goal_id is None
+
+    def test_valid_child_kept(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        parent = create_goal(GoalType.USER, "Project", 0.8,
+                             status=GoalStatus.ACTIVE, goal_id="p")
+        store.create(parent)
+        child = create_goal(GoalType.USER, "Step", 0.7,
+                            status=GoalStatus.ACTIVE, parent_goal_id="p",
+                            goal_id="c")
+        store.create(child)
+        assert store.get("c").parent_goal_id == "p"
+
+    def test_depth_3_allowed(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        store.create(create_goal(GoalType.USER, "L1", 0.8,
+                                 status=GoalStatus.ACTIVE, goal_id="g1"))
+        store.create(create_goal(GoalType.USER, "L2", 0.7,
+                                 status=GoalStatus.ACTIVE, parent_goal_id="g1",
+                                 goal_id="g2"))
+        store.create(create_goal(GoalType.USER, "L3", 0.6,
+                                 status=GoalStatus.ACTIVE, parent_goal_id="g2",
+                                 goal_id="g3"))
+        # depth-3 chain (g1->g2->g3) is the limit and must be kept intact
+        assert store.get("g3").parent_goal_id == "g2"
+
+    def test_depth_4_orphaned(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        for i, parent in [(1, None), (2, "g1"), (3, "g2")]:
+            store.create(create_goal(GoalType.USER, f"L{i}", 0.8,
+                                     status=GoalStatus.ACTIVE,
+                                     parent_goal_id=parent, goal_id=f"g{i}"))
+        # g4 under g3 would be the 4th level -> parent link dropped, goal flat
+        g4 = create_goal(GoalType.USER, "L4", 0.6,
+                         status=GoalStatus.ACTIVE, parent_goal_id="g3",
+                         goal_id="g4")
+        store.create(g4)
+        assert store.get("g4").parent_goal_id is None
+
+    def test_self_parent_orphaned(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.USER, "Self", 0.7,
+                        status=GoalStatus.ACTIVE, parent_goal_id="loop",
+                        goal_id="loop")
+        store.create(g)
+        assert store.get("loop").parent_goal_id is None
+
+    def test_missing_parent_orphaned(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.USER, "Orphan", 0.7,
+                        status=GoalStatus.ACTIVE, parent_goal_id="ghost",
+                        goal_id="o")
+        store.create(g)
+        assert store.get("o").parent_goal_id is None
+
+    def test_cycle_orphaned(self, tmp_path):
+        # Pre-existing A->B chain, then try to add C under B and re-point... we
+        # cannot mutate parent post-create, so simulate a cycle by crafting a
+        # store whose ancestor chain loops, then creating a child off it.
+        store = GoalStore(tmp_path / "goals.jsonl")
+        a = create_goal(GoalType.USER, "A", 0.8, status=GoalStatus.ACTIVE,
+                        goal_id="A")
+        b = create_goal(GoalType.USER, "B", 0.7, status=GoalStatus.ACTIVE,
+                        parent_goal_id="A", goal_id="B")
+        store.create(a)
+        store.create(b)
+        # Force a cycle in the cache: A's parent becomes B (A->B->A).
+        store.get("A").parent_goal_id = "B"
+        child = create_goal(GoalType.USER, "C", 0.6, status=GoalStatus.ACTIVE,
+                            parent_goal_id="B", goal_id="C")
+        store.create(child)
+        # Walking up from B loops (B->A->B...) -> cycle detected -> C orphaned
+        assert store.get("C").parent_goal_id is None
+
+    def test_seed_hierarchy_survives_guard(self, tmp_path):
+        # The one live tree (health <- ram/cpu) must still seed intact.
+        store = GoalStore(tmp_path / "goals.jsonl")
+        store.seed_if_empty()
+        assert store.get("goal-maint-ram").parent_goal_id == "goal-maint-health"
+        assert store.get("goal-maint-cpu").parent_goal_id == "goal-maint-health"
+
+    def test_orphaned_link_persists_flat(self, tmp_path):
+        # An orphaned goal must round-trip flat (the dropped link is persisted).
+        path = tmp_path / "goals.jsonl"
+        store = GoalStore(path)
+        store.create(create_goal(GoalType.USER, "Bad", 0.7,
+                                 status=GoalStatus.ACTIVE,
+                                 parent_goal_id="ghost", goal_id="b"))
+        store.save()
+        reloaded = GoalStore(path)
+        reloaded.load()
+        assert reloaded.get("b").parent_goal_id is None
+
+
 class TestGoalStoreCleanup:
     def test_abandon_lowest(self, tmp_path):
         store = GoalStore(tmp_path / "goals.jsonl")
@@ -916,3 +1017,87 @@ class TestGoalStoreAutoConfirm:
         gid = store.propose(g)
         goal = store.get(gid)
         assert goal.status == GoalStatus.PENDING
+
+
+class TestGoalStoreRecentlyAchieved:
+    """get_recently_achieved: what did she finish TODAY.
+
+    Regression guard for the evening recap, which used to slice get_all()[-5:]
+    and so headlined a goal achieved on 07-05 in the 07-15 summary.
+    """
+
+    @staticmethod
+    def _achieve(store, description, hours_ago):
+        """Achieve a goal through the real status path, then backdate the trail."""
+        g = create_goal(GoalType.LEARNING, description, 0.5)
+        gid = store.create(g)
+        store.update_status(gid, GoalStatus.ACHIEVED, "done", "test")
+        goal = store.get(gid)
+        stamp = time.time() - hours_ago * 3600
+        for entry in goal.audit_trail:
+            if entry.new_status == GoalStatus.ACHIEVED.value:
+                entry.timestamp = stamp
+        return gid
+
+    def test_only_goals_inside_the_window(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        self._achieve(store, "Today", 2)
+        self._achieve(store, "Last week", 240)
+
+        recent = store.get_recently_achieved(24.0)
+
+        assert [g.description for g in recent] == ["Today"]
+
+    def test_ordered_by_achievement_time_not_insertion(self, tmp_path):
+        """The old bug: a stale goal sat first because it was late in the store."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        self._achieve(store, "Older", 20)
+        self._achieve(store, "Newer", 1)
+
+        recent = store.get_recently_achieved(24.0)
+
+        assert [g.description for g in recent] == ["Newer", "Older"]
+
+    def test_empty_when_nothing_finished_today(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        self._achieve(store, "Ancient", 500)
+
+        assert store.get_recently_achieved(24.0) == []
+
+    def test_ignores_goals_that_never_reached_achieved(self, tmp_path):
+        store = GoalStore(tmp_path / "goals.jsonl")
+        g = create_goal(GoalType.LEARNING, "Still going", 0.5)
+        store.create(g)
+
+        assert store.get_recently_achieved(24.0) == []
+
+    def test_updated_at_alone_does_not_pull_a_goal_back_in(self, tmp_path):
+        """A later touch moves updated_at; it must not re-date the achievement."""
+        store = GoalStore(tmp_path / "goals.jsonl")
+        gid = self._achieve(store, "Old win", 300)
+        store.get(gid).updated_at = time.time()
+
+        assert store.get_recently_achieved(24.0) == []
+
+
+class TestGoalAchievedAt:
+    def test_reads_the_trail(self):
+        g = create_goal(GoalType.LEARNING, "X", 0.5)
+        g.audit_trail.append(AuditEntry(
+            timestamp=1000.0, old_status="active", new_status="achieved",
+            reason="done", actor="test",
+        ))
+        assert g.achieved_at == 1000.0
+
+    def test_none_when_never_achieved(self):
+        g = create_goal(GoalType.LEARNING, "X", 0.5)
+        assert g.achieved_at is None
+
+    def test_last_achievement_wins_on_reopened_goal(self):
+        g = create_goal(GoalType.LEARNING, "X", 0.5)
+        for ts in (1000.0, 5000.0):
+            g.audit_trail.append(AuditEntry(
+                timestamp=ts, old_status="active", new_status="achieved",
+                reason="done", actor="test",
+            ))
+        assert g.achieved_at == 5000.0

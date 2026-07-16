@@ -8,6 +8,7 @@ Pattern: GoalStore (goals/store.py) + FetchRegistry MERGE semantics.
 Kontrakt: docs/CONTRACTS.md - Kontrakt 6: World Model
 """
 
+import dataclasses
 import json
 import logging
 import time
@@ -18,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from agent_core.world_model.belief_model import (
     Belief, BeliefType, BeliefSource, EntityType, create_belief,
+    STATUS_ACTIVE, STATUS_QUARANTINED, STATUS_RETRACTED,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,9 +43,14 @@ class BeliefStore:
         self._bulk_mode: bool = False  # when True, defer _enforce_cap to end of batch
 
         # Indexes (rebuilt on load and maintained on add)
-        self._by_entity: Dict[str, List[str]] = defaultdict(list)
-        self._by_entity_type: Dict[EntityType, List[str]] = defaultdict(list)
-        self._by_tag: Dict[str, List[str]] = defaultdict(list)
+        # Ordered-set semantics via dict (Py3.7+ preserves insertion order),
+        # giving O(1) add/remove/membership. Keys are belief_ids, values are
+        # always None. Lists here made add()/drop_belief() O(bucket) -> O(n^2)
+        # across a full build/prune: the _by_entity_type buckets hold tens of
+        # thousands of ids each (2026-07-13).
+        self._by_entity: Dict[str, Dict[str, None]] = defaultdict(dict)
+        self._by_entity_type: Dict[EntityType, Dict[str, None]] = defaultdict(dict)
+        self._by_tag: Dict[str, Dict[str, None]] = defaultdict(dict)
 
     @contextmanager
     def bulk_mode(self):
@@ -198,6 +205,11 @@ class BeliefStore:
             superseded_by=None,
             related_entities=old.related_entities,
             evidence=merged_evidence,
+            # Carry the lifecycle forward: a revise/decay of a quarantined or
+            # retracted belief must NOT silently mint a fresh active record
+            # (resurrection). The new current version keeps the prior status.
+            status=old.status,
+            retraction=old.retraction,
         )
 
         # Mark old as superseded
@@ -217,6 +229,8 @@ class BeliefStore:
             superseded_by=new_id,
             related_entities=old.related_entities,
             evidence=old.evidence,
+            status=old.status,
+            retraction=old.retraction,
         )
 
         self._beliefs[old.belief_id] = superseded
@@ -224,6 +238,110 @@ class BeliefStore:
 
         self.add(revised)
         return revised
+
+    # -- Conscious unlearn: quarantine / retract / unquarantine ----
+    # SAME belief_id in-place status flip (NOT a superseded chain): the record
+    # stays CURRENT (superseded_by=None) so compact() PRESERVES it as the
+    # on-disk audit, and there is no unstable-id churn. Callers should resolve a
+    # belief by entity (the stable key) first; belief_id churns on revise/decay.
+
+    def _lifecycle_snapshot(self, old: Belief, reason: str, actor: str,
+                            actor_detail: str, episode_id: str) -> Dict[str, Any]:
+        """Build the retraction audit payload, snapshotting the prior state so
+        unquarantine can restore it."""
+        return {
+            "reason": reason,
+            "actor": actor,
+            "actor_detail": actor_detail,
+            "ts": time.time(),
+            "episode_id": episode_id,
+            "prev_status": old.status,
+            "prev_belief_type": old.belief_type.value,
+            "prev_confidence": old.confidence,
+        }
+
+    def quarantine(self, belief_id: str, reason: str = "", actor: str = "operator",
+                   actor_detail: str = "", episode_id: str = "") -> Optional[Belief]:
+        """Reversible soft-hide. Guards status == active. Returns the new
+        record (same belief_id, status=quarantined) or None if not eligible."""
+        old = self._beliefs.get(belief_id)
+        if old is None or old.superseded_by is not None or old.status != STATUS_ACTIVE:
+            return None
+        new = dataclasses.replace(
+            old,
+            status=STATUS_QUARANTINED,
+            retraction=self._lifecycle_snapshot(old, reason, actor, actor_detail, episode_id),
+            updated_at=time.time(),
+            revision=old.revision + 1,
+        )
+        self._beliefs[belief_id] = new
+        self._dirty.add(belief_id)
+        return new
+
+    def retract(self, belief_id: str, reason: str = "", actor: str = "operator",
+                actor_detail: str = "", episode_id: str = "") -> Optional[Belief]:
+        """Audited removal. Confidence forced to 0.0; kept CURRENT
+        (superseded_by=None) so compaction preserves it as a tombstone-with-
+        reason. Guards status in {active, quarantined}. Returns the new record
+        or None if already retracted / not found."""
+        old = self._beliefs.get(belief_id)
+        if old is None or old.superseded_by is not None or old.status == STATUS_RETRACTED:
+            return None
+        new = dataclasses.replace(
+            old,
+            status=STATUS_RETRACTED,
+            confidence=0.0,
+            retraction=self._lifecycle_snapshot(old, reason, actor, actor_detail, episode_id),
+            updated_at=time.time(),
+            revision=old.revision + 1,
+        )
+        self._beliefs[belief_id] = new
+        self._dirty.add(belief_id)
+        return new
+
+    def unquarantine(self, belief_id: str, actor: str = "operator",
+                     actor_detail: str = "", episode_id: str = "") -> Optional[Belief]:
+        """Restore a quarantined belief to its prior status/type/confidence.
+        Guards status == quarantined. Returns the restored record or None."""
+        old = self._beliefs.get(belief_id)
+        if old is None or old.status != STATUS_QUARANTINED:
+            return None
+        ret = old.retraction or {}
+        prev_status = ret.get("prev_status", STATUS_ACTIVE)
+        prev_conf = ret.get("prev_confidence", old.confidence)
+        try:
+            prev_type = (BeliefType(ret["prev_belief_type"])
+                         if ret.get("prev_belief_type") else old.belief_type)
+        except (ValueError, KeyError):
+            prev_type = old.belief_type
+        new = dataclasses.replace(
+            old,
+            status=prev_status,
+            belief_type=prev_type,
+            confidence=prev_conf,
+            retraction=None,
+            updated_at=time.time(),
+            revision=old.revision + 1,
+        )
+        self._beliefs[belief_id] = new
+        self._dirty.add(belief_id)
+        return new
+
+    def get_current_by_source(self, value: str) -> List[Belief]:
+        """Current beliefs derived from a file_id/synthesis_id, for by-source
+        ops (/forget_source). Matches the file belief (entity == value or
+        source_id == file:value) and concept beliefs whose source_id encodes it
+        (concept:value:i). Topic beliefs are cross-file aggregates and are
+        intentionally NOT matched -- one bad source must not retract a whole
+        topic."""
+        matches = []
+        for b in self.get_current():
+            sid = b.source_id or ""
+            if (b.entity == value
+                    or sid == f"file:{value}"
+                    or sid.startswith(f"concept:{value}:")):
+                matches.append(b)
+        return matches
 
     def get(self, belief_id: str) -> Optional[Belief]:
         """Get belief by ID."""
@@ -233,23 +351,33 @@ class BeliefStore:
         """Get current beliefs for an entity."""
         ids = self._by_entity.get(entity, [])
         return [self._beliefs[bid] for bid in ids
-                if bid in self._beliefs and self._beliefs[bid].superseded_by is None]
+                if bid in self._beliefs and self._beliefs[bid].superseded_by is None
+                and self._beliefs[bid].status == STATUS_ACTIVE]
 
     def get_by_entity_type(self, entity_type: EntityType) -> List[Belief]:
         """Get current beliefs of a given entity type."""
         ids = self._by_entity_type.get(entity_type, [])
         return [self._beliefs[bid] for bid in ids
-                if bid in self._beliefs and self._beliefs[bid].superseded_by is None]
+                if bid in self._beliefs and self._beliefs[bid].superseded_by is None
+                and self._beliefs[bid].status == STATUS_ACTIVE]
 
     def get_by_tag(self, tag: str) -> List[Belief]:
         """Get current beliefs with a given tag."""
         ids = self._by_tag.get(tag, [])
         return [self._beliefs[bid] for bid in ids
-                if bid in self._beliefs and self._beliefs[bid].superseded_by is None]
+                if bid in self._beliefs and self._beliefs[bid].superseded_by is None
+                and self._beliefs[bid].status == STATUS_ACTIVE]
 
     def get_current(self) -> List[Belief]:
-        """Get all non-superseded beliefs."""
-        return [b for b in self._beliefs.values() if b.superseded_by is None]
+        """Get all non-superseded, active beliefs.
+
+        Quarantined/retracted beliefs are non-active and excluded here -- so
+        every consumer of get_current() (planner, decay, smart_prune, dedup,
+        stats) automatically stops seeing a soft-hidden/retracted belief
+        without each caller needing its own status guard.
+        """
+        return [b for b in self._beliefs.values()
+                if b.superseded_by is None and b.status == STATUS_ACTIVE]
 
     def find_by_entity_and_source(
         self, entity: str, source_id: str
@@ -272,11 +400,20 @@ class BeliefStore:
             by_entity_type[b.entity_type.value] += 1
             total_confidence += b.confidence
 
+        # Lifecycle census over the non-superseded view (current + the
+        # quarantined/retracted records get_current() now hides) -- free
+        # operator visibility into how many beliefs are soft-hidden/retracted.
+        by_status = defaultdict(int)
+        for b in self._beliefs.values():
+            if b.superseded_by is None:
+                by_status[b.status] += 1
+
         return {
             "total": len(current),
             "total_all": len(self._beliefs),
             "by_belief_type": dict(by_type),
             "by_entity_type": dict(by_entity_type),
+            "by_status": dict(by_status),
             "avg_confidence": round(total_confidence / len(current), 3) if current else 0.0,
         }
 
@@ -292,15 +429,18 @@ class BeliefStore:
             self._index_belief(belief)
 
     def _index_belief(self, belief: Belief) -> None:
-        """Add a belief to all indexes."""
+        """Add a belief to all indexes.
+
+        Buckets are dict-backed ordered sets, so assignment is idempotent and
+        O(1) -- no membership scan needed. The old ``bid not in list`` guard
+        was O(bucket): with a few huge _by_entity_type buckets it turned a
+        full build into O(n^2) (54k inserts -> ~7s of pure list scans).
+        """
         bid = belief.belief_id
-        if bid not in self._by_entity.get(belief.entity, []):
-            self._by_entity[belief.entity].append(bid)
-        if bid not in self._by_entity_type.get(belief.entity_type, []):
-            self._by_entity_type[belief.entity_type].append(bid)
+        self._by_entity[belief.entity][bid] = None
+        self._by_entity_type[belief.entity_type][bid] = None
         for tag in belief.tags:
-            if bid not in self._by_tag.get(tag, []):
-                self._by_tag[tag].append(bid)
+            self._by_tag[tag][bid] = None
 
     def compact(self) -> int:
         """Rewrite beliefs.jsonl to only non-superseded beliefs.
@@ -380,16 +520,16 @@ class BeliefStore:
             (self._by_entity, b.entity),
             (self._by_entity_type, b.entity_type),
         ):
-            lst = idx.get(key)
-            if lst and belief_id in lst:
-                lst.remove(belief_id)
-                if not lst:
+            bucket = idx.get(key)
+            if bucket is not None:
+                bucket.pop(belief_id, None)  # O(1) dict-backed ordered set
+                if not bucket:
                     del idx[key]
         for tag in b.tags:
-            lst = self._by_tag.get(tag)
-            if lst and belief_id in lst:
-                lst.remove(belief_id)
-                if not lst:
+            bucket = self._by_tag.get(tag)
+            if bucket is not None:
+                bucket.pop(belief_id, None)
+                if not bucket:
                     del self._by_tag[tag]
 
         self._dirty.discard(belief_id)

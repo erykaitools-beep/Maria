@@ -129,6 +129,16 @@ class MetaCognition:
         patterns = self._reflector.analyze_patterns()
         return patterns.get("need_human", False)
 
+    def needs_human(self) -> bool:
+        """Alias for need_human().
+
+        Call sites (homeostasis core, planner_core, limitation_reporter) and the
+        Telegram notifier all use the plural spelling. Without this alias their
+        hasattr() guards resolved False and the K9 "I need a human" signal was
+        silently dead.
+        """
+        return self.need_human()
+
     def get_status(self) -> Dict[str, Any]:
         """
         Status dict for REPL / Web UI.

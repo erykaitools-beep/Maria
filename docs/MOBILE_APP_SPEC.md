@@ -1,6 +1,6 @@
 # M.A.R.I.A. Mobile — Specyfikacja (MOBILE_APP_SPEC.md)
 
-> **Status:** Etap 2 W TOKU — **System + Dashboard na ŻYWYCH danych** (`/api/status/full`, commit `f977458` w `~/maria-mobile`). Live web preview na telefonie: http://<MINI_PC_LAN_IP>:5000/static/mobile/index.html . **Aktualny fokus (2026-06-09): standard-first** — dociągamy co mamy do jednego standardu wizualnego (§12), nowe funkcje parkujemy w backlogu (§13). Decyzja Eryka: „najpierw standard, później rozszerzenie o dodatki — inaczej będziemy dodawać i dodawać a będzie źle wyglądać". Handoff: `claude_notes/2026-06-08_mobile_app_etap1.md`.
+> **Status (2026-06-16):** Etap 1 + 2 + 3 ZIELONE, Etap 4 (write) ZACZĘTY. 11 ekranów na ŻYWYCH danych (9 REST `Http*Repository` + chat `SocketChatRepository`, same-origin cookie). PWA installable. Pierwsza akcja write LIVE = **Skrzynka** approve/reject (`POST /api/approval/act` przez żywe store'y daemona). Backend ma już resztę write-endpointów (`/api/tasks` POST, `/api/user/profile` POST, `/api/proactive/toggle`, `/api/experiments/*`) — NIE wpięte jeszcze w apkę. Web preview na telefonie: http://<MINI_PC_LAN_IP>:5000/static/mobile/index.html . Wcześniejszy fokus (2026-06-09): standard-first (§12) — domknięty. Handoffy: `claude_notes/2026-06-10_mobile_etap3_chat_projects_budowa.md` (najnowszy), `..._06-09_...etap2...`, `..._06-08_...etap1.md`.
 > **Zasada:** LOKALNE do czasu aż aplikacja realnie działa (ADR-029 / publish-after-execution). Nie pushować publicznie.
 > **Dla Codexa/Claude:** ten plik jest kontraktem. Czytaj cały przed pisaniem kodu. Nie skacz do Etapu 2+ bez zielonego Etapu 1.
 
@@ -115,9 +115,12 @@ Pierwszy ekran = dashboard, nie pusty czat.
 - To pokrywa „logi jako Decyzja/Zmiana/Test/Restart/Zadanie" z koncepcji (nie surowe piekło logów — strukturalne wpisy).
 - Eksperymenty/refleksje Eryka (ręczne wpisy dziennika) → mały NEW store, później.
 
-### 3.8 Pliki (Files) — 🔨 NEW (jedyny ekran bez backendu)
-- Istnieje tylko `GET /api/docs` + `/api/docs/download/<file>` (read).
-- Potrzebne: `GET /api/files` (list), `POST /api/files/upload`, `DELETE /api/files/<name>`, powiązanie z projektem. ~mały dodatek do `maria_ui/`.
+### 3.8 Pliki (Files) — ✅ LIVE read + podglad (2026-06-16)
+- Lista: `GET /api/docs` (zywa). Podglad: dotkniecie pliku tekstowego -> in-app
+  `DocumentPreviewScreen` (`GET /api/docs/download/<file>` przez `ApiClient.getText`,
+  cap 200k znakow, typy binarne -> "pobierz przez przegladarke"). `d00c085`.
+- ⏳ Zostaje (write): `POST /api/files/upload`, `DELETE /api/files/<name>`, powiazanie
+  z projektem. ~maly dodatek do `maria_ui/`. Upload FAB dzis = uczciwy "wkrotce".
 
 ### 3.9 Ustawienia (Settings) — ✅ READY
 - `GET/POST /api/user/profile` (name, response_style, autonomy_level, interests, facts, schedule), `POST /api/proactive/toggle`, `GET /api/capabilities`.
@@ -134,7 +137,7 @@ Pierwszy ekran = dashboard, nie pusty czat.
 | Pamięć | ✅ (read) | front; write później |
 | System | ✅ | front only |
 | Dziennik | ✅ (read) | front; ręczne wpisy później |
-| Pliki | 🔨 | front + nowy `/api/files` |
+| Pliki | ✅ LIVE (read+podglad) | upload/delete (`/api/files`) później |
 | Ustawienia | ✅ | front only |
 
 ---
@@ -242,9 +245,14 @@ Token API do `maria_ui` (mały PR w `maria/`). Wire: Dashboard, System, Pamięć
 SocketIO client → `chat_message`/`chat_response` + statusy + historia.
 **Wynik:** rozmawiasz z Marią z telefonu.
 
-### Etap 4 — Akcje (write)
+### Etap 4 — Akcje (write)  *(W TOKU — 2026-06-16)*
 `POST /api/tasks` (zlecaj Claude/Codex), approve/reject eksperymentów, edycja profilu, proactive toggle, approve-gate akcji.
 **Wynik:** sterujesz Marią z telefonu.
+- ✅ **Skrzynka** approve/reject (`POST /api/approval/act`, layer 2) — pierwszy write.
+- ✅ **Zlecanie zadań** (`POST /api/tasks`) — formularz "+" odpala realnego Claude/Codex (busy/error inline, optymistyczny wiersz PENDING). `34e5c68`.
+- ✅ **Edycja profilu** (`POST /api/user/profile`) — Zapisz persystuje imię/styl/autonomię + diff zainteresowań. `34e5c68`.
+- ✅ **Proactive toggle** (`GET /api/proactive/status` + `POST /api/proactive/toggle`) — przełącznik hydratuje z żywego stanu, działa od razu (optymistycznie, revert na błędzie). `34e5c68`.
+- ⏳ **Zostaje:** approve/reject eksperymentów (`/api/experiments/*` — backend gotowy, brak ekranu w apce), profil: dodawanie faktów/harmonogramu, alerty Telegram (brak endpointu toggle — dziś read-only info-row).
 
 ### Etap 5 — Tryby + brakujące endpointy
 `mode` param + warianty `master_prompt.py`; `/api/files`; `/api/projects` (jeśli zdecydowane); search.
@@ -376,7 +384,7 @@ Plus **pull-to-refresh** na każdym ekranie z danymi.
 - **Żywe kafelki:** Pamięć (`/api/memory/query`, `/api/beliefs/recent`), Zadania (`/api/tasks`, `/api/learning/goals`), Dziennik (`/api/traces`), Ustawienia (`/api/user/profile`).
 
 **Większe etapy (z §8):**
-- ~~Chat na żywo (Etap 3)~~ ✅ 2026-06-10 · ~~`/api/projects`~~ ✅ 2026-06-10 (konduktor) + zakładka Budowa (`/api/build`) · Akcje/write (Etap 4) · Tryby czatu jako realne persony serwera (§4, jeśli wrócą) + `/api/files` write (Etap 5).
+- ~~Chat na żywo (Etap 3)~~ ✅ 2026-06-10 · ~~`/api/projects`~~ ✅ 2026-06-10 (konduktor) + zakładka Budowa (`/api/build`) · **Akcje/write (Etap 4) — W TOKU 2026-06-16: task-create + profile-save + proactive-toggle ✅; zostaje experiments approve/reject** · Tryby czatu jako realne persony serwera (§4, jeśli wrócą) + `/api/files` write (Etap 5).
 - **Dostęp poza WiFi:** Tailscale (prywatny tunel) + token API w `maria_ui` + natywny APK przez chmurę (mini PC nie ma Android SDK). (Etap 6 / dostęp zdalny.)
 - Push: `proactive_notification` → natywne powiadomienia (FCM/local).
 

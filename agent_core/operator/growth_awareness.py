@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -96,42 +96,63 @@ class GrowthAwareness:
 
     # -- Core API --
 
+    # Descriptive fields recomputed on every refresh (status/created_at are NOT).
+    _MUTABLE_FIELDS = (
+        "description",
+        "current_state",
+        "desired_state",
+        "estimated_cost",
+        "estimated_benefit",
+        "source",
+    )
+
     def refresh(self) -> int:
-        """Re-scan all sources and update targets. Returns count of new targets."""
+        """Re-scan all sources: add new targets AND update existing ones in place.
+
+        Returns the count of newly added targets. Operator-set status
+        (deferred/achieved/in_progress) and created_at are preserved across
+        refreshes; only the descriptive fields (description, current_state,
+        cost/benefit, ...) are recomputed so the live numbers stay current
+        instead of freezing at first scan.
+
+        Note: a target whose source no longer regenerates it (e.g. the
+        knowledge backlog drops below threshold) is intentionally NOT
+        auto-resolved here -- a transient source error returning empty would
+        wrongly mark it achieved. Closure stays an explicit mark_achieved().
+        """
         self._ensure_loaded()
-        existing_ids = {t.target_id for t in self._targets}
-        new_targets = []
+        by_id = {t.target_id: t for t in self._targets}
 
-        # 1. Unavailable capabilities
-        for t in self._targets_from_capabilities():
-            if t.target_id not in existing_ids:
-                new_targets.append(t)
-                existing_ids.add(t.target_id)
+        generated: List[GrowthTarget] = []
+        generated.extend(self._targets_from_capabilities())
+        generated.extend(self._targets_from_reliability())
+        generated.extend(self._targets_from_knowledge())
+        # Hardware targets are static module globals -- copy so we never mutate
+        # the shared instances (the old code set created_at on the global).
+        generated.extend(replace(t) for t in _HARDWARE_TARGETS)
 
-        # 2. Low-confidence actions
-        for t in self._targets_from_reliability():
-            if t.target_id not in existing_ids:
-                new_targets.append(t)
-                existing_ids.add(t.target_id)
+        new_count = 0
+        dirty = False
+        for fresh in generated:
+            existing = by_id.get(fresh.target_id)
+            if existing is None:
+                if not fresh.created_at:
+                    fresh.created_at = time.time()
+                self._targets.append(fresh)
+                by_id[fresh.target_id] = fresh
+                new_count += 1
+                dirty = True
+                continue
+            # Update descriptive fields in place; never touch status/created_at.
+            for f in self._MUTABLE_FIELDS:
+                if getattr(existing, f) != getattr(fresh, f):
+                    setattr(existing, f, getattr(fresh, f))
+                    dirty = True
 
-        # 3. Knowledge gaps
-        for t in self._targets_from_knowledge():
-            if t.target_id not in existing_ids:
-                new_targets.append(t)
-                existing_ids.add(t.target_id)
-
-        # 4. Hardware (static, always present)
-        for t in _HARDWARE_TARGETS:
-            if t.target_id not in existing_ids:
-                t.created_at = time.time()
-                new_targets.append(t)
-                existing_ids.add(t.target_id)
-
-        if new_targets:
-            self._targets.extend(new_targets)
+        if dirty:
             self._save()
 
-        return len(new_targets)
+        return new_count
 
     def get_targets(self, status: Optional[str] = None) -> List[GrowthTarget]:
         """Get targets with optional status filter."""

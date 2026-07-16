@@ -236,8 +236,18 @@ class OpenClawClient:
         For write: runs tee to write content.
         """
         if tool_name == "exec":
-            command = args["command"]
-            cmd_parts = command.split()
+            # Prefer an explicit argv list (each element passed as ONE argument, no
+            # whitespace re-splitting) when the caller provides it -- e.g. the undo
+            # inverse 'rm -- <path>' for a path with spaces. Re-splitting a
+            # shlex.quote-d command string here would destroy the quoting and
+            # delete the wrong path. Fall back to the legacy split for existing
+            # string-command callers.
+            argv = args.get("argv")
+            if isinstance(argv, list) and argv and all(isinstance(x, str) for x in argv):
+                cmd_parts = list(argv)
+            else:
+                command = args["command"]
+                cmd_parts = command.split()
         elif tool_name == "read":
             path = args["path"]
             import shlex

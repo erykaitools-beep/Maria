@@ -234,13 +234,33 @@ class TestStrategicPlanner:
         action_types = [a.action_type for a in plan.action_queue]
         assert "learn" in action_types
 
-    def test_rule_fallback_evening(self):
+    def test_rule_fallback_in_window_learns(self):
+        # An in-window hour does learn/exam/review, not creative.
         sp = StrategicPlanner()
-        sp._time_ctx = TimeContext(now=datetime(2026, 4, 13, 19, 0))  # Monday evening
+        sp._time_ctx = TimeContext(now=datetime(2026, 4, 13, 15, 0))  # Monday 15:00
 
         plan = sp._rule_based_fallback()
         action_types = [a.action_type for a in plan.action_queue]
-        assert "creative" in action_types
+        assert "learn" in action_types
+        assert "creative" not in action_types
+
+    def test_rule_fallback_weekend_in_window_learns(self):
+        # 2026-06-20: weekends are learning days now -- a Saturday in-window hour
+        # learns (the old `and is_weekday` gate would have wrongly fallen to creative).
+        sp = StrategicPlanner()
+        sp._time_ctx = TimeContext(now=datetime(2026, 4, 11, 15, 0))  # Saturday 15:00
+
+        plan = sp._rule_based_fallback()
+        assert "learn" in [a.action_type for a in plan.action_queue]
+
+    def test_rule_fallback_gap_hours_creative(self):
+        # The creative/reflection branch fires in the gap between window close
+        # (19:00) and quiet (22:00).
+        sp = StrategicPlanner()
+        sp._time_ctx = TimeContext(now=datetime(2026, 4, 13, 20, 0))  # Monday 20:00
+
+        plan = sp._rule_based_fallback()
+        assert "creative" in [a.action_type for a in plan.action_queue]
 
     def test_rule_fallback_quiet(self):
         sp = StrategicPlanner()

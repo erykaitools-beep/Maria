@@ -157,6 +157,9 @@ def _bare_core(running, last_tick_monotonic, stall=300.0):
     c._running = running
     c._last_tick_monotonic = last_tick_monotonic
     c._watchdog_stall_sec = stall
+    c._external_op_deadline = None
+    c._external_op_label = ""
+    c._external_op_logged = False
     return c
 
 
@@ -185,6 +188,74 @@ class TestWatchdogDecision:
         # the watchdog must not fire a restart then.
         c = _bare_core(False, time.monotonic() - 999, stall=300.0)
         assert c._watchdog_should_trip() is False
+
+
+class TestWatchdogExternalOpLease:
+    """2026-06-30 incident: Phase 17 dispatched a Codex implementation brief
+    (30 min subprocess budget) and the watchdog force-restarted the process at
+    +300s, killing Codex mid-build and stranding the task IN_PROGRESS. A
+    declared external-op lease must hold the watchdog's fire for exactly the
+    leased window -- and no longer."""
+
+    def test_active_lease_holds_fire_on_a_stalled_tick(self):
+        c = _bare_core(True, time.monotonic() - 999, stall=300.0)
+        with c.external_op_lease(1800.0, label="codex-dispatch:market_agent"):
+            assert c._watchdog_should_trip() is False
+
+    def test_expired_lease_trips_again(self):
+        # A wedge INSIDE the leased call (the 2026-06-02 class) must still be
+        # bounded: once the allowance is spent the watchdog fires normally.
+        c = _bare_core(True, time.monotonic() - 999, stall=300.0)
+        with c.external_op_lease(0.0, label="codex-dispatch:market_agent"):
+            assert c._watchdog_should_trip() is True
+
+    def test_lease_release_restamps_heartbeat_then_trips_on_a_new_stall(self):
+        # After a legitimate long lease the tick TAIL (phases after the leased
+        # op) still has work to do. The release must give it a fresh window
+        # instead of tripping instantly on the now-minutes-old stall clock
+        # (the 2026-07-07 residual). Normal tripping returns only if the tail
+        # itself then stalls past the deadline.
+        c = _bare_core(True, time.monotonic() - 999, stall=300.0)
+        with c.external_op_lease(1800.0):
+            pass
+        assert c._external_op_deadline is None
+        # Heartbeat restamped on release -> the tail is not treated as wedged.
+        assert c._watchdog_should_trip() is False
+        # A genuine wedge in the tail (clock ages past the deadline) still trips.
+        c._last_tick_monotonic = time.monotonic() - 999
+        assert c._watchdog_should_trip() is True
+
+    def test_lease_released_even_when_the_op_raises(self):
+        c = _bare_core(True, time.monotonic() - 999, stall=300.0)
+        with pytest.raises(RuntimeError):
+            with c.external_op_lease(1800.0):
+                raise RuntimeError("dispatch crashed")
+        # finally still runs: lease cleared AND heartbeat restamped, so a crash
+        # mid-dispatch does not leave the tail exposed to an instant trip.
+        assert c._external_op_deadline is None
+        assert c._watchdog_should_trip() is False
+
+    def test_lease_does_not_mask_a_fresh_tick(self):
+        # Lease active but the loop is beating fine -- nothing to suppress.
+        c = _bare_core(True, time.monotonic(), stall=300.0)
+        with c.external_op_lease(1800.0):
+            assert c._watchdog_should_trip() is False
+
+    def test_suppression_logs_once_per_lease(self, caplog):
+        import logging as _logging
+        c = _bare_core(True, time.monotonic() - 999, stall=300.0)
+        c._watchdog_stop = threading.Event()
+        c._watchdog_check_sec = 0.01
+        with caplog.at_level(_logging.INFO, logger="agent_core.homeostasis.core"):
+            with c.external_op_lease(1800.0, label="codex-dispatch:maria"):
+                t = threading.Thread(target=c._watchdog_loop, daemon=True)
+                t.start()
+                time.sleep(0.15)
+                c._watchdog_stop.set()
+                t.join(timeout=2.0)
+        held = [r for r in caplog.records if "holding fire" in r.getMessage()]
+        assert len(held) == 1
+        assert "codex-dispatch:maria" in held[0].getMessage()
 
 
 class TestWatchdogArming:
@@ -227,12 +298,9 @@ class TestWatchdogThreadLoop:
     observe the decision without os._exit killing the test process."""
 
     def _core(self, stall, check, last_tick):
-        c = HomeostasisCore.__new__(HomeostasisCore)
-        c._running = True
+        c = _bare_core(True, last_tick, stall=stall)
         c._watchdog_stop = threading.Event()
-        c._watchdog_stall_sec = stall
         c._watchdog_check_sec = check
-        c._last_tick_monotonic = last_tick
         return c
 
     def test_loop_trips_on_a_stalled_tick(self):
@@ -290,12 +358,9 @@ class TestWatchdogThread:
         # End-to-end: the watchdog THREAD must call _trip_watchdog on a stall.
         # _trip_watchdog is stubbed so the test process survives (the real one
         # would os._exit(1)).
-        c = HomeostasisCore.__new__(HomeostasisCore)
-        c._running = True
+        c = _bare_core(True, time.monotonic() - 1.0, stall=0.05)  # stalled
         c._watchdog_stop = threading.Event()
-        c._watchdog_stall_sec = 0.05
         c._watchdog_check_sec = 0.01
-        c._last_tick_monotonic = time.monotonic() - 1.0  # already stalled
         tripped = {"stalled": None}
 
         def _fake_trip(stalled):
@@ -310,12 +375,9 @@ class TestWatchdogThread:
         assert tripped["stalled"] >= 0.05
 
     def test_loop_quiet_while_healthy(self):
-        c = HomeostasisCore.__new__(HomeostasisCore)
-        c._running = True
+        c = _bare_core(True, time.monotonic(), stall=5.0)  # fresh
         c._watchdog_stop = threading.Event()
-        c._watchdog_stall_sec = 5.0
         c._watchdog_check_sec = 0.01
-        c._last_tick_monotonic = time.monotonic()  # fresh
         tripped = {"called": False}
         c._trip_watchdog = lambda s: tripped.__setitem__("called", True)
         t = threading.Thread(target=c._watchdog_loop, daemon=True)

@@ -14,6 +14,7 @@ from typing import Optional
 from agent_core.environment.environment_model import (
     PROFILE_LEARNING,
     berlin_now as _env_berlin_now,
+    is_learning_window as _env_is_learning_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,11 @@ logger = logging.getLogger(__name__)
 # Learning window hours (Berlin time). LEARN_HOURS_ALL is DERIVED from the SSoT
 # (environment_model.PROFILE_LEARNING) so this advisory view can never drift
 # from the enforcing gate (P2 #5).
-LEARN_HOURS_MORNING = (9, 10)   # 9:00-10:59
-LEARN_HOURS_AFTERNOON = (14, 15)  # 14:00-15:59
 LEARN_HOURS_ALL = set(PROFILE_LEARNING.auto_trigger_hours)
+# Contiguous span of the (now full-day) window, for the advisory "minutes to
+# open/close" helpers. Derived from the SSoT so it tracks any config change.
+_LEARN_OPEN_HOUR = min(LEARN_HOURS_ALL) if LEARN_HOURS_ALL else 0
+_LEARN_CLOSE_HOUR = (max(LEARN_HOURS_ALL) + 1) if LEARN_HOURS_ALL else 24
 
 # Quiet hours (Berlin time) - no heavy actions
 QUIET_START = 22
@@ -61,10 +64,11 @@ class TimeContext:
 
     @property
     def is_learning_window(self) -> bool:
-        # P2 (#5): + Mon-Fri so this advisory view matches the enforcing gate's
-        # verdict. Was hour-only -> logged "in window" on weekends while the gate
-        # blocked, producing contradictory traces.
-        return self.hour in LEARN_HOURS_ALL and self.is_weekday
+        # Delegate to the SSoT gate (environment_model) so this advisory view can
+        # never drift from the enforcing window -- hours AND days both come from
+        # PROFILE_LEARNING. (2026-06-20: window is now 7-day, so the old hardcoded
+        # Mon-Fri `and self.is_weekday` would have wrongly closed weekends here.)
+        return _env_is_learning_window(self.berlin_now)
 
     @property
     def is_quiet_hours(self) -> bool:
@@ -93,37 +97,21 @@ class TimeContext:
         """Minutes until current learning window closes. None if not in window."""
         if not self.is_learning_window:
             return None
-        h = self.hour
-        m = self.berlin_now.minute
-        # Morning window: closes at 11:00
-        if h in (9, 10):
-            return (10 - h) * 60 + (60 - m)
-        # Afternoon window: closes at 16:00
-        if h in (14, 15):
-            return (15 - h) * 60 + (60 - m)
-        return None
+        now_min = self.hour * 60 + self.berlin_now.minute
+        return _LEARN_CLOSE_HOUR * 60 - now_min
 
     @property
     def minutes_to_next_window(self) -> Optional[int]:
         """Minutes until next learning window opens. None if already in window."""
         if self.is_learning_window:
             return None
-        h = self.hour
-        m = self.berlin_now.minute
-        now_min = h * 60 + m
-
-        # Check today's remaining windows
-        candidates = []
-        if now_min < 9 * 60:
-            candidates.append(9 * 60 - now_min)
-        if now_min < 14 * 60:
-            candidates.append(14 * 60 - now_min)
-
-        if candidates:
-            return min(candidates)
-
-        # Next window is tomorrow 9:00
-        return (24 * 60 - now_min) + 9 * 60
+        now_min = self.hour * 60 + self.berlin_now.minute
+        open_min = _LEARN_OPEN_HOUR * 60
+        if now_min < open_min:
+            return open_min - now_min
+        # Past today's window -> tomorrow's open (advisory; ignores weekend gap,
+        # matching the prior behaviour).
+        return (24 * 60 - now_min) + open_min
 
     @property
     def is_good_for_heavy_action(self) -> bool:

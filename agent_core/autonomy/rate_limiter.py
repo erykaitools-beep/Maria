@@ -22,7 +22,11 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "maintenance": 10,
     "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
     "effector": 10,   # OpenClaw: max 10 tool invocations per hour
-    "self_analyze": 2,  # K12: max 2 per hour (practically 1/day via planner cooldown)
+    "self_analyze": 1,  # K12: max 1 per hour. Ten limiter jest JEDYNYM
+    # hamulcem na nocnej rotacji (_decide_non_learning_action) -- dzienny
+    # 4h-cooldown zyje tylko w _maybe_self_analyze i rotacja go omija, wiec
+    # 2/h dawalo ~28 pelnych analiz NIM/noc (residual przegladu 07-07).
+    # Dzienna sciezka robi <1/h, wiec 1/h jej nie dotyka.
     "creative": 2,      # K13: max 2 creative reflections per hour
     "critique": 1,      # Faza G: max 1 critique per hour (was: unlimited -> spam loop)
     "ask_expert": 10,   # ChatGPT encyclopedia: max 10 per hour

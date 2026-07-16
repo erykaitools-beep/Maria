@@ -6,8 +6,18 @@
 > (the verified gap map) + `ROADMAP.md` Faza K "Statek Teseusza" discipline,
 > validated against live code.
 > Local until work underway (ADR-029 / publish-after-execution).
-> Last updated: 2026-06-07 (TIER 1 roof CLOSED: planks 6, 7a/7b, 9, 10 all live
-> OBSERVED. Next: TIER 2 hands -- first real effector action on the world).
+> Last updated: 2026-07-06 (planning session, 13-agent recon: DH-B rollup
+> evidence COMPLETE (282+ correct observe decisions on the funding project,
+> 3/3 achieved 07-05); GOAL_DEADLINE_ENABLED turned out to be a DEAD WIRE on
+> the live daemon — read only by abandoned entrypoints — fixed `f6ba962`;
+> creative night-loop faucet closed `0039116`. TIER 2 closes with: ROLLUP
+> cutover (**DONE 07-09 19:54 — clean: one `[ROLLUP/cutover] achieved` line
+> then silence, `closed_by=rollup` written to goals.jsonl, new PID 202729,
+> zero boot errors**) + DEADLINE cutover after live observe lines (STILL OPEN
+> — awaits project #2, i.e. a deadline goal that rollup does NOT close; the
+> funding parent got closed by rollup so it can't be the DEADLINE=cutover proof).
+> Next after Tier 2: DH-C arming (drill-first), then TIER 3 room #1:
+> **workflow** (order amended 07-06, Eryk ack — see Tier 3), skills after).
 
 ## Why this doc exists
 
@@ -48,46 +58,77 @@ The organism can think + learn (inner loop); it could not yet reliably
 7a/7b, 9, 10) are live OBSERVED. Items 6, 7, 9, 10 from the gap map -> planks
 below. **Next: TIER 2 hands** (first real effector action on the world).
 
-### 🔧 TIER 2 — DEPTH BEFORE BREADTH  *(in progress: hands Rung 2 OBSERVED 06-07)*
-- **Hands** — first real effector call on the world. ✅ **Rung 2 OBSERVED
-  2026-06-07**: Maria PROPOSES a deterministic status note, operator
-  `/approve_note` writes it to `meta_data/maria_outbox/` (outside the sandbox,
-  via the guarded sandbox_write engine + atomic no_overwrite). First real
-  artifact: `maria_status_*.txt`. Autonomous PROPOSE behind `OUTBOX_WRITE_ENABLED`
-  (OFF until armed); the write is always operator-gated. *Next rungs:* arm the
-  autonomous proposer; widen artifact types; later OpenClaw read-only at CONFIRM
-  (needs an undo story + authority reconciliation first -- live K7 = BOUNDED).
-- **Knowledge consolidation/synthesis** — sources merge into concept maps; today
-  knowledge is a flat pile that never compounds. *Stage 1 done 2026-06-10:*
-  sleep consolidation real (NREM2 boost + NREM3 forgetting OBSERVED live)
-  and the semantic-dedup chain wired end-to-end (entity metadata contract,
-  planner + Telegram callers, threshold 0.95 calibrated on live vectors,
-  `SEMANTIC_DEDUP_ENABLED` off->observe->merge rollout). *Stage 2:* the
-  synthesizer itself (NIM concept maps behind the independent-exam gate).
-- **Long-horizon project goals** — sub-goal trees + deadlines (today 0 project
-  goals, 0 deadlines).
-- **Rollback / quarantine** — retract bad knowledge (today append-only, never
-  unlearns).
+### 🔧 TIER 2 — DEPTH BEFORE BREADTH  *(3 of 4 planks done; last plank armed =observe 07-04)*
+- **Hands** ✅ far past Rung 2: outbox autonomous-propose ARMED
+  (`OUTBOX_WRITE_ENABLED`, 06-08); B2 FS_WRITE effector LIVE (RED drill 06-21,
+  `FS_WRITE_ENABLED` + `LEARNING_NOTES_ENABLED`); undo journal + execute LIVE
+  on real OpenClaw (DH-A live rung 06-24/25, Maria wrote AND reverted a file);
+  UNDO-SUGGEST armed observe-first (06-25); K7 authority reconciled (06-01..07).
+  *Remaining rungs (post-Tier-2):* widen artifact types; OpenClaw at CONFIRM.
+- **Knowledge consolidation/synthesis** ✅ Stage 1 (06-10: real sleep
+  consolidation + semantic dedup) AND Stage 2 (06-13/14: synthesizer live,
+  first synthesis 82.5%, local-qwen3 faithfulness gate fail-closed,
+  `SYNTH_ENABLED` + `CONCEPT_TRUST_GATE=armed`, autonomous topic picker).
+- **Long-horizon project goals** — DH-B built 2026-06-22 (`parent_goal_id`
+  rollup STEP 2.35 + deadline urgency + `/project` operator kran, ~96 tests,
+  schema-guard always-on) but dormant 2 weeks. **ARMED 2026-07-04:
+  `GOAL_ROLLUP_ENABLED=observe` + `GOAL_DEADLINE_ENABLED=observe`.**
+  ROLLUP evidence COMPLETE 07-05/06: first operator project 3/3 achieved,
+  282+ correct `[ROLLUP/observe] all_children_achieved` decisions, zero
+  mutation. DEADLINE was a congenital DEAD WIRE on the daemon (flag read
+  only in select_goal/rank_goals, neither reachable from the live ranked
+  path since the 03-31 rewrite — wrong-component-tested) — **fixed
+  `f6ba962` 07-06**: dmode read in `_select_ranked_goals`, scorer reads the
+  flag itself when a caller forgets, log dedup per 0.1-multiplier step.
+  Cutover plan: **ROLLUP=cutover BEFORE 07-09 22:57** (else the parent
+  lingers ACTIVE forever; expect one proactive GOAL_ACHIEVED ping — that IS
+  the demo); DEADLINE=cutover only after live `[DEADLINE/observe]` lines
+  (~07-08 evening on the funding parent, or project #2). **REAP:
+  recommendation permanently OFF** (binary flag with no observe mode, USER
+  goals NOT exempt; rollup's ANY_FAIL path covers failures) — Eryk decision
+  to record at cutover. **This is the plank that closes TIER 2.**
+- **Rollback / quarantine** ✅ shipped 2026-06-14 (conscious-unlearn: in-place
+  status-flip + carry-forward + visibility filter + build denylist + blocking
+  lock + vector evict + replay-on-boot; /quarantine //retract /forget_source).
 
 ### 🚪 TIER 3 — NEW ROOMS (breadth, same discipline)
-`skills`, `workflow`, `vision-grounding`, `voice` (north-star). Each via the
+`workflow`, `skills`, `vision-grounding`, `voice` (north-star). Each via the
 flag->observe->cutover discipline. **Deliberately last** — see module map for why
 building them earlier IS a collision.
+
+> **Room order amended 2026-07-06 (Eryk ack): workflow BEFORE skills.**
+> Evidence: (a) workflow's blocking premise "nothing to orchestrate" flipped
+> when hands went live 06-21/24 (FS_WRITE + undo + outbox all armed);
+> (b) workflow is the standing guardrail-4 violation — WIRED, tick Phase 14
+> advancing an EMPTY store every minute, engine never ran once
+> (`workflows.jsonl` never existed), `/wf approve` has zero production
+> callers (requires_approval steps deadlock), DelegationManager bypasses
+> K7 — the room opens by OBSERVING never-run code, then adding valves;
+> (c) skills' fuel (decision_traces) was poisoned by the creative night
+> loop until `0039116` — extractor dry-run gave 4/4 junk; it needs weeks of
+> clean traces, which the faucet fix now accumulates as a side effect.
+> Programme arc after Tier 2 (planning session 07-06): **Warsztat**
+> (workflow room, operator-kran only, STOP before autonomy) -> **Kartoteka**
+> (Faza 7 honest ledger: revive incident recorder, dedup, /trust week,
+> effector evidence into TrustScorer) -> **Tasma** (delivery + autonomy
+> last, on earned evidence). Details: DIGITAL_HUMAN_ROADMAP.md section G.
 
 ## Module map — each path, developmentally
 
 | Module | Status today | Next safe step | Gated on |
 |---|---|---|---|
-| self-repair | ✅ live drill OBSERVED (06-07, cdt-4d13b) | — | done |
-| proof-of-delivery | 7a outbox ✅ + 7b heartbeat ✅ OBSERVED (06-07, cdt-27ac) | — | done |
-| warm recovery | ✅ OBSERVED (06-07, warm_recovery.json + boot hook live) | — | done |
+| self-repair | ✅ live drill OBSERVED (06-07); ADR-031 approve=close; expiry sweeps BLOCKED | — | done |
+| proof-of-delivery | 7a outbox ✅ + 7b heartbeat ✅ OBSERVED (06-07) | — | done |
+| warm recovery | ✅ OBSERVED (06-07 + real boots since) | — | done |
 | drift guard | ✅ DONE (`doc_lint.py` + test, 06-06) | — | done |
-| **effector / hands** | ✅ Rung 2 OBSERVED (06-07, outbox; operator-gated write) | arm autonomous propose; widen artifacts | roof done ✅ |
-| consolidation | stage 1 ✅ (06-10: real sleep OBSERVED, 1453 boosted; semantic dedup wired, flag dark) | arm `=observe`, calibrate, cutover; then stage 2: synthesize sources -> concept map | keystone (done) |
-| project goals | flat single-topic | sub-goal trees + deadlines | goal-closure (done) |
-| **skills** | LIBRARY (frozen) | extract from traces -> sandbox `promote()` | learning-loop real (done) + effector |
-| **workflow** | wired (Faza 5) | orchestrate real actions | **hands** (no hands -> nothing to orchestrate) |
-| vision-grounding | on-demand only | beliefs from camera autonomously | hardware + roof |
+| **effector / hands** | ✅ FS_WRITE LIVE + undo journal/execute LIVE (06-21..25); outbox propose armed | widen artifacts; OpenClaw at CONFIRM | Tier-2 close |
+| consolidation | ✅ stage 1 + 2 LIVE (synthesis armed 06-14, trust-gate, topic picker) | observe quality over weeks | done |
+| **project goals** | built 06-22; ARMED =observe 07-04; rollup evidence COMPLETE 07-05; deadline dead-wire fixed `f6ba962` | ROLLUP cutover przed 07-09 22:57 -> DEADLINE cutover po zywym observe; REAP rekomendacja: trwale OFF | **closes TIER 2** |
+| rollback/quarantine | ✅ shipped 06-14 (conscious-unlearn) | — | done |
+| capability gate (DH-C) | built 06-22, signal-honesty fix 06-28 (`1e322af`); observe silence = healthy (16/16; 702 pre-fix blocks archived on /mnt/storage) | `/drill_capability` (must FORCE-plan the nulled action) + manifest alarm in Phase 18 snapshot -> arm `CAPABILITY_GATE_ENABLED=1` | DH-B plank |
+| **workflow** | wired (Faza 5) but NEVER ran once; `/wf approve` zero callers; DelegationManager bypasses K7 | room #1 (07-06 amendment): boundary one-pager -> first-ever `/wf start` -> note_pipeline -> valves (/wf approve + K7 parity); operator-kran only | TIER 2 closed |
+| **skills** | LIBRARY (frozen); 8 stale 05-15 sandbox drafts = latent trap (archive them); extractor dry-run 4/4 junk on poisoned traces | room #2: extract from CLEAN traces (post-`0039116`) -> sandbox `promote()` | workflow room + weeks of clean traces |
+| vision-grounding | motion-triggered (MOG2 06-21) + VisionMemory ring + PL captions | beliefs from camera autonomously | hardware + Tier 3 |
 | voice (north-star) | missing | "one file of truth, works everywhere" | Tier 3 |
 
 > **On `skills` + `workflow` (the collision question):** both sit in Tier 3 on
@@ -133,8 +174,11 @@ force` -> cdt-4d13b5baaf55 (drill, approval_required) -> bulletin -> TASK_BOARD
   outage needed. Master-only (Telegram gate now enforced). Tests.
 - **6b** 🔒 Run in vivo: `/drill_repair` -> `/list_repairs` -> `/approve_repair`
   -> observe `project=maria` dispatch. **OBSERVED** = a real queue row dispatched.
-- **6c** *(deferred to Tier 2)* un-stub `_review()` so Maria can self-validate a
-  diff (autonomy expansion — operator-gated is safe for now).
+- **6c** ~~un-stub `_review()`~~ **DELETED 2026-07-06**: the stub is
+  unlocatable at HEAD (grep clean in conductor/self_repair; only an
+  IMPLEMENTED legacy `_review` in code_agent) and the premise — Maria
+  self-validates a Codex diff before dispatch — was superseded by ADR-031
+  (approve = close, zero Codex-on-prod dispatch).
 - Flag: command-gated (master). Gated on: restart for 6b.
 
 ### 7. Proof-of-delivery + heartbeat

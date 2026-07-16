@@ -88,6 +88,7 @@ class TeacherAgent:
         # Callbacks
         self._learn_chunk_fn: Optional[Callable] = None
         self._run_exam_fn: Optional[Callable] = None
+        self._milestone_fn: Optional[Callable] = None
 
         # Gap-driven learning (from Critic / Auditor)
         self._critic_agent = None
@@ -104,6 +105,14 @@ class TeacherAgent:
     def set_exam_fn(self, fn: Callable) -> None:
         """Set the function to run exam: fn(file_id) -> Dict or None."""
         self._run_exam_fn = fn
+
+    def set_milestone_fn(self, fn: Callable) -> None:
+        """Set the learning-milestone callback: fn(file_id, score) on exam PASS.
+
+        Optional and advisory (proactive ping); a failure here must never break
+        the exam path, so the caller swallows exceptions.
+        """
+        self._milestone_fn = fn
 
     def set_critic_agent(self, critic) -> None:
         """Set CriticAgent for quality-driven learning priorities."""
@@ -430,6 +439,20 @@ class TeacherAgent:
             self._nim_planning_used += 1
             self._stats["nim_planning_calls"] += 1
 
+            # Reasoning journal: keep the teacher's prose, not just the
+            # file_id extracted below.
+            try:
+                from agent_core.tracing.reasoning_journal import (
+                    get_reasoning_journal,
+                )
+                get_reasoning_journal().record(
+                    source="teacher.nim_gap",
+                    reasoning=response,
+                    prompt_hint=prompt,
+                )
+            except Exception:
+                pass
+
             # Try to match response to a gap file_id
             response_lower = response.strip().lower()
             for gap in gaps:
@@ -515,6 +538,15 @@ class TeacherAgent:
             self._stats["exams_run"] += 1
             if result.get("passed", False):
                 self._stats["exams_passed"] += 1
+                # Learning milestone: Maria passed -> proactively tell the operator.
+                # Advisory only; never let a notify hiccup break the exam path.
+                if self._milestone_fn is not None:
+                    try:
+                        self._milestone_fn(
+                            result.get("file_id", file_id), result.get("score", 0)
+                        )
+                    except Exception as e:
+                        logger.debug(f"milestone_fn failed: {e}")
             self._stats["reviews_done"] += 1
             self._stats["last_exam_score"] = result.get("score", 0)
             self._stats["last_exam_file"] = result.get("file_id", file_id)

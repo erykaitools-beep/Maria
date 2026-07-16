@@ -65,7 +65,8 @@ def generate_task_pdf(
 
         # Header
         pdf.set_font(font, "B", 16)
-        label = "Claude Code" if backend == "claude" else "Codex (ChatGPT)"
+        label = {"claude": "Claude Code", "codex": "Codex (ChatGPT)"}.get(
+            backend, backend)
         pdf.cell(text=f"M.A.R.I.A. - {label}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 

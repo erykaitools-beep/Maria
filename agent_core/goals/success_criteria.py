@@ -50,11 +50,15 @@ KNOWN_CRITERION_TYPES = frozenset({
 # Cap how much of a log we read for regex_in_log (avoid loading a huge JSONL).
 # We read the tail, where recent events live.
 _REGEX_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
-# Same tail cap for exam_results.jsonl when resolving exam_independent.
-_RESULTS_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
 # Mirror of maria_core.sys.config.EXAM_PASS_THRESHOLD; used only when a criterion
 # omits an explicit min_score. Kept as a literal so this module stays import-pure.
 _DEFAULT_EXAM_PASS = 0.6
+# Prefix stamped by the static held-out grader (maria_core exam_agent writes
+# grader_model="heldout:static@v1"). A criterion carrying {"grader": "heldout"}
+# admits ONLY such records -- the regular LLM examiner also stamps
+# grader_independent=True, so without this filter its records would satisfy or
+# shadow a held-out verdict (latest-wins both ways; red-team 2026-07-11).
+_HELDOUT_GRADER_PREFIX = "heldout:"
 
 
 def _contained(path: Path, sandbox_root: Optional[str]) -> Tuple[bool, str]:
@@ -119,16 +123,45 @@ def _eval_regex_in_log(criterion: Dict[str, Any]) -> Tuple[bool, str]:
     return False, f"regex_in_log: '{pattern}' not found in '{raw}'"
 
 
-def _eval_exam_independent(criterion: Dict[str, Any]) -> Tuple[bool, str]:
-    """Pass IFF the latest INDEPENDENT exam on record for ``file`` cleared the bar.
+def _required_grader_prefix(criterion: Dict[str, Any]) -> Optional[str]:
+    """Grader-model prefix a criterion demands, or None (any independent grader).
+
+    ``{"grader": "heldout"}`` -> records must have grader_model starting with
+    "heldout:" (the static held-out examiner). The filter is applied DURING the
+    record scan, never post-hoc on the latest independent record -- otherwise a
+    newer LLM-graded record (a spaced review, or the no-bank fallback) would
+    shadow a valid held-out PASS and flap the goal (red-team 2026-07-11).
+    """
+    grader = criterion.get("grader")
+    if not grader:
+        return None
+    grader = str(grader).strip().lower()
+    if grader == "heldout":
+        return _HELDOUT_GRADER_PREFIX
+    # Future-proof: an explicit prefix ("heldout:", "nim:") is used verbatim.
+    return grader
+
+
+def _eval_exam_independent(
+    criterion: Dict[str, Any],
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> Tuple[bool, str]:
+    """Pass IFF the latest matching INDEPENDENT exam for ``file`` cleared the bar.
 
     This is the learning keystone (B4): a learning goal is "done" only when an
-    examiner that is NOT the student (grader_independent == True, e.g. the static
-    held-out grader ``heldout:static@v1``) scored the file's recall at or above
-    ``min_score``. Read-only, pure-Python, no LLM, no network: it re-reads the
-    recorded evidence in exam_results.jsonl rather than trusting a "completed"
-    status flag a self-grading LLM could have set. Latest entry wins (JSONL is
+    examiner that is NOT the student (grader_independent == True) scored the
+    file's recall at or above ``min_score``. A criterion may additionally pin the
+    examiner KIND via ``grader`` (e.g. "heldout" -> only the static held-out
+    grader counts; the regular LLM examiner cannot satisfy or overwrite it).
+    Read-only, pure-Python, no LLM, no network: it re-reads the recorded evidence
+    in exam_results.jsonl rather than trusting a "completed" status flag a
+    self-grading LLM could have set. Latest matching entry wins (JSONL is
     append-ordered), so a fresh failure correctly un-closes the goal.
+
+    Reads the FULL results file (the old 2 MiB tail cap silently hid passes older
+    than the tail once exam_results.jsonl outgrew it -- it is ~5.9 MB live).
+    Callers evaluating many criteria should preload ``exam_records`` once via
+    :func:`load_slim_exam_records` and thread it through ``evaluate_criteria``.
     """
     file_id = criterion.get("file") or criterion.get("file_id")
     if not file_id:
@@ -138,46 +171,33 @@ def _eval_exam_independent(criterion: Dict[str, Any]) -> Tuple[bool, str]:
         min_score = float(min_score)
     except (TypeError, ValueError):
         return False, f"exam_independent: bad min_score {min_score!r}"
+    required_prefix = _required_grader_prefix(criterion)
 
-    raw_path = criterion.get("results_path")
-    if raw_path:
-        path = Path(raw_path)
-    else:
-        try:
-            from maria_core.sys.config import EXAM_RESULTS
-            path = Path(EXAM_RESULTS)
-        except Exception as exc:  # config import must never crash a tick
-            return False, f"exam_independent: no results_path and config unavailable: {exc}"
-    if not path.is_file():
-        return False, f"exam_independent: results file '{path}' not found"
+    # A criterion with its OWN results_path must read that file -- a preloaded
+    # map (built from the default path) would silently answer from the wrong log.
+    if exam_records is None or criterion.get("results_path"):
+        path = _resolve_exam_results_path(criterion.get("results_path"))
+        if path is None:
+            return False, "exam_independent: no results_path and config unavailable"
+        if not path.is_file():
+            return False, f"exam_independent: results file '{path}' not found"
+        exam_records = load_slim_exam_records(str(path))
 
     latest: Optional[Dict[str, Any]] = None
-    try:
-        size = path.stat().st_size
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            if size > _RESULTS_MAX_BYTES:
-                fh.seek(size - _RESULTS_MAX_BYTES)
-                fh.readline()  # discard the partial line the seek landed in
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(rec, dict):
-                    continue
-                if rec.get("file") != file_id:
-                    continue
-                if not rec.get("grader_independent"):
-                    continue
-                latest = rec  # append-order -> last independent entry wins
-    except OSError as exc:
-        return False, f"exam_independent: read failed: {exc}"
+    for rec in exam_records.get(file_id, []):
+        if not rec.get("grader_independent"):
+            continue
+        if required_prefix and not str(rec.get("grader_model") or "").startswith(
+            required_prefix
+        ):
+            continue
+        latest = rec  # append-order -> last matching entry wins
 
+    kind = f" ({required_prefix}*)" if required_prefix else ""
     if latest is None:
-        return False, f"exam_independent: no independent exam on record for '{file_id}'"
+        return False, (
+            f"exam_independent: no independent{kind} exam on record for '{file_id}'"
+        )
     score = latest.get("score")
     if not isinstance(score, (int, float)):
         return False, f"exam_independent: record for '{file_id}' has non-numeric score {score!r}"
@@ -204,33 +224,22 @@ def _resolve_exam_results_path(results_path: Optional[str] = None) -> Optional[P
         return None
 
 
-def independently_verified_file_ids(
-    min_score: float = _DEFAULT_EXAM_PASS,
+def load_slim_exam_records(
     results_path: Optional[str] = None,
-) -> set:
-    """File ids whose LATEST independent exam scored at/above ``min_score``.
+) -> Dict[str, List[Dict[str, Any]]]:
+    """One full read of exam_results.jsonl -> per-file APPEND-ORDERED slim records.
 
-    The single source of truth for "this file's knowledge is externally
-    verified": a file is here IFF an examiner that is NOT the student
-    (``grader_independent == True``, e.g. the static held-out grader) most
-    recently scored its recall at/above the bar. Consumed by the learning-goal
-    closer (reconciliation / update_learning_goal) AND the belief + semantic
-    index trust gates, so none of them trust a self-graded ``completed`` status
-    flag a self-grading LLM could have set ("read"/"self-graded" != "verified").
-
-    Reads the FULL exam_results.jsonl once -- NOT the per-criterion tail cap used
-    by ``_eval_exam_independent`` -- so an older independent pass is never missed
-    and a genuinely-verified file is never wrongly demoted. Pure-Python,
-    read-only, no LLM, no network. Returns an empty set if the file is absent.
+    Slim = only the trust-relevant keys (score, grader_independent, grader_model)
+    -- the full records carry questions/answers/grading and would hold ~6 MB of
+    text in memory for nothing. Callers that evaluate many criteria or compute
+    several verified sets in one pass (planner reconcile, close_goal_on_criteria)
+    load this ONCE and thread it through, instead of N independent file reads.
+    Returns {} when the file is absent/unreadable (fail-closed: nothing verified).
     """
-    try:
-        min_score = float(min_score)
-    except (TypeError, ValueError):
-        min_score = _DEFAULT_EXAM_PASS
     path = _resolve_exam_results_path(results_path)
     if path is None or not path.is_file():
-        return set()
-    latest: Dict[str, Dict[str, Any]] = {}
+        return {}
+    records: Dict[str, List[Dict[str, Any]]] = {}
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -241,17 +250,117 @@ def independently_verified_file_ids(
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(rec, dict) or not rec.get("grader_independent"):
+                if not isinstance(rec, dict):
                     continue
                 fid = rec.get("file") or rec.get("file_id")
-                if fid:
-                    latest[fid] = rec  # append-order: latest independent wins
+                if not fid:
+                    continue
+                records.setdefault(fid, []).append({
+                    "score": rec.get("score"),
+                    "grader_independent": rec.get("grader_independent"),
+                    "grader_model": rec.get("grader_model"),
+                })
     except OSError:
-        return set()
-    return {
-        fid for fid, rec in latest.items()
-        if isinstance(rec.get("score"), (int, float)) and rec["score"] >= min_score
-    }
+        return {}
+    return records
+
+
+def _latest_verified_ids(
+    min_score: float,
+    results_path: Optional[str],
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]],
+    required_prefix: Optional[str],
+) -> set:
+    """Shared core: files whose LATEST matching independent record clears the bar.
+
+    With ``required_prefix`` set, only that examiner kind's records compete
+    (single latest-wins lane). Without it (the broad predicate), latest-wins is
+    tracked PER EXAMINER KIND (LLM lane vs held-out lane) and the file is
+    verified if ANY lane's latest verdict clears the bar. Rationale
+    (diff-review 2026-07-12): a heldout project and live Kronika can share
+    slug-named RSS files -- a mechanical held-out FAIL must not erase Kronika's
+    LLM PASS from the broad set (and an LLM fail must not erase a held-out
+    pass); each examiner kind governs its own lane.
+    """
+    try:
+        min_score = float(min_score)
+    except (TypeError, ValueError):
+        min_score = _DEFAULT_EXAM_PASS
+    if exam_records is None:
+        exam_records = load_slim_exam_records(results_path)
+    verified = set()
+    for fid, recs in exam_records.items():
+        latest_by_kind: Dict[str, Dict[str, Any]] = {}
+        for rec in recs:
+            if not rec.get("grader_independent"):
+                continue
+            grader_model = str(rec.get("grader_model") or "")
+            if required_prefix:
+                if not grader_model.startswith(required_prefix):
+                    continue
+                kind = "match"
+            else:
+                kind = (
+                    "heldout"
+                    if grader_model.startswith(_HELDOUT_GRADER_PREFIX)
+                    else "llm"
+                )
+            latest_by_kind[kind] = rec  # append-order: latest per lane wins
+        if any(
+            isinstance(rec.get("score"), (int, float))
+            and rec["score"] >= min_score
+            for rec in latest_by_kind.values()
+        ):
+            verified.add(fid)
+    return verified
+
+
+def independently_verified_file_ids(
+    min_score: float = _DEFAULT_EXAM_PASS,
+    results_path: Optional[str] = None,
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> set:
+    """File ids whose LATEST independent exam scored at/above ``min_score``.
+
+    The single source of truth for "this file's knowledge is externally
+    verified": a file is here IFF an examiner that is NOT the student
+    (``grader_independent == True``) most recently scored its recall at/above
+    the bar. Consumed by the learning-goal closer (reconciliation /
+    update_learning_goal) AND the belief + semantic index trust gates, so none
+    of them trust a self-graded ``completed`` status flag a self-grading LLM
+    could have set ("read"/"self-graded" != "verified").
+
+    NOTE: "independent" here means NOT-the-student -- the regular NIM examiner
+    qualifies. For the stricter held-out-only subset (mechanical grading against
+    a frozen answer key) use :func:`heldout_verified_file_ids`.
+
+    Reads the FULL exam_results.jsonl once (or reuses a preloaded
+    ``exam_records`` map), so an older independent pass is never missed and a
+    genuinely-verified file is never wrongly demoted. Pure-Python, read-only,
+    no LLM, no network. Returns an empty set if the file is absent.
+    """
+    return _latest_verified_ids(min_score, results_path, exam_records, None)
+
+
+def heldout_verified_file_ids(
+    min_score: float = _DEFAULT_EXAM_PASS,
+    results_path: Optional[str] = None,
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> set:
+    """File ids whose LATEST held-out record cleared the bar (strict subset).
+
+    Only records stamped by the static held-out grader (grader_model
+    "heldout:*": frozen answer key + mechanical grading, zero LLM in the
+    verdict) count -- the regular LLM examiner cannot add to or overwrite this
+    set, because non-heldout records are skipped DURING the scan (an LLM record
+    newer than a held-out PASS does not shadow it). This is the progress /
+    closure predicate for goals with metadata verification_mode='heldout'
+    (Option C, 2026-07-12); the broader bool predicate above keeps serving
+    everything else, unchanged.
+    """
+    return _latest_verified_ids(
+        min_score, results_path, exam_records, _HELDOUT_GRADER_PREFIX
+    )
 
 
 def is_independently_verified(
@@ -275,6 +384,7 @@ def evaluate_criterion(
     *,
     sandbox_root: Optional[str] = None,
     exam_checker: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[bool, str]:
     """Evaluate ONE criterion. Returns ``(passed, evidence)``."""
     if not isinstance(criterion, dict):
@@ -285,7 +395,7 @@ def evaluate_criterion(
     if ctype == CRITERION_REGEX_IN_LOG:
         return _eval_regex_in_log(criterion)
     if ctype == CRITERION_EXAM_INDEPENDENT:
-        return _eval_exam_independent(criterion)
+        return _eval_exam_independent(criterion, exam_records=exam_records)
     if ctype == CRITERION_EXAM_PASSED:
         if exam_checker is None:
             return False, "exam_passed: no exam_checker provided (delegated to learning path)"
@@ -302,6 +412,7 @@ def evaluate_criteria(
     *,
     sandbox_root: Optional[str] = None,
     exam_checker: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    exam_records: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[bool, List[Dict[str, Any]]]:
     """Evaluate ALL criteria (logical AND). Returns ``(all_passed, evidence_list)``.
 
@@ -311,11 +422,21 @@ def evaluate_criteria(
     """
     if not criteria:
         return False, [{"type": None, "passed": False, "detail": "no success_criteria"}]
+    # Amortize the exam-results read: many criteria on one goal (a project child
+    # holds one exam_independent entry per pantry file) must not trigger one full
+    # ~6 MB file read EACH. Criteria carrying their own results_path self-load.
+    if exam_records is None and any(
+        isinstance(c, dict) and c.get("type") == CRITERION_EXAM_INDEPENDENT
+        and not c.get("results_path")
+        for c in criteria
+    ):
+        exam_records = load_slim_exam_records()
     evidence: List[Dict[str, Any]] = []
     all_passed = True
     for crit in criteria:
         passed, detail = evaluate_criterion(
-            crit, sandbox_root=sandbox_root, exam_checker=exam_checker
+            crit, sandbox_root=sandbox_root, exam_checker=exam_checker,
+            exam_records=exam_records,
         )
         evidence.append({
             "type": crit.get("type") if isinstance(crit, dict) else None,

@@ -302,3 +302,65 @@ class TestPerceptOutput:
         assert percept.total_processing_time_ms > 0.0
 
         sensor.close()
+
+
+class TestDescribeSnapshot:
+    """describe_snapshot: isolated one-shot LLaVA call for the autonomous path.
+    It must NOT mutate the shared SceneModule._llava_fn -- doing so made the
+    per-tick scene run pick up LLaVA and block the tick (~30s tick_overrun)."""
+
+    def test_calls_llava_directly_without_mutating_scene(self):
+        cortex = VisionCortex()
+        sensor = MockSensor(sensor_id="cam-0")
+        sensor.open()
+        cortex.add_sensor(sensor)
+        scene = SceneModule()
+        calls = []
+
+        def _fake_llava(prompt, b64):
+            calls.append((prompt, b64))
+            return "Widac osobe w kadrze."
+
+        scene._llava_describe = _fake_llava
+        cortex.add_module(MotionModule())
+        cortex.add_module(scene)
+
+        before = scene._llava_fn  # stats backend in the tick -> None
+        desc = cortex.describe_snapshot()
+
+        assert desc == "Widac osobe w kadrze."
+        assert len(calls) == 1            # LLaVA invoked directly, exactly once
+        assert scene._llava_fn is before  # shared fn untouched -> no tick race
+        sensor.close()
+
+    def test_returns_none_without_llava_fn(self):
+        cortex = VisionCortex()
+        sensor = MockSensor(sensor_id="cam-0")
+        sensor.open()
+        cortex.add_sensor(sensor)
+        cortex.add_module(SceneModule())  # no _llava_describe attached
+        assert cortex.describe_snapshot() is None
+        sensor.close()
+
+    def test_custom_prompt_and_saves_frame(self, tmp_path):
+        cortex = VisionCortex()
+        sensor = MockSensor(sensor_id="cam-0")
+        sensor.open()
+        cortex.add_sensor(sensor)
+        scene = SceneModule()
+        seen = {}
+
+        def _fake_llava(prompt, b64):
+            seen["prompt"] = prompt
+            return "opis"
+
+        scene._llava_describe = _fake_llava
+        cortex.add_module(scene)
+
+        out = tmp_path / "snap.jpg"
+        desc = cortex.describe_snapshot(prompt="MOJ PROMPT", save_path=str(out))
+
+        assert desc == "opis"
+        assert seen["prompt"] == "MOJ PROMPT"          # override used, not scene's
+        assert out.exists() and out.stat().st_size > 0  # described frame saved
+        sensor.close()

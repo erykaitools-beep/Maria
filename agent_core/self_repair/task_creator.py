@@ -166,11 +166,22 @@ class RepairTaskCreator:
 
         nim_status = _service_status(snapshot, "NVIDIA NIM API")
         if nim_status != "available":
-            return {
-                "reason": "nim_unavailable",
-                "nim_status": nim_status,
-                "repair_kind": candidate.repair_kind,
-            }
+            # Don't deadlock the detector that is REPORTING a NIM outage: a
+            # model_unavailable candidate whose subject IS NIM must still create
+            # its alert even though NIM is down -- otherwise a genuine NIM outage
+            # can never surface (the gate blocked the very task meant to flag it,
+            # audit 2026-06-16 #14). All other repair kinds still require NIM.
+            subject = _candidate_subject(candidate)
+            is_nim_self_report = (
+                candidate.repair_kind == "model_unavailable"
+                and subject == "NVIDIA NIM API"
+            )
+            if not is_nim_self_report:
+                return {
+                    "reason": "nim_unavailable",
+                    "nim_status": nim_status,
+                    "repair_kind": candidate.repair_kind,
+                }
 
         if self._pending_same_kind_in_cooldown(candidate.repair_kind):
             return {"reason": "cooldown", "repair_kind": candidate.repair_kind}
@@ -307,6 +318,13 @@ def _service_status(snapshot: Dict[str, Any], service_name: str) -> str:
 
 def _send_notification(notifier: Any, text: str) -> None:
     if notifier is None:
+        return
+    # Quiet hours: the repair task is already queued (/pending_repairs) with a
+    # 24h expiry, echoed to the bulletin and the task board, before this ping.
+    # Defer the night notice rather than wake the operator -- self-repair is an
+    # ALERT the operator closes in-session (ADR-031), not something to act on at
+    # 3am, and the task outlives the night.
+    if getattr(notifier, "in_quiet_hours", lambda: False)():
         return
     # PLAIN TEXT (parse_mode=None): the body carries '/approve_repair <id>'.
     # Telegram Markdown treats '_' as italic and, when underscores balance,

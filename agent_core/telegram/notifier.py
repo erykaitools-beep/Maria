@@ -15,7 +15,7 @@ Sources:
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from agent_core.telegram.bot import TelegramBot
 
@@ -32,18 +32,41 @@ ALERT_COOLDOWNS: Dict[str, float] = {
     "creative_tension": 7200,     # 2h - tensions don't change fast
     "creative_meta_goal": 7200,   # 2h - batch meta-goal summaries
     "self_analysis": 14400,       # 4h - analysis is expensive
-    "needs_human": 3600,          # 1h - K9 signal
+    "needs_human": 21600,         # 6h - K9 signal (LOW_CONFIDENCE stays hot under material starvation; 1h spammed)
     "health_drop": 1800,          # 30min - urgent
     "mode_change": 600,           # 10min - mode transitions
+    "mode_change_survival": 600,  # 10min - SURVIVAL demotion (own counter so a
+                                  # recent REDUCED alert cannot swallow it)
     "consecutive_failure": 3600,  # 1h - K7 blocks
     "stuck_planner": 7200,        # 2h - stuck loop detection
     "learning_progress": 1800,    # 30min - CDL progress updates
     "learning_complete": 0,       # always send - operator requested this
     "startup": 0,                 # always send
+    # Effector approval/result/incident: no time cooldown (each is a distinct
+    # operator decision), but they DO honor quiet hours -- the request survives
+    # in the approval queue (/approve_ef), so a night ping only defers, never
+    # drops. Not in QUIET_HOURS_CRITICAL: an approval can wait until morning.
+    "effector_request": 0,
+    "effector_result": 0,
+    "effector_incident": 0,
 }
 
 # Default cooldown for unknown categories
 DEFAULT_COOLDOWN = 3600
+
+# Alert categories that pierce the operator's quiet hours; everything else waits
+# until morning. Both are the operator's call -- he is blocked (needs_human) or
+# something is actively breaking (consecutive_failure).
+QUIET_HOURS_CRITICAL: frozenset = frozenset({
+    "needs_human",
+    "consecutive_failure",
+    # A SURVIVAL demotion means real hardware trouble -- imminent OOM, full disk,
+    # thermal, a hung model -- never CPU alone (that tops out at REDUCED). The CPU
+    # filter in notify_mode_change still runs first, so self-inflicted load cannot
+    # reach this; only a genuine failure pierces quiet hours. REDUCED stays
+    # deferrable (category "mode_change").
+    "mode_change_survival",
+})
 
 
 class TelegramNotifier:
@@ -57,13 +80,53 @@ class TelegramNotifier:
     def __init__(self, bot: Optional[TelegramBot] = None):
         self._bot = bot or TelegramBot()
         self._last_sent: Dict[str, float] = {}  # category -> timestamp
+        # Returns True when the local clock is inside the operator's quiet
+        # window. Injected during wiring; None means quiet hours are not enforced
+        # (fail-open -- an un-wired notifier still sends).
+        self._quiet_hours_check: Optional[Callable[[], bool]] = None
 
     @property
     def configured(self) -> bool:
         return self._bot.configured
 
+    def set_quiet_hours_check(self, fn: Optional[Callable[[], bool]]) -> None:
+        """Inject the quiet-hours predicate (fn() -> True when it is quiet now).
+
+        The window itself lives in OperatorModel (the SSoT); resolving it is the
+        wiring's job, so the notifier stays free of that dependency and a test
+        can drive quiet hours with a plain lambda.
+        """
+        self._quiet_hours_check = fn
+
+    def in_quiet_hours(self) -> bool:
+        """Is it the operator's quiet window right now? Fail-open on any error.
+
+        Public so a caller that delivers via send_raw (which bypasses _can_send
+        -- the outbox note proposal, a self-repair alert, a vision advisory) can
+        defer its own night ping. Safe to defer only when the underlying item
+        survives the drop: the note stays PENDING (/list_notes), the repair task
+        stays queued (/pending_repairs), a vision sighting is advisory. Silencing
+        the operator forever on a bad read is worse than one late ping, so an
+        unset or throwing predicate resolves to 'not quiet'.
+        """
+        if self._quiet_hours_check is None:
+            return False
+        try:
+            return bool(self._quiet_hours_check())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("[Telegram] quiet-hours check failed: %s", e)
+            return False
+
     def _can_send(self, category: str) -> bool:
-        """Check if cooldown for this category has expired."""
+        """Gate a category on quiet hours first, then its cooldown.
+
+        Quiet hours suppress everything except QUIET_HOURS_CRITICAL. Suppression
+        is a plain drop -- there is no queue -- which is why a category that
+        cannot afford to be dropped must be critical, not merely cheap to
+        re-send.
+        """
+        if category not in QUIET_HOURS_CRITICAL and self.in_quiet_hours():
+            return False
         cooldown = ALERT_COOLDOWNS.get(category, DEFAULT_COOLDOWN)
         if cooldown == 0:
             return True
@@ -175,7 +238,11 @@ class TelegramNotifier:
         if recommendations:
             lines.append("*Rekomendacje:*")
             for r in recommendations[:5]:
-                lines.append(f"- {r[:150]}")
+                # 280 > REC_LINE_MAX (240): the formatter already trims each line
+                # to a whole finding, so this is just a backstop, not a mid-reason
+                # cut. The old 150 sliced the description off exactly where the
+                # number lived.
+                lines.append(f"- {r[:280]}")
 
         text = "\n".join(lines)
         ok = self._bot.send_message(text)
@@ -244,13 +311,33 @@ class TelegramNotifier:
         return ok
 
     def notify_mode_change(
-        self, from_mode: str, to_mode: str, trigger: str = ""
+        self,
+        from_mode: str,
+        to_mode: str,
+        trigger: str = "",
+        alerts: Optional[List[str]] = None,
     ) -> bool:
-        """Send mode transition alert (only for degraded modes)."""
+        """Send mode transition alert (only for degraded modes).
+
+        Self-inflicted CPU demotions are dropped. Maria's own local inference
+        (ollama / LLaVA / exams) saturates the CPU on this mini-PC, which trips a
+        REDUCED demotion, which fired a Telegram alert -- 31/31 mode-change alerts
+        in the 07-15 audit came from her own load and told the operator nothing
+        to act on. When EVERY alert behind the transition is a CPU alert, skip
+        it; a non-CPU alert (RAM, temp, disk, coherence) means something else and
+        still goes out. `alerts` is the structured trigger list; `trigger` stays
+        the human-readable string for the message body.
+        """
         # Only notify on degradation (not recovery back to ACTIVE)
         if to_mode == "active":
             return False
-        if not self._can_send("mode_change"):
+        if alerts and all("CPU" in a for a in alerts):
+            return False
+        # SURVIVAL is a genuine-failure mode and pierces quiet hours; REDUCED is
+        # deferrable. The CPU filter above already ran, so a survival demotion
+        # here is never self-inflicted CPU.
+        category = "mode_change_survival" if to_mode == "survival" else "mode_change"
+        if not self._can_send(category):
             return False
 
         text = (
@@ -260,7 +347,7 @@ class TelegramNotifier:
             text += f"\nPrzyczyna: {trigger}"
         ok = self._bot.send_message(text)
         if ok:
-            self._mark_sent("mode_change")
+            self._mark_sent(category)
         return ok
 
     def notify_consecutive_failures(
@@ -314,6 +401,15 @@ class TelegramNotifier:
             self._mark_sent("stuck_planner")
         return ok
 
+    # Quiet-hours coverage note. The effector methods below go through _can_send
+    # (categories with cooldown 0, so quiet hours are their only gate) -- safe
+    # because the request survives in the approval queue. send_raw() still
+    # bypasses _can_send by design (it is the delivery channel for the /restart
+    # reply, the proactive scheduler's own windowed contacts, and code-task
+    # results the operator asked for); the send_raw callers that SHOULD honor
+    # quiet hours (outbox note, self-repair alert, vision advisory) call
+    # in_quiet_hours() themselves before sending. notify_startup keeps its own
+    # file cooldown and must arrive after a restart.
     def notify_effector_request(
         self,
         tool_name: str,
@@ -322,11 +418,14 @@ class TelegramNotifier:
         authority_level: str = "",
         request_id: str = "",
     ) -> bool:
-        """
-        Send effector approval request to operator (Phase 5).
+        """Send effector approval request to operator (Phase 5).
 
-        Always sent (no cooldown) - operator needs to see every request.
+        Honors quiet hours: the request is already persisted in the approval
+        queue (/approve_ef) before this is called, so a deferred night ping only
+        delays the notice, never the request.
         """
+        if not self._can_send("effector_request"):
+            return False
         args_str = ", ".join(
             f"{k}={str(v)[:60]}" for k, v in list(tool_args.items())[:5]
         )
@@ -351,6 +450,8 @@ class TelegramNotifier:
         summary: str = "",
     ) -> bool:
         """Send effector execution result to operator (Phase 5)."""
+        if not self._can_send("effector_result"):
+            return False
         status = "OK" if success else "BLAD"
         lines = [
             f"*Efektor wynik: {tool_name} [{status}]*",
@@ -362,7 +463,13 @@ class TelegramNotifier:
         return self._bot.send_message(text)
 
     def notify_effector_incident(self, task, outcome) -> bool:
-        """Report persistent effector failure (coordinator: 3× retry exhausted)."""
+        """Report persistent effector failure (coordinator: 3× retry exhausted).
+
+        Honors quiet hours: the failure is also posted to the bulletin, so a
+        deferred night ping is not the only record.
+        """
+        if not self._can_send("effector_incident"):
+            return False
         n = len(outcome.attempts)
         last_err = outcome.attempts[-1].error if outcome.attempts else "-"
         lines = [

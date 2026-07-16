@@ -62,6 +62,38 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
+# Polish diacritics fold, used for KEYWORD matching only. Each accented char
+# maps to exactly one ASCII char, so the fold is length-preserving: a match on
+# the folded text has spans that index 1:1 back into the original. That lets
+# the ASCII keyword patterns match natural Polish ("z trescia") while path and
+# content are sliced from the ORIGINAL text, so accented file content survives.
+# Escapes (not literal glyphs) so the source stays pure ASCII.
+_PL_FOLD = str.maketrans(
+    "ąćęłńóśźż"
+    "ĄĆĘŁŃÓŚŹŻ",
+    "acelnoszzACELNOSZZ",
+)
+
+
+class _OriginalMatch:
+    """Adapts a regex Match made on FOLDED text so ``group(i)`` returns the
+    matching slice of the ORIGINAL (un-folded) text. The fold is
+    length-preserving, so the folded match's spans are valid indices into the
+    original; an unmatched optional group falls back to the raw group (None)."""
+
+    __slots__ = ("_original", "_match")
+
+    def __init__(self, original: str, match: "re.Match[str]") -> None:
+        self._original = original
+        self._match = match
+
+    def group(self, index: int = 0) -> Optional[str]:
+        start, end = self._match.span(index)
+        if start < 0:
+            return self._match.group(index)
+        return self._original[start:end]
+
+
 # write: "napisz/zapisz plik <path> z trescia/tekstem <content>"
 _register(
     "write_pl",
@@ -136,10 +168,14 @@ class TaskIntentDetector:
         if not norm:
             return None
 
+        # Match keywords on a diacritics-folded copy (so natural Polish like
+        # "z trescia" hits the ASCII patterns) but build args from the ORIGINAL
+        # via _OriginalMatch, so accented paths/content are preserved verbatim.
+        folded = norm.translate(_PL_FOLD)
         for pattern_id, regex, builder in _PATTERNS:
-            match = regex.match(norm)
+            match = regex.match(folded)
             if match:
-                tool_name, tool_args = builder(match)
+                tool_name, tool_args = builder(_OriginalMatch(norm, match))
                 return TaskIntent(
                     tool_name=tool_name,
                     tool_args=tool_args,

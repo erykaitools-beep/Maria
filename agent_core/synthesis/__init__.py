@@ -13,19 +13,23 @@ Kontrakt: docs/CONTRACTS.md - Kontrakt 2 (Sandbox) + Kontrakt 6 (World Model)
 """
 
 from agent_core.synthesis.synthesis_agent import (
+    JUDGE_STALL_REASONS,
     SynthesisAgent,
     append_synthesis_review,
     build_synthesis_record,
     eligible_topics,
     gather_material,
+    is_judge_stall,
     read_synthesis_reviews,
 )
 
 __all__ = [
+    "JUDGE_STALL_REASONS",
     "SynthesisAgent",
     "append_synthesis_review",
     "build_synthesis_record",
     "eligible_topics",
     "gather_material",
+    "is_judge_stall",
     "read_synthesis_reviews",
 ]

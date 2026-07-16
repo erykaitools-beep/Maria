@@ -244,3 +244,30 @@ def test_drill_heartbeat_no_creator(tmp_path):
     response = bridge.handlers["drill_heartbeat"]("force")
 
     assert "nie wired" in response
+
+
+def test_send_notification_deferred_during_quiet_hours():
+    # Quiet hours: the repair task is already queued (/pending_repairs, 24h) and
+    # posted to the bulletin before this ping, so deferring the night notice
+    # loses nothing -- self-repair is an ALERT the operator closes in-session.
+    from agent_core.self_repair.task_creator import _send_notification
+
+    calls = []
+    notifier = SimpleNamespace(
+        send_raw=lambda text, parse_mode=None: calls.append(text),
+        in_quiet_hours=lambda: True,
+    )
+    _send_notification(notifier, "[Self-repair] Created cdt-1")
+    assert calls == []
+
+
+def test_send_notification_sent_outside_quiet_hours():
+    from agent_core.self_repair.task_creator import _send_notification
+
+    calls = []
+    notifier = SimpleNamespace(
+        send_raw=lambda text, parse_mode=None: calls.append(text),
+        in_quiet_hours=lambda: False,
+    )
+    _send_notification(notifier, "[Self-repair] Created cdt-1")
+    assert len(calls) == 1 and "cdt-1" in calls[0]

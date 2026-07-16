@@ -51,6 +51,7 @@ DEFAULT_ACTION_CLASSIFICATIONS: Dict[str, ActionClassification] = {
     "critique": ActionClassification.ANALYTICAL,      # Faza G: READ-ONLY knowledge critic (ADR-028)
     "ask_expert": ActionClassification.GUARDED,       # External API cost (ChatGPT) — keep rate-limited
     "fs_write": ActionClassification.GUARDED,         # B2: sandboxed file write (rate-limited + logged + K10-validated)
+    "play": ActionClassification.FREE,                # Self-time: ungraded free musing, internal, writes only its own journal (no effector)
 }
 
 

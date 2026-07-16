@@ -6,6 +6,7 @@ Kontrakt: docs/CONTRACTS.md - Kontrakt 5: Planner
 """
 
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,6 +19,51 @@ AGING_FACTOR_PER_HOUR = 0.1
 
 # Max aging multiplier (clamp) to prevent runaway
 MAX_AGING = 4.0
+
+# Deadline urgency (Etap B): a goal nearing/past its deadline is boosted in
+# selection, multiplicatively AFTER aging and INDEPENDENTLY clamped so it
+# re-orders the feasible set without starving the queue. The deadline field is
+# absolute Unix epoch seconds (TZ-safe, reminders convention); None = no
+# deadline = multiplier 1.0 (the only behaviour for every goal today).
+DEADLINE_URGENT_WINDOW_SEC = 24 * 3600  # within this window -> ramps 1.0 -> ~2.0
+DEADLINE_OVERDUE_BOOST = 3.0            # past the deadline -> max urgency
+DEADLINE_BOOST_CAP = 3.0               # clamp (aging already clamps at MAX_AGING)
+
+
+def deadline_mode(env_value: Optional[str]) -> str:
+    """Map a raw GOAL_DEADLINE_ENABLED value to off | observe | cutover.
+
+    off     -> multiplier hardwired 1.0 (selection unchanged, default)
+    observe -> compute + log the multiplier each deadlined goal WOULD get,
+               ranking UNCHANGED
+    cutover -> apply the multiplier so selection re-orders by urgency
+    """
+    v = (env_value or "").strip().lower()
+    if v == "observe":
+        return "observe"
+    if v in ("cutover", "on", "1", "true", "yes", "armed"):
+        return "cutover"
+    return "off"
+
+
+def deadline_multiplier(goal, now: float) -> float:
+    """Urgency multiplier in [1.0, DEADLINE_BOOST_CAP] from a goal's deadline.
+
+    None deadline -> 1.0. Overdue -> DEADLINE_OVERDUE_BOOST. Within the urgent
+    window -> linear ramp from 1.0 (far edge) to ~2.0 (due now). Beyond the
+    window -> 1.0. Pure, deterministic (ADR-013), no side effects.
+    """
+    deadline = getattr(goal, "deadline", None)
+    if deadline is None:
+        return 1.0
+    remaining = deadline - now
+    if remaining <= 0:
+        mult = DEADLINE_OVERDUE_BOOST
+    elif remaining <= DEADLINE_URGENT_WINDOW_SEC:
+        mult = 1.0 + (1.0 - remaining / DEADLINE_URGENT_WINDOW_SEC)
+    else:
+        mult = 1.0
+    return min(mult, DEADLINE_BOOST_CAP)
 
 # META goals whose descriptions contain any of these markers require the
 # learning window just like explicit LEARNING goals. Previously only "nauk"/
@@ -66,6 +112,15 @@ class GoalSelector:
     Feasibility: can this goal make progress right now?
     """
 
+    def __init__(self) -> None:
+        # [DEADLINE/*] log dedup: goal_id -> last logged multiplier (rounded
+        # to 0.1). The live planner re-scores every goal each ~60s cycle and
+        # inside the 24h ramp the multiplier moves a hair every pass; without
+        # dedup that is ~1440 near-identical INFO lines/day/goal (the
+        # ROLLUP/observe spam class). One line per 0.1 step is still ~10
+        # lines across a goal's whole ramp -- signal kept, noise dropped.
+        self._deadline_log_marks: Dict[str, float] = {}
+
     def select_goal(
         self,
         active_goals: list,
@@ -93,10 +148,11 @@ class GoalSelector:
         if now is None:
             now = time.time()
 
+        dmode = deadline_mode(os.environ.get("GOAL_DEADLINE_ENABLED"))
         scored = []
         handoff_scored = []
         for goal in active_goals:
-            score = self._compute_effective_priority(goal, now)
+            score = self._compute_effective_priority(goal, now, dmode)
             feasible, reason = self._check_feasibility(
                 goal, evaluation_metrics, knowledge_snapshot,
                 off_window_learning_allowed=off_window_learning_allowed,
@@ -121,16 +177,61 @@ class GoalSelector:
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1]
 
-    def _compute_effective_priority(self, goal, now: float) -> float:
+    def prune_deadline_marks(self, active_ids) -> None:
+        """Drop [DEADLINE/*] log-dedup marks for goals no longer active.
+
+        Called from the live ranking pass. Keeps the dedup dict bounded on a
+        daemon that runs for months -- marks must not outlive their goals
+        (the BeliefStore unbounded-append lesson).
         """
-        Compute priority with aging factor.
+        stale = [gid for gid in self._deadline_log_marks
+                 if gid not in active_ids]
+        for gid in stale:
+            del self._deadline_log_marks[gid]
+
+    def _compute_effective_priority(
+        self, goal, now: float, dmode: Optional[str] = None
+    ) -> float:
+        """
+        Compute priority with aging factor (and, when armed, deadline urgency).
 
         effective_priority = priority * (1 + hours_pending * AGING_FACTOR_PER_HOUR)
         Clamped to max aging of 4.0 to prevent runaway.
+
+        When ``dmode`` is observe/cutover and the goal has a deadline, an urgency
+        multiplier (:func:`deadline_multiplier`) is computed. ``observe`` only
+        logs it (ranking unchanged); ``cutover`` applies it multiplicatively
+        after aging. ``dmode=None`` (the default) reads the flag itself -- a
+        caller that forgets to pass the mode gets LIVE flag behaviour, never a
+        silently-dead deadline path (the 03-31..07-06 regression: the flag was
+        wired only to entrypoints the daemon had abandoned). Callers on hot
+        loops pass their once-per-cycle value instead.
         """
         hours_pending = (now - goal.created_at) / 3600.0
         aging = hours_pending * AGING_FACTOR_PER_HOUR
         effective = goal.priority * (1.0 + min(aging, MAX_AGING))
+
+        if dmode is None:
+            dmode = deadline_mode(os.environ.get("GOAL_DEADLINE_ENABLED"))
+
+        if dmode != "off" and getattr(goal, "deadline", None) is not None:
+            mult = deadline_multiplier(goal, now)
+            if mult == 1.0:
+                # Deadline pushed back out of the urgency ramp: clear the
+                # mark so a later re-entry logs a fresh line (the observe
+                # evidence must not be suppressed by a stale mark).
+                self._deadline_log_marks.pop(goal.id, None)
+            else:
+                mark = round(mult, 1)
+                if self._deadline_log_marks.get(goal.id) != mark:
+                    self._deadline_log_marks[goal.id] = mark
+                    logger.info(
+                        "[DEADLINE/%s] goal %s urgency x%.2f (remaining %.1fh)",
+                        dmode, goal.id, mult, (goal.deadline - now) / 3600.0,
+                    )
+            if dmode == "cutover":
+                effective *= mult
+
         return effective
 
     def _check_feasibility(
@@ -216,9 +317,10 @@ class GoalSelector:
         if now is None:
             now = time.time()
 
+        dmode = deadline_mode(os.environ.get("GOAL_DEADLINE_ENABLED"))
         ranked = []
         for goal in active_goals:
-            score = self._compute_effective_priority(goal, now)
+            score = self._compute_effective_priority(goal, now, dmode)
             ranked.append((score, goal))
         ranked.sort(key=lambda x: x[0], reverse=True)
         return ranked

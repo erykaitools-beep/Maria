@@ -77,3 +77,52 @@ def test_synthreview_shows_persisted_review(tmp_path):
     assert "synthesis_kofeina_20260613" in out
     assert "Kofeina i sen" in out
     assert "wiernosc" in out  # faithfulness verdict surfaced
+
+
+def test_synthreview_judge_stall_is_not_a_content_verdict(tmp_path):
+    """Monday-legibility (Rank 1): a judge TIMEOUT must not read as "0 supported
+    -> rejected" -- that misdiagnosis (judge latency mistaken for hallucination)
+    is exactly what would corrupt a SYNTH_ENABLED go/no-go call."""
+    append_synthesis_review(
+        tmp_path / "synthesis_review.jsonl",
+        {
+            "success": False, "file_id": "synthesis_relatywizm_20260615",
+            "topic": "teoria wzglednosci", "source_files": ["wiki_a", "wiki_b"],
+            "summary": "Czas plynie wolniej w silnym polu grawitacyjnym.",
+            "key_points": ["Dylatacja czasu", "Rownowaznosc masy i energii"],
+            "reason": "unfaithful_to_sources",
+            # judge timed out: 0/5 with reason=judge_failed (NOT a content ruling)
+            "faithfulness": {"ok": False, "reason": "judge_failed",
+                             "supported": 0, "unstated": 0, "contradicted": 0,
+                             "total": 5},
+        },
+    )
+    bridge = _bridge(tmp_path)
+    out = bridge.handlers["synthreview"]("5")
+    assert "SEDZIA NIE ZADZIALAL" in out      # stall surfaced as a stall
+    assert "judge_failed" in out
+    assert "0/5 poparte" not in out           # NOT rendered as a content verdict
+    assert "-> ODRZUT" not in out
+
+
+def test_synthreview_genuine_rejection_still_shows_odrzut(tmp_path):
+    """The flip side: a real low-support/contradicted verdict must STILL read as
+    a content rejection -- the stall fix must not swallow genuine failures."""
+    append_synthesis_review(
+        tmp_path / "synthesis_review.jsonl",
+        {
+            "success": False, "file_id": "synthesis_mit_20260615",
+            "topic": "mit", "source_files": ["wiki_a", "wiki_b"],
+            "summary": "Twierdzenie nie poparte zrodlami.",
+            "key_points": ["Punkt A", "Punkt B"],
+            "reason": "unfaithful_to_sources",
+            "faithfulness": {"ok": False, "reason": "contradicted",
+                             "supported": 2, "unstated": 0, "contradicted": 1,
+                             "total": 5},
+        },
+    )
+    bridge = _bridge(tmp_path)
+    out = bridge.handlers["synthreview"]("5")
+    assert "2/5 poparte" in out
+    assert "-> ODRZUT" in out
+    assert "SEDZIA NIE ZADZIALAL" not in out

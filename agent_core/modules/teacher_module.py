@@ -25,6 +25,7 @@ def _make_nim_first_examiner_fn(
     nim_timeout: int,
     fallback_num_predict: int,
     scheduler=None,
+    used_cell: Optional[dict] = None,
 ):
     """Examiner-side LLM (question AUTHOR or GRADER): NIM first, honest local fallback.
 
@@ -46,6 +47,12 @@ def _make_nim_first_examiner_fn(
     Params differ between author (creative temp, 120s ok) and grader
     (deterministic temp, needs ~240s for a full 6-question rubric: NIM measured
     ~85s/3q). Returns a ``callable(prompt) -> str`` matching the call_ollama API.
+
+    ``used_cell``: optional one-slot dict; on every call the closure records the
+    backend that actually produced the output ("nim:<model>" / "local:<model>")
+    under ``used_cell["backend"]``. Before this, exam records carried a constant
+    planned label ("nim-first|qwen3:8b"), so the NIM-vs-fallback split -- and
+    thus the real grader lineage -- was invisible in the trust data.
     """
     from maria_core.learning.llm_utils import call_ollama
 
@@ -82,6 +89,8 @@ def _make_nim_first_examiner_fn(
                     max_tokens=max_tokens, force_json=True,
                 )
                 if resp and resp.strip():
+                    if used_cell is not None:
+                        used_cell["backend"] = f"nim:{nim.model}"
                     return resp
                 logger.warning("[EXAM] NIM %s returned empty; "
                                "falling back to local %s", role, fallback_model)
@@ -90,6 +99,8 @@ def _make_nim_first_examiner_fn(
                                "falling back to local %s", role, exc, fallback_model)
         # Local examiner fallback is a heavy model (qwen3) on the CPU -- serialize
         # it on the scheduler mutex so it never overlaps the student answer or K12.
+        if used_cell is not None:
+            used_cell["backend"] = f"local:{fallback_model}"
         guard = (scheduler.heavy_lease(f"exam_{role}_local")
                  if scheduler is not None else nullcontext())
         with guard:
@@ -99,7 +110,7 @@ def _make_nim_first_examiner_fn(
     return _run
 
 
-def _make_exam_author_fn(fallback_model: str, scheduler=None):
+def _make_exam_author_fn(fallback_model: str, scheduler=None, used_cell=None):
     """Exam-question AUTHOR: NIM first (fast, off-CPU), honest local fallback.
 
     Authoring a multi-question rubric is a heavy generation that chronically
@@ -110,11 +121,11 @@ def _make_exam_author_fn(fallback_model: str, scheduler=None):
     return _make_nim_first_examiner_fn(
         fallback_model, role="author", temperature=0.3,
         max_tokens=4096, nim_timeout=120, fallback_num_predict=4096,
-        scheduler=scheduler,
+        scheduler=scheduler, used_cell=used_cell,
     )
 
 
-def _make_exam_grader_fn(fallback_model: str, scheduler=None):
+def _make_exam_grader_fn(fallback_model: str, scheduler=None, used_cell=None):
     """Exam GRADER: NIM first (off-CPU), local independent fallback.
 
     Grading was the last heavy CPU step in the regular exam: qwen3 graded a
@@ -139,7 +150,7 @@ def _make_exam_grader_fn(fallback_model: str, scheduler=None):
     return _make_nim_first_examiner_fn(
         fallback_model, role="grader", temperature=0.1,
         max_tokens=6144, nim_timeout=240, fallback_num_predict=2048,
-        scheduler=scheduler,
+        scheduler=scheduler, used_cell=used_cell,
     )
 
 
@@ -188,9 +199,106 @@ class TeacherModule(MariaModule):
         # Wire up learning functions
         agent.set_learn_fn(self._learn_chunk_wrapped)
         agent.set_exam_fn(self._run_exam_wrapped)
+        # Learning milestone -> proactive ping ("Maria mowi gdy zda egzamin").
+        agent.set_milestone_fn(self._on_learning_milestone)
 
         self._agent = agent
         return agent
+
+    def _on_learning_milestone(self, file_id: str, score) -> None:
+        """Forward a passed-exam milestone to the proactive scheduler.
+
+        Late-bound lookup of ctx.proactive_scheduler: the teacher agent is
+        lazy-inited on the first learning session, by which point homeostasis
+        has wired proactive -- but resolving it at call time keeps this robust
+        to init ordering and to proactive being absent in REPL-only contexts.
+        """
+        sched = getattr(self.ctx, "proactive_scheduler", None)
+        if sched is not None and hasattr(sched, "note_learning_milestone"):
+            sched.note_learning_milestone(file_id, score)
+        self._maybe_seed_learning_note(file_id, score)
+
+    def _maybe_seed_learning_note(self, file_id: str, score) -> None:
+        """Etap 2 (RED zone, flag-gated OFF): on a passed exam, seed a goal whose
+        success_criterion is that a short self-authored "I learned X" note exists
+        in the sandbox -- giving the autonomous FS_WRITE hand a real, recurring
+        REASON to act (the gap: nothing else creates file_exists goals on its
+        own).
+
+        DOUBLE-GATED so it is inert + litter-free by default:
+          - LEARNING_NOTES_ENABLED must be on (the behaviour itself), AND
+          - the planner's FS_WRITE loop must be armed -- else the goal could
+            never be fulfilled and would sit ACTIVE forever (goal litter).
+        Deduped per file; the write stays jailed (<=1 KiB, sandbox, sanitized).
+        """
+        if not _env_flag("LEARNING_NOTES_ENABLED"):
+            return
+        planner = getattr(self.ctx, "planner_core", None)
+        store = getattr(self.ctx, "goal_store", None)
+        if planner is None or store is None:
+            return
+        # Only create a write-goal the hand can actually fulfil (no litter).
+        if not getattr(planner, "_fs_write_enabled", False):
+            return
+        try:
+            import time
+            import uuid
+            from pathlib import Path
+            from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
+            from agent_core.hands.sandbox_writer import default_sandbox_root
+
+            # Dedup: at most one open note-goal per learned file.
+            for g in store.get_active():
+                meta = getattr(g, "metadata", None) or {}
+                if meta.get("learning_note_file") == file_id:
+                    return
+
+            root = getattr(planner, "_fs_sandbox_root", None)
+            if not root:
+                try:
+                    from maria_core.sys.config import BASE_DIR
+                    root = default_sandbox_root(BASE_DIR)
+                except Exception:
+                    root = default_sandbox_root(".")
+
+            topic = (
+                Path(str(file_id)).stem.replace("_", " ").replace("-", " ").strip()
+                or str(file_id)
+            )
+            # Filename uses ONLY safe chars (alnum + "_" + ".txt") + a uuid, so it
+            # is a fixed point of sandbox_write's _sanitize_filename. If we derived
+            # it from file_id, special chars (e.g. "report(final).txt" -> "__")
+            # would be collapsed by the sanitizer at write time -> the written
+            # path would diverge from the criterion path -> the goal could never
+            # close (goal litter). The topic stays readable in the note CONTENT.
+            fname = f"maria_note_{int(time.time())}_{uuid.uuid4().hex[:6]}.txt"
+            try:
+                s = float(score)
+                pct = round(s * 100) if s <= 1.0 else round(s)
+            except (TypeError, ValueError):
+                pct = None
+            score_line = f"Egzamin zdany: {pct}%\n" if pct else ""
+            content = f"Nauczylam sie: {topic}\n{score_line}(autonomiczna notatka Marii)\n"
+            target = str(Path(root) / fname)
+
+            goal = create_goal(
+                goal_type=GoalType.USER,
+                description=f"Zapisz notatke z nauki: {topic}",
+                priority=0.7,
+                status=GoalStatus.ACTIVE,
+                created_by="maria",
+                success_criteria=[{"type": "file_exists", "path": target}],
+                metadata={
+                    "learning_note_file": file_id,
+                    "fs_write_content": content,
+                    "b2_learning_note": True,
+                },
+            )
+            store.create(goal)
+            store.save()
+            logger.info("[Etap2] seeded learning-note goal %s -> %s", goal.id, fname)
+        except Exception as e:
+            logger.debug(f"learning-note seed failed: {e}")
 
     def _get_router(self):
         """Get LLMRouter from ctx.brain."""
@@ -235,8 +343,18 @@ class TeacherModule(MariaModule):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _run_exam_wrapped(self, file_id: str):
-        """Wrap run_exam_if_ready to work with TeacherAgent."""
+    def _run_exam_wrapped(self, file_id: str, use_heldout: bool = False):
+        """Wrap run_exam_if_ready to work with TeacherAgent.
+
+        ``use_heldout`` is an EXPLICIT opt-in from the caller (the EXAM handler
+        passes it only for plans whose action_params carry grader='heldout' --
+        i.e. B4 drills on heldout-mode goals). It is deliberately NOT read from
+        the HELDOUT_GRADER_ENABLED env flag anymore: the global read flipped
+        grading for EVERY exam once bank rows existed for a file, which would
+        have routed live Kronika reviews through the uncalibrated mechanical
+        grader and demoted verified files latest-wins (red-team 2026-07-11,
+        CRITICAL #2). The env flag now arms ONLY the planner's B4 emission.
+        """
         try:
             from maria_core.learning.exam_agent import run_exam_if_ready
             from maria_core.sys.config import KNOWLEDGE_INDEX, LONGTERM_MEMORY, EXAM_RESULTS
@@ -270,7 +388,6 @@ class TeacherModule(MariaModule):
             # looped the pipeline forever.
             student_model = OLLAMA_MODEL
             examiner_model = "qwen3:8b" if student_model != "qwen3:8b" else "llama3.1:8b"
-            heldout = _env_flag("HELDOUT_GRADER_ENABLED")
             # Both exam paths now answer CONCISE (held-out always did; the regular
             # path switched 2026-06-06 -- see _execute_exam), so a short fact/number
             # reply fits well under 2048 tokens. 4096 is no longer needed: generate
@@ -321,26 +438,47 @@ class TeacherModule(MariaModule):
             # local-only grader stayed because a NAIVE NIM grader timed out at 45s
             # and the ROUTER silently fell back to the student = hidden self-grade;
             # _make_exam_grader_fn fixes both: 240s timeout + explicit qwen3 fallback.)
-            grader_llm_fn = _make_exam_grader_fn(examiner_model, scheduler=_exam_scheduler)
+            # One-slot cells: each closure records the backend that ACTUALLY ran
+            # ("nim:<model>" / "local:<model>"); run_exam_if_ready copies them into
+            # the exam record AFTER grading. Separate cells so an author fallback
+            # can never masquerade as the grader in the provenance data.
+            author_cell = {"backend": None}
+            grader_cell = {"backend": None}
+            grader_llm_fn = _make_exam_grader_fn(
+                examiner_model, scheduler=_exam_scheduler, used_cell=grader_cell)
             # Author the questions on NIM too (off-CPU, fast); same honest fallback.
-            generator_llm_fn = _make_exam_author_fn(examiner_model, scheduler=_exam_scheduler)
+            generator_llm_fn = _make_exam_author_fn(
+                examiner_model, scheduler=_exam_scheduler, used_cell=author_cell)
             grader_meta = {
-                # Independence holds for EITHER grader: NIM nemotron and the qwen3
-                # fallback are both a different family than the student (llama).
+                # Independence = the examiner is never the STUDENT (different
+                # weights), for EITHER backend. Nuance recorded honestly via the
+                # cells: the live NIM (dracarys) is a Llama-3.1 finetune -- same
+                # LINEAGE as the student, different weights/scale -- while the
+                # qwen3 fallback is a genuinely different family.
                 "independent": examiner_model != student_model,
                 "grader": f"nim-first|{examiner_model}",
                 "student": student_model,
+                "grader_cell": grader_cell,
+                "author_cell": author_cell,
             }
 
-            # Live SemanticMemory for CLOSED-BOOK held-out answering (retrieval
-            # over learned summaries instead of spoon-feeding the file's own).
-            # Wired as ctx.semantic_search (homeostasis_module); None -> the exam
-            # falls back to legacy open-book, so this is safe before backfill.
-            _ctx = getattr(self, "ctx", None)
-            sem_mem = (
-                getattr(_ctx, "semantic_search", None)
-                or getattr(_ctx, "semantic_memory", None)
-            )
+            # Context policy (C5, 2026-07-12): held-out exams answer OPEN-BOOK
+            # in production (semantic_memory=None) -- the independence of Option
+            # C comes from the frozen answer key + mechanical grading, not from
+            # recall-from-retrieval. Closed-book stays a drill mode (the offline
+            # rebaseline/subscore scripts pass semantic_memory themselves);
+            # summaries are indexed only at boot, so a fresh pantry file would
+            # retrieve NOTHING and fail blind. Regular exams never read
+            # semantic memory (the kwarg is consumed only by the held-out
+            # branch), but keep the old wiring for them unchanged.
+            if use_heldout:
+                sem_mem = None
+            else:
+                _ctx = getattr(self, "ctx", None)
+                sem_mem = (
+                    getattr(_ctx, "semantic_search", None)
+                    or getattr(_ctx, "semantic_memory", None)
+                )
             result = run_exam_if_ready(
                 index_path=KNOWLEDGE_INDEX,
                 memory_path=LONGTERM_MEMORY,
@@ -350,7 +488,7 @@ class TeacherModule(MariaModule):
                 grader_llm_fn=grader_llm_fn,
                 generator_llm_fn=generator_llm_fn,
                 grader_meta=grader_meta,
-                use_heldout=heldout,
+                use_heldout=use_heldout,
                 semantic_memory=sem_mem,
             )
             return {
@@ -358,6 +496,7 @@ class TeacherModule(MariaModule):
                 "passed": result["passed"],
                 "score": result["score"],
                 "file_id": result["file_id"],
+                "heldout_fallback": result.get("heldout_fallback", False),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

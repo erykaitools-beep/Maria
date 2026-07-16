@@ -30,6 +30,13 @@ VISION_EVENT_TYPES = {
     "vision_health":   (0.4, 30.0, True),   # Health status, dedupable
 }
 
+# Classifications that mean "a real object moved" (worth an event/ping), as
+# opposed to AMBIENT (light/shadow) and CAMERA_SHAKE (wind, scattered noise).
+_SALIENT_MOTION = (
+    MotionClassification.PERSON_MOVEMENT,
+    MotionClassification.OBJECT_MOVEMENT,
+)
+
 
 class VisionPerceptionAdapter:
     """Converts VisionPercept to K1 PerceptionEvents.
@@ -59,9 +66,13 @@ class VisionPerceptionAdapter:
         # Always emit regular perception tick
         events.append(self._make_percept_event(percept))
 
-        # Motion event (if motion detected)
+        # Motion event (only for coherent object motion). AMBIENT (light,
+        # shadows) and CAMERA_SHAKE (gusty foliage, scattered noise, a bumped
+        # camera) are environmental noise, not "something is there" -- emitting
+        # them spammed the operator with pings on wind/clouds. The MOG2 detector
+        # already absorbs most lighting; this is the salience backstop.
         if percept.motion and percept.motion.motion_detected:
-            if percept.motion.classification != MotionClassification.AMBIENT:
+            if percept.motion.classification in _SALIENT_MOTION:
                 events.append(self._make_motion_event(percept))
 
             # High-priority alert for danger

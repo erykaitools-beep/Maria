@@ -17,6 +17,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# B2 (2026-06-18): max autonomous fetch attempts per goal before giving up and
+# letting the R1-A reaper handle it. Shared with PlannerCore's fetch consumer
+# so the stuck path and the goal-cycle path honour the same ceiling.
+FETCH_RETRY_CAP = 3
+
 
 class StuckCause(Enum):
     """Diagnosed root cause of a stuck loop."""
@@ -25,6 +30,7 @@ class StuckCause(Enum):
     RATE_LIMITED = "rate_limited"              # K7/rate limit blocking action
     CONSECUTIVE_FAILURES = "consecutive_fails" # K7 blocked due to failure streak
     NO_FILES = "no_files"                     # Goal has no input files to learn from
+    MATERIALS_EXHAUSTED = "materials_exhausted"  # Files exist but all already learned -> fetch new
     LLM_ERROR = "llm_error"                   # LLM backend failing repeatedly
     MISSING_SUBSYSTEM = "missing_subsystem"   # Required module not configured
     UNKNOWN = "unknown"                       # Could not determine cause
@@ -127,10 +133,28 @@ class StuckHandler:
                 context={"action": action, "reason": reason},
             )
 
-        if "idle_reason" in (plan_result or {}):
-            idle = plan_result.get("idle_reason", "")
-            if "no_files" in idle or "no files" in idle.lower():
-                return self._diagnose_no_files(fingerprint, plan_result)
+        idle = (plan_result or {}).get("idle_reason", "") or ""
+        if "no_files" in idle or "no files" in idle.lower():
+            return self._diagnose_no_files(fingerprint, plan_result)
+
+        # B2: materials exhausted -- files exist but are all already learned /
+        # chunked, so the teacher skips every cycle (non_chunking_strategy /
+        # filtered_out_all_candidates) and the goal grinds. Fetching new content
+        # is the correct escape. NOTE: the PRIMARY trigger is the planner's
+        # goal-cycle detector (_maybe_arm_fetch) -- an exhausted learn yields a
+        # SKIPPED plan, not FAILED, so stuck-detection rarely reaches here. This
+        # branch is defensive: it covers the rare case where a LEARN genuinely
+        # FAILS carrying one of these reasons (reason) or carries idle_reason.
+        exhausted_tags = (
+            "non_chunking_strategy",
+            "filtered_out_all_candidates",
+            "materials_exhausted",
+            "all_files_learned",
+        )
+        if any(tag in reason for tag in exhausted_tags) or any(
+            tag in idle for tag in exhausted_tags
+        ):
+            return self._diagnose_materials_exhausted(fingerprint, plan_result)
 
         # Unknown cause
         return StuckDiagnosis(
@@ -175,7 +199,28 @@ class StuckHandler:
             detail="Cel nauki nie ma plikow w input/. "
                    "Sprobuje pobrac nowe materialy.",
             repair_action=RepairAction.TRIGGER_FETCH,
-            context={"idle_reason": plan_result.get("idle_reason", "")},
+            context={
+                # goal_id MUST ride in context: _repair_trigger_fetch reads it
+                # to locate the goal. Without it the repair silently no-ops.
+                "goal_id": fingerprint.get("goal_id", ""),
+                "idle_reason": plan_result.get("idle_reason", ""),
+            },
+        )
+
+    def _diagnose_materials_exhausted(
+        self, fingerprint: Dict, plan_result: Dict,
+    ) -> StuckDiagnosis:
+        """Goal's own materials are exhausted (all already learned) -> fetch new."""
+        return StuckDiagnosis(
+            cause=StuckCause.MATERIALS_EXHAUSTED,
+            detail="Materialy celu sa wyczerpane (wszystko juz przerobione). "
+                   "Sprobuje pobrac nowe materialy z sieci.",
+            repair_action=RepairAction.TRIGGER_FETCH,
+            context={
+                "goal_id": fingerprint.get("goal_id", ""),
+                "idle_reason": plan_result.get("idle_reason", ""),
+                "reason": fingerprint.get("reason", ""),
+            },
         )
 
     # -- Level 5: Self-repair --
@@ -221,6 +266,9 @@ class StuckHandler:
                 # Hint: topic files exist, prefer learning
                 goal.metadata["prefer_learn"] = True
                 goal.metadata["stuck_repair"] = "switch_to_learn"
+                # GoalStore.save() only writes goals marked dirty.
+                if hasattr(self._goal_store, "_mark_dirty"):
+                    self._goal_store._mark_dirty(goal_id)
                 self._goal_store.save()
 
                 diag.repair_succeeded = True
@@ -279,20 +327,43 @@ class StuckHandler:
         return diag
 
     def _repair_trigger_fetch(self, diag: StuckDiagnosis) -> StuckDiagnosis:
-        """Mark that new material needs to be fetched."""
+        """Mark that new material needs to be fetched.
+
+        Sets goal.metadata["needs_fetch"], which PlannerCore consumes on the
+        next learning cycle: it overrides the learning action with FETCH for the
+        goal's topics (B2, 2026-06-18). Capped by fetch_attempts so a goal with
+        no new sources falls back to the R1-A reaper instead of fetching forever.
+        """
         goal_id = diag.context.get("goal_id", "")
 
         if self._goal_store and goal_id:
             goal = self._goal_store.get(goal_id)
             if goal and hasattr(goal, 'metadata'):
+                if not goal.metadata.get("topics"):
+                    # The planner's fetch consumer is topic-scoped; arming a
+                    # topicless goal would leave needs_fetch dangling forever.
+                    diag.repair_detail = (
+                        "Cel nie ma tematu (topics) - nie moge dociagnac materialu."
+                    )
+                    return diag
+                attempts = goal.metadata.get("fetch_attempts", 0)
+                if attempts >= FETCH_RETRY_CAP:
+                    diag.repair_detail = (
+                        f"Cel juz {attempts}x probowal pobrac nowe materialy "
+                        "bez skutku - zostawiam reaperowi (R1-A)."
+                    )
+                    return diag
                 goal.metadata["needs_fetch"] = True
                 goal.metadata["stuck_repair"] = "trigger_fetch"
+                # GoalStore.save() only writes goals marked dirty.
+                if hasattr(self._goal_store, "_mark_dirty"):
+                    self._goal_store._mark_dirty(goal_id)
                 self._goal_store.save()
 
                 diag.repair_succeeded = True
                 diag.repair_detail = (
                     "Oznaczono cel do pobrania nowych materialow. "
-                    "FETCH zostanie uruchomiony w nastepnym cyklu."
+                    "FETCH ruszy w nastepnym cyklu nauki."
                 )
                 logger.info(
                     "[StuckHandler] Repair: trigger_fetch for goal %s", goal_id,
@@ -370,6 +441,9 @@ class StuckHandler:
             hints.append("Modul nie jest skonfigurowany - wymaga restartu")
         elif cause == StuckCause.NO_FILES:
             hints.append("Dodaj materialy do input/ lub czekaj na FETCH")
+        elif cause == StuckCause.MATERIALS_EXHAUSTED:
+            hints.append("Maria probuje pobrac nowe materialy (FETCH)")
+            hints.append("/goals - sprawdz czy cel ma jeszcze sens")
         elif cause == StuckCause.UNKNOWN:
             hints.append("/trace - sprawdz ostatnie decyzje")
             hints.append("/status - sprawdz ogolny stan")

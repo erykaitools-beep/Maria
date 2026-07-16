@@ -177,16 +177,20 @@ class MemoryManager:
         Returns:
             Result dictionary with success status and freed amount
         """
-        logger.info(f"Consolidating episodic memory (target: {target_freed_mb}MB)")
+        logger.info(
+            "consolidate_episodic requested (target: %sMB) -- NOT IMPLEMENTED, "
+            "freeing nothing", target_freed_mb,
+        )
 
-        # Placeholder implementation
-        # Real implementation would:
-        # 1. Archive old episodic entries
-        # 2. Compress/summarize repeated patterns
-        # 3. Move to long-term storage
-
+        # NOT-IMPLEMENTED stub, reported HONESTLY (success=False). A real
+        # implementation would archive old episodic entries, compress repeated
+        # patterns, and move to long-term storage. Until then it must NOT claim
+        # success: a wired homeostasis executor would otherwise read "freed 0 MB
+        # but success" as a real free and consider memory pressure handled while
+        # nothing changed (2026-06-14 audit, Rank 11).
         return {
-            "success": True,
+            "success": False,
+            "reason": "not_implemented",
             "freed_mb": 0,
             "entries_archived": 0,
         }

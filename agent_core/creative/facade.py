@@ -104,6 +104,10 @@ class CreativeModule:
         (R1) and suppressed loops are surfaced to operator (D3)."""
         self._bulletin_store = store
         self._goal_adapter.set_bulletin_store(store)
+        # D3 now measures recurrence from creative advisories (post-R1), not the
+        # dead GoalStore source -- without this it silently counts 0 and the same
+        # ideas spam forever (diagnosed 2026-06-28).
+        self._loop_detector.set_bulletin_store(store)
 
     def set_llm_fn(self, fn: Optional[Callable[[str], str]]) -> None:
         """Wire LLM function for Phase 2 engines (late wiring)."""
@@ -159,6 +163,13 @@ class CreativeModule:
         """
         start = time.time()
         logger.info(f"[CREATIVE] Starting reflection cycle (trigger: {trigger})")
+
+        # Cooldown clock starts at ATTEMPT, not at success (2026-07-06): a
+        # cycle that dies mid-way (NIM timeout mid-generation) must still
+        # consume its 2h slot, otherwise a nightly outage turns the ~60s
+        # planner cadence into an unbounded retry storm of context builds
+        # and partial LLM calls.
+        self._last_reflection_ts = start
 
         # 1. Build context
         context = self._context_builder.build(period_hours=24.0)
@@ -464,9 +475,9 @@ class CreativeModule:
 
         topic = f"creative_loop:{meta_goal_type}"
         summary = (
-            f"LoopDetector: pattern '{meta_goal_type}' has {count} ABANDONED "
-            f"creative meta-goal(s) in {window_days}d. Suppressing "
-            f"regeneration until the streak ages out. Latest example: "
+            f"LoopDetector: pattern '{meta_goal_type}' recurred {count} time(s) "
+            f"in {window_days}d without being actioned. Suppressing regeneration "
+            f"until the streak ages out. Latest example: "
             f"{getattr(sample_mg, 'title', '')[:80]}"
         )
         try:

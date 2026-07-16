@@ -7,6 +7,7 @@ from agent_core.self_repair.detectors import (
     MODEL_UNAVAILABLE,
     THREAD_UNHEALTHY,
     THREAD_WEDGE_SECONDS,
+    _is_unavailable,
     detect_action_failure_storm,
     detect_dispatcher_stuck,
     detect_model_unavailable,
@@ -83,6 +84,54 @@ def test_detect_model_unavailable_cooldown():
     candidates = detect_model_unavailable(store, lambda kind, subject: True)
 
     assert candidates == []
+
+
+def test_is_unavailable_vocabulary_matches_real_statuses():
+    # Audit 2026-06-16: vocab must match what tool_registry actually emits.
+    # NIM "depleted" is RPM/budget back-pressure, NOT an outage (false positive).
+    assert _is_unavailable("NVIDIA NIM API", "depleted") is False
+    assert _is_unavailable("NVIDIA NIM API", "available") is False
+    assert _is_unavailable("NVIDIA NIM API", "unavailable") is True
+    # OpenClaw emits "disconnected", Codex "not_configured" -- must count as down
+    # (the old check only matched "unavailable" -> false negative).
+    assert _is_unavailable("OpenClaw Effector", "disconnected") is True
+    assert _is_unavailable("OpenClaw Effector", "available") is False
+
+
+def test_detect_model_unavailable_nim_depleted_is_not_an_outage():
+    # NIM rate-limit/budget depletion must NOT trip model_unavailable.
+    store = SnapshotStoreStub([
+        _snapshot("s1", "available"),
+        _snapshot("s2", "depleted"),
+        _snapshot("s3", "depleted"),
+    ])
+
+    candidates = detect_model_unavailable(store, lambda kind, subject: False)
+
+    assert candidates == []
+
+
+def test_detect_model_unavailable_openclaw_disconnected_fires():
+    def _snap(sid, openclaw_status):
+        return {
+            "snapshot_id": sid,
+            "external_services": [
+                {"name": "NVIDIA NIM API", "status": "available"},
+                {"name": "Ollama (local LLM)", "status": "available"},
+                {"name": "OpenClaw Effector", "status": openclaw_status},
+            ],
+        }
+
+    store = SnapshotStoreStub([
+        _snap("s1", "available"),
+        _snap("s2", "disconnected"),
+        _snap("s3", "disconnected"),
+    ])
+
+    candidates = detect_model_unavailable(store, lambda kind, subject: False)
+
+    assert len(candidates) == 1
+    assert candidates[0].evidence_summary["service_name"] == "OpenClaw Effector"
 
 
 def test_detect_dispatcher_stuck_positive():

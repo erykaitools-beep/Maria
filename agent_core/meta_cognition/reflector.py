@@ -27,6 +27,7 @@ from agent_core.meta_cognition.reflection_model import (
 )
 from agent_core.meta_cognition.reflection_store import ReflectionStore
 from agent_core.meta_cognition.confidence_tracker import ConfidenceTracker
+from agent_core.planner.decision_filters import result_is_skipped
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,15 @@ class Reflector:
         Updates the Reflection record with actual outcome,
         outcome match classification, confidence update, and lessons.
         """
+        # A skipped attempt (declined before any work -- e.g. no fresh material
+        # passed the filter) has no real outcome to evaluate. Leave its reflection
+        # pending so it stays OUT of ConfidenceTracker (which only counts
+        # is_reflected records): planner *rest* must not drag decision-confidence
+        # down the way a genuine failure does. Same exclusion that self-analysis
+        # sensors and the K7 failure breaker already apply to skips.
+        if result_is_skipped(result):
+            return None
+
         reflection = self._store.get_by_plan_id(plan_id)
         if reflection is None:
             logger.debug(f"[K9] No reflection found for plan {plan_id}")

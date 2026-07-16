@@ -121,11 +121,15 @@ class MemoryQuery:
                 if fid:
                     self._knowledge_cache[fid] = rec
 
-        # Load beliefs (MERGE: last per entity wins)
+        # Load beliefs (MERGE: last per entity wins). Quarantined/retracted
+        # beliefs (status != active) are excluded -- this is the operator-facing
+        # chat "co wiesz o X" surface and must respect a soft-hide/retraction.
+        # Missing status key on an old record means active (backward compatible).
         if self._beliefs_path.exists():
             for rec in _load_jsonl(self._beliefs_path):
                 entity = rec.get("entity", "")
-                if entity and not rec.get("superseded_by"):
+                if (entity and not rec.get("superseded_by")
+                        and rec.get("status", "active") == "active"):
                     self._beliefs_cache[entity] = rec
 
     def query_topic(self, topic: str, top_k: int = 10) -> List[MemoryResult]:

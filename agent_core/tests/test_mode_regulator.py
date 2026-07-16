@@ -194,6 +194,35 @@ class TestModeDecision:
             mode = regulator.decide_mode(state, [])
         assert mode == Mode.ACTIVE
 
+    def test_learning_window_recovers_from_reduced_not_trapped(self, regulator):
+        """Regression (2026-06-15): a CPU-spike demote to REDUCED during a
+        learning window must still recover to ACTIVE.
+
+        The no-sleep branch used to ``return self.current_mode``, which
+        short-circuited the REDUCED->ACTIVE recovery below. A healthy idle box
+        therefore sat in REDUCED (light-only) for the whole window -- the
+        afternoon 14-16 window had 11/12 learns blocked by mode=reduced. After
+        the fix the branch falls through so recovery can engage."""
+        regulator.transition_to(Mode.REDUCED)
+        state = {
+            "idle_seconds": 5000,      # > IDLE_FOR_SLEEP_SEC: would otherwise sleep
+            "ram_available_pct": 80,   # healthy
+            "cpu_load": 20,            # healthy: the CPU spike is over
+        }
+        with patch.object(ModeRegulator, "_is_learning_window", return_value=True):
+            # First tick must reach the recovery branch and start the stability
+            # timer (the bug never got here -- it froze in REDUCED).
+            regulator.decide_mode(state, [])
+            assert regulator._stable_since is not None, (
+                "recovery timer never started -- still trapped in REDUCED"
+            )
+            # Once the stability window elapses, it must lift back to ACTIVE.
+            regulator._stable_since = time.time() - (
+                regulator.STABLE_TIME_FOR_ACTIVE_SEC + 5
+            )
+            recovered = regulator.decide_mode(state, [])
+        assert recovered == Mode.ACTIVE
+
     def test_learning_window_wakes_from_sleep(self, regulator):
         """Maria should auto-wake from SLEEP when learning window starts."""
         regulator.transition_to(Mode.SLEEP)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,12 @@ class TaskQueue:
         self._path = path or _DEFAULT_PATH
         self._tasks: Optional[Dict[str, Task]] = None
         self._last_loaded_mtime: float = 0.0
+        # Reentrant lock so the three in-process writers (tick-loop dispatcher,
+        # Telegram handler, Web UI) genuinely serialize read-modify-write on the
+        # shared dict instead of racing. Docstrings elsewhere long CLAIMED a
+        # per-store lock that did not exist (audit 2026-06-16 #3); this is it.
+        # RLock because public methods nest (post -> _ensure_loaded -> _append).
+        self._lock = threading.RLock()
 
     # --- Persistence -------------------------------------------------
 
@@ -104,18 +111,19 @@ class TaskQueue:
 
     def post(self, task: Task) -> Task:
         """Insert or update a task. Returns the persisted task."""
-        self._ensure_loaded()
-        assert self._tasks is not None
-        self._tasks[task.task_id] = task
-        self._append(task)
-        logger.info(
-            "[CONDUCTOR] Posted: %s project=%s phase=%s status=%s",
-            task.task_id,
-            task.project,
-            task.phase,
-            task.status.value,
-        )
-        return task
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            self._tasks[task.task_id] = task
+            self._append(task)
+            logger.info(
+                "[CONDUCTOR] Posted: %s project=%s phase=%s status=%s",
+                task.task_id,
+                task.project,
+                task.phase,
+                task.status.value,
+            )
+            return task
 
     def update(self, task_id: str, **fields: Any) -> Optional[Task]:
         """Apply partial updates to an existing task. Returns updated
@@ -123,34 +131,36 @@ class TaskQueue:
 
         ``status`` and ``assignee`` accept either Enum or string.
         """
-        self._ensure_loaded()
-        assert self._tasks is not None
-        existing = self._tasks.get(task_id)
-        if existing is None:
-            logger.warning("[CONDUCTOR] update: unknown task_id %s", task_id)
-            return None
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            existing = self._tasks.get(task_id)
+            if existing is None:
+                logger.warning("[CONDUCTOR] update: unknown task_id %s", task_id)
+                return None
 
-        d = existing.to_dict()
-        for key, value in fields.items():
-            if value is None and key not in ("started_at", "completed_at", "estimated_minutes"):
-                continue
-            if key == "status" and isinstance(value, TaskStatus):
-                d["status"] = value.value
-            elif key == "assignee" and isinstance(value, Assignee):
-                d["assignee"] = value.value
-            else:
-                d[key] = value
-        d["updated_at"] = time.time()
+            d = existing.to_dict()
+            for key, value in fields.items():
+                if value is None and key not in ("started_at", "completed_at", "estimated_minutes"):
+                    continue
+                if key == "status" and isinstance(value, TaskStatus):
+                    d["status"] = value.value
+                elif key == "assignee" and isinstance(value, Assignee):
+                    d["assignee"] = value.value
+                else:
+                    d[key] = value
+            d["updated_at"] = time.time()
 
-        updated = Task.from_dict(d)
-        self._tasks[task_id] = updated
-        self._append(updated)
-        return updated
+            updated = Task.from_dict(d)
+            self._tasks[task_id] = updated
+            self._append(updated)
+            return updated
 
     def get(self, task_id: str) -> Optional[Task]:
-        self._ensure_loaded()
-        assert self._tasks is not None
-        return self._tasks.get(task_id)
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            return self._tasks.get(task_id)
 
     # --- Queries -----------------------------------------------------
 
@@ -161,39 +171,41 @@ class TaskQueue:
         include_terminal: bool = True,
     ) -> List[Task]:
         """Return tasks optionally filtered by project and/or status."""
-        self._ensure_loaded()
-        assert self._tasks is not None
-        out: List[Task] = []
-        for t in self._tasks.values():
-            if project is not None and t.project != project:
-                continue
-            if status is not None and t.status != status:
-                continue
-            if not include_terminal and t.is_terminal:
-                continue
-            out.append(t)
-        return out
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            out: List[Task] = []
+            for t in self._tasks.values():
+                if project is not None and t.project != project:
+                    continue
+                if status is not None and t.status != status:
+                    continue
+                if not include_terminal and t.is_terminal:
+                    continue
+                out.append(t)
+            return out
 
     def get_next(self, project: str) -> Optional[Task]:
         """Pick the highest-priority PENDING task in ``project`` whose
         dependencies are all DONE. Returns None if nothing is ready."""
-        self._ensure_loaded()
-        assert self._tasks is not None
-        candidates: List[Task] = []
-        for t in self._tasks.values():
-            if t.project != project:
-                continue
-            if t.status != TaskStatus.PENDING:
-                continue
-            if not self._deps_satisfied(t):
-                continue
-            candidates.append(t)
-        if not candidates:
-            return None
-        # Highest priority first; tie-break: oldest created_at wins so a
-        # backlog drains in submission order rather than oscillating.
-        candidates.sort(key=lambda x: (-x.priority, x.created_at))
-        return candidates[0]
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            candidates: List[Task] = []
+            for t in self._tasks.values():
+                if t.project != project:
+                    continue
+                if t.status != TaskStatus.PENDING:
+                    continue
+                if not self._deps_satisfied(t):
+                    continue
+                candidates.append(t)
+            if not candidates:
+                return None
+            # Highest priority first; tie-break: oldest created_at wins so a
+            # backlog drains in submission order rather than oscillating.
+            candidates.sort(key=lambda x: (-x.priority, x.created_at))
+            return candidates[0]
 
     def _deps_satisfied(self, task: Task) -> bool:
         assert self._tasks is not None
@@ -207,18 +219,20 @@ class TaskQueue:
 
     def stats(self, project: Optional[str] = None) -> Dict[str, int]:
         """Counts per status, optionally scoped to one project."""
-        self._ensure_loaded()
-        assert self._tasks is not None
-        out: Dict[str, int] = {s.value: 0 for s in TaskStatus}
-        out["total"] = 0
-        for t in self._tasks.values():
-            if project is not None and t.project != project:
-                continue
-            out[t.status.value] += 1
-            out["total"] += 1
-        return out
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            out: Dict[str, int] = {s.value: 0 for s in TaskStatus}
+            out["total"] = 0
+            for t in self._tasks.values():
+                if project is not None and t.project != project:
+                    continue
+                out[t.status.value] += 1
+                out["total"] += 1
+            return out
 
     def projects(self) -> List[str]:
-        self._ensure_loaded()
-        assert self._tasks is not None
-        return sorted({t.project for t in self._tasks.values()})
+        with self._lock:
+            self._ensure_loaded()
+            assert self._tasks is not None
+            return sorted({t.project for t in self._tasks.values()})

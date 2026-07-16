@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
+from agent_core.operator.operator_model import in_quiet_hours, quiet_hours_window
 from agent_core.environment.environment_model import (
     EnvironmentMode,
     EnvironmentProfile,
@@ -126,18 +127,11 @@ class ModeDetector:
             return None
         try:
             prefs = getattr(self._operator_model, "get_preferences", lambda: {})()
-            quiet_start = prefs.get("quiet_hours_start")
-            quiet_end = prefs.get("quiet_hours_end")
-            if quiet_start is not None and quiet_end is not None:
-                hour = now.hour
-                if quiet_start <= quiet_end:
-                    # Simple range: e.g., 22-7
-                    if quiet_start <= hour or hour < quiet_end:
-                        return EnvironmentMode.QUIET
-                else:
-                    # Wrap around midnight: e.g., 22-7
-                    if hour >= quiet_start or hour < quiet_end:
-                        return EnvironmentMode.QUIET
+            window = quiet_hours_window(prefs)
+            if window is None:
+                return None
+            if in_quiet_hours(now.hour, window):
+                return EnvironmentMode.QUIET
         except Exception:
             pass
         return None

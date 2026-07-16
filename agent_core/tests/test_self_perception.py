@@ -190,6 +190,32 @@ def test_diff_triggers_bulletin(tmp_path, fake_ctx):
     assert "mode" in bulletin.calls[-1]["metadata"]["diff_fields"]
 
 
+def test_real_bulletin_dedup_collapses_diffs(tmp_path, fake_ctx):
+    """Regression guard: SelfPerception posts under a STABLE topic
+    ("self_state_change") so the REAL BulletinStore dedup collapses every
+    self-state diff into ONE open entry. If the topic ever becomes dynamic
+    (snapshot_id / diff_fields), dedup breaks and the board floods (~one entry
+    per 30 min). The other tests use FakeBulletinStore which does no dedup, so
+    this is the only test exercising the real create_and_post -> find_open path.
+    """
+    from agent_core.bulletin.bulletin_store import BulletinStore
+    from agent_core.bulletin.bulletin_model import EntryType
+
+    store = BulletinStore(path=tmp_path / "bulletin.jsonl")
+    sp = make_perception(tmp_path, fake_ctx, store)
+
+    sp.take_snapshot()            # first: diff vs None -> posts the one entry
+    fake_ctx.mode = "REDUCED"
+    sp.take_snapshot()            # diff -> deduped, no new entry
+    fake_ctx.mode = "SLEEP"
+    sp.take_snapshot()            # diff -> still deduped
+
+    open_entries = store.find_open(
+        topic="self_state_change", entry_type=EntryType.IMPROVEMENT
+    )
+    assert len(open_entries) == 1
+
+
 def test_is_fresh_threshold(tmp_path, fake_ctx, monkeypatch):
     current_time = 1000.0
     monkeypatch.setattr("agent_core.self_perception.perception.time.time", lambda: current_time)

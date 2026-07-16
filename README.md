@@ -51,7 +51,7 @@ She remembers who you are, what you care about, and adapts to your preferences.
 | **Autonomous Learning** | Drop `.txt` files in `input/` — Maria chunks, extracts knowledge, runs spaced repetition exams |
 | **Cognitive Core** | 13 architectural contracts (K1-K13): perception, goals, planning, world model, meta-cognition |
 | **Self-Reflection** | Self-analysis, creative tension detection, experiment system for parameter tuning |
-| **Proactive Communication** | Morning summaries, learning milestones, idle check-ins via Telegram |
+| **Proactive Communication** | Morning summaries, goal achievements, idle check-ins via Telegram |
 | **Operator Memory** | Remembers your name, interests, schedule, preferences across sessions |
 | **Web UI** | Chat, status dashboard, knowledge browser, experiment viewer |
 | **Telegram Bot** | Two-way communication, approve/reject goals, remote control |
@@ -212,7 +212,7 @@ Maria reaches out via Telegram when she has something meaningful to say:
 - **Morning summary** (7-9am) — health, goals, learning stats
 - **Evening recap** (8-9pm) — what happened today
 - **Goal achieved** — celebration when a goal is completed
-- **Learning milestone** — every 10% knowledge coverage
+- **Goal proposed** — a new goal is awaiting your approval
 - **Idle check-in** — after 48h without operator contact
 
 Quiet hours (23:00-6:00), daily limits, per-reason cooldowns.

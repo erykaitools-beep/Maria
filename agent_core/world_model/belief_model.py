@@ -43,6 +43,16 @@ class BeliefSource(Enum):
     USER = "user"                # User-provided
 
 
+# Belief lifecycle statuses (rollback/quarantine, 2026-06-14). "active" is the
+# ONLY visible state: every consumer read-filter requires status == STATUS_ACTIVE
+# (single source of truth for "visible = active"). A missing status key on an
+# old record means active (backward compatible). quarantined = reversible
+# soft-hide; retracted = audited removal kept on disk as a tombstone-with-reason.
+STATUS_ACTIVE = "active"
+STATUS_QUARANTINED = "quarantined"
+STATUS_RETRACTED = "retracted"
+
+
 @dataclass(frozen=True)
 class Belief:
     """
@@ -66,6 +76,16 @@ class Belief:
     superseded_by: Optional[str]   # belief_id of newer version
     related_entities: Tuple[str, ...]
     evidence: Tuple[Tuple[str, str, float], ...] = ()  # v2: (source_type, source_ref, weight)
+    # v3 (rollback/quarantine, 2026-06-14): conscious-unlearn lifecycle.
+    # status="active" is the normal state; "quarantined" = reversible soft-hide
+    # (invisible to every consumer, vector evicted, kept on disk + in audit);
+    # "retracted" = audited removal (confidence forced 0.0, kept CURRENT so
+    # compact() preserves it as a tombstone-with-reason). A non-active record
+    # keeps superseded_by=None so it survives compaction. Old records load as
+    # "active" (backward-compatible). retraction = {reason, actor, actor_detail,
+    # ts, prev_status, prev_belief_type, prev_confidence, episode_id} or None.
+    status: str = "active"
+    retraction: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dict for JSONL storage."""
@@ -87,6 +107,12 @@ class Belief:
         }
         if self.evidence:
             d["evidence"] = [list(e) for e in self.evidence]
+        # Emit lifecycle fields only when non-default (mirrors evidence) so
+        # the on-disk shape is unchanged for the active common case.
+        if self.status != "active":
+            d["status"] = self.status
+        if self.retraction is not None:
+            d["retraction"] = self.retraction
         return d
 
     @staticmethod
@@ -114,6 +140,8 @@ class Belief:
             superseded_by=d.get("superseded_by"),
             related_entities=tuple(d.get("related_entities", [])),
             evidence=evidence,
+            status=d.get("status", "active"),
+            retraction=d.get("retraction"),
         )
 
 

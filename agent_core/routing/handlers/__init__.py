@@ -14,6 +14,8 @@ import time as _time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from agent_core.planner.decision_filters import creative_cooldown_skip
+
 logger = logging.getLogger(__name__)
 
 
@@ -281,6 +283,117 @@ def _resolve_notifier(telegram_notifier):
     return telegram_notifier
 
 
+def _provenance_gate_mode() -> str:
+    """Kronika TIER 1 provenance gate mode (read live, like GOAL_ROLLUP):
+      off      -- no gate (default; market goals behave like any other)
+      observe  -- log what the gate WOULD credit, but keep current behavior
+      cutover  -- enforce: market goals own only stamped provenance
+    """
+    val = (os.environ.get("KRONIKA_PROVENANCE_GATE") or "off").strip().lower()
+    return val if val in ("off", "observe", "cutover") else "off"
+
+
+def _credit_progress(goal, verified_count: int, total_owned: int) -> float:
+    """Fraction of a goal's owned files that are independently verified.
+
+    A market project-child may set a fixed target N (metadata
+    ['provenance_target_n']) so a daily-cadence file set that keeps growing does
+    not push closure past the 14-day deadline; otherwise it is verified/total.
+    Non-market goals are unchanged (verified/total).
+    """
+    meta = goal.metadata or {}
+    n = meta.get("provenance_target_n")
+    if n and meta.get("source_kind") == "market":
+        try:
+            return min(1.0, verified_count / float(n))
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+    return verified_count / total_owned if total_owned else 0.0
+
+
+def _append_heldout_criteria(goal, file_ids) -> bool:
+    """C6: give a heldout-mode goal one exam_independent{grader:heldout}
+    criterion PER stamped pantry file -- the criterion writer the whole B4
+    chain was missing (files do not exist at goal creation; they arrive via
+    the daily cadence fetch, so the criteria must be appended HERE, at the
+    stamp). Dedup per file, capped at provenance_target_n. Returns True when
+    the goal's criteria changed.
+    """
+    meta = getattr(goal, "metadata", None) or {}
+    n = meta.get("provenance_target_n")
+    try:
+        cap = int(n) if n else None
+    except (TypeError, ValueError):
+        cap = None
+    min_score = _heldout_min_score(goal)
+    crits = list(getattr(goal, "success_criteria", None) or [])
+    have = {
+        c.get("file") or c.get("file_id")
+        for c in crits
+        if isinstance(c, dict) and c.get("type") == "exam_independent"
+    }
+    added = False
+    for fid in file_ids:
+        if cap is not None and len(have) >= cap:
+            break
+        if not fid or fid in have:
+            continue
+        crits.append({
+            "type": "exam_independent", "file": fid,
+            "grader": "heldout", "min_score": min_score,
+        })
+        have.add(fid)
+        added = True
+    if added:
+        goal.success_criteria = crits
+    return added
+
+
+def stamp_market_provenance(plan, fetched_files, goal_store) -> None:
+    """Record which files a market project-child's fetch produced (SEAM-2).
+
+    Stamps the fetched file ids onto the TRIGGERING goal's
+    metadata['market_file_ids'] -- a key SEPARATE from file_ids, so it stays
+    inert until the provenance gate is at 'cutover'. This is the provenance link
+    the gate credits by, instead of loose token-match. Applies to market goals
+    AND /project sub-goals; no-op for plain goals; best-effort (never raises into
+    the fetch path).
+
+    Heldout-mode goals (Option C) additionally get a per-file
+    exam_independent{grader:heldout} criterion for each newly stamped file --
+    that is what makes the planner's B4 drill reachable for dynamically fetched
+    project files (C6).
+    """
+    try:
+        goal_id = getattr(plan, "goal_id", None)
+        if not goal_id or not goal_store or not fetched_files:
+            return
+        goal = goal_store.get(goal_id)
+        if not goal:
+            return
+        meta = goal.metadata or {}
+        # Record provenance for market goals AND any /project sub-goal, so a
+        # non-market child's fetched files get a provenance link (read back by
+        # resolve_goal_files under the gate) instead of falling to token-match.
+        if meta.get("source_kind") != "market" and not meta.get("project_parent"):
+            return
+        existing = list(goal.metadata.get("market_file_ids", []))
+        merged = list(dict.fromkeys(existing + list(fetched_files)))
+        changed = False
+        if merged != existing:
+            goal.metadata["market_file_ids"] = merged
+            changed = True
+        if _verification_mode(goal) == "heldout":
+            changed = _append_heldout_criteria(goal, merged) or changed
+        if changed:
+            goal.updated_at = _time.time()
+            if hasattr(goal_store, "_mark_dirty"):
+                goal_store._mark_dirty(goal.id)
+            goal_store.save()
+    except Exception as e:
+        logger.debug("market provenance stamp skipped: %s", e)
+
+
 def resolve_goal_files(goal, action_params=None, knowledge_analyzer=None) -> list:
     """Resolve the set of files a learning goal 'owns', in priority order:
       1) explicit file_ids persisted on the goal (e.g. fetch-handoff)
@@ -289,25 +402,73 @@ def resolve_goal_files(goal, action_params=None, knowledge_analyzer=None) -> lis
     Accepts both 'topics' (plural) and 'topic' (singular). Single source of
     truth for the goal<->knowledge mapping -- shared by progress credit
     (update_learning_goal) and the reconciliation sweep so they cannot drift.
+
+    Kronika TIER 1: a market goal OR any /project sub-goal is subject to the
+    provenance gate on the topic-match fallback (see _provenance_gate_mode), and
+    a /project sub-goal additionally gets an unconditional freshness floor (owns
+    only files indexed at/after its own creation -- 2026-07-11). Plain learning
+    goals are byte-for-byte unchanged.
     """
+    meta = goal.metadata or {}
     files = list(
-        goal.metadata.get("file_ids")
-        or goal.metadata.get("fetched_file_ids")
+        meta.get("file_ids")
+        or meta.get("fetched_file_ids")
         or (action_params or {}).get("resolved_file_ids")
         or []
     )
     if files:
         return files
-    topics = list(goal.metadata.get("topics") or [])
-    single = goal.metadata.get("topic")
+    topics = list(meta.get("topics") or [])
+    single = meta.get("topic")
     if single and single not in topics:
         topics.append(single)
+    topic_files = []
     if knowledge_analyzer and topics:
         try:
-            return [fid for fid, _ in knowledge_analyzer.get_files_for_topics(topics)]
+            topic_files = [
+                fid for fid, _ in knowledge_analyzer.get_files_for_topics(topics)
+            ]
         except Exception:
-            return []
-    return []
+            topic_files = []
+
+    # Option C: a heldout-mode goal owns EXACTLY its stamped pantry, regardless
+    # of the provenance-gate mode -- under gate off/observe the token-match
+    # fallback would let sibling children cross-credit each other's held-out
+    # passes on shared market vocabulary (diff-review 2026-07-12). The heldout
+    # contract must not rest on a mutable env flag.
+    if str(meta.get("verification_mode") or "").strip().lower() == "heldout":
+        return list(meta.get("market_file_ids") or [])
+
+    is_market = meta.get("source_kind") == "market"
+    is_project_child = bool(meta.get("project_parent"))
+    if is_market or is_project_child:
+        mode = _provenance_gate_mode()
+        if mode in ("observe", "cutover"):
+            stamped = list(meta.get("market_file_ids") or [])
+            if mode == "cutover":
+                # Owns only its provenance (possibly [] -> reconcile skips it,
+                # update_learning_goal falls to the nudge which is also gated).
+                return stamped
+            logger.info(
+                "[PROVENANCE_GATE/observe] project goal %s: token-match=%d files, "
+                "provenance=%d stamped -> cutover WOULD credit %d",
+                goal.id, len(topic_files), len(stamped), len(stamped),
+            )
+    # Freshness floor (NON-market /project children only): a sub-goal never
+    # credits files that pre-existed its own creation -- kills the false-close
+    # where a pre-existing verified file merely shares topic tokens. Market
+    # children keep their exact gate behavior (byte-identical observe, provenance
+    # at cutover -- they return above); plain learning goals fall straight
+    # through, byte-for-byte unchanged.
+    if is_project_child and not is_market and knowledge_analyzer and topic_files:
+        try:
+            cutoff = getattr(goal, "created_at", 0) or 0
+            if cutoff:
+                fresh = knowledge_analyzer.files_created_since(cutoff)
+                topic_files = [f for f in topic_files if f in fresh]
+        except Exception:
+            pass
+    return topic_files
 
 
 def completed_file_ids(knowledge_snapshot) -> set:
@@ -337,6 +498,20 @@ def completed_file_ids(knowledge_snapshot) -> set:
     return completed
 
 
+def _completed_intersect_verified(knowledge_snapshot, verified_ids) -> set:
+    """Completed files that are ALSO in ``verified_ids``, with P5 dup inheritance."""
+    by_status = (knowledge_snapshot or {}).get("files_by_status", {})
+    verified = {
+        fid for rec in by_status.get("completed", [])
+        for fid in ((rec.get("id") or rec.get("file")),)
+        if fid in verified_ids
+    }
+    for rec in by_status.get("duplicate", []):
+        if rec.get("duplicate_of") in verified:
+            verified.add(rec.get("id") or rec.get("file"))
+    return verified
+
+
 def independently_verified_completed_ids(knowledge_snapshot, *, verified_ids=None) -> set:
     """The trusted-DONE subset of completed_file_ids: files an INDEPENDENT
     examiner verified (grader_independent==True, score >= pass), NOT self-graded.
@@ -355,16 +530,72 @@ def independently_verified_completed_ids(knowledge_snapshot, *, verified_ids=Non
     if verified_ids is None:
         from agent_core.goals.success_criteria import independently_verified_file_ids
         verified_ids = independently_verified_file_ids()
-    by_status = (knowledge_snapshot or {}).get("files_by_status", {})
-    verified = {
-        fid for rec in by_status.get("completed", [])
-        for fid in ((rec.get("id") or rec.get("file")),)
-        if fid in verified_ids
-    }
-    for rec in by_status.get("duplicate", []):
-        if rec.get("duplicate_of") in verified:
-            verified.add(rec.get("id") or rec.get("file"))
-    return verified
+    return _completed_intersect_verified(knowledge_snapshot, verified_ids)
+
+
+def _verification_mode(goal) -> str:
+    """Goal's verification mode: 'heldout' or '' (default trust regime)."""
+    return str(
+        ((getattr(goal, "metadata", None) or {}).get("verification_mode")) or ""
+    ).strip().lower()
+
+
+def _heldout_min_score(goal) -> float:
+    """Per-goal held-out pass bar (C7 calibration knob), default 0.6.
+
+    THE knob the calibration drill adjusts. It must reach every door that
+    credits heldout progress -- criteria (_append_heldout_criteria) AND the two
+    progress doors (update_learning_goal, planner reconcile); a knob that only
+    reached criteria let verified/N auto-achieve at the hardcoded 0.6 while B4
+    still saw the files unmet (diff-review 2026-07-12, HIGH).
+    """
+    meta = getattr(goal, "metadata", None) or {}
+    try:
+        return float(meta.get("heldout_min_score", 0.6))
+    except (TypeError, ValueError):
+        return 0.6
+
+
+def heldout_criteria_fully_seeded(goal) -> bool:
+    """False while a heldout project child's pantry is only PARTIALLY criteria'd.
+
+    exam_independent criteria are appended AS FILES ARRIVE (daily cadence
+    fetch), so "all current criteria pass" at 6 of a 12-file target is not
+    done -- closing there would ship a half-empty Kronika. Guard shared by
+    close_goal_on_criteria and the planner B4 already-proven close. Goals
+    without heldout mode (or without a target N) are always 'complete' here.
+    """
+    if _verification_mode(goal) != "heldout":
+        return True
+    meta = getattr(goal, "metadata", None) or {}
+    n = meta.get("provenance_target_n")
+    if not n:
+        return True
+    crits = [
+        c for c in (getattr(goal, "success_criteria", None) or [])
+        if isinstance(c, dict) and c.get("type") == "exam_independent"
+    ]
+    try:
+        return len(crits) >= int(n)
+    except (TypeError, ValueError):
+        return True
+
+
+def heldout_verified_completed_ids(knowledge_snapshot, *, verified_ids=None) -> set:
+    """Heldout-mode twin of independently_verified_completed_ids (Option C).
+
+    Counts ONLY files whose latest held-out record (grader_model 'heldout:*' --
+    frozen answer key, mechanical grading) cleared the bar. Goals with metadata
+    verification_mode='heldout' credit progress from THIS set on every door
+    (update_learning_goal + planner reconcile), so a regular LLM exam -- which
+    also stamps grader_independent=True -- can neither advance nor close them
+    (the gate-with-two-doors CRITICAL, red-team 2026-07-11). Everything without
+    the mode keeps the broader bool predicate, byte-for-byte unchanged.
+    """
+    if verified_ids is None:
+        from agent_core.goals.success_criteria import heldout_verified_file_ids
+        verified_ids = heldout_verified_file_ids()
+    return _completed_intersect_verified(knowledge_snapshot, verified_ids)
 
 
 def update_learning_goal(
@@ -383,10 +614,27 @@ def update_learning_goal(
 
     try:
         goal = goal_store.get(plan.goal_id)
-        if not goal or goal.type.value != "learning":
+        if not goal:
+            return
+        # Learning goals + project sub-goals (USER children of a /project
+        # parent): a sub-goal is learning-shaped (topic + deadline) and the
+        # rollup needs it to actually close, so it earns progress the same way.
+        if goal.type.value != "learning" and not (
+            goal.type.value == "user"
+            and (goal.metadata or {}).get("project_parent")
+        ):
             return
 
         progress = goal.progress
+        # Kronika TIER 1: under 'cutover' a market goal OR any /project child is
+        # credited ONLY by provenance (stamped files) and MUST NOT get the
+        # topic-match fallback nudge -- otherwise exams on token-junk drag it to
+        # 1.0 despite the gate (the confirmed false-close, 2026-07-11).
+        gate_cutover = (
+            ((goal.metadata or {}).get("source_kind") == "market"
+             or (goal.metadata or {}).get("project_parent"))
+            and _provenance_gate_mode() == "cutover"
+        )
         scoped_file_ids = resolve_goal_files(
             goal, plan.action_params, knowledge_analyzer,
         )
@@ -398,21 +646,38 @@ def update_learning_goal(
         # true on the path that runs (audit 2026-06-01). "read"/"self-graded"
         # != "verified".
         file_based = False
+        heldout_mode = _verification_mode(goal) == "heldout"
         if knowledge_analyzer and scoped_file_ids:
             try:
-                verified_ids = independently_verified_completed_ids(
-                    knowledge_analyzer.get_knowledge_snapshot()
-                )
+                snapshot = knowledge_analyzer.get_knowledge_snapshot()
+                # Heldout-mode goal: only mechanically-graded held-out verdicts
+                # count -- a regular LLM exam must not advance or close it
+                # (gate-with-two-doors fix, red-team 2026-07-11) -- and they
+                # count at the GOAL'S OWN bar (C7 calibration knob).
+                if heldout_mode:
+                    from agent_core.goals.success_criteria import (
+                        heldout_verified_file_ids,
+                    )
+                    verified_ids = heldout_verified_completed_ids(
+                        snapshot,
+                        verified_ids=heldout_verified_file_ids(
+                            min_score=_heldout_min_score(goal)),
+                    )
+                else:
+                    verified_ids = independently_verified_completed_ids(snapshot)
                 done = sum(1 for fid in scoped_file_ids if fid in verified_ids)
-                progress = done / len(scoped_file_ids)
+                progress = _credit_progress(goal, done, len(scoped_file_ids))
                 file_based = True
             except Exception:
                 pass
 
         # Fallback only when no files could be resolved: nudge progress so a
         # genuinely-working goal still shows movement. A goal with a resolvable
-        # file set is judged solely on exam-verified completion above.
-        if not file_based and progress <= goal.progress:
+        # file set is judged solely on exam-verified completion above. Suppressed
+        # for a gated market child (provenance-only credit) and for heldout-mode
+        # goals (an LLM exam pass must never nudge a held-out goal forward).
+        if not file_based and progress <= goal.progress and not gate_cutover \
+                and not heldout_mode:
             if result.get("exams_passed", 0) > 0:
                 progress = min(1.0, goal.progress + 0.2)
             elif result.get("chunks_learned", 0) > 0:
@@ -476,6 +741,17 @@ def close_goal_on_criteria(
         goal = goal_store.get(plan.goal_id)
         if not goal or not getattr(goal, "success_criteria", None):
             return
+        # Heldout-mode project child: its exam_independent criteria are appended
+        # AS FILES ARRIVE (daily cadence fetch), so "all current criteria pass"
+        # at 6/12 pantry files would close a 12-target project early. Until the
+        # pantry is fully criteria'd, closure belongs to the verified/N progress
+        # door alone.
+        if not heldout_criteria_fully_seeded(goal):
+            logger.debug(
+                "[criteria] heldout goal %s: pantry not fully criteria'd, "
+                "not closing early", plan.goal_id,
+            )
+            return
         from agent_core.goals.success_criteria import evaluate_criteria
         passed, evidence = evaluate_criteria(
             goal.success_criteria, sandbox_root=sandbox_root,
@@ -510,25 +786,34 @@ def close_goal_on_criteria(
 
 def seed_first_action_goal(
     goal_store, base_dir=None, filename: str = "maria_first_action.txt",
+    sandbox_root: Optional[str] = None,
 ) -> Optional[str]:
     """Create the demonstration goal for the first real effector action (B2).
 
     An ACTIVE goal whose only success_criterion is that a file exists in the
     sandbox. With FS_WRITE_ENABLED on, the planner writes that file and the goal
     closes on external evidence. Returns the goal id (or None).
+
+    ``sandbox_root`` (when given) is used directly as the file's directory so the
+    criterion path matches exactly where the planner writes (the /drill_fs_write
+    path resolves the planner's own root and threads it through here). Otherwise
+    the root is derived from ``base_dir`` via default_sandbox_root().
     """
     if goal_store is None:
         return None
     from pathlib import Path
     from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
     from agent_core.hands.sandbox_writer import default_sandbox_root
-    if base_dir is None:
-        try:
-            from maria_core.sys.config import BASE_DIR
-            base_dir = BASE_DIR
-        except Exception:
-            base_dir = "."
-    target = str(Path(default_sandbox_root(base_dir)) / filename)
+    if sandbox_root:
+        target = str(Path(sandbox_root) / filename)
+    else:
+        if base_dir is None:
+            try:
+                from maria_core.sys.config import BASE_DIR
+                base_dir = BASE_DIR
+            except Exception:
+                base_dir = "."
+        target = str(Path(default_sandbox_root(base_dir)) / filename)
     goal = create_goal(
         goal_type=GoalType.USER,
         description="B2: write the first real file to the world (sandbox)",
@@ -635,6 +920,14 @@ def make_learn_handler(
                     "reason": "outside_learning_window"}
 
         filter_ids = resolve_topics(plan, knowledge_analyzer)
+        # Project sub-goal whose topic matches NO file: an unfiltered session
+        # would "learn" random material and nudge the sub-goal off-topic.
+        # no_files is a _MATERIALS_EXHAUSTED_REASONS tag, so the goal-cycle
+        # detector arms the B2 FETCH pump for the topic instead.
+        if (not filter_ids and plan.action_params.get("topics")
+                and (getattr(plan, "metadata", None) or {}).get("project_child")):
+            return {"success": False, "skipped": True, "reason": "no_files",
+                    "chunks_learned": 0}
         status = teacher_agent.run_session(
             max_iterations=1, filter_file_ids=filter_ids,
         )
@@ -707,14 +1000,20 @@ def make_exam_handler(
             # B4 drill: examine ONE specific file directly (spaced-repetition
             # path), bypassing run_session's own action choice -- so a goal
             # behind an exam_independent criterion is actually re-examined even
-            # if its file is already 'completed'. Held-out grading is gated by
-            # HELDOUT_GRADER_ENABLED, which the exam pipeline (_run_exam_fn)
-            # reads; here we just drive the file through it.
+            # if its file is already 'completed'. Held-out grading is opted into
+            # PER EXAM via the plan's grader param (C8, red-team 2026-07-11:
+            # the old global env flag flipped grading for EVERY exam, so live
+            # Kronika reviews would have hit the uncalibrated mechanical grader
+            # the moment bank rows existed for their files).
             exam_fn = getattr(teacher_agent, "_run_exam_fn", None)
             if exam_fn is None:
                 return {"success": False, "error": "teacher_agent has no exam fn"}
             try:
-                r = exam_fn(target_file_id) or {}
+                if params.get("grader") == "heldout":
+                    r = exam_fn(target_file_id, use_heldout=True) or {}
+                else:
+                    # Positional-only call keeps older exam fns / test fakes valid.
+                    r = exam_fn(target_file_id) or {}
             except Exception as e:
                 return {"success": False, "error": f"exam failed: {e}"}
             result = {
@@ -725,12 +1024,25 @@ def make_exam_handler(
                 "file": r.get("file_id", target_file_id),
                 "source": params.get("source", "heldout_drill"),
             }
+            if r.get("heldout_fallback"):
+                # Surfaced for the planner/traces: the drill asked for the
+                # mechanical grader but the bank had too few rows.
+                result["heldout_fallback"] = True
         else:
             if _is_outside_learning_window(plan):
                 return {"success": False, "skipped": True,
                         "reason": "outside_learning_window"}
 
             filter_ids = resolve_topics(plan, knowledge_analyzer)
+            # Project sub-goal whose topic matches NO file: an unfiltered
+            # session would examine random material and credit the sub-goal
+            # off-topic (+0.2/pass). no_files -> B2 FETCH pump instead.
+            # Mirrors make_learn_handler.
+            if (not filter_ids and params.get("topics")
+                    and (getattr(plan, "metadata", None) or {}).get(
+                        "project_child")):
+                return {"success": False, "skipped": True,
+                        "reason": "no_files", "exams_run": 0}
             status = teacher_agent.run_session(
                 max_iterations=1, filter_file_ids=filter_ids,
             )
@@ -892,8 +1204,14 @@ def make_fetch_handler(
     knowledge_analyzer,
     semantic_search=None,
     goal_store=None,
+    core=None,
 ) -> Callable:
-    """Create handler for ActionType.FETCH."""
+    """Create handler for ActionType.FETCH.
+
+    ``core`` (HomeostasisCore, optional) provides external_op_lease for the
+    heldout bank author -- its NIM calls are an intentional tick stall the
+    watchdog must be told about.
+    """
 
     def handler(plan) -> Dict[str, Any]:
         from agent_core.web_source.decision_log import log_fetch_decision
@@ -919,16 +1237,26 @@ def make_fetch_handler(
                     "reason": "outside_learning_window"}
 
         try:
-            from agent_core.web_source import run_fetch_session
+            from agent_core.web_source import (
+                run_fetch_session, resolve_feed_profile,
+            )
 
             max_articles = plan.action_params.get("max_articles", 3)
             # Pass user-requested topics from conversation goals
             override_topics = plan.action_params.get("topics")
+            # B1 choke-point (Kronika): a goal tagged source_kind='market' fetches
+            # from MARKET_FEEDS with the market matcher. Every FETCH emission path
+            # (early valve, forced, saturation, K8, tail) funnels through this
+            # handler, so resolving the profile here covers them all. None-safe.
+            feed_profile = resolve_feed_profile(
+                goal_store, getattr(plan, "goal_id", None)
+            )
             result = run_fetch_session(
                 knowledge_analyzer=knowledge_analyzer,
                 max_articles=max_articles,
                 semantic_memory=semantic_search,
                 override_topics=override_topics,
+                feed_profile=feed_profile,
             )
             errors = result.get("errors", 0)
             articles = result.get("articles_fetched", 0)
@@ -948,6 +1276,29 @@ def make_fetch_handler(
                 handoff_files = _register_fetch_handoff_goal(
                     plan, result, knowledge_analyzer, goal_store,
                 )
+                # SEAM-2: record provenance on the triggering market child so
+                # the gate can credit it by what it fetched, not token-match.
+                stamp_market_provenance(
+                    plan, result.get("fetched_files"), goal_store,
+                )
+                # C1 (Option C): freeze the held-out answer key AT ACQUISITION
+                # for heldout-mode goals -- the key exists before the student
+                # ever sees the material. Flag+mode gated inside; best-effort,
+                # capped per fetch; must never raise into the fetch path.
+                try:
+                    from agent_core.teacher.heldout_author import (
+                        author_bank_for_goal,
+                    )
+                    _hg = (
+                        goal_store.get(plan.goal_id)
+                        if goal_store and getattr(plan, "goal_id", None)
+                        else None
+                    )
+                    author_bank_for_goal(
+                        _hg, result.get("fetched_files"), core=core,
+                    )
+                except Exception as e:
+                    logger.debug("heldout bank author skipped: %s", e)
 
             if errors > 0:
                 outcome = "error"
@@ -966,7 +1317,12 @@ def make_fetch_handler(
             )
 
             return {
-                "success": errors == 0,
+                # Yield-aware (mirror action_executor._exec_fetch): 0 articles is not
+                # a win. 0 articles + no error = nothing NEW to fetch -> skipped (idle
+                # rest), so the saturation fetch pump stops being falsely reinforced
+                # AND fetch-confidence isn't tanked. Same idle!=failed contract.
+                "success": articles > 0 and errors == 0,
+                "skipped": articles == 0 and errors == 0,
                 "articles_fetched": articles,
                 "fetched_files": result.get("fetched_files", []),
                 "learn_handoff_files": handoff_files,
@@ -1097,15 +1453,14 @@ def make_self_analyze_handler(
             notifier = _resolve_notifier(telegram_notifier)
             if notifier and report.recommendations:
                 try:
-                    # AnalysisReport has no analysis_text field; the analyzer's text
-                    # output lives in raw_response. The old phantom read fell into the
-                    # bare except below -> self-analysis Telegram summary was always
-                    # silently dropped (audyt 2026-06-13).
-                    summary = report.raw_response[:300] if report.raw_response else ""
-                    recs = [
-                        r if isinstance(r, str) else str(r)
-                        for r in report.recommendations
-                    ]
+                    # Clean (summary, recs) instead of dumping raw_response (raw
+                    # JSON / prose) and str(dataclass) reprs into Telegram
+                    # (operator-facing junk, audyt 2026-06-15). Shared formatter
+                    # so the two call sites cannot drift.
+                    from agent_core.self_analysis.recommendation_model import (
+                        format_report_for_telegram,
+                    )
+                    summary, recs = format_report_for_telegram(report)
                     notifier.notify_self_analysis(summary, recs)
                 except Exception:
                     pass
@@ -1134,6 +1489,12 @@ def make_creative_handler(
             return {"success": False, "error": "No creative module configured"}
 
         try:
+            # Cooldown guard (2026-07-06): ask-first before the NIM-heavy
+            # reflect(); shape and rationale live in the shared helper.
+            skip = creative_cooldown_skip(creative_module)
+            if skip is not None:
+                return skip
+
             trigger = plan.action_params.get("trigger", "planner")
             result = creative_module.reflect(trigger=trigger)
 
@@ -1150,6 +1511,25 @@ def make_creative_handler(
                     pass
 
             return result
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    return handler
+
+
+def make_play_handler(play_module) -> Callable:
+    """Create handler for ActionType.PLAY (self-time / "spacer po wlasnej glowie").
+
+    Ungraded by design: runs one play cycle and returns its result. No goal
+    completion, no bulletin, no notification -- it is leisure, not work.
+    """
+
+    def handler(plan) -> Dict[str, Any]:
+        if play_module is None:
+            return {"success": False, "error": "No play module configured"}
+        try:
+            trigger = plan.action_params.get("trigger", "planner_idle")
+            return play_module.play(trigger=trigger)
         except Exception as e:
             return {"success": False, "error": str(e)}
 

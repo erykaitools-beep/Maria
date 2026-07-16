@@ -29,12 +29,19 @@ from typing import Any, Callable, Dict, List, Optional
 # Same normalization rules as the belief builder (which itself mirrors
 # KnowledgeAnalyzer) -- a THIRD copy of these rules would eventually
 # drift, and tag-rule drift is exactly how dedup bugs are born.
-from agent_core.world_model.belief_builder import _load_jsonl, _normalize_tag
+from agent_core.world_model.belief_builder import (
+    _load_jsonl,
+    _normalize_tag,
+    _source_group,
+)
 
 logger = logging.getLogger(__name__)
 
-# A synthesis must CROSS sources -- one file has nothing to synthesize
-# with. Records capped so the NIM prompt stays bounded on input.
+# A synthesis must CROSS independent sources -- one source has nothing to
+# synthesize with. "Independent" means distinct LOGICAL sources: single-origin
+# corpora (expert_*, one LLM voice) collapse to one (belief_builder._source_group),
+# so two expert_*.txt files do NOT clear this bar. Records capped so the NIM
+# prompt stays bounded on input.
 MIN_DISTINCT_SOURCES = 2
 MAX_MATERIAL_RECORDS = 12
 MAX_TAGS = 10
@@ -81,8 +88,9 @@ def gather_material(
     """
     Collect longterm-memory records for a topic (normalized tag match).
 
-    Returns None when the topic has no synthesizable material: fewer
-    than MIN_DISTINCT_SOURCES distinct source files. Otherwise a dict:
+    Returns None when the topic has no synthesizable material: fewer than
+    MIN_DISTINCT_SOURCES distinct LOGICAL sources (single-origin corpora
+    collapsed, see belief_builder._source_group). Otherwise a dict:
     {topic, records, source_files, summaries, key_points}.
 
     Newest records win the cap, but never at the cost of dropping a
@@ -106,7 +114,12 @@ def gather_material(
             matching.append(rec)
 
     sources = sorted({r["source_file"] for r in matching})
-    if len(sources) < MIN_DISTINCT_SOURCES:
+    # Gate on INDEPENDENT sources, not raw files: a topic carried only by
+    # expert_*.txt is one LLM voice (gap_planner ASK_EXPERT), never a
+    # cross-source basis -- crossing it with itself is a fake "cross-source"
+    # synthesis (audit 2026-06-16). See belief_builder._source_group.
+    distinct_sources = {_source_group(s) for s in sources}
+    if len(distinct_sources) < MIN_DISTINCT_SOURCES:
         return None
 
     # Reserve the freshest record per source, then fill with the
@@ -145,14 +158,19 @@ def gather_material(
 
 
 def eligible_topics(
-    memory_path: Path, limit: int = 10,
+    memory_path: Path, limit: Optional[int] = 10,
 ) -> List[Dict[str, Any]]:
     """
-    Topics with synthesizable material: normalized tags appearing in at
-    least MIN_DISTINCT_SOURCES distinct source files, strongest first.
+    Topics with synthesizable material: normalized tags appearing in at least
+    MIN_DISTINCT_SOURCES distinct LOGICAL sources (single-origin corpora
+    collapsed, see belief_builder._source_group), strongest first. The reported
+    "sources" count is the independent-source count, so the picker ranks on real
+    cross-source breadth, not raw file count.
 
-    Feeds /synthesize without arguments (operator suggestion list) and,
-    later, the autonomous topic picker.
+    Feeds /synthesize without arguments (operator suggestion list, limit=10)
+    and the autonomous topic picker (limit=None -> the FULL eligible set, so
+    its least-recently-synthesized rule can rotate across the whole corpus
+    instead of being trapped on the 10 richest tags). limit=None returns all.
     """
     records = _load_jsonl(Path(memory_path))
     tag_sources = defaultdict(set)
@@ -165,7 +183,11 @@ def eligible_topics(
         for tag in rec.get("tags", []):
             normalized = _normalize_tag(tag)
             if normalized and normalized != SYNTHESIS_FOLDER:
-                tag_sources[normalized].add(source)
+                # Collapse single-origin corpora (expert_*) to one logical
+                # source so the gate, the reported "sources" count and the
+                # picker's ranking all reflect INDEPENDENT sources, not raw
+                # file count (audit 2026-06-16).
+                tag_sources[normalized].add(_source_group(source))
 
     eligible = [
         {"topic": tag, "sources": len(srcs)}
@@ -515,6 +537,28 @@ def parse_faithfulness_response(
     return None
 
 
+# Faithfulness "reasons" that mean the judge produced NO real verdict -- a
+# timeout/error, an unparseable response, or nothing to judge -- rather than an
+# actual SUPPORTED/CONTRADICTED ruling. Operator surfaces MUST render these
+# distinctly: a judge stall reads byte-identical to "0 supported -> rejected"
+# otherwise, which is the exact misdiagnosis that would corrupt a SYNTH_ENABLED
+# go/no-go call. CANONICAL SOURCE -- the cron watcher
+# (scripts/check_autonomous_synthesis.py) keeps a standalone copy on purpose
+# (zero-import design); keep the two in sync.
+JUDGE_STALL_REASONS = frozenset({
+    "judge_failed", "judge_parse_failed", "no_material_or_claims",
+})
+
+
+def is_judge_stall(faithfulness: Any) -> bool:
+    """True when a faithfulness verdict dict reflects a judge stall (no real
+    signal) rather than an actual content ruling. Safe on any input."""
+    return (
+        isinstance(faithfulness, dict)
+        and faithfulness.get("reason") in JUDGE_STALL_REASONS
+    )
+
+
 def check_source_faithfulness(
     synthesis: Dict[str, Any],
     material: Dict[str, Any],
@@ -548,6 +592,18 @@ def check_source_faithfulness(
 
     statuses = parse_faithfulness_response(raw or "")
     if statuses is None:
+        return {**base, "reason": "judge_parse_failed"}
+    # A usable ruling needs exactly one verdict per claim. MORE verdicts than
+    # claims (duplicated/phantom ids -- a known small-model failure mode) would
+    # let `supported` exceed the claim count and push the ratio above 1.0,
+    # passing an ungrounded synthesis; FEWER leaves claims unjudged. Either way
+    # the verdict<->claim alignment is unreliable, so fail closed as a judge
+    # stall -- never a content ruling (audit 2026-06-15 #6).
+    if len(statuses) != len(claims):
+        logger.warning(
+            "[Synthesis] faithfulness judge returned %d verdicts for %d claims"
+            " -- unusable ruling", len(statuses), len(claims),
+        )
         return {**base, "reason": "judge_parse_failed"}
 
     contradicted = sum(1 for s in statuses if "CONTRA" in s)
@@ -589,7 +645,7 @@ class SynthesisAgent:
     def gather(self, topic: str) -> Optional[Dict[str, Any]]:
         return gather_material(self._memory_path, topic)
 
-    def topics(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def topics(self, limit: Optional[int] = 10) -> List[Dict[str, Any]]:
         return eligible_topics(self._memory_path, limit=limit)
 
     def synthesize(

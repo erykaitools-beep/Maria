@@ -97,6 +97,23 @@ class TestNotes:
         out = build_approval_inbox(tmp_path)
         assert out["items"][0]["detail"] == "tresc tu"
 
+    def test_body_preferred_over_reason_and_full_in_extra(self, tmp_path):
+        # Production case: a note has BOTH a one-word reason and a real body.
+        # The preview must show the BODY (what Maria wants to post), and the
+        # FULL untruncated body must ride in extra["content"] so the app can
+        # render the whole note on tap. Reason stays available in extra too.
+        body = "Maria -- status note\n" + ("szczegoly " * 40)
+        _write_outbox(tmp_path, [
+            _note("obx-7", "maria_status_x.md", reason="autonomous",
+                  content=body),
+        ])
+        out = build_approval_inbox(tmp_path)
+        item = out["items"][0]
+        assert item["detail"].startswith("Maria -- status note")
+        assert item["detail"] != "autonomous"
+        assert item["extra"]["content"] == body  # full, untruncated
+        assert item["extra"]["reason"] == "autonomous"
+
 
 class TestRepairs:
     def test_only_pending_self_repair(self, tmp_path):

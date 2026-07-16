@@ -528,3 +528,118 @@ class TestIntegration:
         # Completely invalid
         result = memory._extract_json("no json here at all")
         assert result is None
+
+
+# ============================================================
+# TestPendingCondensation -- the daemon-safe backlog drain
+# ============================================================
+
+def _seed_session(memory, session, n_turns, last_ts):
+    """Append n_turns user/assistant turns for `session`, newest at last_ts."""
+    path = memory.history_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        for i in range(n_turns):
+            role = "user" if i % 2 == 0 else "assistant"
+            ts = last_ts - (n_turns - 1 - i)  # ascending, ending at last_ts
+            f.write(json.dumps({
+                "ts": ts, "session": session, "role": role,
+                "content": f"wiadomosc {i} sesji {session}",
+            }, ensure_ascii=False) + "\n")
+
+
+class TestPendingCondensation:
+    """condense_pending_sessions: drain CLOSED sessions from durable history."""
+
+    NOW = 1_000_000.0
+    IDLE = 1800.0
+
+    def test_condenses_idle_unsummarized_session(self, memory, mock_brain):
+        _seed_session(memory, session=101, n_turns=4, last_ts=self.NOW - 5000)
+        n = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        assert n == 1
+        summaries = memory.get_recent_summaries(limit=10)
+        assert len(summaries) == 1
+        assert summaries[0]["session"] == 101
+        assert summaries[0]["turn_count"] == 4
+
+    def test_skips_live_session(self, memory, mock_brain):
+        """A session whose newest turn is within idle_secs is the live
+        conversation -> must NOT be condensed mid-flight."""
+        _seed_session(memory, session=202, n_turns=4, last_ts=self.NOW - 60)
+        n = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        assert n == 0
+        assert memory.get_recent_summaries(limit=10) == []
+
+    def test_skips_already_summarized(self, memory, mock_brain):
+        _seed_session(memory, session=303, n_turns=4, last_ts=self.NOW - 5000)
+        memory.save_summary({"session": 303, "summary": "stare", "date": "x"})
+        n = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        assert n == 0  # already done -> skipped
+        mock_brain._ask_once.assert_not_called()
+
+    def test_skips_single_turn_session(self, memory, mock_brain):
+        _seed_session(memory, session=404, n_turns=1, last_ts=self.NOW - 5000)
+        n = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        assert n == 0  # turns < 2 -> not worth a summary
+
+    def test_max_per_run_cap_and_resume(self, memory, mock_brain):
+        for s in (501, 502, 503):
+            _seed_session(memory, session=s, n_turns=2, last_ts=self.NOW - 5000)
+        first = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE, max_per_run=2
+        )
+        assert first == 2
+        # The remaining one is drained on the next call (idempotent backlog).
+        second = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE, max_per_run=2
+        )
+        assert second == 1
+        third = memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE, max_per_run=2
+        )
+        assert third == 0  # nothing left
+
+    def test_oldest_first(self, memory, mock_brain):
+        _seed_session(memory, session=601, n_turns=2, last_ts=self.NOW - 9000)  # oldest
+        _seed_session(memory, session=602, n_turns=2, last_ts=self.NOW - 3000)
+        memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE, max_per_run=1
+        )
+        summaries = memory.get_recent_summaries(limit=10)
+        assert len(summaries) == 1
+        assert summaries[0]["session"] == 601  # oldest condensed first
+
+    def test_rule_fallback_on_llm_failure(self, memory):
+        brain = specced(LLMRouter)
+        brain._ask_once.side_effect = Exception("LLM down")
+        _seed_session(memory, session=701, n_turns=3, last_ts=self.NOW - 5000)
+        n = memory.condense_pending_sessions(
+            brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        assert n == 1
+        summaries = memory.get_recent_summaries(limit=10)
+        assert summaries[0]["condensed_by"] == "rule"
+        assert summaries[0]["session"] == 701
+
+    def test_backlog_date_from_last_turn(self, memory, mock_brain):
+        """Backlog summaries carry the session's real date, not 'today'."""
+        last_ts = self.NOW - 5000
+        _seed_session(memory, session=801, n_turns=2, last_ts=last_ts)
+        memory.condense_pending_sessions(
+            mock_brain, now=self.NOW, idle_secs=self.IDLE
+        )
+        expected = time.strftime("%Y-%m-%d", time.localtime(last_ts))
+        assert memory.get_recent_summaries(limit=10)[0]["date"] == expected
+
+    def test_no_history_file_is_safe(self, memory, mock_brain):
+        # history_path does not exist yet
+        assert memory.condense_pending_sessions(mock_brain, now=self.NOW) == 0

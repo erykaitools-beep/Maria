@@ -123,12 +123,19 @@ class TestChatHttpTimeout:
         assert brain._http_timeout == OLLAMA_HTTP_TIMEOUT
 
     def test_chat_timeout_config_default_is_75(self):
+        from maria_core.sys import config as cfg
         with pytest.MonkeyPatch.context() as mp:
+            # config.py calls load_dotenv() at import, and importlib.reload re-runs
+            # it -> it would re-inject CHAT_TIMEOUT from the live .env (150) and
+            # defeat the delenv below. No-op load_dotenv for the reload so we
+            # measure the CODE default (75), not the operator's armed value.
+            mp.setattr("dotenv.load_dotenv", lambda *a, **k: None)
             mp.delenv("CHAT_TIMEOUT", raising=False)
-            from maria_core.sys import config as cfg
             importlib.reload(cfg)
             assert cfg.CHAT_HTTP_TIMEOUT == 75
-            importlib.reload(cfg)  # restore module state
+        # Restore real module state (load_dotenv + .env active) OUTSIDE the patch,
+        # so later tests see the deployed CHAT_TIMEOUT, not the stripped reload.
+        importlib.reload(cfg)
 
     def test_chat_timeout_env_override(self):
         with pytest.MonkeyPatch.context() as mp:

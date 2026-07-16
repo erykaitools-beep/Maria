@@ -36,6 +36,15 @@ PROMOTION_THRESHOLDS = {
 # Minimum successful actions before trust is meaningful
 MIN_ACTIONS_FOR_TRUST = 10
 
+# Actor stamped by the planner's non-productive loop detector
+# (planner_core.py:4850). Among all abandon actors this is the ONLY one that
+# means "Maria worked the goal and got stuck" -- every other one means nobody
+# ever touched it (planner_stale_cleanup: 922 goals), the architecture moved
+# (r1_cleanup: 64), the operator let a proposal lapse (system: 33), or a better
+# proposal displaced it (creative: 13). Keyed on the actor, not on the reason
+# text, so rewording the message cannot silently reclassify failures.
+ACTOR_NONPRODUCTIVE_LOOP = "planner_nonproductive_detector"
+
 # How many days of clean operation needed after promotion
 PROBATION_DAYS = 7.0
 
@@ -180,9 +189,10 @@ class TrustScorer:
                 for g in goals:
                     # Match goals to action types through audit trail
                     if self._goal_matches_action(g, action_type):
-                        if g.status.value == "achieved":
+                        outcome = self._goal_outcome(g)
+                        if outcome is True:
                             success_count += 1
-                        elif g.status.value in ("failed", "abandoned"):
+                        elif outcome is False:
                             fail_count += 1
                 total = success_count + fail_count
                 if total >= 3:
@@ -422,6 +432,52 @@ class TrustScorer:
         return max(0.0, min(1.0, score))
 
     @staticmethod
+    def _goal_outcome(goal) -> Optional[bool]:
+        """Did Maria succeed, fail, or never actually get to try?
+
+        Returns True (success), False (failure) or None (no evidence -- excluded
+        from the rate entirely, rather than counted against her).
+
+        ABANDONED IS NOT A FAILURE. It was counted as one until 2026-07-15, and
+        on live data 95.6% of goals (1140/1192) are abandoned -- so the "goal
+        success rate" was mostly measuring goal EXPIRY. Of those, 922 were
+        dropped by planner_stale_cleanup as "stale: pending 72h with no
+        progress": nobody ever started them (0/926 had progress > 0). Scoring
+        Maria's trustworthiness down for goals no one ever ran conflates a
+        backlog problem with an ability problem.
+
+        A failure needs evidence she TRIED: either measurable progress that did
+        not reach the finish, or the planner's own non-productive-loop verdict
+        (20 consecutive actions without progress -- trying hard and getting
+        nowhere is the realest failure there is, even at progress 0).
+        """
+        try:
+            status = (goal.status.value if hasattr(goal.status, 'value')
+                      else str(goal.status))
+        except Exception:
+            return None
+
+        if status == "achieved":
+            return True
+        if status == "failed":
+            return False
+        if status != "abandoned":
+            # active / pending / proposed / cancelled -- verdict not in yet.
+            return None
+
+        if (getattr(goal, "progress", 0) or 0) > 0:
+            return False  # moved the needle, never finished
+
+        for entry in reversed(getattr(goal, "audit_trail", None) or []):
+            if str(getattr(entry, "new_status", "")) != "abandoned":
+                continue
+            if getattr(entry, "actor", "") == ACTOR_NONPRODUCTIVE_LOOP:
+                return False  # tried hard, went nowhere -- a real failure
+            return None  # any other actor: nobody ever ran it -- no evidence
+
+        return None  # abandoned with no audit trail -- no evidence either way
+
+    @staticmethod
     def _goal_matches_action(goal, action_type: str) -> bool:
         """
         Check if a goal is related to an action type.
@@ -431,8 +487,15 @@ class TrustScorer:
         - MAINTENANCE goals -> maintenance, evaluate, critique
         - USER goals -> effector, ask_expert
         """
+        # Goal declares `type` (goal_model.py:84); `goal_type` is only the
+        # create_goal() KWARG name. Reading goal.goal_type raised inside the
+        # hasattr() ARGUMENT -- evaluated before hasattr could guard it -- so
+        # this returned False for every goal since 2026-04-12: no goal ever
+        # matched an action, total_actions stayed 0, has_enough_data() (min 10)
+        # was never true, and propose_promotion() bailed at `if not qualified`
+        # before reaching any threshold. Zero promotion proposals in history.
         try:
-            gtype = goal.goal_type.value if hasattr(goal.goal_type, 'value') else str(goal.goal_type)
+            gtype = goal.type.value if hasattr(goal.type, 'value') else str(goal.type)
         except Exception:
             return False
 
@@ -453,7 +516,7 @@ class TrustScorer:
         if self._goal_store:
             try:
                 for g in self._goal_store.get_all():
-                    gtype = g.goal_type.value if hasattr(g.goal_type, 'value') else str(g.goal_type)
+                    gtype = g.type.value if hasattr(g.type, 'value') else str(g.type)
                     mapping = {
                         "learning": ["learn", "exam", "fetch"],
                         "maintenance": ["maintenance", "evaluate"],
@@ -480,8 +543,13 @@ class TrustScorer:
             except Exception:
                 pass
 
-        # Fallback: at least these standard types
+        # Fallback: at least these standard types. Includes "effector" -- it was
+        # the one action with a real track record (16/17 achieved) yet the only
+        # one missing here, so whenever the goal store contributed nothing (which
+        # was ALWAYS, while _goal_matches_action was reading a phantom field) the
+        # sharpest action was also the one never scored.
         if not types:
-            types = {"learn", "exam", "fetch", "evaluate", "maintenance"}
+            types = {"learn", "exam", "fetch", "evaluate", "maintenance",
+                     "effector"}
 
         return types

@@ -246,3 +246,199 @@ def test_heldout_telegram_command(tmp_path, monkeypatch):
     assert "exam_independent" in cmd("")         # status shows the open criterion goal
     assert "OFF" in cmd("off")                   # disable
     assert p._heldout_enabled is False
+
+
+# -------------------- C8 (2026-07-12): per-exam grader scoping --------------------
+
+def _stub_bank_coverage(monkeypatch, file_id, rows=3):
+    """B4's coverage peek reads the LIVE default bank; stub it for tests."""
+    import maria_core.learning.exam_agent as ea
+    fake = [{"file": file_id, "q": f"q{i}", "match": "contains",
+             "canonical": f"odp{i}", "bank_version": "v3"} for i in range(rows)]
+    monkeypatch.setattr(ea, "load_heldout_bank", lambda *a, **k: fake)
+
+
+def test_b4_plan_carries_grader_from_criterion(tmp_path, monkeypatch):
+    """A criterion with grader='heldout' travels into the emitted plan's
+    action_params -- mechanical grading is opted into PER EXAM, never by the
+    global env flag (red-team CRITICAL #2: the blanket read would have flipped
+    live Kronika reviews to the uncalibrated static grader)."""
+    _stub_bank_coverage(monkeypatch, "web_rss_x.txt")
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = create_goal(
+        GoalType.USER, "projekt #3 child", 0.9, status=GoalStatus.ACTIVE,
+        success_criteria=[{
+            "type": "exam_independent", "file": "web_rss_x.txt",
+            "grader": "heldout", "min_score": 0.6,
+            "results_path": str(results),
+        }],
+    )
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is not None
+    assert plan.action_params["grader"] == "heldout"
+    assert plan.action_params["target_file_id"] == "web_rss_x.txt"
+
+
+def test_b4_plan_without_grader_field_stays_unscoped(tmp_path):
+    """Legacy criterion (no grader field) -> plan has no grader param -> the
+    handler calls the exam fn positionally (old fakes/signatures stay valid)."""
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = _make_exam_goal("web_wiki_chemia.txt", results)
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is not None
+    assert "grader" not in plan.action_params
+
+
+def test_exam_handler_passes_heldout_optin(tmp_path):
+    """plan grader='heldout' -> handler calls exam fn with use_heldout=True."""
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = _make_exam_goal("f.txt", results)
+    store.create(g)
+    seen = {}
+
+    def exam_fn(file_id, use_heldout=False):
+        seen["use_heldout"] = use_heldout
+        _write_exam_result(results, file_id, 0.83)
+        return {"success": True, "passed": True, "score": 0.83,
+                "file_id": file_id}
+
+    teacher = SimpleNamespace(_run_exam_fn=exam_fn)
+    handler = make_exam_handler(teacher, goal_store=store)
+    plan = create_plan(g.id, "x", ActionType.EXAM, {
+        "target_file_id": "f.txt", "grader": "heldout",
+    })
+    result = handler(plan)
+    assert result["success"] is True
+    assert seen["use_heldout"] is True
+
+    # No grader param -> positional call, use_heldout stays default False.
+    seen.clear()
+    plan2 = create_plan(g.id, "x", ActionType.EXAM, {"target_file_id": "f.txt"})
+    handler(plan2)
+    assert seen["use_heldout"] is False
+
+
+def test_b4_partial_pantry_not_closed_drills_unmet(tmp_path):
+    """Heldout child with target N=2 and only 1 seeded+passing criterion: B4
+    must NOT close it (early-close guard) -- and since the only criterion is
+    already met, there is nothing to drill this cycle."""
+    results = tmp_path / "exam_results.jsonl"
+    _write_exam_result(results, "a.txt", 0.9)  # heldout pass on record
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = create_goal(
+        GoalType.USER, "projekt child", 0.9, status=GoalStatus.ACTIVE,
+        success_criteria=[{
+            "type": "exam_independent", "file": "a.txt", "grader": "heldout",
+            "min_score": 0.6, "results_path": str(results),
+        }],
+        metadata={"project_parent": "g-p", "source_kind": "market",
+                  "provenance_target_n": 2, "verification_mode": "heldout"},
+    )
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is None
+    refreshed = store.get(g.id)
+    assert refreshed.status == GoalStatus.ACTIVE  # NOT closed at 1/2
+
+
+def test_b4_no_bank_coverage_skips_with_cooldown(tmp_path, monkeypatch):
+    """C3: a grader:heldout criterion with too few bank rows must NOT emit an
+    EXAM (the fallback LLM record can never satisfy it -> burn loop); the goal
+    gets a cooldown so B4 stops re-scanning it every cycle."""
+    _stub_bank_coverage(monkeypatch, "web_rss_x.txt", rows=1)  # below minimum
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = create_goal(
+        GoalType.USER, "projekt child", 0.9, status=GoalStatus.ACTIVE,
+        success_criteria=[{
+            "type": "exam_independent", "file": "web_rss_x.txt",
+            "grader": "heldout", "min_score": 0.6,
+            "results_path": str(results),
+        }],
+    )
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is None
+    # B4's OWN cooldown map, NOT the global selection filter: parking the goal
+    # in stuck_cooldowns would also block its cadence FETCH -- the very thing
+    # that fills the pantry (diff-review 2026-07-12).
+    assert p._b4_cooldowns.get(g.id, 0) > 0
+    assert g.id not in p._state.stuck_cooldowns
+
+    # Cooldown respected on the next scan even with coverage now present.
+    _stub_bank_coverage(monkeypatch, "web_rss_x.txt", rows=3)
+    assert p._maybe_run_heldout_exam({}) is None
+
+
+def test_b4_legacy_criterion_skips_bank_peek(tmp_path, monkeypatch):
+    """No grader field -> the LLM examiner can satisfy the criterion, so the
+    bank peek must not block emission (legacy /heldout seed keeps working)."""
+    _stub_bank_coverage(monkeypatch, "other.txt", rows=0)  # empty bank
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = _make_exam_goal("web_wiki_chemia.txt", results)
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is not None
+    assert plan.action_params["target_file_id"] == "web_wiki_chemia.txt"
+
+
+def test_b4_starved_file_does_not_block_covered_siblings(tmp_path, monkeypatch):
+    """One uncoverable file (source gone, bank empty) must not starve the
+    goal's OTHER unmet-but-covered files: B4 walks the unmet list and drills
+    the first drillable one (diff-review 2026-07-12)."""
+    import maria_core.learning.exam_agent as ea
+    monkeypatch.delenv("HELDOUT_BANK_AUTHOR_ENABLED", raising=False)
+    # Bank covers ONLY file b -- file a is permanently uncoverable.
+    fake_bank = [
+        {"file": "web_rss_b.txt", "q": f"q{i}", "match": "contains",
+         "canonical": f"odp{i}", "bank_version": "v3"} for i in range(3)
+    ]
+    monkeypatch.setattr(ea, "load_heldout_bank", lambda *a, **k: fake_bank)
+
+    results = tmp_path / "exam_results.jsonl"
+    store = GoalStore(tmp_path / "goals.jsonl")
+    g = create_goal(
+        GoalType.USER, "projekt child", 0.9, status=GoalStatus.ACTIVE,
+        success_criteria=[
+            {"type": "exam_independent", "file": "web_rss_a.txt",
+             "grader": "heldout", "min_score": 0.6,
+             "results_path": str(results)},
+            {"type": "exam_independent", "file": "web_rss_b.txt",
+             "grader": "heldout", "min_score": 0.6,
+             "results_path": str(results)},
+        ],
+    )
+    store.create(g)
+    p = _planner(tmp_path)
+    p.set_goal_store(store)
+    p.set_heldout_enabled(True)
+
+    plan = p._maybe_run_heldout_exam({})
+    assert plan is not None
+    assert plan.action_params["target_file_id"] == "web_rss_b.txt"

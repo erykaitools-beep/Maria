@@ -404,6 +404,34 @@ class TestAutonomyPolicy:
         result = policy.check(action_type="fetch")
         assert result.allowed is True
 
+    def test_skipped_attempt_does_not_trip_breaker(self):
+        # A skip (candidates filtered out, no fresh material) is neither success
+        # nor failure. 3 skips must NOT block -- unlike 3 real failures. This is
+        # the learn deadlock: filtered_out_all_candidates skips tripped the
+        # breaker, which then blocked every learn so it could never recover.
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        policy.record_execution("learn", False, skipped=True)
+        policy.record_execution("learn", False, skipped=True)
+        policy.record_execution("learn", False, skipped=True)
+        result = policy.check(action_type="learn")
+        assert result.allowed is True
+
+    def test_skipped_attempt_does_not_reset_real_streak(self):
+        # A skip is neutral: it must not mask a real failure streak either.
+        # 2 real failures + a skip + a 3rd real failure still trips the breaker.
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        policy.record_execution("learn", False)
+        policy.record_execution("learn", False)
+        policy.record_execution("learn", False, skipped=True)  # neutral, no reset
+        policy.record_execution("learn", False)  # 3rd real failure
+        result = policy.check(action_type="learn")
+        assert result.allowed is False
+        assert "consecutive_failures" in result.reasons[0]
+
     def test_degraded_mode_blocks_guarded(self):
         policy = AutonomyPolicy(
             escalation_handler=EscalationHandler(
@@ -434,6 +462,147 @@ class TestAutonomyPolicy:
         policy.record_execution("fetch", True)
         remaining = policy._rate_limiter.get_remaining("fetch")
         assert remaining == 2
+
+
+class TestRateLimitByClass:
+    """Rate limits bind for GUARDED + ANALYTICAL, never for FREE.
+
+    Historically check() consulted the rate limiter only for GUARDED
+    actions, leaving the configured ANALYTICAL limits (self_analyze 2/h,
+    critique 1/h, ...) dead: record_execution() fed the limiter but
+    check() never asked it. The night rotation then ground K12 through
+    NIM every ~60s all night (2026-07-07). The fix arms ANALYTICAL too,
+    but deliberately leaves FREE (learn/exam/review/evaluate/noop/play)
+    unlimited -- those are the cheap floor actions the design never meant
+    to cap, and their day-path selection sites do not precheck, so capping
+    them would surface as loud FAILED plans at the execution gate.
+    """
+
+    def test_analytical_action_rate_limited_at_default_limit(self):
+        # Default limits: self_analyze = 1/h (zejscie z 2/h 07-07: limiter
+        # jest jedynym hamulcem nocnej rotacji). Second check must block.
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        policy.record_execution("self_analyze", True)
+        result = policy.check(action_type="self_analyze")
+        assert result.allowed is False
+        assert result.decision == "rate_limited"
+        assert result.classification == "analytical"
+
+    def test_analytical_critique_rate_limited_at_one_per_hour(self):
+        # critique = 1/h (the tightest ANALYTICAL cap). Second check blocks.
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        policy.record_execution("critique", True)
+        result = policy.check(action_type="critique")
+        assert result.allowed is False
+        assert result.decision == "rate_limited"
+
+    def test_analytical_under_limit_still_runs_in_degraded_modes(self):
+        # The 7/7 guarantee is about MODES, not frequency: under the
+        # limit (0/1 used), ANALYTICAL actions still run in reduced/sleep.
+        policy = AutonomyPolicy()
+        for mode in ("reduced", "sleep"):
+            result = policy.check(action_type="self_analyze", mode=mode)
+            assert result.allowed is True, mode
+
+    def test_free_action_with_configured_limit_stays_unlimited(self):
+        # evaluate is FREE and HAS a dict limit (2/h), but FREE is never
+        # consulted -- capping it would arm un-prechecked day-paths (K4
+        # report, maintenance EVALUATE) into loud FAILED plans. Pin that
+        # the FREE class overrides the stale dict entry.
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        for _ in range(10):
+            policy.record_execution("evaluate", True)
+        result = policy.check(action_type="evaluate")
+        assert result.allowed is True
+
+    def test_free_review_stays_unlimited(self):
+        # review = 5/h in the dict but FREE: the exam-deadlock breaker's
+        # forced REVIEW must never be rate-blocked.
+        policy = AutonomyPolicy()
+        for _ in range(10):
+            policy.record_execution("review", True)
+        result = policy.check(action_type="review")
+        assert result.allowed is True
+
+    def test_free_action_without_limit_stays_unlimited(self):
+        policy = AutonomyPolicy()
+        for _ in range(20):
+            policy.record_execution("learn", True)
+        result = policy.check(action_type="learn")
+        assert result.allowed is True
+
+    def test_guarded_action_still_rate_limited(self):
+        # Pre-existing GUARDED behavior must be unchanged by the widening.
+        policy = AutonomyPolicy(
+            rate_limiter=ActionRateLimiter(limits={"fetch": 2}),
+            escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
+        )
+        policy.record_execution("fetch", True)
+        policy.record_execution("fetch", True)
+        result = policy.check(action_type="fetch")
+        assert result.allowed is False
+        assert result.decision == "rate_limited"
+
+
+class TestPrecheckQuiet:
+    """precheck=True answers "would this be allowed?" without side effects.
+
+    The planner asks for every rotation candidate every cycle (~60s at
+    night). Without precheck, each blocked "no" would land in
+    autonomy_decisions.jsonl -- thousands of non-events per night (the
+    log had 146 fs_write lines/night from the SLEEP-mode question alone).
+    """
+
+    def test_precheck_rate_limit_block_skips_escalation(self, tmp_path):
+        log = tmp_path / "decisions.jsonl"
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=log),
+        )
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit reached
+        result = policy.check(action_type="self_analyze", precheck=True)
+        assert result.allowed is False
+        assert result.decision == "rate_limited"
+        assert result.blocked_result is None
+        assert not log.exists()
+        assert policy.get_recent_escalations() == []
+
+    def test_real_check_rate_limit_block_records_escalation(self, tmp_path):
+        log = tmp_path / "decisions.jsonl"
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=log),
+        )
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit reached
+        result = policy.check(action_type="self_analyze")
+        assert result.allowed is False
+        assert result.blocked_result is not None
+        assert log.exists()
+        assert len(policy.get_recent_escalations()) == 1
+
+    def test_precheck_rule_block_skips_escalation(self, tmp_path):
+        # Mode-rule blocks (e.g. fs_write in SLEEP) are quiet too when
+        # the caller is only asking.
+        log = tmp_path / "decisions.jsonl"
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(log_path=log),
+        )
+        result = policy.check(
+            action_type="fs_write", mode="sleep", precheck=True,
+        )
+        assert result.allowed is False
+        assert result.blocked_result is None
+        assert not log.exists()
+        assert policy.get_recent_escalations() == []
+
+    def test_precheck_allowed_action_unaffected(self):
+        policy = AutonomyPolicy()
+        result = policy.check(action_type="self_analyze", precheck=True)
+        assert result.allowed is True
 
 
 # ============================================================

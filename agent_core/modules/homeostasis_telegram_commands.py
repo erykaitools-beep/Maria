@@ -17,6 +17,57 @@ from agent_core.modules.homeostasis_outbox import _propose_outbox_status_note
 
 logger = logging.getLogger(__name__)
 
+# Sub-goals an operator can attach to one /project (bounds the active-goal load).
+MAX_PROJECT_SUBGOALS = 12
+
+
+def _parse_project_deadline(text):
+    """Parse an operator deadline string to epoch seconds (Etap B /project).
+
+    Returns None when ``text`` is blank (a project may have no deadline). Raises
+    ValueError when ``text`` is non-blank but unparseable, so the command can
+    reject bad input upfront rather than silently dropping the deadline.
+
+    Accepts the reminder natural forms ("za 30 dni", "jutro 9:00", "za 2h") plus
+    ISO dates: "YYYY-MM-DD" (-> 23:59 local that day) and "YYYY-MM-DD HH:MM".
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    from agent_core.reminders import parse_time
+
+    ts = parse_time(text)
+    if ts is not None:
+        return ts
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if fmt == "%Y-%m-%d":
+            dt = dt.replace(hour=23, minute=59, second=0, microsecond=0)
+        return dt.timestamp()
+    raise ValueError(f"nie rozumiem terminu: {text!r}")
+
+
+def _parse_project_args(args):
+    """Split a raw /project arg string into (name, deadline_text, [subgoals]).
+
+    Format: ``<nazwa> | <termin> | <podcel1> ; <podcel2> ; ...`` where the two
+    ``|`` segments are optional. Sub-goals split on ``;`` or newlines; blanks are
+    dropped. Returns (name, deadline_text, subgoals) with name possibly empty
+    (caller validates).
+    """
+    raw = (args or "").strip()
+    parts = [p.strip() for p in raw.split("|")]
+    name = parts[0] if parts else ""
+    deadline_text = parts[1] if len(parts) > 1 else ""
+    subgoals = []
+    if len(parts) > 2:
+        blob = parts[2].replace("\n", ";")
+        subgoals = [s.strip() for s in blob.split(";") if s.strip()]
+    return name, deadline_text, subgoals
+
 
 def register_telegram_commands(bridge, ctx):
     """Register Telegram command handlers for operator interaction."""
@@ -62,6 +113,133 @@ def register_telegram_commands(bridge, ctx):
         if sp is None:
             return "Brak SelfPerception (modul nie wired)."
         return sp.format_status_for_telegram()
+
+    def _cmd_myslenie(args):
+        """Show recent reasoning-journal entries (Maria "thinks out loud").
+
+        Usage: /myslenie [n] [zrodlo]  e.g. /myslenie 5 creative
+        """
+        from agent_core.tracing.reasoning_journal import get_reasoning_journal
+        parts = (args or "").split()
+        n = 3
+        source = None
+        for p in parts:
+            if p.isdigit():
+                n = max(1, min(int(p), 10))
+            else:
+                source = p
+        entries = get_reasoning_journal().recent(n=n, source=source)
+        if not entries:
+            scope = f" (zrodlo: {source})" if source else ""
+            return (
+                f"Notatnik rozumowania pusty{scope}.\n"
+                "Wpisy powstaja gdy LLM rozumuje w creative/K12/teacher."
+            )
+        lines = [f"*Notatnik rozumowania* (ostatnie {len(entries)}):"]
+        for e in entries:
+            ts = time.strftime("%d.%m %H:%M", time.localtime(e.get("ts", 0)))
+            head = f"\n[{ts}] {e.get('source', '?')}"
+            if e.get("model"):
+                head += f" ({e['model'].split('/')[-1]})"
+            lines.append(head)
+            if e.get("conclusion"):
+                lines.append(f"Wniosek: {e['conclusion'][:200]}")
+            reasoning = (e.get("reasoning") or "").replace("\n", " ")
+            lines.append(f"Myslenie: {reasoning[:300]}")
+            if e.get("episode_id"):
+                lines.append(f"epizod: {e['episode_id']}")
+        return "\n".join(lines)
+
+    def _cmd_selfcontext(args):
+        """Show the merged situational picture (Super-META E0 SelfContext)."""
+        sc = getattr(ctx, "self_context", None)
+        if sc is None:
+            return "Brak SelfContext (modul nie wired)."
+        return sc.format_for_telegram()
+
+    def _cmd_lastseen(args):
+        """Show what Maria recently saw (Super-META E1 VisionMemory)."""
+        vm = getattr(ctx, "vision_memory", None)
+        if vm is None:
+            return "Brak VisionMemory (modul nie wired)."
+        return vm.format_for_telegram()
+
+    def _cmd_growth(args):
+        """Show Maria's growth targets (K15.3 GrowthAwareness), top 5 by benefit/cost."""
+        g = getattr(ctx, "growth_awareness", None)
+        if g is None:
+            return "Brak GrowthAwareness (modul nie wired)."
+        return g.get_summary_text()
+
+    def _cmd_samorozwoj(args):
+        """Curated self-development board: which ideas Maria keeps asking for,
+        how many times, since when, and whether anything ever came of it."""
+        sdj = getattr(ctx, "self_dev_journal", None)
+        if sdj is None:
+            return "Brak dziennika samorozwoju (modul nie wired)."
+        return sdj.render_board()
+
+    def _cmd_approve_dev(args):
+        """Take over a self-dev idea Maria nudged about (/approve_dev <token>).
+
+        Closure, not execution (mirrors /approve_repair): resolves the linked
+        creative advisories as operator_acknowledged so the idea stops recurring
+        and the board flips it from UTKNAL to zrealizowane."""
+        bridge = getattr(ctx, "self_dev_bridge", None)
+        if bridge is None:
+            return "Brak mostu samorozwoju (modul nie wired)."
+        token = (args or "").strip().split()[0] if (args or "").strip() else ""
+        if not token:
+            return "Uzycie: /approve_dev <token> (token z powiadomienia Marii)."
+        return bridge.acknowledge(token)
+
+    def _cmd_play(args):
+        """Self-time ("spacer po wlasnej glowie"): toggle + peek at her musings.
+
+        This is the OBSERVE window -- without it the play journal would rot
+        unseen like the creative one did.
+
+        /play        -> status (flag + last musings + how many continued a thread)
+        /play on     -> arm self-time (runtime; resets to PLAY_ENABLED on restart)
+        /play off    -> stop
+        """
+        planner = ctx.planner_core
+        pm = getattr(ctx, "play_module", None)
+        arg = (args or "").strip().lower()
+        if arg in {"on", "true", "1", "start"}:
+            if planner is None:
+                return "Brak planner_core (modul nie wired)."
+            planner.set_play_enabled(True)
+            return (
+                "Self-time (PLAY) = ON (runtime; reset po restarcie).\n"
+                "Gdy obudzona i bez zadan -> swobodna mysl do wlasnego dziennika, "
+                "bez oceny. /play -> podglad, /play off -> cofnij."
+            )
+        if arg in {"off", "false", "0", "stop"}:
+            if planner is None:
+                return "Brak planner_core (modul nie wired)."
+            planner.set_play_enabled(False)
+            return "Self-time (PLAY) = OFF."
+        flag = "ON" if (planner and getattr(planner, "_play_enabled", False)) else "OFF"
+        if pm is None:
+            return f"Self-time (PLAY) = {flag}. Brak play_module (nie wired)."
+        st = pm.get_status()
+        recent = pm.journal.recent(2)
+        cont = sum(1 for e in recent if e.get("continues"))
+        lines = [
+            f"Self-time (PLAY) = {flag}",
+            f"musingow lacznie: {st['total_plays']} | dzis: {st['today']} "
+            f"| LLM: {'tak' if st['has_llm'] else 'nie'}",
+        ]
+        if recent:
+            lines.append(f"ostatnie ({cont} kontynuuje watek):")
+            for e in recent:
+                m = str(e.get("musing", "")).replace("\n", " ")[:200]
+                link = " (watek)" if e.get("continues") else ""
+                lines.append(f"- {m}{link}")
+        else:
+            lines.append("(jeszcze zadnych musingow)")
+        return "\n".join(lines)
 
     def _cmd_strategic(args):
         """#9: toggle/inspect whether StrategicPlanner drives the tactical loop.
@@ -140,7 +318,7 @@ def register_telegram_commands(bridge, ctx):
                 lines.append(f"Cele z kryterium file_exists (otwarte): {open_crit}")
             except Exception:
                 pass
-        lines.append("/fs_write on|off|seed")
+        lines.append("/fs_write on|off|seed | /drill_fs_write | /learning_notes (notatki z nauki)")
         return "\n".join(lines)
 
     def _cmd_heldout(args):
@@ -159,21 +337,23 @@ def register_telegram_commands(bridge, ctx):
         parts = (args or "").strip().split()
         arg = parts[0].lower() if parts else ""
         if arg in {"on", "true", "1", "start"}:
-            # env drives the exam pipeline's use_heldout; flag drives the planner
-            # to actively re-examine exam_independent goals. Set together.
+            # C8: the flag arms ONLY the planner's B4 emission. Mechanical
+            # grading is opted into PER EXAM by the plan's grader='heldout'
+            # param (carried from the goal's criterion) -- regular exams and
+            # spaced reviews keep the LLM examiner regardless of this toggle.
             _os.environ["HELDOUT_GRADER_ENABLED"] = "1"
             planner.set_heldout_enabled(True)
             return (
                 "HELDOUT = ON (runtime; reset po restarcie).\n"
-                "Planner re-egzaminuje plik celu z kryterium exam_independent,\n"
-                "egzamin oceniany NIEZALEZNIE (heldout:static@v1, zero LLM),\n"
-                "cel domyka sie NA DOWODZIE (grader_independent w exam_results).\n"
+                "Planner emituje egzaminy dla celow z kryterium exam_independent;\n"
+                "ocena mechaniczna (heldout:static@v1) TYLKO dla planow z\n"
+                "grader=heldout (kryterium celu). Zwykle egzaminy/powtorki: LLM.\n"
                 "/heldout seed -> cel-demo, /heldout off -> cofnij."
             )
         if arg in {"off", "false", "0", "stop"}:
             _os.environ["HELDOUT_GRADER_ENABLED"] = "0"
             planner.set_heldout_enabled(False)
-            return "HELDOUT = OFF (planner nie wymusza egzaminu; grader wraca do LLM)."
+            return "HELDOUT = OFF (planner nie emituje egzaminow B4)."
         if arg == "seed":
             store = ctx.goal_store
             if store is None:
@@ -196,6 +376,13 @@ def register_telegram_commands(bridge, ctx):
         env_on = _os.environ.get("HELDOUT_GRADER_ENABLED", "").strip().lower() in {
             "1", "true", "yes", "on"}
         lines = [f"HELDOUT (niezalezny egzamin): planner={state} grader_env={'1' if env_on else '0'}"]
+        try:
+            from agent_core.teacher.heldout_author import author_enabled
+            lines.append(
+                f"Bank author (fetch): {'ON' if author_enabled() else 'OFF'}"
+            )
+        except Exception:
+            pass
         store = ctx.goal_store
         if store is not None:
             try:
@@ -207,6 +394,41 @@ def register_telegram_commands(bridge, ctx):
                 lines.append(f"Cele z kryterium exam_independent (otwarte): {open_crit}")
             except Exception:
                 pass
+        # Bank coverage (C9 arming aid): v3 rows per covered file + a red flag
+        # if any file of a NON-heldout market goal leaked into the v3 bank
+        # (must be ZERO pre-flip -- Kronika stays with the LLM examiner).
+        try:
+            from maria_core.learning.exam_agent import (
+                load_heldout_bank, HELDOUT_MIN_BANK_ROWS,
+            )
+            rows = load_heldout_bank()
+            v3 = [r for r in rows if r.get("bank_version") == "v3"]
+            by_file = {}
+            for r in v3:
+                fid = r.get("file") or r.get("file_id")
+                by_file[fid] = by_file.get(fid, 0) + 1
+            covered = sum(
+                1 for n in by_file.values() if n >= HELDOUT_MIN_BANK_ROWS)
+            lines.append(
+                f"Bank: {len(rows)} wierszy ({len(v3)} v3, "
+                f"{covered} plikow z pokryciem >= {HELDOUT_MIN_BANK_ROWS})"
+            )
+            if store is not None and by_file:
+                banked = set(by_file)
+                leaked = set()
+                for g in store.get_all():
+                    meta = getattr(g, "metadata", None) or {}
+                    if meta.get("source_kind") == "market" and str(
+                        meta.get("verification_mode") or ""
+                    ).lower() != "heldout":
+                        leaked |= banked & set(meta.get("market_file_ids") or [])
+                if leaked:
+                    lines.append(
+                        f"UWAGA: {len(leaked)} plikow spoza trybu heldout w "
+                        f"banku v3 (np. {sorted(leaked)[0]})"
+                    )
+        except Exception:
+            pass
         lines.append("/heldout on|off|seed [plik]")
         return "\n".join(lines)
 
@@ -425,6 +647,108 @@ def register_telegram_commands(bridge, ctx):
             f"Zapis DOPIERO po: /approve_note {rec['id']}."
         )
 
+    def _cmd_drill_fs_write(args):
+        """On-demand proof of the AUTONOMOUS FS_WRITE loop (B2, the first
+        autonomous hand -- mirror /drill_outbox + /drill_repair).
+
+        Seeds a file_exists goal with a FRESH filename (only if none is open),
+        then runs the REAL planner -> execute -> close chain ONCE and reports
+        whether Maria wrote the file into the jailed sandbox and the goal closed
+        on EXTERNAL evidence (the file on disk). The write is jailed
+        (meta_data/fs_sandbox/), <=1 KiB, sanitized -- never a production
+        artifact. FS_WRITE_ENABLED is flipped on only for this run, then restored
+        (the drill leaves no standing autonomy). Unlike Rung 2 (/drill_outbox)
+        there is NO operator approval in the write loop -- this proves the
+        autonomous hand, not the operator-gated one.
+        """
+        planner = ctx.planner_core
+        store = ctx.goal_store
+        if planner is None or store is None:
+            return "Brak planner_core/goal_store (modul nie wired)."
+
+        import time
+        import uuid
+        from agent_core.goals.goal_model import GoalStatus
+        from agent_core.hands.sandbox_writer import default_sandbox_root
+        from agent_core.routing.handlers import (
+            seed_first_action_goal, close_goal_on_criteria,
+        )
+
+        # Resolve the sandbox root exactly as _maybe_fs_write does, so the seeded
+        # criterion path, the planner's write target, and the closer all agree.
+        root = getattr(planner, "_fs_sandbox_root", None)
+        if not root:
+            try:
+                from maria_core.sys.config import BASE_DIR
+                root = default_sandbox_root(BASE_DIR)
+            except Exception:
+                root = default_sandbox_root(".")
+
+        def _has_open_file_crit(g):
+            return any(
+                isinstance(c, dict) and c.get("type") == "file_exists"
+                for c in (getattr(g, "success_criteria", None) or [])
+            )
+        try:
+            existing = [g for g in store.get_active() if _has_open_file_crit(g)]
+        except Exception:
+            existing = []
+
+        seeded_gid = None
+        if not existing:
+            fname = f"maria_drill_{int(time.time())}_{uuid.uuid4().hex[:6]}.txt"
+            seeded_gid = seed_first_action_goal(store, sandbox_root=root, filename=fname)
+            if not seeded_gid:
+                return "drill_fs_write: nie udalo sie stworzyc celu-demo."
+
+        prev = getattr(planner, "_fs_write_enabled", False)
+        try:
+            # Inside the try so finally always restores, even if this raises.
+            planner.set_fs_write_enabled(True)
+            plan = planner._maybe_fs_write({})
+            if plan is None:
+                if seeded_gid:
+                    try:
+                        store.update_status(
+                            seeded_gid, GoalStatus.ABANDONED,
+                            "drill: planner nie wygenerowal planu", "drill",
+                        )
+                    except Exception:
+                        pass
+                return (
+                    "drill_fs_write: planner nie wygenerowal planu "
+                    "(rate-limit lub brak celu file_exists). Sprobuj za chwile."
+                )
+            result = planner.executor.execute(plan) or {}
+            # Production executor (CapabilityRouter) already closes the goal; the
+            # routerless fallback does not -- close defensively (idempotent: the
+            # closer re-stats the file on disk, never trusts a flag).
+            try:
+                close_goal_on_criteria(
+                    plan, result, store,
+                    sandbox_root=plan.action_params.get("sandbox_root") or root,
+                )
+            except Exception:
+                pass
+        finally:
+            planner.set_fs_write_enabled(prev)
+
+        gid = plan.goal_id
+        g = store.get(gid) if gid else None
+        achieved = bool(g and getattr(g.status, "value", None) == "achieved")
+        wrote = bool(result.get("success"))
+        path = result.get("path", "?")
+        if wrote and achieved:
+            return (
+                f"drill_fs_write OK -> Maria SAMA zapisala plik:\n{path}\n"
+                f"Cel {gid} domkniety NA DOWODZIE (plik istnieje na dysku).\n"
+                f"Pierwsza autonomiczna reka dziala. Plik jest kasowalny."
+            )
+        return (
+            f"drill_fs_write czesciowy: zapis={wrote} cel_domkniety={achieved} "
+            f"path={path} goal={gid}. Sprawdz logi."
+        )
+
     def _cmd_list_notes(args):
         store = getattr(ctx, "outbox_store", None)
         if store is None:
@@ -464,6 +788,91 @@ def register_telegram_commands(bridge, ctx):
             return "Uzycie: /reject_note <id>"
         res = store.reject(pid)
         return f"Odrzucono {pid}." if res.get("ok") else f"Nie udalo sie: {res.get('error')}"
+
+    def _cmd_learning_notes(args):
+        """Etap 2 (RED zone) -- READ-ONLY view of Maria's autonomous learning notes.
+
+        Lists meta_data/fs_sandbox/maria_note_*.txt (the notes the FS_WRITE hand
+        writes on a passed exam), counts the backing b2_learning_note goals by
+        status, and prints the most recent note's content. Pure read: no store
+        mutation, no write, no flag flip -- so the operator can SEE that the
+        armed Etap 2 actually fired after a restart.
+        """
+        import os as _os
+        import glob as _glob
+
+        from agent_core.hands.sandbox_writer import default_sandbox_root
+
+        # Resolve the sandbox root EXACTLY like the seed/write path does, so the
+        # files we list are the ones the hand actually wrote.
+        root = None
+        planner = getattr(ctx, "planner_core", None)
+        if planner is not None:
+            root = getattr(planner, "_fs_sandbox_root", None)
+        if not root:
+            try:
+                from maria_core.sys.config import BASE_DIR
+                root = default_sandbox_root(BASE_DIR)
+            except Exception:
+                root = default_sandbox_root(".")
+
+        # Backing goals (b2_learning_note), grouped by status.
+        active = achieved = other = 0
+        store = getattr(ctx, "goal_store", None)
+        if store is not None:
+            try:
+                for g in store.get_all():
+                    meta = getattr(g, "metadata", None) or {}
+                    if not meta.get("b2_learning_note"):
+                        continue
+                    if getattr(g, "is_active", False):
+                        active += 1
+                    elif getattr(getattr(g, "status", None), "value", "") == "achieved":
+                        achieved += 1
+                    else:
+                        other += 1
+            except Exception:
+                pass
+
+        # Notes actually on disk (newest first).
+        files = []
+        try:
+            files = sorted(
+                _glob.glob(_os.path.join(root, "maria_note_*.txt")),
+                key=lambda p: _os.path.getmtime(p),
+                reverse=True,
+            )
+        except Exception:
+            pass
+
+        lines = [
+            "Notatki z nauki (autonomiczna reka FS_WRITE):",
+            f"  cele b2_learning_note: {achieved} domkniete / {active} otwarte"
+            + (f" / {other} inne" if other else ""),
+            f"  pliki na dysku: {len(files)}",
+        ]
+        if not files:
+            lines.append("(jeszcze brak -- Maria zapisze gdy zda egzamin po restarcie)")
+            return "\n".join(lines)
+
+        for p in files[:5]:
+            try:
+                sz = _os.path.getsize(p)
+            except OSError:
+                sz = 0
+            lines.append(f"- {_os.path.basename(p)} ({sz} B)")
+
+        # Most recent note's content (jailed <=1 KiB, safe to print).
+        try:
+            newest = files[0]
+            with open(newest, "r", encoding="utf-8", errors="replace") as fh:
+                body = fh.read(1024).strip()
+            lines.append("")
+            lines.append(f"Ostatnia ({_os.path.basename(newest)}):")
+            lines.append(body)
+        except Exception:
+            pass
+        return "\n".join(lines)
 
     def _repair_task_matches(task_id, ref):
         token = ref.strip()
@@ -557,6 +966,188 @@ def register_telegram_commands(bridge, ctx):
         ctx.goal_store.reject(goal.id)
         ctx.goal_store.save()
         return f"Odrzucono: {goal.description[:80]}"
+
+    def _cmd_project(args):
+        """Create a long-horizon project goal with sub-goals + an optional deadline.
+
+        Etap B operator producer ("kran"): turns the dormant sub-goal tree +
+        deadline machinery live. The project (parent USER goal) owns its sub-goals
+        (child USER goals); the planner's rollup phase completes the parent when
+        all children finish, and the children inherit the deadline so urgency
+        prioritises the actionable leaves.
+
+        Usage:
+          /project <nazwa> | <termin> | <podcel1> ; <podcel2> ; ...
+          /project heldout <N> <nazwa> | <termin> | <podcele...>
+        Examples:
+          /project Hiszpanski | za 30 dni | slownictwo ; gramatyka ; rozmowki
+          /project Remont | 2026-07-15 | demontaz ; malowanie
+          /project Szybki cel | jutro 18:00          (sam termin, bez pod-celow)
+          /project heldout 12 Kronika srebra | za 14 dni | zebrac ; timeline
+
+        Tryb heldout (Option C, 2026-07-12): dzieci dostaja source_kind=market
+        + provenance_target_n=N + verification_mode='heldout' -- ich postep
+        licza WYLACZNIE egzaminy komisyjne (zamrozony klucz + mechaniczna
+        ocena), zwykly egzamin LLM ich nie domyka.
+        """
+        if not ctx.goal_store:
+            return "GoalStore not available"
+        from agent_core.goals.goal_model import (
+            GoalType, GoalStatus, MAX_ACTIVE_GOALS, create_goal,
+        )
+
+        name, deadline_text, subgoals = _parse_project_args(args)
+        # Optional heldout prefix in the first segment:
+        #   "heldout 12 Kronika srebra" -> N=12, name="Kronika srebra"
+        heldout_n = None
+        if name:
+            _toks = name.split()
+            if _toks and _toks[0].lower() == "heldout":
+                heldout_n = 12  # default pantry target (Kronika precedent)
+                rest = _toks[1:]
+                if rest and rest[0].isdigit():
+                    heldout_n = int(rest[0])
+                    rest = rest[1:]
+                name = " ".join(rest).strip()
+                if not name:
+                    return (
+                        "Tryb heldout wymaga nazwy: /project heldout <N> "
+                        "<nazwa> | <termin> | <podcele>"
+                    )
+                if not (1 <= heldout_n <= 50):
+                    return "Tryb heldout: N poza zakresem (1-50)."
+        if not name:
+            return (
+                "Uzycie: /project <nazwa> | <termin> | <podcel1> ; <podcel2> ...\n"
+                "Przyklad: /project Hiszpanski | za 30 dni | slownictwo ; gramatyka"
+            )
+        if len(subgoals) > MAX_PROJECT_SUBGOALS:
+            return (
+                f"Za duzo pod-celow ({len(subgoals)}), max {MAX_PROJECT_SUBGOALS}. "
+                "Rozbij projekt na mniejsze."
+            )
+        try:
+            deadline = _parse_project_deadline(deadline_text)
+        except ValueError as e:
+            return (
+                f"Termin: {e}\n"
+                "Akceptuje: 'za 30 dni', 'jutro 9:00', '2026-07-15', "
+                "'2026-07-15 18:00'."
+            )
+        if deadline is not None and deadline <= time.time():
+            return (
+                "Termin jest w przeszlosci. Podaj date w przod (lub pomin termin)."
+            )
+
+        # Capacity guard: /project creates 1 parent + N children, ALL ACTIVE, in a
+        # burst. GoalStore.create() only reclaims PENDING slots on overflow, so an
+        # active set already full of ACTIVE goals would silently exceed
+        # MAX_ACTIVE_GOALS. Validate upfront (producer-validates-strictly) against
+        # the irreducible floor = goals that cannot be abandoned (status ACTIVE).
+        needed = 1 + len(subgoals)
+        running = sum(
+            1 for g in ctx.goal_store.get_active()
+            if g.status == GoalStatus.ACTIVE
+        )
+        free = MAX_ACTIVE_GOALS - running
+        if needed > free:
+            return (
+                f"Za malo miejsca w aktywnych celach (potrzeba {needed}, wolne "
+                f"{max(free, 0)} z {MAX_ACTIVE_GOALS}). Domknij cele (/goals) lub "
+                "rozbij projekt na mniejsze."
+            )
+
+        parent = create_goal(
+            goal_type=GoalType.USER,
+            description=name,
+            priority=0.55,  # below children so leaves get worked first
+            status=GoalStatus.ACTIVE,
+            created_by="operator",
+            deadline=deadline,
+            metadata=(
+                {"project": True, "subgoal_count": len(subgoals),
+                 "verification_mode": "heldout"}
+                if heldout_n else
+                {"project": True, "subgoal_count": len(subgoals)}
+            ),
+        )
+        parent_id = ctx.goal_store.create(parent)
+
+        created_children = []
+        for text in subgoals:
+            child = create_goal(
+                goal_type=GoalType.USER,
+                description=text,
+                priority=0.6,
+                status=GoalStatus.ACTIVE,
+                created_by="operator",
+                parent_goal_id=parent_id,
+                deadline=deadline,  # inherit so urgency boosts the leaves
+                # topics: the sub-goal name feeds the learn filter and the
+                # B2 FETCH pump (no material on the topic -> Maria fetches it)
+                metadata=(
+                    {"project_parent": parent_id, "topics": [text],
+                     "source_kind": "market",
+                     "provenance_target_n": heldout_n,
+                     "verification_mode": "heldout"}
+                    if heldout_n else
+                    {"project_parent": parent_id, "topics": [text]}
+                ),
+            )
+            cid = ctx.goal_store.create(child)
+            created_children.append((cid, text))
+        ctx.goal_store.save()
+
+        from agent_core.reminders import format_scheduled_time
+        when = format_scheduled_time(deadline) if deadline else "brak"
+        lines = [
+            f"*Projekt utworzony:* {name}",
+            f"  [{parent_id[:8]}] termin: {when}",
+        ]
+        if heldout_n:
+            lines.append(
+                f"  tryb: HELDOUT (spizarnia N={heldout_n}/podcel; "
+                "postep licza tylko egzaminy komisyjne)"
+            )
+        if created_children:
+            lines.append(f"*Pod-cele ({len(created_children)}):*")
+            for cid, text in created_children:
+                lines.append(f"  [{cid[:8]}] {text[:60]}")
+        else:
+            lines.append("(bez pod-celow - sam cel projektu)")
+        lines.append("\n/projects pokaze postep drzewa.")
+        return "\n".join(lines)
+
+    def _cmd_projects(args):
+        """List project trees: each parent goal with its children + progress.
+
+        Read-only view so the operator can watch rollup close a parent as its
+        sub-goals finish, and see deadline urgency at a glance.
+        """
+        if not ctx.goal_store:
+            return "GoalStore not available"
+        from agent_core.goals.goal_model import TERMINAL_STATUSES
+        from agent_core.reminders import format_scheduled_time
+
+        all_goals = ctx.goal_store.get_all()
+        parents = [g for g in all_goals if g.metadata.get("project")]
+        if not parents:
+            return "Brak projektow. Utworz: /project <nazwa> | <termin> | <pod-cele>"
+
+        parents.sort(key=lambda g: g.created_at, reverse=True)
+        lines = []
+        for p in parents[:15]:
+            children = ctx.goal_store.get_children(p.id)
+            done = sum(1 for c in children if c.status in TERMINAL_STATUSES)
+            when = format_scheduled_time(p.deadline) if p.deadline else "brak"
+            lines.append(
+                f"*{p.description[:50]}* [{p.id[:8]}] {p.status.value} "
+                f"{p.progress:.0%} ({done}/{len(children)}) termin: {when}"
+            )
+            for c in sorted(children, key=lambda x: x.created_at):
+                mark = "x" if c.status in TERMINAL_STATUSES else " "
+                lines.append(f"   [{mark}] {c.description[:55]} ({c.status.value})")
+        return "\n".join(lines)
 
     def _cmd_test_propose(args):
         """[DEBUG] Inject a stub PROPOSED goal to verify GOAL_PROPOSED Phase 13 alert.
@@ -1287,6 +1878,20 @@ def register_telegram_commands(bridge, ctx):
         synthesis ids carry BALANCED underscores, which bare Markdown
         eats silently (the 2026-06-09 /approve_note lesson)."""
         if not report.get("success"):
+            # A judge STALL (timeout/parse-fail/nothing-to-judge) comes back as
+            # reason="unfaithful_to_sources" with the real reason preserved in
+            # the faithfulness dict. Surface it distinctly: otherwise it reads
+            # byte-identical to "claims don't hold to sources" -- the exact
+            # misdiagnosis that would corrupt a SYNTH_ENABLED go/no-go call.
+            from agent_core.synthesis import is_judge_stall
+            _faith = report.get("faithfulness")
+            if is_judge_stall(_faith):
+                return (
+                    "[Synteza] NIE rozstrzygnieto. SEDZIA WIERNOSCI NIE "
+                    f"ZADZIALAL ({_faith.get('reason')}) -- to NIE ocena "
+                    "tresci, tylko timeout/blad lokalnego qwen3 na CPU. "
+                    "Synteza moze byc dobra; brak realnego sygnalu wiernosci."
+                )
             reasons = {
                 "insufficient_material": (
                     "Za malo materialu - temat musi wystepowac w >=2 "
@@ -1381,8 +1986,15 @@ def register_telegram_commands(bridge, ctx):
             max_tokens=4096, nim_timeout=180, fallback_num_predict=2048,
             scheduler=scheduler,
         )
-        grader_fn = _make_exam_grader_fn(examiner_model, scheduler=scheduler)
-        author_fn = _make_exam_author_fn(examiner_model, scheduler=scheduler)
+        # One-slot cells: record which backend ACTUALLY authored/graded (NIM vs
+        # local fallback) -- copied into the sandbox exam record by
+        # run_exam_if_ready, same contract as the teacher exam path.
+        synth_author_cell = {"backend": None}
+        synth_grader_cell = {"backend": None}
+        grader_fn = _make_exam_grader_fn(
+            examiner_model, scheduler=scheduler, used_cell=synth_grader_cell)
+        author_fn = _make_exam_author_fn(
+            examiner_model, scheduler=scheduler, used_cell=synth_author_cell)
 
         def student_fn(prompt):
             # Same contract as the teacher's exam answer: heavy lease for
@@ -1412,13 +2024,32 @@ def register_telegram_commands(bridge, ctx):
                 if scheduler is not None else nullcontext()
             )
             with guard:
+                # Belt (2026-06-14): pre-warm the judge model INSIDE the lease,
+                # BEFORE the deadline-bounded call. A cold qwen3 load (~10-30s
+                # reading 5GB from disk on this CPU box, or a ModelScheduler
+                # idle-unload between cycles) would otherwise be paid OUT OF the
+                # judge's 540s budget -- and a cold load on top of a 12-source
+                # prefill is exactly how a GOOD synthesis fail-closes on a
+                # timeout that was never the judge's verdict. Warm-up is
+                # best-effort (errors swallowed); keep_alive holds the model in
+                # RAM through to the real call below, which still fail-closes on
+                # its own deadline.
+                try:
+                    from agent_core.llm.warmup import warm_up_models
+                    warm_up_models(
+                        [examiner_model], keep_alive="10m", timeout_s=120,
+                    )
+                except Exception as exc:  # warm-up must never abort the judge
+                    logger.debug(
+                        "[Synthesis] judge pre-warm skipped: %s", exc)
                 # Dedicated, generous budget: the judge reads up to 12 (capped)
                 # sources on CPU. Measured ~348s on a clean box for a 12-source
                 # synthesis with /no_think + tight caps (live 2026-06-13), so
                 # 540s gives ~190s headroom for a richer synthesis or mild load
                 # -- the cost of fail-closing a GOOD synthesis (false reject) is
-                # worse than a one-a-day ~6-min heavy-mutex hold. Output is a
-                # short JSON verdict, so the predict cap stays low.
+                # worse than a one-a-day ~6-min heavy-mutex hold. With the model
+                # pre-warmed above, the budget now covers prefill+inference, not
+                # a cold load. Output is a short JSON verdict, so predict stays low.
                 return call_with_timeout(
                     lambda: call_ollama(
                         prompt, model=examiner_model, num_predict=400,
@@ -1429,13 +2060,15 @@ def register_telegram_commands(bridge, ctx):
                 )
 
         grader_meta = {
-            # NOTE: the exam grader is NIM-first, so this flag reflects the
-            # fallback names, not the model that actually graded -- the real
-            # groundedness signal is now the LOCAL faithfulness judge above, and
-            # synthesis beliefs are capped at OBSERVATION regardless (Brick 3).
+            # NOTE: the planned label is NIM-first, but the record now carries
+            # the ACTUAL grader via the cells below -- the real groundedness
+            # signal is still the LOCAL faithfulness judge above, and synthesis
+            # beliefs are capped at OBSERVATION regardless (Brick 3).
             "independent": examiner_model != student_model,
             "grader": f"nim-first|{examiner_model}",
             "student": student_model,
+            "grader_cell": synth_grader_cell,
+            "author_cell": synth_author_cell,
         }
 
         sandbox_mgr = getattr(ctx, "sandbox_manager", None)
@@ -1604,7 +2237,14 @@ def register_telegram_commands(bridge, ctx):
             / "synthesis_picker_state.json"
         )
         state = load_state(state_path)
-        eligible = SynthesisAgent(LONGTERM_MEMORY).topics(limit=10)
+        # Feed the picker the FULL eligible set (limit=None), not the top-10.
+        # The picker's rule is least-recently-synthesized; capping candidates
+        # at the 10 richest-by-source-count tags meant the autonomous loop
+        # forever re-synthesized the SAME ~10 strongest topics while 990+
+        # eligible topics were never pickable -- the exact opposite of the
+        # "spread across the corpus" promise. The top-10 cap belongs only to
+        # the human-facing /synthesize suggestion menu (audit 2026-06-15 #3).
+        eligible = SynthesisAgent(LONGTERM_MEMORY).topics(limit=None)
 
         decision = decide_synthesis(eligible, state, time.time(), in_window)
         if decision["action"] != "synthesize":
@@ -1614,67 +2254,101 @@ def register_telegram_commands(bridge, ctx):
             return  # operator (lub poprzedni pick) w trakcie -- nastepnym razem
 
         topic = decision["topic"]
-        # Stempel budzetu dnia PRZED cyklem: nieudany przebieg nie ma
-        # retry-stormu (lekcja NREM 2026-06-12 -- cooldown przezywa restart).
-        save_state(state_path, record_pick(state, topic, time.time()))
-        logger.info(
-            "[Synthesis] autonomiczny pick: '%s' (%d zrodel, tryb observe-gate)",
-            topic, decision.get("sources", 0),
-        )
 
         def _run():
+            report = None
             try:
                 report = _run_synthesis_cycle(topic)
-                core_ref.event_logger._write_event({
-                    "timestamp": time.time(),
-                    "event": "autonomous_synthesis",
-                    "topic": topic,
-                    "file_id": report.get("file_id"),
-                    "exam": report.get("exam"),
-                    "mode": report.get("mode"),
-                    "would_promote": report.get("would_promote"),
-                    "promoted": report.get("promoted"),
-                    "success": report.get("success"),
-                    "reason": report.get("reason"),
-                })
-                logger.info(
-                    "[Synthesis] autonomiczna synteza '%s': %s",
-                    topic, report.get("exam") or report.get("reason"),
-                )
-                bs = getattr(ctx, "bulletin_store", None)
-                if bs and report.get("success"):
-                    try:
-                        from agent_core.bulletin.bulletin_model import EntryType
-                        exam = report.get("exam", {})
-                        bs.create_and_post(
-                            entry_type=EntryType.NEED_REVIEW,
-                            topic=f"Auto-synteza: {report.get('topic')}",
-                            reason_code="autonomous_synthesis",
-                            summary=(
-                                f"file={report.get('file_id')} "
-                                f"exam={'pass' if exam.get('passed') else 'fail'} "
-                                f"score={exam.get('score', 0):.2f} "
-                                f"mode={report.get('mode')} "
-                                f"promoted={report.get('promoted')}"
-                            ),
-                            requested_by="synthesis_picker",
-                            metadata={
-                                "file_id": report.get("file_id"),
-                                "autonomous": True,
-                            },
-                        )
-                    except Exception:
-                        pass
             except Exception as e:
                 logger.warning(
                     "[Synthesis] autonomiczny cykl padl dla '%s': %s", topic, e,
                 )
+                report = {"success": False, "reason": "cycle_error",
+                          "error": str(e), "topic": topic}
             finally:
-                _synthesis_lock.release()
+                # ALWAYS surface the run before releasing the lock. Even a
+                # crashed run consumed the day's only synthesis budget, so an
+                # invisible failure is a real legibility hole (audit 2026-06-15
+                # #5). The release sits in its OWN finally so a slow/throwing
+                # report never strands the SHARED lock.
+                try:
+                    # (a) Event UNCONDITIONALLY -- the cron watcher + log scans
+                    # must see a failed run, not silence.
+                    core_ref.event_logger._write_event({
+                        "timestamp": time.time(),
+                        "event": "autonomous_synthesis",
+                        "topic": topic,
+                        "file_id": report.get("file_id"),
+                        "exam": report.get("exam"),
+                        "mode": report.get("mode"),
+                        "would_promote": report.get("would_promote"),
+                        "promoted": report.get("promoted"),
+                        "success": report.get("success"),
+                        "reason": report.get("reason"),
+                    })
+                    logger.info(
+                        "[Synthesis] autonomiczna synteza '%s': %s",
+                        topic, report.get("exam") or report.get("reason"),
+                    )
+                    bs = getattr(ctx, "bulletin_store", None)
+                    if bs and report.get("success"):
+                        try:
+                            from agent_core.bulletin.bulletin_model import EntryType
+                            exam = report.get("exam", {})
+                            bs.create_and_post(
+                                entry_type=EntryType.NEED_REVIEW,
+                                topic=f"Auto-synteza: {report.get('topic')}",
+                                reason_code="autonomous_synthesis",
+                                summary=(
+                                    f"file={report.get('file_id')} "
+                                    f"exam={'pass' if exam.get('passed') else 'fail'} "
+                                    f"score={exam.get('score', 0):.2f} "
+                                    f"mode={report.get('mode')} "
+                                    f"promoted={report.get('promoted')}"
+                                ),
+                                requested_by="synthesis_picker",
+                                metadata={
+                                    "file_id": report.get("file_id"),
+                                    "autonomous": True,
+                                },
+                            )
+                        except Exception:
+                            pass
+                    # (b) Same-day failure alert. A judge-stall returns
+                    # success=False too, so this covers it; success stays on
+                    # the bulletin + cron path (no chat spam on the daily win).
+                    if not report.get("success"):
+                        try:
+                            bridge.bot.send_message(
+                                f"[Auto] {_format_synthesis_report(report)}"
+                            )
+                        except Exception:
+                            pass
+                finally:
+                    _synthesis_lock.release()
 
-        threading.Thread(
-            target=_run, daemon=True, name="AutoSynthesis",
-        ).start()
+        # Stempel budzetu dnia PRZED cyklem: nieudany przebieg nie ma
+        # retry-stormu (lekcja NREM 2026-06-12 -- cooldown przezywa restart).
+        # The thread owns the lock release once spawned; ANY exception
+        # before it starts (a save_state TypeError on a corrupt state file,
+        # or Thread.start RuntimeError under thread/FD exhaustion) must free
+        # the SHARED _synthesis_lock here -- otherwise it leaks for the whole
+        # process lifetime and ALL synthesis (autonomous + manual /synthesize)
+        # dies silently until a restart. Mirrors the manual /synthesize guard.
+        spawned = False
+        try:
+            save_state(state_path, record_pick(state, topic, time.time()))
+            logger.info(
+                "[Synthesis] autonomiczny pick: '%s' (%d zrodel, tryb observe-gate)",
+                topic, decision.get("sources", 0),
+            )
+            threading.Thread(
+                target=_run, daemon=True, name="AutoSynthesis",
+            ).start()
+            spawned = True
+        finally:
+            if not spawned:
+                _synthesis_lock.release()
 
     # Wepnij autonomiczny picker w tick (faza 10.8) -- raz dziennie,
     # okno nauki, observe. Bezpieczne nawet bez sandboxa: cykl sam
@@ -1694,7 +2368,7 @@ def register_telegram_commands(bridge, ctx):
         Plain-text (no Markdown): synthesis file_ids carry underscores that
         bare Markdown eats (the 2026-06-09 /approve_note lesson)."""
         from pathlib import Path as _Path
-        from agent_core.synthesis import read_synthesis_reviews
+        from agent_core.synthesis import is_judge_stall, read_synthesis_reviews
         try:
             n = max(1, min(20, int((args or "").strip() or 5)))
         except (TypeError, ValueError):
@@ -1740,7 +2414,12 @@ def register_telegram_commands(bridge, ctx):
             if srcs:
                 out.append(f"  zrodla: {', '.join(str(s) for s in srcs)}")
             faith = r.get("faithfulness")
-            if isinstance(faith, dict) and faith.get("total"):
+            if is_judge_stall(faith):
+                out.append(
+                    f"  wiernosc: SEDZIA NIE ZADZIALAL ({faith.get('reason')})"
+                    " -- timeout/blad qwen3, NIE ocena tresci (brak sygnalu)"
+                )
+            elif isinstance(faith, dict) and faith.get("total"):
                 out.append(
                     f"  wiernosc: {faith.get('supported')}/{faith.get('total')}"
                     f" poparte, {faith.get('contradicted', 0)} sprzeczne"
@@ -1752,6 +2431,145 @@ def register_telegram_commands(bridge, ctx):
                 out.append(f"  synteza: {summary}")
             for kp in kps[:6]:
                 out.append(f"    * {kp}")
+        return "\n".join(out)
+
+    # -- Conscious unlearn (rollback/quarantine) -- operator surface --
+    # Master-gated by the bridge (like every command here). Plain-text, ids in
+    # backticks: synthesis/concept ids carry underscores that bare Markdown eats
+    # (the 2026-06-09 /approve_note lesson). Irreversible ops (/retract,
+    # /forget_source) require a two-step confirm.
+
+    def _cmd_quarantine(args):
+        """/quarantine <belief_id|entity> -- reversible soft-hide (undo:
+        /unquarantine). Hides the belief from every consumer + evicts its
+        vector, but keeps it on disk + in the audit ledger."""
+        wm = getattr(ctx, "world_model", None)
+        if wm is None:
+            return "[Unlearn] WorldModel niedostepny."
+        target = (args or "").strip()
+        if not target:
+            return "Uzycie: /quarantine <belief_id|entity>"
+        res = wm.quarantine_belief(
+            target, reason="operator quarantine", actor="operator",
+            actor_detail="telegram")
+        if not res.get("ok"):
+            return f"[Unlearn] Nie wykonano: {res.get('message')}"
+        ents = ", ".join(res.get("entities", []))
+        return (f"[Unlearn] Kwarantanna: {res['count']} belief(ow) [{ents}] "
+                f"schowane. Cofnij: /unquarantine {target}")
+
+    def _cmd_unquarantine(args):
+        """/unquarantine <belief_id|entity> -- restore a quarantined belief."""
+        wm = getattr(ctx, "world_model", None)
+        if wm is None:
+            return "[Unlearn] WorldModel niedostepny."
+        target = (args or "").strip()
+        if not target:
+            return "Uzycie: /unquarantine <belief_id|entity>"
+        res = wm.unquarantine_belief(
+            target, actor="operator", actor_detail="telegram")
+        if not res.get("ok"):
+            return f"[Unlearn] Nie wykonano: {res.get('message')}"
+        ents = ", ".join(res.get("entities", []))
+        return f"[Unlearn] Przywrocono {res['count']} belief(ow) [{ents}]."
+
+    def _cmd_retract(args):
+        """/retract <belief_id|entity> <powod> [confirm] -- audited removal
+        (IRREVERSIBLE: confidence 0, denylisted so it never re-mints). Without
+        'confirm' shows a preview. Use a belief_id for multi-word entities."""
+        wm = getattr(ctx, "world_model", None)
+        if wm is None:
+            return "[Unlearn] WorldModel niedostepny."
+        parts = (args or "").strip().split()
+        if len(parts) < 2:
+            return "Uzycie: /retract <belief_id|entity> <powod> [confirm]"
+        confirm = parts[-1].lower() == "confirm"
+        if confirm:
+            parts = parts[:-1]
+        target = parts[0]
+        reason = " ".join(parts[1:]).strip() or "operator retract"
+        targets = wm._resolve_targets(target)
+        if not targets:
+            return f"[Unlearn] Brak aktywnego beliefa dla: {target}"
+        if not confirm:
+            lines = [f"[Unlearn] /retract usunie {len(targets)} belief(ow) "
+                     "(NIEODWRACALNE):"]
+            for b in targets[:10]:
+                lines.append(f"  `{b.belief_id}` [{b.entity}] "
+                             f"{(b.content or '')[:60]}")
+            lines.append(f"Potwierdz: /retract {target} {reason} confirm")
+            return "\n".join(lines)
+        res = wm.retract_belief(
+            target, reason=reason, actor="operator", actor_detail="telegram")
+        if not res.get("ok"):
+            return f"[Unlearn] Nie wykonano: {res.get('message')}"
+        return (f"[Unlearn] Wycofano {res['count']} belief(ow). Audyt: "
+                f"`{res.get('retraction_id')}`. /retractions by zobaczyc.")
+
+    def _cmd_forget_source(args):
+        """/forget_source <file_id|synthesis_id> <powod> [confirm] -- root-and-
+        branch retract of every belief derived from a source (the pull for a
+        flagged-bad synthesis) + denylist so build_all never re-creates them."""
+        wm = getattr(ctx, "world_model", None)
+        if wm is None:
+            return "[Unlearn] WorldModel niedostepny."
+        parts = (args or "").strip().split()
+        if len(parts) < 2:
+            return "Uzycie: /forget_source <file_id|synthesis_id> <powod> [confirm]"
+        confirm = parts[-1].lower() == "confirm"
+        if confirm:
+            parts = parts[:-1]
+        source = parts[0]
+        reason = " ".join(parts[1:]).strip() or "operator forget_source"
+        targets = wm.store.get_current_by_source(source)
+        if not confirm:
+            if targets:
+                lines = [f"[Unlearn] /forget_source wytnie {len(targets)} "
+                         f"belief(ow) ze zrodla `{source}` (NIEODWRACALNE, + denylist):"]
+                for b in targets[:10]:
+                    lines.append(f"  `{b.belief_id}` [{b.entity}]")
+            else:
+                lines = [f"[Unlearn] Zero aktywnych beliefow ze zrodla `{source}`; "
+                         "forget_source i tak doda denylist (nie odrosna przy budowie)."]
+            lines.append(f"Potwierdz: /forget_source {source} {reason} confirm")
+            return "\n".join(lines)
+        res = wm.forget_source(
+            source, reason=reason, actor="operator", actor_detail="telegram")
+        if res.get("count", 0) == 0:
+            return (f"[Unlearn] Zero aktywnych beliefow, ale zrodlo `{source}` na "
+                    f"denylescie (nie odrosnie). Audyt: `{res.get('retraction_id')}`.")
+        return (f"[Unlearn] Wyciecie zrodla `{source}`: {res['count']} belief(ow) "
+                f"wycofane + denylist. Audyt: `{res.get('retraction_id')}`.")
+
+    def _cmd_retractions(args):
+        """/retractions [n] -- the conscious-unlearn audit ledger (newest
+        first): who retracted what, when, why. The go/no-go evidence + the
+        operator's record of every soft-hide / removal."""
+        wm = getattr(ctx, "world_model", None)
+        if wm is None:
+            return "[Unlearn] WorldModel niedostepny."
+        try:
+            n = max(1, min(30, int((args or "").strip() or 10)))
+        except (TypeError, ValueError):
+            n = 10
+        rows = wm.list_retractions(limit=n)
+        if not rows:
+            return ("[Unlearn] Ksiega pusta -- jeszcze nic nie wycofano. "
+                    "/quarantine /retract /forget_source zapisuja tutaj.")
+        out = [f"[Unlearn] Ostatnie {len(rows)} (najnowsze pierwsze):"]
+        for r in rows:
+            ents = ", ".join(r.get("target_entities") or []) or "?"
+            scope = r.get("source_scope") or {}
+            scope_s = (f" zrodlo={scope.get('value')}"
+                       if scope.get("kind") == "by_source" else "")
+            out.append("")
+            out.append(f"- {r.get('op', '?')} x{r.get('count', '?')} "
+                       f"[{r.get('actor', '?')}/{r.get('actor_detail', '')}]"
+                       f"{scope_s}")
+            out.append(f"  encje: {ents}")
+            if r.get("reason"):
+                out.append(f"  powod: {r.get('reason')}")
+            out.append(f"  id: `{r.get('retraction_id', '?')}` | {r.get('iso', '')}")
         return "\n".join(out)
 
     def _cmd_help(args):
@@ -1774,15 +2592,31 @@ def register_telegram_commands(bridge, ctx):
             "/memory <temat> - co Maria wie\n"
             "/beliefs [gaps|maintain] - beliefs\n"
             "/synthesize [temat] - synteza wiedzy (sandbox+egzamin)\n"
+            "/synthreview [n] - ostatnie syntezy (observe)\n"
             "/validate - cross-validation\n"
             "/board - tablica potrzeb\n"
+            "\n*Cofanie wiedzy (rollback):*\n"
+            "/quarantine <id|encja> - schowaj belief (odwracalne)\n"
+            "/unquarantine <id|encja> - przywroc\n"
+            "/retract <id|encja> <powod> [confirm] - usun (audyt)\n"
+            "/forget_source <zrodlo> <powod> [confirm] - wytnij cale zrodlo\n"
+            "/retractions [n] - ksiega cofniec (audyt)\n"
             "\n*Kodowanie (Code Agent):*\n"
             "/code <zadanie> - zlec kodowanie\n"
             "/code approve - zatwierdz krok\n"
             "/code status - aktywna sesja\n"
             "/code history - historia\n"
+            "\n*Pliki:*\n"
+            "/wyslij <sciezka> - przeslij dokument z repo (docs/)\n"
+            "\n*Zdalna naprawa (izolowana):*\n"
+            "/fix <opis> - Codex naprawia w worktree, przysle diff\n"
+            "/fix_list - oczekujace galezie fix/\n"
+            "/fix_apply <galaz> - scal (gdy drzewo czyste)\n"
+            "/fix_drop <galaz> - odrzuc\n"
+            "/undo_list - dziennik cofania akcji efektora\n"
+            "/undo_preview <id> - jak cofnac dana akcje\n"
             "\n*AI asystenci:*\n"
-            "/claude <zadanie> - Claude (3/h)\n"
+            "/claude <zadanie> - analiza/odczyt kodu (read-only, 3/h)\n"
             "/codex <zadanie> - Codex/ChatGPT\n"
             "/analyze <modul> - analiza kodu\n"
             "\n*Przypomnienia i zadania:*\n"
@@ -1807,6 +2641,13 @@ def register_telegram_commands(bridge, ctx):
             "/env switch <tryb> - przelacz\n"
             "/env list - dostepne tryby\n"
             "/env auto - auto-detekcja\n"
+            "\n*Samoswiadomosc:*\n"
+            "/selfstatus - aktualny stan (zdolnosci, limity)\n"
+            "/selfcontext - pelny obraz sytuacji (kto, ja, misja, wiedza, wzrok)\n"
+            "/lastseen - co Maria ostatnio widziala (cowidzialas)\n"
+            "/growth - kierunki rozwoju (rozwoj; top 5)\n"
+            "/samorozwoj - co Maria chce w sobie poprawic + czy utknelo (petla)\n"
+            "/approve_dev <token> - przejmij pomysl ktory Maria podsunela\n"
             "\n*Diagnostyka:*\n"
             "/tasks [N] - historia taskow Claude/Codex\n"
             "/pdf <task_id> - wyslij wynik jako PDF\n"
@@ -2174,16 +3015,462 @@ def register_telegram_commands(bridge, ctx):
         t.start()
         return f"Analizuje modul: '{module_path}'. Wynik za chwile..."
 
+    def _send_repo_doc_async(abs_path, label="WyslijCmd"):
+        """Send a pre-validated repo document on a daemon thread (a 30s upload
+        must never block the poll loop). The document itself is the result;
+        only failures get an extra text line."""
+        import threading
+        from pathlib import Path as _Path
+        name = _Path(abs_path).name
+
+        def _send():
+            try:
+                ok = bridge.bot.send_document(abs_path, caption=f"Dokument: {name}")
+                if not ok:
+                    bridge.bot.send_message(f"Nie udalo sie wyslac: {name}")
+            except Exception as e:
+                bridge.bot.send_message(f"Blad wysylki: {e}")
+
+        threading.Thread(target=_send, daemon=True, name=label).start()
+        return name
+
+    def _cmd_wyslij(args):
+        """Send a repo document via Telegram: /wyslij <path>.
+
+        Deterministic, safe counterpart to asking in chat. Whitelisted to docs/
+        and claude_notes/ (plus a few top-level docs); path-jailed; secrets
+        denylisted; 20 MiB cap. The morning of 2026-06-22 both the chat brain and
+        /claude FAKED sending a file -- this command actually does it (or says
+        plainly why not). Single source of truth for the jail: doc_sender."""
+        from agent_core.telegram.doc_sender import resolve_sendable
+        res = resolve_sendable(args or "")
+        if not res.ok:
+            return (
+                f"{res.reason}\n"
+                "Uzycie: /wyslij <sciezka>\n"
+                "Przyklad: /wyslij docs/DIGITAL_HUMAN_ROADMAP.md"
+            )
+        name = _send_repo_doc_async(res.path, label="WyslijCmd")
+        return f"Wysylam: {name}..."
+
+    def _cmd_fix(args):
+        """Remote fix in an isolated worktree: /fix <opis>.
+
+        Dispatches Codex (workspace-write) into a throwaway git worktree branched
+        off HEAD, OUTSIDE the live repo, so the running daemon is untouched. Sends
+        the diff to Telegram for review; applying (/fix_apply) stays operator-gated
+        and clean-tree only. Eryk's 2026-06-22 ask: react from work, not just read."""
+        if not args or not args.strip():
+            return (
+                "Uzycie: /fix <opis naprawy>\n"
+                "Przyklad: /fix popraw literowke w docstringu doc_sender\n"
+                "Codex pracuje w IZOLOWANYM worktree (zywy demon nietkniety), "
+                "przysle diff. Scalanie: /fix_apply <galaz> (gdy drzewo czyste) "
+                "lub w sesji. /fix_list, /fix_drop <galaz>."
+            )
+        task = args.strip()
+        from agent_core.telegram import remote_fix
+        if remote_fix.is_busy():
+            return "Inny /fix wlasnie trwa - poczekaj az skonczy."
+
+        import threading
+
+        def _run():
+            try:
+                from agent_core.llm.codex_client import CodexClient
+                codex = CodexClient()
+                bridge.bot.send_message(
+                    f"[/fix] Pracuje w izolowanym worktree nad: {task[:80]}...\n"
+                    "(Codex, do ~15 min). Diff przysle po skonczeniu."
+                )
+                res = remote_fix.create_fix(task, codex)
+                if not res.get("ok"):
+                    msg = f"[/fix] Nie wyszlo: {res.get('reason')}"
+                    if res.get("summary"):
+                        msg += f"\n\nCodex: {res['summary'][:600]}"
+                    bridge.bot.send_message(msg)
+                    return
+                branch = res["branch"]
+                bridge.bot.send_message(
+                    f"[/fix] Gotowe na galezi `{branch}`.\n\n"
+                    f"Codex: {(res.get('summary') or '(brak)')[:900]}\n\n"
+                    f"Zmiany:\n{res.get('stat','')[:900]}\n\n"
+                    f"Scal: /fix_apply {branch} (gdy drzewo czyste) lub w sesji. "
+                    f"Odrzuc: /fix_drop {branch}"
+                )
+                diff = res.get("diff") or ""
+                from agent_core.telegram.remote_fix import _MAX_DIFF_INLINE
+                if 0 < len(diff) <= _MAX_DIFF_INLINE:
+                    # parse_mode=None: a diff may itself contain ``` and break a
+                    # Markdown code fence -> send as plain text, no fence.
+                    bridge.bot.send_message(f"diff {branch}:\n{diff}", parse_mode=None)
+                elif diff:
+                    import tempfile
+                    import os as _os
+                    fd, path = tempfile.mkstemp(prefix="maria_fix_", suffix=".patch")
+                    try:
+                        with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                            f.write(diff)
+                        bridge.bot.send_document(path, caption=f"diff: {branch}")
+                    finally:
+                        try:
+                            _os.remove(path)
+                        except OSError:
+                            pass
+            except Exception as e:
+                bridge.bot.send_message(f"[/fix] Blad: {e}")
+
+        threading.Thread(target=_run, daemon=True, name="RemoteFix").start()
+        return f"[/fix] Przyjeto: '{task[:60]}'. Worktree + Codex startuje..."
+
+    def _cmd_fix_list(args):
+        """List pending fix/ branches: /fix_list"""
+        from agent_core.telegram import remote_fix
+        branches = remote_fix.list_fix_branches()
+        if not branches:
+            return "Brak oczekujacych galezi fix/."
+        return ("Oczekujace naprawy:\n" + "\n".join(f"- {b}" for b in branches)
+                + "\n\nScal: /fix_apply <galaz> | Odrzuc: /fix_drop <galaz>")
+
+    def _cmd_fix_apply(args):
+        """Merge a fix/ branch into the live branch (clean-tree only): /fix_apply <galaz>"""
+        if not args or not args.strip():
+            return "Uzycie: /fix_apply <galaz>  (zobacz /fix_list)"
+        from agent_core.telegram import remote_fix
+        res = remote_fix.apply_fix(args.strip())
+        if not res.get("ok"):
+            return f"[/fix_apply] {res.get('reason')}"
+        return f"[/fix_apply] {res['branch']} -> {res['into']}. {res.get('note','')}"
+
+    def _cmd_fix_drop(args):
+        """Delete a fix/ branch: /fix_drop <galaz>"""
+        if not args or not args.strip():
+            return "Uzycie: /fix_drop <galaz>  (zobacz /fix_list)"
+        from agent_core.telegram import remote_fix
+        res = remote_fix.drop_fix(args.strip())
+        return (f"[/fix_drop] Usunieto {res['branch']}." if res.get("ok")
+                else f"[/fix_drop] {res.get('reason')}")
+
+    def _cmd_undo_list(args):
+        """List recent effector undo-journal entries: /undo_list [N]"""
+        from agent_core.effector.undo_journal import (
+            EffectorUndoJournal, format_undo_list,
+        )
+        n = int(args.strip()) if args.strip().isdigit() else 10
+        return format_undo_list(EffectorUndoJournal().list_recent(n))
+
+    def _cmd_undo_preview(args):
+        """Preview how a journaled effector action would be undone: /undo_preview <id>"""
+        rid = args.strip()
+        if not rid:
+            return "Uzycie: /undo_preview <record_id>  (zobacz /undo_list)"
+        from agent_core.effector.undo_journal import (
+            EffectorUndoJournal, format_undo_preview,
+        )
+        return format_undo_preview(EffectorUndoJournal().get(rid))
+
+    def _cmd_drill_undo(args):
+        """Proof of the undo EXECUTION path against the FS sandbox (no live OpenClaw).
+
+        Two sub-cases run end to end through the REAL EffectorCoordinator._execute_undo:
+          - RESTORE: a sandbox file is overwritten, then undo restores its prior content.
+          - REMOVE:  a NEW sandbox file (name with a space) is created, then undo removes
+                     it -- exercising the argv-safe rm inverse (FIX-2).
+        The invoke is a jailed fake doing real file I/O confined to meta_data/fs_sandbox/;
+        EFFECTOR_UNDO_EXECUTE_ENABLED is flipped on only for this run (restored after).
+        Never touches the live, unsandboxed OpenClaw -- proves capture -> build_inverse
+        -> execute -> verify -> mark_undone with zero live risk."""
+        import os
+        from pathlib import Path
+        from agent_core.effector.coordinator import EffectorCoordinator
+        from agent_core.effector.undo_journal import EffectorUndoJournal, STATUS_UNDONE
+        from agent_core.hands.sandbox_writer import default_sandbox_root
+
+        try:
+            from maria_core.sys.config import BASE_DIR
+            root = Path(default_sandbox_root(BASE_DIR))
+        except Exception:
+            root = Path(default_sandbox_root("."))
+        root.mkdir(parents=True, exist_ok=True)
+
+        def _jailed(path):
+            p = Path(path).resolve()
+            rp = root.resolve()
+            if not (p == rp or rp in p.parents):
+                raise ValueError(f"path escapes sandbox: {path}")
+            return p
+
+        def invoke(tool, a):
+            if tool == "write":
+                _jailed(a["path"]).write_text(a["content"], encoding="utf-8")
+                return {"ok": True, "result": "ok"}
+            if tool == "read":
+                p = _jailed(a["path"])
+                if p.is_file():
+                    return {"ok": True, "result": p.read_text(encoding="utf-8")}
+                return {"ok": False, "error": "cat: No such file or directory"}
+            if tool == "exec":
+                argv = a.get("argv") or []
+                if len(argv) >= 3 and argv[0] == "rm":
+                    p = _jailed(argv[-1])
+                    if p.exists():
+                        p.unlink()
+                return {"ok": True, "result": ""}
+            return {"ok": False, "error": "unknown tool"}
+
+        def _read_or_none(p):
+            r = invoke("read", {"path": p})
+            return r.get("result") if r.get("ok") else None
+
+        journal = EffectorUndoJournal(path=root / "drill_undo_journal.jsonl")
+        coord = EffectorCoordinator(openclaw_client=None, undo_journal=journal)
+        restore_path = root / "drill_restore.txt"
+        remove_path = root / "drill_new file.txt"  # space -> proves argv-safe rm
+
+        prev = os.environ.get("EFFECTOR_UNDO_EXECUTE_ENABLED")
+        os.environ["EFFECTOR_UNDO_EXECUTE_ENABLED"] = "1"
+        try:
+            # RESTORE: prior content exists, action overwrites, undo restores it.
+            invoke("write", {"path": str(restore_path), "content": "OLD"})
+            rec1 = journal.record_action(
+                tool="write", args={"path": str(restore_path), "content": "NEW"},
+                read_fn=_read_or_none)
+            invoke("write", {"path": str(restore_path), "content": "NEW"})  # the action
+            out1 = coord._execute_undo(rec1.record_id, invoke=invoke)
+            restored = restore_path.read_text(encoding="utf-8") if restore_path.exists() else None
+            restore_ok = bool(out1.get("ok")) and restored == "OLD"
+
+            # REMOVE: no prior file, action creates it, undo removes it.
+            rec2 = journal.record_action(
+                tool="write", args={"path": str(remove_path), "content": "NEW"},
+                read_fn=_read_or_none)
+            invoke("write", {"path": str(remove_path), "content": "NEW"})  # the action (create)
+            out2 = coord._execute_undo(rec2.record_id, invoke=invoke)
+            remove_ok = bool(out2.get("ok")) and not remove_path.exists()
+            r1, r2 = journal.get(rec1.record_id), journal.get(rec2.record_id)
+            undone1 = r1 is not None and r1.status == STATUS_UNDONE
+            undone2 = r2 is not None and r2.status == STATUS_UNDONE
+        finally:
+            if prev is None:
+                os.environ.pop("EFFECTOR_UNDO_EXECUTE_ENABLED", None)
+            else:
+                os.environ["EFFECTOR_UNDO_EXECUTE_ENABLED"] = prev
+            for f in (restore_path, remove_path, root / "drill_undo_journal.jsonl"):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+        return (
+            "drill_undo (sandbox, BEZ live OpenClaw):\n"
+            f"  RESTORE: {'OK' if restore_ok else 'FAIL'} -- plik wrocil do 'OLD'"
+            f" (journal UNDONE={undone1})\n"
+            f"  REMOVE:  {'OK' if remove_ok else 'FAIL'} -- nowy plik (nazwa ze spacja)"
+            f" usuniety (journal UNDONE={undone2})\n"
+            "_execute_undo cofnal realne zmiany w jailu. Live = ten sam tor na "
+            "OpenClaw, RAZEM po /undo_action."
+        )
+
+    def _cmd_undo_action(args):
+        """Execute the inverse of a journaled effector action: /undo_action <id> [tak].
+
+        Operator-initiated (inherently authorized, like /efapprove) but fail-closed
+        and gated: EFFECTOR_UNDO_EXECUTE_ENABLED must be armed; the record must be
+        auto-reversible and not already undone / not a failed action; and a TWO-STEP
+        confirm is required (the bare call previews, '<id> tak' executes). This runs
+        a REAL action on the live, unsandboxed OpenClaw filesystem -- armed only with
+        the operator, for the live rung (use /drill_undo for a safe sandbox proof)."""
+        from agent_core.effector.coordinator import _undo_execute_enabled
+        from agent_core.effector.undo_journal import (
+            EffectorUndoJournal, format_undo_preview,
+            STATUS_UNDONE, STATUS_ACTION_FAILED,
+        )
+        if not _undo_execute_enabled():
+            return ("Cofanie wykonawcze WYLACZONE (EFFECTOR_UNDO_EXECUTE_ENABLED OFF).\n"
+                    "To uzbrajamy RAZEM na zywo -- /undo_action wykonuje realna akcje "
+                    "OpenClaw. Bezpieczny dowod toru: /drill_undo.")
+        parts = (args or "").split()
+        if not parts:
+            return "Uzycie: /undo_action <id> [tak]  (najpierw podglad, potem 'tak')"
+        rid = parts[0]
+        confirm = len(parts) > 1 and parts[1].strip().lower() in (
+            "tak", "yes", "confirm", "ok")
+
+        journal = getattr(ctx, "undo_journal", None) or EffectorUndoJournal()
+        rec = journal.get(rid)
+        if rec is None:
+            return f"Nie znam wpisu {rid} (zobacz /undo_list)."
+        if rec.status == STATUS_UNDONE:
+            return f"Wpis {rid} juz cofniety."
+        if rec.status == STATUS_ACTION_FAILED:
+            return f"Wpis {rid}: akcja sie nie powiodla -- nie ma czego cofac."
+        kind = (rec.inverse or {}).get("kind")
+        if kind not in ("invoke", "noop"):
+            return (f"Wpisu {rid} NIE da sie automatycznie cofnac "
+                    f"({rec.reversibility}).\n" + format_undo_preview(rec))
+        if not confirm:
+            return (format_undo_preview(rec)
+                    + f"\n\nWYKONAC cofniecie na zywym OpenClaw? -> /undo_action {rid} tak")
+
+        coord = getattr(ctx, "effector_coordinator", None)
+        if coord is None:
+            return "Brak effector_coordinator (modul nie wired)."
+        out = coord._execute_undo(rid)
+        if out.get("ok"):
+            return f"Cofnieto {rid} (status={out.get('reason')})."
+        detail = f" -- {out.get('detail')}" if out.get("detail") else ""
+        return f"Cofniecie {rid} NIE powiodlo sie: {out.get('reason')}{detail}"
+
+    def _cmd_approve_undo(args):
+        """Approve a Maria undo SUGGESTION: run the bounded inverse, then close.
+
+        Unlike /approve_repair (close-only -- ADR-031, no clean autonomous fix),
+        approving an undo EXECUTES it: the journaled, post-verified inverse is a
+        single reversible OpenClaw call (the same _execute_undo proven live via
+        /undo_action). Safe where dispatching Codex to prod was not. Fail-closed:
+        EFFECTOR_UNDO_EXECUTE_ENABLED must be armed. Success -> mark_done + resolve
+        bulletin; failure -> mark_blocked (expiry cleans it) + report. The undo
+        journal already records the undo_failed status, so the operator can retry
+        manually via /undo_action.
+        """
+        from agent_core.effector.coordinator import _undo_execute_enabled
+        conductor = getattr(ctx, "maria_conductor", None)
+        task_ref = args.strip() if isinstance(args, str) else str(args).strip()
+        if conductor is None or not task_ref:
+            return "Uzycie: /approve_undo <task_id>"
+
+        matches = [
+            task for task in conductor.get_pending_undo_suggestions()
+            if _repair_task_matches(task.task_id, task_ref)
+        ]
+        if len(matches) != 1:
+            return f"Nie znaleziono PENDING undo-suggestion: {task_ref}"
+
+        task = matches[0]
+        record_id = (task.artifacts or {}).get("undo_record_id")
+        if not record_id:
+            return f"Task {task.task_id} bez undo_record_id (uszkodzony wpis)."
+
+        if not _undo_execute_enabled():
+            return ("Cofanie wykonawcze WYLACZONE (EFFECTOR_UNDO_EXECUTE_ENABLED OFF).\n"
+                    f"Sugestia {task.task_id} czeka -- uzbroj flage i sprobuj ponownie, "
+                    "albo zostaw ja do expiry (24h).")
+
+        coord = getattr(ctx, "effector_coordinator", None)
+        if coord is None:
+            return "Brak effector_coordinator (modul nie wired)."
+
+        out = coord._execute_undo(record_id)
+        from agent_core.self_repair.expiry import _close_linked_bulletin
+        if out.get("ok"):
+            conductor.mark_done(
+                task.task_id,
+                notes=f"undo executed by operator (/approve_undo): {out.get('reason')}",
+            )
+            _close_linked_bulletin(
+                getattr(ctx, "bulletin_store", None), task.task_id,
+                reason="undo_executed",
+            )
+            # The dispatch loop sends the returned string (telegram/__init__.py:212);
+            # an explicit send here would double-deliver the confirmation (review F3).
+            return (f"[Undo] {task.task_id}: cofnieto {record_id} "
+                    f"(status={out.get('reason')}).")
+
+        detail = f" -- {out.get('detail')}" if out.get("detail") else ""
+        conductor.mark_blocked(
+            task.task_id, reason=f"undo_failed: {out.get('reason')}{detail}")
+        # Close the bulletin now, not via expiry: expiry is flag-gated for the
+        # scan path, and /approve_undo is reachable with SUGGEST off (EXECUTE on,
+        # or a /drill task), so an open bulletin would leak (review F4).
+        _close_linked_bulletin(
+            getattr(ctx, "bulletin_store", None), task.task_id,
+            reason="undo_failed",
+        )
+        return (f"Cofniecie {record_id} NIE powiodlo sie: {out.get('reason')}{detail}\n"
+                f"Task {task.task_id} -> BLOCKED (expiry sprzatnie). "
+                f"Dziennik: /undo_preview {record_id}")
+
+    def _cmd_drill_suggest_undo(args):
+        """Live drill for the undo-SUGGEST channel: create a synthetic undo
+        suggestion through the REAL UndoSuggestionCreator so the propose chain
+        runs end to end -- gate -> PENDING task -> bulletin -> Telegram notify.
+        Proves the 'Maria raises her hand' wiring; the inverse is NOT executed
+        (synthetic record, no live OpenClaw). Execution is proven separately by
+        /drill_undo + the live rung. The task is drill=True + approval_required,
+        harmless; let expiry sweep it after 24h.
+
+        /drill_suggest_undo        respect the gate (refused outside ACTIVE/REDUCED).
+        /drill_suggest_undo force  bypass the gate -- exercise the chain on demand.
+        """
+        creator = getattr(ctx, "undo_suggestion_creator", None)
+        if creator is None:
+            return "Brak undo_suggestion_creator (modul undo_suggest nie wired)."
+
+        arg = args.strip().lower() if isinstance(args, str) else ""
+        force = arg == "force"
+
+        from agent_core.undo_suggest.suggestion_creator import UndoSuggestionCandidate
+        candidate = UndoSuggestionCandidate(
+            undo_record_id=f"eundo-drill{int(time.time()) % 100000:05d}",
+            tool="write",
+            goal_id="drill-goal",
+            summary="DRILL - synthetic undo suggestion (no real action, no live OpenClaw)",
+            evidence_summary={
+                "drill": True,
+                "path": "/tmp/drill",
+                "goal_status": "failed",
+                "inverse_note": "synthetic",
+                "note": "manual /drill_suggest_undo -- exercises the real propose chain",
+            },
+            detected_at=time.time(),
+        )
+        try:
+            task_id = creator.create(candidate, snapshot_id="drill", bypass_gate=force)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("drill_suggest_undo create failed", exc_info=True)
+            return f"Drill blad: {exc}"
+
+        if task_id is None:
+            return (
+                "Drill ODMOWIONY przez gate (mode != ACTIVE/REDUCED, stale snapshot "
+                "lub cooldown). To JEST realne zachowanie. Uzyj "
+                "'/drill_suggest_undo force' by przetestowac sam lancuch teraz."
+            )
+
+        return (
+            f"Drill OK -> {task_id} (drill, approval_required). Ping TG powinien przyjsc.\n"
+            "To dowod KANALU propozycji (nie wykonania -- rekord syntetyczny). "
+            "Zostaw do expiry (24h)."
+        )
+
     def _cmd_claude(args):
         """Execute task via Claude Code CLI: /claude <task>"""
         if not args or not args.strip():
             return (
                 "Uzycie: /claude <opis zadania>\n"
+                "/claude to ANALIZA tekstem (bez narzedzi): nie czyta plikow, "
+                "nie wykonuje akcji, nie wysle pliku.\n"
                 "Przyklad: /claude przeanalizuj planner_core.py i znajdz potencjalne bugi\n"
-                "Przyklad: /claude zaproponuj refactor modulu critic\n"
+                "Plik wyslesz przez /wyslij <sciezka>; zadanie kodowe przez /codex.\n"
                 "Limit: 3/h, 15/dzien (subskrypcja operatora)"
             )
         task = args.strip()
+
+        # The morning of 2026-06-22: /claude is a TOOL-LESS text analyst
+        # (--tools "") so "wyslij mi plik X" produced hallucinated <tool_call>
+        # text falsely marked COMPLETED. Catch a file-delivery request here and
+        # actually send it (or redirect to /wyslij) instead of burning a Claude
+        # call on something this backend categorically cannot do.
+        try:
+            from agent_core.telegram.doc_sender import detect_file_request
+            fr = detect_file_request(task)
+        except Exception:
+            fr = None
+        if fr is not None:
+            if fr.kind == "send" and fr.path:
+                name = _send_repo_doc_async(fr.path, label="ClaudeFileSend")
+                return f"To nie wymaga Claude - wysylam plik: {name}..."
+            return fr.message  # honest redirect to /wyslij
 
         import threading
 
@@ -2254,8 +3541,10 @@ def register_telegram_commands(bridge, ctx):
                 else:
                     store.mark_timeout(task_id, 300)
                     bridge.bot.send_message(
-                        f"[Claude] Brak odpowiedzi (timeout 5min).\n"
-                        f"Task {task_id} zapisany - mozesz ponowic."
+                        "[Claude] Brak uzytecznej odpowiedzi (timeout 5min albo "
+                        "zadanie wymagalo akcji/narzedzi - /claude tylko analizuje "
+                        "tekst). Plik wyslesz przez /wyslij <sciezka>; zadanie "
+                        f"kodowe przez /codex.\nTask {task_id} zapisany."
                     )
             except Exception as e:
                 store.mark_failed(task_id, str(e)[:300])
@@ -2320,6 +3609,67 @@ def register_telegram_commands(bridge, ctx):
             timestamp=task.get("created_at"),
         )
         return f"PDF wygenerowany dla task {task['task_id']}."
+
+    def _cmd_kronika(args):
+        """Render a /project tree as a chronicle PDF: /kronika [goal_id].
+
+        Tasma-lite (operator pull only): the project's stamped pantry
+        (market_file_ids) + independent-exam verification become a
+        chronological DOCUMENT sent via the existing PDF pipe. READ-ONLY --
+        no goal mutation, no autocreate, no scheduling.
+        """
+        store = ctx.goal_store
+        if not store:
+            return "Brak goal_store (modul nie wired)."
+
+        parent_id = (args or "").strip()
+        if not parent_id:
+            # Auto-detect: the most recent parent whose children carry a
+            # market provenance stamp (there is exactly one live: Kronika).
+            candidates = []
+            for g in store.get_all():
+                children = store.get_children(g.id)
+                if children and any(
+                    (c.metadata or {}).get("source_kind") == "market"
+                    for c in children
+                ):
+                    candidates.append(g)
+            if not candidates:
+                return ("Nie znalazlem projektu z rynkowa spizarnia. "
+                        "Uzycie: /kronika [goal_id]")
+            candidates.sort(key=lambda g: getattr(g, "created_at", 0))
+            parent_id = candidates[-1].id
+        else:
+            # Support prefix matching like /pdf does
+            if store.get(parent_id) is None:
+                for g in store.get_all():
+                    if g.id.startswith(parent_id):
+                        parent_id = g.id
+                        break
+
+        try:
+            from agent_core.synthesis.kronika_report import (
+                build_kronika_report,
+            )
+            report = build_kronika_report(store, parent_id)
+        except Exception as e:
+            logger.warning(f"[KRONIKA] report build failed: {e}")
+            return f"Blad budowy kroniki: {e}"
+        if report is None:
+            return f"Cel '{parent_id}' nie istnieje. Uzycie: /kronika [goal_id]"
+
+        parent = store.get(parent_id)
+        stamp = time.strftime("%Y%m%d_%H%M")
+        _send_result_pdf(
+            f"kronika_{stamp}", "Kronika rynku",
+            (parent.description or parent_id)[:120], report,
+            timestamp=time.time(),
+        )
+        n_children = len(store.get_children(parent_id))
+        return (
+            f"Kronika wygenerowana: {parent.description[:60]} "
+            f"({n_children} podceli). PDF w drodze."
+        )
 
     def _cmd_profile(args):
         """Operator profile: /profile [set|rhythm|add_interest|remove_interest] <text>"""
@@ -2625,11 +3975,17 @@ def register_telegram_commands(bridge, ctx):
     # --- Workflow commands (Faza 5) ---
 
     def _cmd_wf(args):
-        """Telegram /wf - workflow management."""
+        """Telegram /wf - workflow management.
+
+        Telegram delivers args as a STRING (handler(args: str)); split into
+        tokens so subcommands work. The old code indexed the string directly
+        (args[0] == first CHARACTER), so every subcommand was unreachable and
+        only the bare no-arg view worked (2026-06-14 audit, Rank 9)."""
         engine = ctx.workflow_engine
         if not engine:
             return "Workflow Engine niedostepny."
-        sub = args[0].lower() if args else "list"
+        tokens = (args or "").split()
+        sub = tokens[0].lower() if tokens else "list"
 
         if sub == "list":
             wfs = engine.list_workflows()
@@ -2641,14 +3997,14 @@ def register_telegram_commands(bridge, ctx):
                 lines.append(f"{w['workflow_id'][:8]} {w['name']} [{w['status']}] {w['progress_pct']:.0f}%")
             return "\n".join(lines)
 
-        if sub == "start" and len(args) >= 2:
+        if sub == "start" and len(tokens) >= 2:
             try:
                 from agent_core.workflow.templates import WORKFLOW_TEMPLATES
-                tmpl_name = args[1]
+                tmpl_name = tokens[1]
                 if tmpl_name not in WORKFLOW_TEMPLATES:
                     return f"Nieznany szablon. Dostepne: {', '.join(WORKFLOW_TEMPLATES.keys())}"
                 tmpl = WORKFLOW_TEMPLATES[tmpl_name]
-                topic = " ".join(args[2:]) if len(args) > 2 else None
+                topic = " ".join(tokens[2:]) if len(tokens) > 2 else None
                 if tmpl["needs_topic"] and not topic:
                     return f"Podaj temat: /wf start {tmpl_name} <topic>"
                 steps = tmpl["factory"](topic) if tmpl["needs_topic"] else tmpl["factory"]()
@@ -2659,24 +4015,24 @@ def register_telegram_commands(bridge, ctx):
             except Exception as e:
                 return f"Error: {e}"
 
-        if sub == "pause" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
+        if sub == "pause" and len(tokens) >= 2:
+            wf_obj = _find_wf(engine, tokens[1])
             if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
+                return f"Nie znaleziono: {tokens[1]}"
             ok = engine.pause(wf_obj["workflow_id"])
             return f"Paused: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wstrzymac."
 
-        if sub == "resume" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
+        if sub == "resume" and len(tokens) >= 2:
+            wf_obj = _find_wf(engine, tokens[1])
             if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
+                return f"Nie znaleziono: {tokens[1]}"
             ok = engine.resume(wf_obj["workflow_id"])
             return f"Resumed: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna wznowic."
 
-        if sub == "cancel" and len(args) >= 2:
-            wf_obj = _find_wf(engine, args[1])
+        if sub == "cancel" and len(tokens) >= 2:
+            wf_obj = _find_wf(engine, tokens[1])
             if not wf_obj:
-                return f"Nie znaleziono: {args[1]}"
+                return f"Nie znaleziono: {tokens[1]}"
             ok = engine.cancel(wf_obj["workflow_id"], "operator via Telegram")
             return f"Cancelled: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna anulowac."
 
@@ -2699,11 +4055,15 @@ def register_telegram_commands(bridge, ctx):
         return None
 
     def _cmd_env(args):
-        """Telegram /env - environment mode management."""
+        """Telegram /env - environment mode management.
+
+        Telegram delivers args as a STRING; tokenize (see _cmd_wf -- same
+        2026-06-14 audit Rank 9 string-vs-list bug)."""
         mgr = ctx.environment_manager
         if not mgr:
             return "Environment Manager niedostepny."
-        sub = args[0].lower() if args else "status"
+        tokens = (args or "").split()
+        sub = tokens[0].lower() if tokens else "status"
 
         if sub == "status":
             status = mgr.get_status()
@@ -2717,10 +4077,10 @@ def register_telegram_commands(bridge, ctx):
                 lines.append(f"Blocked: {', '.join(status['blocked_actions'])}")
             return "\n".join(lines)
 
-        if sub in ("switch", "set") and len(args) >= 2:
+        if sub in ("switch", "set") and len(tokens) >= 2:
             try:
                 from agent_core.environment.environment_model import EnvironmentMode
-                mode = EnvironmentMode(args[1].lower())
+                mode = EnvironmentMode(tokens[1].lower())
                 ok = mgr.switch(mode, by="operator")
                 return f"Switched to: {mode.value}" if ok else f"Already in: {mode.value}"
             except ValueError:
@@ -2796,6 +4156,18 @@ def register_telegram_commands(bridge, ctx):
     bridge.register_command("todo", _cmd_todo)
     bridge.register_command("profile", _cmd_profile)
     bridge.register_command("pdf", _cmd_pdf)
+    bridge.register_command("kronika", _cmd_kronika)
+    bridge.register_command("wyslij", _cmd_wyslij)
+    bridge.register_command("fix", _cmd_fix)
+    bridge.register_command("fix_list", _cmd_fix_list)
+    bridge.register_command("fix_apply", _cmd_fix_apply)
+    bridge.register_command("fix_drop", _cmd_fix_drop)
+    bridge.register_command("undo_list", _cmd_undo_list)
+    bridge.register_command("undo_preview", _cmd_undo_preview)
+    bridge.register_command("drill_undo", _cmd_drill_undo)
+    bridge.register_command("undo_action", _cmd_undo_action)
+    bridge.register_command("approve_undo", _cmd_approve_undo)
+    bridge.register_command("drill_suggest_undo", _cmd_drill_suggest_undo)
     bridge.register_command("tasks", _cmd_tasks)
     bridge.register_command("claude", _cmd_claude)
     bridge.register_command("code", _cmd_code)
@@ -2804,6 +4176,16 @@ def register_telegram_commands(bridge, ctx):
     bridge.register_command("board", _cmd_board)
     bridge.register_command("status", _cmd_status)
     bridge.register_command("selfstatus", _cmd_selfstatus)
+    bridge.register_command("selfcontext", _cmd_selfcontext)
+    bridge.register_command("myslenie", _cmd_myslenie)
+    bridge.register_command("lastseen", _cmd_lastseen)
+    bridge.register_command("cowidzialas", _cmd_lastseen)
+    bridge.register_command("growth", _cmd_growth)
+    bridge.register_command("rozwoj", _cmd_growth)
+    bridge.register_command("samorozwoj", _cmd_samorozwoj)
+    bridge.register_command("petla", _cmd_samorozwoj)
+    bridge.register_command("approve_dev", _cmd_approve_dev)
+    bridge.register_command("play", _cmd_play)
     bridge.register_command("strategic", _cmd_strategic)
     bridge.register_command("fs_write", _cmd_fs_write)
     bridge.register_command("heldout", _cmd_heldout)
@@ -2812,12 +4194,16 @@ def register_telegram_commands(bridge, ctx):
     bridge.register_command("drill_repair", _cmd_drill_repair)
     bridge.register_command("drill_heartbeat", _cmd_drill_heartbeat)
     bridge.register_command("drill_outbox", _cmd_drill_outbox)
+    bridge.register_command("drill_fs_write", _cmd_drill_fs_write)
     bridge.register_command("approve_note", _cmd_approve_note)
     bridge.register_command("reject_note", _cmd_reject_note)
     bridge.register_command("list_notes", _cmd_list_notes)
+    bridge.register_command("learning_notes", _cmd_learning_notes)
     bridge.register_command("goals", _cmd_goals)
     bridge.register_command("approve", _cmd_approve)
     bridge.register_command("reject", _cmd_reject)
+    bridge.register_command("project", _cmd_project)
+    bridge.register_command("projects", _cmd_projects)
     bridge.register_command("test_propose", _cmd_test_propose)
     bridge.register_command("restart", _cmd_restart)
     bridge.register_command("priority", _cmd_priority)
@@ -2829,6 +4215,11 @@ def register_telegram_commands(bridge, ctx):
     bridge.register_command("beliefs", _cmd_beliefs)
     bridge.register_command("synthesize", _cmd_synthesize)
     bridge.register_command("synthreview", _cmd_synthreview)
+    bridge.register_command("quarantine", _cmd_quarantine)
+    bridge.register_command("unquarantine", _cmd_unquarantine)
+    bridge.register_command("retract", _cmd_retract)
+    bridge.register_command("forget_source", _cmd_forget_source)
+    bridge.register_command("retractions", _cmd_retractions)
     bridge.register_command("nauka", _cmd_nauka)
     bridge.register_command("do", _cmd_do)
     bridge.register_command("efapprove", _cmd_efapprove)
@@ -2838,3 +4229,34 @@ def register_telegram_commands(bridge, ctx):
     bridge.register_command("trust", _cmd_trust)
     bridge.register_command("help", _cmd_help)
     bridge.register_command("start", lambda a: _cmd_help(a))  # Handle /start from Telegram
+
+    # --- Telegram as CHAT (not just a command console) -----------------------
+    # Plain (non-slash) operator text -> Maria's daemon chat brain, with the SAME
+    # identity + situational awareness as the Web UI chat. Flag-gated OFF
+    # (TELEGRAM_CHAT_ENABLED) per BHP: when off, free-text keeps the historical
+    # silent-consume behaviour (still fed to OperatorModel learning).
+    def _chat_reply(text):
+        brain = getattr(ctx, "brain", None)
+        if brain is None or not hasattr(brain, "think"):
+            return None
+        try:
+            from models.ollama_brain import BrainTimeout
+        except Exception:
+            BrainTimeout = ()  # pragma: no cover - import always works in prod
+        try:
+            # raise_on_timeout: a cold-CPU stall surfaces a clear "busy" line
+            # instead of a silent dead chat (mirrors the Web UI chat, 2026-06-08).
+            return brain.think(text, raise_on_timeout=True) or None
+        except BrainTimeout:
+            return ("Jestem teraz zajeta ciezkim mysleniem (planer/nauka na CPU), "
+                    "sprobuj za chwile.")
+        except Exception as e:
+            logger.warning("Telegram chat reply failed: %s", e)
+            return None
+
+    import os as _os_chat
+    if _os_chat.environ.get("TELEGRAM_CHAT_ENABLED", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        bridge.set_chat_handler(_chat_reply)
+        logger.info("[Telegram] chat mode ON (plain text -> Maria's brain)")

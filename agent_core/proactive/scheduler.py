@@ -9,6 +9,8 @@ Persistence: meta_data/proactive_state.json (survives restarts).
 
 import json
 import logging
+import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +21,7 @@ from agent_core.proactive.generators import ContentGenerators
 from agent_core.proactive.proactive_model import (
     CONTACT_COOLDOWNS,
     CONTACT_WINDOWS,
+    MAX_PER_DAY_BY_REASON,
     ContactReason,
     ProactiveContact,
     ProactiveState,
@@ -32,6 +35,11 @@ CHECK_INTERVAL_TICKS = 60
 # Late night block: no proactive contact 23:00-6:00
 QUIET_HOURS_START = 23
 QUIET_HOURS_END = 6
+
+# Learning-milestone dedup: don't re-announce the same file within this window
+# (spaced-repetition re-exams a COMPLETED file and would otherwise re-ping).
+_MILESTONE_DEDUP_SEC = 24 * 3600
+_MILESTONE_BUFFER_CAP = 10
 
 # Default persistence path
 _META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
@@ -61,8 +69,18 @@ class ProactiveScheduler:
         self._notify_fn: Optional[Callable[[str], None]] = None
         self._tick_count = 0
 
-        # Event queue for triggered contacts (goal_achieved, etc.)
+        # Event queue for triggered contacts (goal_achieved, etc.).
+        # Written by trigger_event() from whatever thread mutates the goal
+        # store (planner/teacher); drained by _process_events() on the tick
+        # thread -- guard the queue so the snapshot+clear stays atomic.
         self._pending_events: List[ContactReason] = []
+        self._events_lock = threading.Lock()
+
+        # LEARNING_MILESTONE buffer: passed-exam milestones the generator drains
+        # at send time (twin of GOAL_ACHIEVED's recent-achievements pull). Guarded
+        # by _events_lock. _milestone_seen dedups the same file within 24h.
+        self._milestone_buffer: List[Dict] = []
+        self._milestone_seen: Dict[str, float] = {}
 
     @property
     def generators(self) -> ContentGenerators:
@@ -92,8 +110,70 @@ class ProactiveScheduler:
 
     def trigger_event(self, reason: ContactReason) -> None:
         """Queue an event-based contact (e.g. goal achieved)."""
-        if reason not in self._pending_events:
-            self._pending_events.append(reason)
+        with self._events_lock:
+            if reason not in self._pending_events:
+                self._pending_events.append(reason)
+
+    def bind_goal_store(self, goal_store) -> None:
+        """Wire live GOAL_ACHIEVED contacts to goal-store achievements.
+
+        Registers a status observer on the store; any real transition into
+        ACHIEVED queues a GOAL_ACHIEVED event (CONTACT_COOLDOWNS throttles to
+        <=1/h, daily cap still applies). This is the production caller of
+        trigger_event() -- without it the event path is dead code.
+
+        The "achieved" status is matched by value to keep proactive decoupled
+        from agent_core.goals (no import). Safe no-op if the store predates the
+        observer API.
+        """
+        if goal_store is None or not hasattr(goal_store, "register_status_observer"):
+            return
+
+        def _on_goal_status(goal, old_status, new_status):
+            if new_status == "achieved":
+                self.trigger_event(ContactReason.GOAL_ACHIEVED)
+
+        goal_store.register_status_observer(_on_goal_status)
+
+    def note_learning_milestone(self, topic: str, score: float) -> None:
+        """Record a passed-exam milestone and queue a LEARNING_MILESTONE contact.
+
+        Called by the teacher when an exam PASSES (file finished + verified).
+        The same file is deduped within 24h so spaced-repetition re-passes of
+        already-learned material don't spam the operator. The actual send is
+        still gated by the LEARNING_MILESTONE cooldown + daily cap; the generator
+        drains this buffer at send time, batching several passes into one ping.
+        """
+        if not topic:
+            return
+        now = time.time()
+        with self._events_lock:
+            last = self._milestone_seen.get(topic, 0.0)
+            if now - last < _MILESTONE_DEDUP_SEC:
+                return  # already announced this file recently
+            self._milestone_seen[topic] = now
+            # Prune stale dedup entries so the map can't grow unbounded.
+            self._milestone_seen = {
+                k: v for k, v in self._milestone_seen.items()
+                if now - v < _MILESTONE_DEDUP_SEC
+            }
+            self._milestone_buffer.append({"topic": topic, "score": score, "ts": now})
+            if len(self._milestone_buffer) > _MILESTONE_BUFFER_CAP:
+                self._milestone_buffer = self._milestone_buffer[-_MILESTONE_BUFFER_CAP:]
+        # trigger_event takes _events_lock too -> call it OUTSIDE the block above.
+        self.trigger_event(ContactReason.LEARNING_MILESTONE)
+
+    def drain_recent_milestones(self) -> List[Dict]:
+        """Return queued learning milestones and clear them (generator accessor).
+
+        Drains rather than peeks so a milestone is announced once; if the ping is
+        cooldown-dropped, generate() is never called, so the buffer is retained
+        for the next eligible tick.
+        """
+        with self._events_lock:
+            items = list(self._milestone_buffer)
+            self._milestone_buffer.clear()
+            return items
 
     def tick(self) -> int:
         """
@@ -111,10 +191,11 @@ class ProactiveScheduler:
         if not self._notify_fn:
             return 0
 
-        # Reset daily counter
+        # Reset daily counters
         today = datetime.now().strftime("%Y-%m-%d")
         if self._state.last_day != today:
             self._state.contacts_today = 0
+            self._state.sent_today_by_reason = {}
             self._state.last_day = today
 
         # Daily limit check
@@ -149,10 +230,16 @@ class ProactiveScheduler:
     def _process_events(self) -> int:
         """Process queued event-based contacts."""
         sent = 0
-        events = list(self._pending_events)
-        self._pending_events.clear()
+        with self._events_lock:
+            events = list(self._pending_events)
+            self._pending_events.clear()
 
         for reason in events:
+            # Cooldown-blocked events are intentionally dropped, not re-queued:
+            # GOAL_ACHIEVED is not must-deliver -- the generator always pulls the
+            # current recent-achievements list, so the next achievement re-fires
+            # with fresh content. Add re-queue logic only if a must-survive event
+            # type is introduced.
             if not self._can_send(reason):
                 continue
             contact = self._generators.generate(reason)
@@ -176,10 +263,29 @@ class ProactiveScheduler:
         if now.weekday() == 6:
             scheduled_reasons.append(ContactReason.WEEKLY_REVIEW)
 
+        # Faza 1 / K14.1: Maria asks one low-pressure question/day (ActiveLearner).
+        # Flag-gated OFF; inherits this loop's window + cooldown + daily-cap, so it
+        # can never nag. The generator returns None when there is nothing worth
+        # asking or a question is already open.
+        if os.environ.get("ACTIVE_LEARNER_ENABLED", "").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            scheduled_reasons.append(ContactReason.OPERATOR_QUESTION)
+
+        # Hot-weather hydration nudge (during-day care). Flag-gated, default ON:
+        # the generator returns None unless it is genuinely hot, so mild days
+        # are silent regardless. MAX_PER_DAY_BY_REASON caps it at 2/day.
+        if os.environ.get("HYDRATION_NUDGE_ENABLED", "true").strip().lower() in (
+            "1", "true", "yes", "on",
+        ):
+            scheduled_reasons.append(ContactReason.HYDRATION_NUDGE)
+
         for reason in scheduled_reasons:
             if not self._in_time_window(reason):
                 continue
             if not self._can_send(reason):
+                continue
+            if not self._under_daily_reason_cap(reason):
                 continue
             contact = self._generators.generate(reason)
             if contact:
@@ -272,6 +378,19 @@ class ProactiveScheduler:
         last = self._state.last_sent.get(reason.value, 0)
         return (time.time() - last) >= cooldown
 
+    def _under_daily_reason_cap(self, reason: ContactReason) -> bool:
+        """Check the optional per-reason daily cap (separate from the global cap).
+
+        Most reasons have no entry in MAX_PER_DAY_BY_REASON and are unbounded
+        here (only the global max_contacts_per_day + cooldown apply). The
+        hydration nudge uses this to stay gentle (<=2/day) even though its
+        3.5h cooldown would otherwise allow a third fire in the window.
+        """
+        cap = MAX_PER_DAY_BY_REASON.get(reason.value)
+        if cap is None:
+            return True
+        return self._state.sent_today_by_reason.get(reason.value, 0) < cap
+
     def _in_time_window(self, reason: ContactReason) -> bool:
         """Check if current time is in the allowed window for this reason."""
         window = CONTACT_WINDOWS.get(reason.value)
@@ -294,6 +413,9 @@ class ProactiveScheduler:
             self._notify_fn(contact.message)
             self._state.last_sent[contact.reason.value] = time.time()
             self._state.contacts_today += 1
+            self._state.sent_today_by_reason[contact.reason.value] = (
+                self._state.sent_today_by_reason.get(contact.reason.value, 0) + 1
+            )
             self._log_contact(contact)
             logger.info(
                 "Proactive contact sent: %s (today: %d)",

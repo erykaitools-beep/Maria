@@ -25,6 +25,7 @@ from models.ollama_brain import (
     _fast_context_enabled,
     _CHAT_CTX_HIGH_CHARS,
     _CHAT_CTX_LOW_CHARS,
+    _CHAT_TAIL_MAX_CHARS,
 )
 
 _HHMM = re.compile(r"\b\d{1,2}:\d{2}\b")
@@ -80,6 +81,71 @@ def test_send_list_starts_system_ends_user(brain):
     msgs = brain._compose_send_messages("c")
     assert msgs[0]["role"] == "system"
     assert msgs[-1]["role"] == "user"
+
+
+# --- situational tail (live state rides AFTER the cached prefix) ------------
+
+def test_situational_tail_is_second_system_after_prefix(brain, monkeypatch):
+    """Live work/state goes in a SECOND system message after the cached prefix
+    (so the chat knows what Maria is doing now), user turn still clean."""
+    monkeypatch.setattr(brain, "_get_work_context", lambda: "ucze sie: astronomia")
+    msgs = brain._compose_send_messages("pytanie")
+    assert msgs[0]["role"] == "system"               # cached prefix
+    assert msgs[1]["role"] == "system"               # situational tail
+    assert "astronomia" in msgs[1]["content"]
+    assert msgs[-1]["role"] == "user"
+    assert msgs[-1]["content"] == "pytanie"           # still byte-clean
+
+
+def test_situational_tail_does_not_bust_prefix(brain, monkeypatch):
+    """THE invariant for B: the tail changes every turn (live state) but the
+    cached PREFIX stays byte-identical -> KV cache stays warm."""
+    monkeypatch.setattr(brain, "_get_coarse_time_context",
+                        lambda: "poniedzialek, 08.06.2026 (wieczor)")
+    work = iter(["praca A", "praca B"])
+    monkeypatch.setattr(brain, "_get_work_context", lambda: next(work))
+    a = brain._compose_send_messages("x")
+    b = brain._compose_send_messages("y")
+    assert a[0]["content"] == b[0]["content"]          # prefix identical
+    assert a[1]["content"] != b[1]["content"]          # tail differs (live)
+
+
+def test_no_tail_means_no_second_system_message(brain, monkeypatch):
+    """All providers empty -> empty tail -> only the prefix system message
+    (graceful: the tail never appends an empty blurb)."""
+    monkeypatch.setattr(brain, "_get_work_context", lambda: "")
+    monkeypatch.setattr(brain, "_get_awareness_context", lambda: "")
+    brain._evidence_collector = None
+    msgs = brain._compose_send_messages("pytanie")
+    assert len([m for m in msgs if m["role"] == "system"]) == 1
+
+
+def test_situational_tail_capped(brain, monkeypatch):
+    monkeypatch.setattr(brain, "_get_work_context", lambda: "x" * 5000)
+    tail = brain._build_situational_tail()
+    assert 0 < len(tail) <= _CHAT_TAIL_MAX_CHARS + 8   # cap + " ..." suffix
+
+
+def test_conversation_context_not_in_prefix_rides_in_tail(brain, monkeypatch):
+    """Regression (adversarial review 2026-06-21): Phase 20 appends conversation
+    summaries to the file mid-chat. If that fed the cached prefix it would change
+    the prefix bytes every few minutes and bust the KV cache. The prefix MUST
+    exclude conversation context; it rides in the situational tail instead."""
+    monkeypatch.setattr(brain, "_get_coarse_time_context",
+                        lambda: "poniedzialek, 08.06.2026 (wieczor)")
+    # Summary changes between turns (as Phase 20 condenses a new session).
+    convos = iter(["[Pamiec rozmow: A]", "[Pamiec rozmow: B]"])
+    monkeypatch.setattr(brain, "_get_conversation_context", lambda: next(convos))
+
+    a = brain._compose_send_messages("x")
+    b = brain._compose_send_messages("y")
+
+    # Prefix byte-identical despite the conversation summary changing.
+    assert a[0]["content"] == b[0]["content"]
+    assert "Pamiec rozmow" not in a[0]["content"]   # not in the cached prefix
+    # It rides in the situational tail (second system message).
+    assert a[1]["role"] == "system"
+    assert "Pamiec rozmow: A" in a[1]["content"]
 
 
 # --- the cold-cache safety net (bounded context) ---------------------------

@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_HISTORY_PATH = Path("meta_data/conversation_history.jsonl")
 DEFAULT_SUMMARIES_PATH = Path("meta_data/conversation_summaries.jsonl")
 
+# A session is "closed" (safe to condense) once its newest turn is older than
+# this -- so the live conversation is never condensed mid-flight.
+DEFAULT_SESSION_IDLE_SECS = 1800.0  # 30 min
+# Cap LLM calls per drain so backlog clearing never spikes the model.
+DEFAULT_MAX_CONDENSE_PER_RUN = 3
+
 
 class ConversationMemory:
     """
@@ -214,6 +220,144 @@ class ConversationMemory:
             "date": date_str,
             "turn_count": turn_count,
             "summary": f"Sesja {self.session_id} ({turn_count} wiadomosci)",
+            "facts": [],
+            "user_facts": [],
+            "sentiment": "neutral",
+            "condensed_by": "rule",
+        }
+
+    def condense_pending_sessions(
+        self,
+        brain,
+        now: Optional[float] = None,
+        idle_secs: float = DEFAULT_SESSION_IDLE_SECS,
+        max_per_run: int = DEFAULT_MAX_CONDENSE_PER_RUN,
+    ) -> int:
+        """Condense CLOSED sessions from durable history that lack a summary.
+
+        This is the daemon-safe condensation path. The original design only
+        condensed at REPL shutdown via an in-memory turn counter, which never
+        fires in the 24/7 daemon (and looked at the wrong instance), so
+        summaries froze. This instead reads the PERSISTED history + summaries
+        -- no in-memory counters, no shutdown hook -- and is therefore robust
+        to hard kills and the chat/daemon instance split.
+
+        A session is eligible when (a) it has no summary yet, (b) it has at
+        least 2 turns, and (c) its newest turn is older than ``idle_secs`` (so
+        the live conversation is never condensed mid-flight). The backlog is
+        drained oldest-first, capped at ``max_per_run`` LLM calls per call.
+
+        Returns the number of sessions condensed.
+        """
+        now = time.time() if now is None else now
+
+        # 1. Group durable history by session: newest-turn ts + turn count.
+        overview: Dict[Any, Dict[str, float]] = {}
+        if not self.history_path.exists():
+            return 0
+        try:
+            with open(self.history_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("role") not in ("user", "assistant"):
+                        continue
+                    sid = entry.get("session")
+                    if sid is None:
+                        continue
+                    ts = float(entry.get("ts", 0) or 0)
+                    bucket = overview.setdefault(sid, {"last": 0.0, "turns": 0})
+                    bucket["turns"] += 1
+                    if ts > bucket["last"]:
+                        bucket["last"] = ts
+        except Exception as e:
+            logger.warning(f"condense_pending: history read failed: {e}")
+            return 0
+
+        # 2. Sessions already summarized (idempotent: never re-condense).
+        done = {s.get("session") for s in self.get_recent_summaries(limit=100000)}
+
+        # 3. Closed + un-summarized + has content, oldest-first.
+        pending = [
+            sid for sid, b in overview.items()
+            if sid not in done
+            and b["turns"] >= 2
+            and b["last"] < now - idle_secs
+        ]
+        pending.sort(key=lambda sid: overview[sid]["last"])
+
+        condensed_count = 0
+        for sid in pending[:max_per_run]:
+            messages = self._get_messages_for_session(sid)
+            if not messages:
+                continue
+            summary = self._condense_messages(brain, sid, messages)
+            if summary:
+                self.save_summary(summary)
+                condensed_count += 1
+        return condensed_count
+
+    def _get_messages_for_session(self, session_id) -> List[Dict]:
+        """Read all user/assistant turns for an arbitrary session from history."""
+        if not self.history_path.exists():
+            return []
+        messages = []
+        try:
+            with open(self.history_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if (
+                        entry.get("session") == session_id
+                        and entry.get("role") in ("user", "assistant")
+                    ):
+                        messages.append(entry)
+        except Exception as e:
+            logger.warning(f"condense_pending: session read failed: {e}")
+        return messages
+
+    def _condense_messages(
+        self, brain, session_id, messages: List[Dict]
+    ) -> Optional[Dict[str, Any]]:
+        """Condense an explicit message list for a backlog session.
+
+        Unlike condense_session (which dates the summary 'today' for the live
+        session), this dates it from the session's last turn so backlog
+        summaries carry their real date.
+        """
+        if not messages:
+            return None
+        turn_count = len(messages)
+        last_ts = max(
+            (float(m.get("ts", 0) or 0) for m in messages), default=time.time()
+        )
+        date_str = time.strftime("%Y-%m-%d", time.localtime(last_ts))
+        conversation_text = self._build_conversation_text(messages)
+
+        condensed = self._llm_condense(brain, conversation_text)
+        if condensed:
+            condensed.update({
+                "session": session_id,
+                "date": date_str,
+                "turn_count": turn_count,
+            })
+            return condensed
+
+        return {
+            "session": session_id,
+            "date": date_str,
+            "turn_count": turn_count,
+            "summary": f"Sesja {session_id} ({turn_count} wiadomosci)",
             "facts": [],
             "user_facts": [],
             "sentiment": "neutral",

@@ -109,8 +109,18 @@ PROFILE_LEARNING = EnvironmentProfile(
     planner_interval_multiplier=0.5,  # Faster cycles
     prompt_addition="Tryb nauki: skupiam sie na przyswajaniu wiedzy. "
                     "Priorytet na nauke, egzaminy i powtorki.",
-    auto_trigger_hours=(9, 10, 14, 15),           # 09:00-10:59 + 14:00-15:59 Berlin
-    auto_trigger_days=(0, 1, 2, 3, 4),            # Mon-Fri
+    # 2026-06-20: widened 4h (09-10,14-15, Mon-Fri) -> 10h every day (09:00-18:59
+    # Berlin, all 7 days). The narrow window throttled throughput: she was ACTIVE
+    # (and thus able to fetch/learn -- GUARDED fetch is blocked in SLEEP) only ~4h
+    # on weekdays, slept ~70%, and exhausted goals could not refetch the rest of
+    # the day. Widening makes the regulator keep her awake through the window
+    # (mode_regulator wakes on is_learning_window), lets fetch/learn run without
+    # the OFF_WINDOW_LEARN_BUDGET cap, and -- because mode_detector selects
+    # PROFILE_LEARNING by hour -- deprioritizes reflection in favour of
+    # learn/exam/fetch. QUIET 22-06 stays (night consolidation/rest); 19-22 + 06-09
+    # remain DEFAULT (gentle wind-down / ramp).
+    auto_trigger_hours=tuple(range(9, 19)),       # 09:00-18:59 Berlin (10h)
+    auto_trigger_days=tuple(range(7)),            # all 7 days
 )
 
 PROFILE_MONITORING = EnvironmentProfile(

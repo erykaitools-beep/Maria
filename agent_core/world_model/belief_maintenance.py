@@ -555,6 +555,11 @@ def merge_duplicate_pair(store, keep_id: str, remove_id: str) -> bool:
         superseded_by=None,
         related_entities=merged_entities,
         evidence=tuple(merged_ev),
+        # Carry the lifecycle of the kept belief forward (resurrection guard):
+        # merging must not turn a quarantined/retracted belief back into a
+        # fresh active record under a new id.
+        status=keep.status,
+        retraction=keep.retraction,
     )
 
     # Supersede both old beliefs
@@ -577,6 +582,8 @@ def merge_duplicate_pair(store, keep_id: str, remove_id: str) -> bool:
                 superseded_by=new_id,
                 related_entities=old.related_entities,
                 evidence=old.evidence,
+                status=old.status,
+                retraction=old.retraction,
             )
             store._beliefs[old.belief_id] = sup
             store._dirty.add(old.belief_id)

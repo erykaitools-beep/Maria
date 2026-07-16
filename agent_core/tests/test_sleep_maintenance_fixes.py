@@ -246,12 +246,14 @@ class TestSleepDoesRealWorkWhenWired:
 
 
 class _SpyProcessor:
-    """Records what belief_store the core handed over; touches no files."""
+    """Records the belief_store + mutate flag the core handed over; no files."""
 
     last_store = "UNSET"
+    last_mutate = "UNSET"
 
-    def __init__(self, belief_store=None, session_id=0, **kwargs):
+    def __init__(self, belief_store=None, session_id=0, mutate_beliefs=True, **kwargs):
         _SpyProcessor.last_store = belief_store
+        _SpyProcessor.last_mutate = mutate_beliefs
 
     def process_sleep_cycle(self):
         return {"phases": {}, "phases_completed": 5, "dreams": []}
@@ -272,6 +274,7 @@ class TestSleepCycleGuards:
             sleep_processor_module, "SleepProcessor", _SpyProcessor
         )
         _SpyProcessor.last_store = "UNSET"
+        _SpyProcessor.last_mutate = "UNSET"
         core = HomeostasisCore(
             memory_manager=specced(MemoryManager),
             llm_manager=specced(LLMManager),
@@ -298,6 +301,7 @@ class TestSleepCycleGuards:
     def test_first_sleep_runs_belief_phases(self, core, store):
         core._run_sleep_cycle()
         assert _SpyProcessor.last_store is store
+        assert _SpyProcessor.last_mutate is True
         event = self._last_event(core)
         assert event["belief_phases_ran"] is True
         assert event["belief_skip_reason"] is None
@@ -306,7 +310,10 @@ class TestSleepCycleGuards:
     def test_second_sleep_within_gap_is_throttled(self, core, store):
         core._run_sleep_cycle()
         core._run_sleep_cycle()
-        assert _SpyProcessor.last_store is None
+        # REM still gets the store to read (dreams fire on throttled sleeps),
+        # but belief MUTATION (NREM2/3) is throttled off.
+        assert _SpyProcessor.last_store is store
+        assert _SpyProcessor.last_mutate is False
         event = self._last_event(core)
         assert event["belief_phases_ran"] is False
         assert event["belief_skip_reason"] == "throttled"
@@ -357,7 +364,10 @@ class TestSleepCycleGuards:
         assert core2._last_belief_sleep_ts == core._last_belief_sleep_ts
 
         core2._run_sleep_cycle()
-        assert _SpyProcessor.last_store is None  # throttled mimo restartu
+        # Throttled after restart: store still handed over for REM reads, but
+        # mutation stays off so the stamp keeps dampening the boost.
+        assert _SpyProcessor.last_store is store
+        assert _SpyProcessor.last_mutate is False
         event = self._last_event(core2)
         assert event["belief_skip_reason"] == "throttled"
 

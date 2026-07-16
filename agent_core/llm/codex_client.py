@@ -38,6 +38,20 @@ RATE_WINDOW_SEC = 3600
 # Default log path
 _META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
 _DEFAULT_LOG_PATH = _META_DIR / "codex_interactions.jsonl"
+_FALLBACK_CODEX_BIN = "/home/maria/.npm-global/bin/codex"
+_QUERY_SANDBOX = os.environ.get("CODEX_QUERY_SANDBOX", "read-only")
+_IMPL_SANDBOX = os.environ.get("CODEX_IMPL_SANDBOX", "workspace-write")
+_APPROVAL_POLICY = os.environ.get("CODEX_APPROVAL_POLICY", "never")
+
+
+def _default_codex_bin() -> str:
+    """Resolve Codex CLI at runtime so PATH/env changes are picked up."""
+    return os.environ.get("CODEX_BIN") or shutil.which("codex") or _FALLBACK_CODEX_BIN
+
+
+def _toml_string(value: str) -> str:
+    """Return a TOML-safe basic string for `codex -c key=value` overrides."""
+    return json.dumps(value)
 
 
 class CodexClient:
@@ -50,15 +64,19 @@ class CodexClient:
 
     def __init__(
         self,
-        codex_bin: str = os.environ.get(
-            "CODEX_BIN", "/home/maria/.npm-global/bin/codex"
-        ),
+        codex_bin: Optional[str] = None,
         timeout_s: float = 120,
         log_path: Optional[Path] = None,
+        query_sandbox: str = _QUERY_SANDBOX,
+        impl_sandbox: str = _IMPL_SANDBOX,
+        approval_policy: str = _APPROVAL_POLICY,
     ):
-        self._codex_bin = codex_bin
+        self._codex_bin = codex_bin or _default_codex_bin()
         self._timeout_s = timeout_s
         self._log_path = Path(log_path or _DEFAULT_LOG_PATH)
+        self._query_sandbox = query_sandbox
+        self._impl_sandbox = impl_sandbox
+        self._approval_policy = approval_policy
 
         # Rate limiting (sliding window)
         self._call_timestamps: deque = deque()
@@ -80,6 +98,7 @@ class CodexClient:
         cwd: Optional[Path] = None,
         timeout_s: Optional[float] = None,
         impl_mode: bool = False,
+        out_file: Optional[Path] = None,
     ) -> Optional[str]:
         """
         Send a knowledge query to ChatGPT via Codex CLI.
@@ -96,11 +115,11 @@ class CodexClient:
                 the instance default (120s). Pass a higher value (e.g.
                 1800s) when dispatching implementation briefs where Codex
                 may run for many minutes before committing.
-            impl_mode: When True, pass ``--sandbox workspace-write``
-                and ``--ask-for-approval never`` so Codex can edit files
-                and commit autonomously. Default False keeps Codex in
-                read-only Q&A mode (used by creative, web_source,
-                code_agent). Dispatcher sets True.
+            impl_mode: When True, pass ``--sandbox`` using
+                ``CODEX_IMPL_SANDBOX`` (default: ``workspace-write``) and
+                ``approval_policy="never"`` so Codex can edit files
+                autonomously. Default False pins Codex to read-only Q&A mode
+                (used by creative, web_source, code_agent).
 
         Returns:
             Response text or None if unavailable/rate-limited/error.
@@ -124,6 +143,7 @@ class CodexClient:
         start = time.time()
         result = self._invoke(
             prompt, cwd=cwd, timeout_s=timeout_s, impl_mode=impl_mode,
+            out_file=out_file,
         )
         duration_ms = (time.time() - start) * 1000
 
@@ -153,6 +173,7 @@ class CodexClient:
         cwd: Optional[Path] = None,
         timeout_s: Optional[float] = None,
         impl_mode: bool = False,
+        out_file: Optional[Path] = None,
     ) -> Optional[str]:
         """Execute Codex CLI as subprocess (non-interactive exec mode).
 
@@ -163,9 +184,10 @@ class CodexClient:
         ``timeout_s``: override the instance default ``self._timeout_s``
         for this call only. None = use instance default.
 
-        ``impl_mode``: True for autonomous implementation work (adds
-        ``--sandbox workspace-write --ask-for-approval never``). False
-        for Q&A reads (Codex stays read-only, never asks).
+        ``impl_mode``: True for autonomous implementation work. False for
+        Q&A reads (Codex stays read-only). Both modes set
+        ``approval_policy="never"`` so Maria never blocks on an interactive
+        approval prompt.
         """
         effective_timeout = (
             timeout_s if timeout_s is not None else self._timeout_s
@@ -173,32 +195,50 @@ class CodexClient:
         try:
             # Prepend context brief so Codex knows it's helping M.A.R.I.A.
             full_prompt = f"{_CONTEXT_BRIEF}\n\n{prompt}" if _CONTEXT_BRIEF else prompt
-            out_file = self._log_path.parent / ".codex_last_response.txt"
+            # Per-call out_file lets concurrent callers (e.g. remote /fix) avoid
+            # clobbering each other on the shared default response file.
+            out_file = Path(out_file) if out_file is not None \
+                else self._log_path.parent / ".codex_last_response.txt"
+            out_file.parent.mkdir(parents=True, exist_ok=True)
             cmd = [
                 self._codex_bin,
                 "exec",                   # non-interactive mode
                 "--skip-git-repo-check",  # Maria's context, not a repo question
+                "--color", "never",       # stable logs for automation
                 "-o", str(out_file),      # write response to file
             ]
-            if impl_mode:
-                # Autonomous implementation: let Codex write files and run
-                # commands without asking. Q&A path keeps the safer
-                # read-only default.
-                # Note: --ask-for-approval is a TOP-LEVEL flag, not a flag
-                # on the ``exec`` subcommand. Pass approval_policy via
-                # -c (TOML config override) instead. Value is a TOML
-                # string, so it needs to keep its quotes.
-                cmd.extend([
-                    "--sandbox", "workspace-write",
-                    "-c", 'approval_policy="never"',
-                ])
-            cmd.append(full_prompt)
+            if cwd is not None:
+                cmd.extend(["--cd", str(cwd)])
+            sandbox = self._impl_sandbox if impl_mode else self._query_sandbox
+            if not sandbox:
+                # Fail closed: never omit --sandbox and fall through to
+                # codex's per-project default, which is WRITABLE for
+                # trust_level="trusted" dirs (incl. Maria's own repo
+                # /home/maria/maria). An empty flag value must not silently
+                # widen access on the Q&A read path.
+                sandbox = "workspace-write" if impl_mode else "read-only"
+            if not impl_mode and sandbox != "read-only":
+                # Q&A callers (creative/web_source/synthesis) run in Maria's
+                # live repo; a writable sandbox here lets a "read" edit files.
+                logger.warning(
+                    "[Codex] Q&A (read) path running with writable sandbox "
+                    "%r (CODEX_QUERY_SANDBOX) - Q&A callers can modify files",
+                    sandbox,
+                )
+            cmd.extend(["--sandbox", sandbox])
+            cmd.extend([
+                "-c", f"approval_policy={_toml_string(self._approval_policy)}",
+            ])
+            # Note: --ask-for-approval is not a current ``codex exec`` flag.
+            # Pass approval_policy via -c (TOML config override).
+            cmd.append("-")  # prompt via stdin; avoids argv length/quoting issues
 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=effective_timeout,
+                input=full_prompt,
                 env=None,  # inherit environment (OAuth tokens)
                 cwd=str(cwd) if cwd is not None else None,
             )
@@ -296,6 +336,10 @@ class CodexClient:
             "total_errors": self._total_errors,
             "total_tokens_approx": self._total_tokens_approx,
             "log_path": str(self._log_path),
+            "codex_bin": self._codex_bin,
+            "query_sandbox": self._query_sandbox,
+            "impl_sandbox": self._impl_sandbox,
+            "approval_policy": self._approval_policy,
         }
 
     def get_recent_interactions(self, limit: int = 10) -> List[Dict]:

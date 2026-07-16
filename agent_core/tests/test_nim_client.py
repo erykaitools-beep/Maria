@@ -98,6 +98,22 @@ class TestTokenBudget:
         budget._request_timestamps = [old - i for i in range(40)]
         assert budget.can_use_nim() is True
 
+    def test_can_use_nim_daily_token_exhausted(self, budget):
+        """2026-06-20: token budget is enforced, not observability-only -- once the
+        daily tokens are spent, NIM is blocked (caller falls back to Ollama)."""
+        budget.record_usage(prompt_tokens=6000, completion_tokens=5000)  # 11k > 10k
+        assert budget.get_remaining_today() <= 0
+        assert budget.can_use_nim() is False
+
+    def test_budget_status_depleted_on_token_exhaustion(self, budget):
+        budget.record_usage(prompt_tokens=6000, completion_tokens=5000)
+        assert budget.get_budget_status() == "DEPLETED"
+
+    def test_budget_status_low_near_daily_cap(self, budget):
+        """>=80% of the daily token budget used -> LOW (early-warning)."""
+        budget.record_usage(prompt_tokens=8500, completion_tokens=0)  # 85%
+        assert budget.get_budget_status() == "LOW"
+
     def test_budget_status_ok(self, budget):
         """Status is OK when plenty of budget."""
         assert budget.get_budget_status() == "OK"

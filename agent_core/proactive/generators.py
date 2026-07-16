@@ -6,6 +6,7 @@ All generators are pure functions - no side effects, no LLM calls.
 """
 
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -33,14 +34,17 @@ class ContentGenerators:
         self._get_proposed_goals: Optional[Callable] = None
         self._get_health: Optional[Callable] = None
         self._get_user_name: Optional[Callable] = None
-        self._get_user_interests: Optional[Callable] = None
         self._get_recent_achievements: Optional[Callable] = None
-        self._get_planner_stats: Optional[Callable] = None
+        self._get_recent_milestones: Optional[Callable] = None
+        self._get_chunks_learned: Optional[Callable] = None
         self._get_mode: Optional[Callable] = None
         self._get_operator_context: Optional[Callable] = None
         self._get_operator_rhythm: Optional[Callable] = None
         self._get_weather: Optional[Callable] = None
+        self._get_weather_data: Optional[Callable] = None  # raw WeatherData (hydration nudge)
         self._get_perception: Optional[Callable] = None
+        self._get_operator_question: Optional[Callable] = None
+        self._get_self_context: Optional[Callable] = None  # E4: full situational picture
 
     # -- Accessor setters (called during wiring) --
 
@@ -65,14 +69,20 @@ class ContentGenerators:
     def set_user_name_fn(self, fn: Callable) -> None:
         self._get_user_name = fn
 
-    def set_user_interests_fn(self, fn: Callable) -> None:
-        self._get_user_interests = fn
-
     def set_recent_achievements_fn(self, fn: Callable) -> None:
         self._get_recent_achievements = fn
 
-    def set_planner_stats_fn(self, fn: Callable) -> None:
-        self._get_planner_stats = fn
+    def set_recent_milestones_fn(self, fn: Callable) -> None:
+        self._get_recent_milestones = fn
+
+    def set_chunks_learned_fn(self, fn: Callable) -> None:
+        """Inject the 24h chunk count (KnowledgeAnalyzer.count_chunks_learned).
+
+        Separate from the knowledge snapshot on purpose: the snapshot is read on
+        the planner tick path, this reads the much larger memory file and is only
+        wanted by the daily frame.
+        """
+        self._get_chunks_learned = fn
 
     def set_mode_fn(self, fn: Callable) -> None:
         self._get_mode = fn
@@ -86,8 +96,23 @@ class ContentGenerators:
     def set_weather_fn(self, fn: Callable) -> None:
         self._get_weather = fn
 
+    def set_weather_data_fn(self, fn: Callable) -> None:
+        """Inject raw WeatherData accessor (used by the hydration nudge, which
+        needs the temperature itself, not just the formatted morning line)."""
+        self._get_weather_data = fn
+
     def set_perception_fn(self, fn: Callable) -> None:
         self._get_perception = fn
+
+    def set_operator_question_fn(self, fn: Callable) -> None:
+        """Inject ActiveLearner's 'what to ask next' decision (K14.1)."""
+        self._get_operator_question = fn
+
+    def set_self_context_fn(self, fn: Callable) -> None:
+        """Inject SelfContext.build() (E4): the merged situational picture so a
+        proactive message can speak from the whole situation (last seen + current
+        focus), not just isolated stats."""
+        self._get_self_context = fn
 
     # -- Generators --
 
@@ -100,7 +125,8 @@ class ContentGenerators:
             ContactReason.GOAL_ACHIEVED: self._goal_achieved,
             ContactReason.LEARNING_MILESTONE: self._learning_milestone,
             ContactReason.IDLE_CHECKIN: self._idle_checkin,
-            ContactReason.INTEREST_MATCH: self._interest_match,
+            ContactReason.OPERATOR_QUESTION: self._operator_question,
+            ContactReason.HYDRATION_NUDGE: self._hydration_nudge,
         }
         gen_fn = generators.get(reason)
         if not gen_fn:
@@ -110,6 +136,20 @@ class ContentGenerators:
         except Exception as e:
             logger.debug("Generator %s failed: %s", reason.value, e)
             return None
+
+    def _operator_question(self) -> Optional[ProactiveContact]:
+        """ActiveLearner (K14.1): ask ONE low-pressure question to fill a gap.
+        The injected fn returns the question text (marking it pending) or None
+        when there is nothing worth asking / a question is already open."""
+        if not self._get_operator_question:
+            return None
+        text = self._get_operator_question()
+        if not text:
+            return None
+        return ProactiveContact(
+            reason=ContactReason.OPERATOR_QUESTION,
+            message=text,
+        )
 
     def _morning_summary(self) -> Optional[ProactiveContact]:
         """Daily morning briefing with overnight stats."""
@@ -139,6 +179,10 @@ class ContentGenerators:
         for pl in perception_lines:
             lines.append(pl)
 
+        # E4: situational awareness -- what I last saw + what I'm working on now.
+        for sl in self._situational_lines():
+            lines.append(sl)
+
         # Health & mode
         health = self._safe_call(self._get_health)
         mode = self._safe_call(self._get_mode) or "?"
@@ -153,12 +197,19 @@ class ContentGenerators:
             completed = len(by_status.get("completed", []))
             new_count = len(by_status.get("new", []))
             chunks = snap.get("total_chunks_learned", 0)
-            avg_score = snap.get("average_exam_score", 0)
+            # "Wiedza" is deliberately the lifetime total -- it is a claim about
+            # accumulated knowledge, not about a day, so the sum is the answer.
             lines.append(f"Wiedza: {completed}/{total} plikow, {chunks} chunkow")
             if new_count > 0:
                 lines.append(f"Nowe do nauki: {new_count}")
-            if avg_score > 0:
-                lines.append(f"Sredni wynik egzaminow: {avg_score:.0%}")
+            # The exam figure is a claim about how she is doing lately, so it is
+            # windowed: the lifetime mean sits on 1347 exams and cannot move.
+            exams_24h = snap.get("exam_count_24h", 0)
+            if exams_24h > 0:
+                avg_24h = snap.get("average_exam_score_24h", 0)
+                lines.append(
+                    f"Egzaminy (24h): {exams_24h}, sredni wynik {avg_24h:.0%}"
+                )
 
         # Active goals (compact)
         goals = self._safe_call(self._get_active_goals) or []
@@ -188,31 +239,41 @@ class ContentGenerators:
         )
 
     def _evening_recap(self) -> Optional[ProactiveContact]:
-        """Daily evening summary of what happened today."""
+        """Daily evening summary of what happened today.
+
+        Every figure here is windowed to the last 24h. Lifetime aggregates were
+        tried and they lied: on 07-12..07-15 this frame printed "5379 chunks /
+        83%" plus the same five achievements four evenings running, because a
+        single day cannot move an all-time sum -- and one of those achievements
+        was ten days old. A quiet day must be allowed to read as a quiet day.
+        """
         name = self._safe_call(self._get_user_name) or "Operator"
 
         lines = [f"*Podsumowanie dnia, {name}*", ""]
 
-        # Planner stats (cycles, actions today)
-        stats = self._safe_call(self._get_planner_stats)
-        if stats:
-            cycles = stats.get("total_cycles", 0)
-            lines.append(f"Cykli plannera: {cycles}")
+        # Chunks counted from long-term memory, not from successful learn actions:
+        # a learn action that finds every chunk already known still reports
+        # success, so the action count runs ahead of what was really learned
+        # (101 vs 83 on 2026-07-16).
+        chunks_24h = self._safe_call(self._get_chunks_learned) or 0
+        if chunks_24h > 0:
+            lines.append(f"Chunki nauczone (24h): {chunks_24h}")
 
-        # Learning progress
         snap = self._safe_call(self._get_knowledge_snapshot)
         if snap:
-            chunks_24h = snap.get("total_chunks_learned", 0)
-            avg_score = snap.get("average_exam_score", 0)
-            if chunks_24h > 0:
-                lines.append(f"Chunki nauczone: {chunks_24h}")
-            if avg_score > 0:
-                lines.append(f"Sredni wynik egzaminow: {avg_score:.0%}")
+            exams_24h = snap.get("exam_count_24h", 0)
+            if exams_24h > 0:
+                avg_24h = snap.get("average_exam_score_24h", 0)
+                lines.append(
+                    f"Egzaminy (24h): {exams_24h}, sredni wynik {avg_24h:.0%}"
+                )
 
-        # Achievements
+        # Achievements: the injected fn returns only goals achieved inside the
+        # window, newest first. An empty list is a real answer -- print nothing
+        # rather than reaching further back for something to show.
         achievements = self._safe_call(self._get_recent_achievements) or []
         if achievements:
-            lines.append("\nOsiagniecia:")
+            lines.append("\nOsiagniecia (24h):")
             for a in achievements[:5]:
                 lines.append(f"  - {a}")
 
@@ -295,39 +356,31 @@ class ContentGenerators:
         )
 
     def _learning_milestone(self) -> Optional[ProactiveContact]:
-        """Notify about learning progress milestones."""
-        snap = self._safe_call(self._get_knowledge_snapshot)
-        if not snap:
+        """Notify when Maria has passed exam(s) / finished file(s).
+
+        Twin of _goal_achieved: pulls the freshly-passed milestones (the
+        scheduler drains its buffer here) and batches them into one ping.
+        """
+        items = self._safe_call(self._get_recent_milestones) or []
+        if not items:
             return None
 
-        total = snap.get("total_files", 0)
-        by_status = snap.get("files_by_status", {})
-        completed = len(by_status.get("completed", []))
-        if total == 0:
-            return None
-
-        coverage = completed / total
-        # Milestone at every 10%
-        milestone = int(coverage * 10) * 10
-        if milestone == 0:
-            return None
-
-        chunks = snap.get("total_chunks_learned", 0)
-        avg_score = snap.get("average_exam_score", 0)
-
-        lines = [
-            f"*Kamien milowy: {milestone}% wiedzy!*",
-            "",
-            f"Pliki: {completed}/{total}",
-            f"Chunki: {chunks}",
-        ]
-        if avg_score > 0:
-            lines.append(f"Sredni wynik: {avg_score:.0%}")
+        lines = ["*Nauczylam sie czegos nowego!*", ""]
+        for it in items[:5]:
+            topic = self._format_topic(it.get("topic", "?"))
+            pct = self._score_pct(it.get("score"))
+            if pct is not None:
+                lines.append(f"  - {topic} (egzamin zdany {pct}%)")
+            else:
+                lines.append(f"  - {topic}")
+        extra = len(items) - 5
+        if extra > 0:
+            lines.append(f"  ... i {extra} wiecej")
 
         return ProactiveContact(
             reason=ContactReason.LEARNING_MILESTONE,
             message="\n".join(lines),
-            metadata={"milestone_pct": milestone, "coverage": coverage},
+            metadata={"count": len(items)},
         )
 
     def _idle_checkin(self) -> Optional[ProactiveContact]:
@@ -362,6 +415,59 @@ class ContentGenerators:
         return ProactiveContact(
             reason=ContactReason.IDLE_CHECKIN,
             message="\n".join(lines),
+        )
+
+    def _hydration_nudge(self) -> Optional[ProactiveContact]:
+        """Hot-weather care: gently remind the operator to drink water.
+
+        Fires only when it is genuinely hot (needs_hydration_reminder over the
+        raw WeatherData). Returns None on mild days, when weather is
+        unavailable, or when the operator is on a do-not-disturb context.
+        Wording is warm and rotated by hour so two nudges on the same day read
+        differently rather than as a repeated canned line.
+        """
+        get_data = self._get_weather_data
+        if get_data is None:
+            return None
+        data = self._safe_call(get_data)
+        if data is None:
+            return None
+
+        # Heat gate (lazy import keeps generators free of a hard weather dep).
+        from agent_core.weather.salience import needs_hydration_reminder
+        if not needs_hydration_reminder(data):
+            return None
+
+        # Respect "urlop" / "nie przeszkadzac", same skip as the morning brief.
+        op_context = self._safe_call(self._get_operator_context)
+        if op_context:
+            skip_keywords = ("urlop", "nie przeszkadza", "vacation", "dnd")
+            if any(kw in op_context.lower() for kw in skip_keywords):
+                return None
+
+        name = self._safe_call(self._get_user_name) or "Operator"
+        temp = f"{data.temp_c:.0f}"
+        feels = f"{data.feels_like_c:.0f}"
+
+        # City stays in metadata only -- folding it into "w {city}" breaks Polish
+        # declension for arbitrary OWM names ("w Berlin"), so keep the wording
+        # city-agnostic.
+        variants = [
+            f"{name}, dzis {temp}C i ostro przygrzewa. "
+            "Zrob sobie przerwe i wypij szklanke wody.",
+            f"Upal nie odpuszcza ({temp}C, odczuwalne {feels}C). "
+            f"{name}, pamietaj o nawodnieniu!",
+            f"Goraco dzis ({temp}C). {name}, dawno piles wode? "
+            "To dobry moment na szklanke.",
+            f"{temp}C na dworze - zadbaj o siebie. "
+            f"Szklanka wody teraz sie przyda, {name}.",
+        ]
+        idx = datetime.now().hour % len(variants)
+
+        return ProactiveContact(
+            reason=ContactReason.HYDRATION_NUDGE,
+            message=variants[idx],
+            metadata={"temp_c": data.temp_c, "feels_like_c": data.feels_like_c},
         )
 
     def proposed_goal_alert(
@@ -404,47 +510,66 @@ class ContentGenerators:
             },
         )
 
-    def _interest_match(self) -> Optional[ProactiveContact]:
-        """Alert about new content matching user's interests."""
-        interests = self._safe_call(self._get_user_interests) or []
-        if not interests:
-            return None
-
-        snap = self._safe_call(self._get_knowledge_snapshot)
-        if not snap:
-            return None
-
-        new_files = snap.get("new_files_available", [])
-        if not new_files:
-            return None
-
-        # Check if any new file titles match interests
-        matches = []
-        for f in new_files:
-            title = (f.get("title", "") or f.get("file_id", "")).lower()
-            for interest in interests:
-                if interest.lower() in title:
-                    matches.append((f, interest))
-                    break
-
-        if not matches:
-            return None
-
-        name = self._safe_call(self._get_user_name) or "Operator"
-        lines = [f"*{name}, cos dla Ciebie!*", ""]
-        for f, interest in matches[:3]:
-            title = f.get("title", f.get("file_id", "?"))
-            lines.append(f"  - {title} (temat: {interest})")
-
-        lines.append("\nChcesz zebym sie tego nauczyla?")
-
-        return ProactiveContact(
-            reason=ContactReason.INTEREST_MATCH,
-            message="\n".join(lines),
-            metadata={"matches": len(matches)},
-        )
-
     # -- Helpers --
+
+    def _situational_lines(self) -> List[str]:
+        """E4: a compact 'what I'm working on right now' from SelfContext, so a
+        proactive message speaks from the live situation ("teraz robie Y").
+
+        Deliberately does NOT restate the last vision sighting: that already rides
+        the interactive chat tail (E2) where it is contextual and not a re-broadcast
+        -- echoing it in a proactive message would duplicate the VisionAdvisor ping
+        (or leak the 'operator present' silent placeholder). Proactive's unique
+        situational bit is the planner's REAL current focus (E3 rung2), which is
+        not surfaced anywhere else.
+
+        Flag-gated (PROACTIVE_SITUATIONAL, default OFF -> observe->cutover). Returns
+        [] when off / no picture / nothing worth adding. Pure read: SelfContext.
+        build() is read-only and cache-backed.
+        """
+        if os.environ.get("PROACTIVE_SITUATIONAL", "").strip().lower() not in (
+            "1", "true", "yes", "on"
+        ):
+            return []
+        pic = self._safe_call(self._get_self_context)
+        if not isinstance(pic, dict):
+            return []
+
+        # Fully defensive: called inline by _morning_summary (NOT via _safe_call),
+        # so a malformed picture must degrade to no situational line, never kill
+        # the whole briefing.
+        try:
+            mission = pic.get("mission") or {}
+            # Only the planner's REAL focus (E3 rung2), never the priority-guess.
+            if (
+                isinstance(mission, dict)
+                and mission.get("focus_source") == "planner"
+                and mission.get("top_goal")
+            ):
+                return [f"Teraz pracuje nad: {mission['top_goal']}"]
+            return []
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Proactive _situational_lines failed: %s", e)
+            return []
+
+    @staticmethod
+    def _format_topic(file_id: Any) -> str:
+        """Turn a file id / path into a readable topic name."""
+        name = str(file_id or "").strip()
+        name = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]  # drop directory
+        if "." in name:
+            name = name.rsplit(".", 1)[0]  # drop extension
+        name = name.replace("_", " ").replace("-", " ").strip()
+        return name or str(file_id)
+
+    @staticmethod
+    def _score_pct(score: Any) -> Optional[int]:
+        """Normalise an exam score (0.0-1.0 fraction, or already a percent) to %."""
+        if not isinstance(score, (int, float)):
+            return None
+        if score <= 0:
+            return None
+        return round(score * 100) if score <= 1.0 else round(score)
 
     @staticmethod
     def _safe_call(fn: Optional[Callable], *args, **kwargs):

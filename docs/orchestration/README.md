@@ -103,7 +103,7 @@ In priority order:
 3. **Run T-001 (Codex dispatch validation).** Send a tiny throwaway task to Codex through the agreed flow. Goal: a working dispatch + retrieve pattern, not a real fix.
 4. **Run T-002 (Kimi 2.6 dispatch validation).** Same exercise with Kimi.
 5. **Decide on monitoring.** When a worker is running, does the master watch the stream, sleep on it, or poll? Add the decision to `MASTER_WORKFLOW.md` under "Monitoring".
-6. **Pick the first real task.** Something small, low-risk, where a hallucination is easy to detect. Pull it from the existing roadmap (e.g. a stale-doc cleanup).
+6. **Pick the first real task.** Something small, low-risk, where a hallucination is easy to detect. Pull it from the existing roadmap (e.g. one of the `[VERIFY]` items in `docs/funding/FUNDING_STRATEGY_MARIA.md`, or a stale-doc cleanup).
 7. **Run the first real task end-to-end.** Master + worker + review + merge + ledger. Retro in 30 minutes.
 
 Time budget: ~2–3 focused hours. Goal: by end of day the loop has run once for real.
@@ -114,6 +114,7 @@ Time budget: ~2–3 focused hours. Goal: by end of day the loop has run once for
 
 - `CLAUDE.md` — project overview, conventions, ADRs.
 - `docs/ARCHITECTURE.md`, `docs/CONTRACTS.md`, `docs/ROADMAP.md` — primary context for any worker touching M.A.R.I.A. internals.
+- `docs/funding/` — strategy folder created the same day as this one.
 - `claude_notes/` — session notes; the master writes one at the end of every session.
 
 ---

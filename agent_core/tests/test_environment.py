@@ -88,11 +88,11 @@ class TestEnvironmentModel:
 
     def test_learning_auto_trigger_weekdays(self):
         p = PROFILE_LEARNING
-        # Mon-Fri
+        # 2026-06-20: learning runs all 7 days.
         assert 0 in p.auto_trigger_days
         assert 4 in p.auto_trigger_days
-        assert 5 not in p.auto_trigger_days  # No Saturday
-        assert 6 not in p.auto_trigger_days  # No Sunday
+        assert 5 in p.auto_trigger_days  # Saturday
+        assert 6 in p.auto_trigger_days  # Sunday
 
     def test_quiet_auto_trigger_night_hours(self):
         p = PROFILE_QUIET
@@ -137,13 +137,10 @@ class TestModeDetector:
         detector = ModeDetector()
         # Reset anti-flap timer
         detector._last_switch_ts = 0
-        # At a time that doesn't trigger any auto mode
-        now = datetime(2026, 4, 12, 12, 0)  # Saturday noon
+        # 20:00 is in the gap between the learning window (09-19) and QUIET (22-06),
+        # so no profile auto-triggers -> no change.
+        now = datetime(2026, 4, 12, 20, 0)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
-        # QUIET doesn't trigger on Saturdays (no auto_trigger_days set)
-        # LEARNING doesn't trigger on weekends
-        # So should be None (no change) or QUIET (night hours don't match)
-        # At noon, no triggers match -> None
         assert result is None or result == EnvironmentMode.DEFAULT
 
     def test_detect_learning_weekday_morning(self):
@@ -242,10 +239,9 @@ class TestModeDetector:
                 return {"quiet_hours_start": 22, "quiet_hours_end": 7}
 
         detector.set_operator_model(FakeOperatorModel())
-        now = datetime(2026, 4, 12, 12, 0)  # Saturday noon
-        # No quiet hours at noon, no other triggers for Saturday
+        now = datetime(2026, 4, 12, 20, 0)  # gap hour (19-22): not quiet, not learning
         result = detector.detect(EnvironmentMode.DEFAULT, now)
-        # Saturday noon - no triggers match
+        # Operator quiet hours (22-07) don't apply at 20:00, no other trigger.
         assert result is None
 
 
@@ -476,28 +472,31 @@ class TestLearningWindowTimezone:
         # the one place that must exercise the REAL window function.
         yield
 
-    def test_fires_at_corrected_berlin_hours_on_weekday(self):
+    def test_fires_across_full_day_window_all_week(self):
         from agent_core.environment.environment_model import is_learning_window
-        # Monday (2026-04-13). Intended: 09:00-10:59 + 14:00-15:59 Berlin.
-        for hour in (9, 10, 14, 15):
+        # 2026-06-20: window is 09:00-18:59 Berlin, all 7 days.
+        for hour in (9, 12, 15, 18):
             assert is_learning_window(datetime(2026, 4, 13, hour, 30)) is True, hour
-        for hour in (8, 11, 12, 13, 16, 23):
+        for hour in (8, 19, 22, 23, 3):
             assert is_learning_window(datetime(2026, 4, 13, hour, 30)) is False, hour
+        # Weekends are learning days now (2026-04-11 Sat, 2026-04-12 Sun).
+        assert is_learning_window(datetime(2026, 4, 11, 12, 0)) is True
+        assert is_learning_window(datetime(2026, 4, 12, 12, 0)) is True
 
-    def test_old_utc_window_hours_now_closed(self):
+    def test_window_boundaries_are_berlin_walltime(self):
         from agent_core.environment.environment_model import is_learning_window
-        # Regression on the exact skew: 07:00 and 12:00 were the old UTC-authored
-        # window (false-open half). They must now be CLOSED.
-        assert is_learning_window(datetime(2026, 4, 13, 7, 0)) is False
-        assert is_learning_window(datetime(2026, 4, 13, 12, 0)) is False
-        # And 10:00 / 15:00 (false-closed back-half) must now be OPEN.
-        assert is_learning_window(datetime(2026, 4, 13, 10, 0)) is True
-        assert is_learning_window(datetime(2026, 4, 13, 15, 0)) is True
+        # TZ regression: hours are interpreted in Europe/Berlin, not UTC. The
+        # window edges must land exactly at the Berlin wall-clock boundaries.
+        assert is_learning_window(datetime(2026, 4, 13, 8, 59)) is False  # before open
+        assert is_learning_window(datetime(2026, 4, 13, 9, 0)) is True    # lower edge
+        assert is_learning_window(datetime(2026, 4, 13, 18, 59)) is True  # upper edge
+        assert is_learning_window(datetime(2026, 4, 13, 19, 0)) is False  # after close
 
-    def test_closed_on_weekend_even_in_learning_hour(self):
+    def test_weekend_now_a_learning_day(self):
         from agent_core.environment.environment_model import is_learning_window
-        # Saturday 2026-04-11 at 10:00 -- a learning HOUR but not a learning DAY.
-        assert is_learning_window(datetime(2026, 4, 11, 10, 0)) is False
+        # 2026-06-20: window is 7-day, so a Saturday learning HOUR is now OPEN.
+        assert is_learning_window(datetime(2026, 4, 11, 10, 0)) is True   # Saturday
+        assert is_learning_window(datetime(2026, 4, 11, 23, 0)) is False  # but night closed
 
     def test_berlin_now_is_zone_pinned_not_naive(self):
         from agent_core.environment.environment_model import berlin_now

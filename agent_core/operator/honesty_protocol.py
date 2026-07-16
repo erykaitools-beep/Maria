@@ -123,10 +123,46 @@ class HonestyProtocol:
             return text
         if qualifier == "nie wiem":
             return "Nie wiem."
-        # Prepend qualifier, lowercase the first char of text
+        # Prepend qualifier, lowercase the first char of text. Join with a SPACE,
+        # not ", ": the low qualifier already ends in a conjunction ("...pewna,
+        # ale") so a second comma produced "Nie jestem pewna, ale, umiem..." --
+        # a stray comma after "ale". A space reads correctly for every qualifier
+        # ("Nie jestem pewna, ale umiem...", "Prawdopodobnie umiem...").
         if text and text[0].isupper():
             text = text[0].lower() + text[1:]
-        return f"{qualifier.capitalize()}, {text}"
+        return f"{qualifier.capitalize()} {text}"
+
+    def get_honest_limits_line(self, max_items: int = 2) -> str:
+        """A short, honest "what I can't do yet" line for the chat tail.
+
+        Sourced from the manifest's static LIMITATIONS (clean Polish,
+        operator-facing) -- NOT get_unavailable(): those entries are capabilities
+        the identity normally claims she CAN do (a currently-unavailable handler
+        would contradict it) and carry English engineering descriptions. We keep
+        only concrete capability gaps (software/knowledge categories), dropping
+        transient mode-based ("Tryb ...") and hardware/autonomy items. Returns ""
+        when no manifest or nothing operator-meaningful -> no noise."""
+        manifest = self._capability_manifest
+        if manifest is None:
+            return ""
+        try:
+            limitations = manifest.get_limitations()
+        except Exception:
+            return ""
+        picked: List[str] = []
+        for lim in (limitations or []):
+            cat = getattr(lim, "category", "")
+            desc = (getattr(lim, "description", "") or "").strip()
+            if cat not in ("software", "knowledge"):
+                continue  # drop hardware (perf) + autonomy (stale OBSERVE)
+            if not desc or desc.startswith("Tryb"):
+                continue  # drop transient mode-based limits
+            picked.append(desc)
+            if len(picked) >= max_items:
+                break
+        if not picked:
+            return ""
+        return "Szczerze, jeszcze nie potrafie: " + "; ".join(picked) + "."
 
     def get_action_stats(self) -> Dict[str, Dict]:
         """Get execution stats per action type. Public API for other modules."""

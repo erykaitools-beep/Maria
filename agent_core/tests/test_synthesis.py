@@ -107,6 +107,91 @@ class TestEligibleTopics:
         # 'rzadki' appears in ONE source -> not synthesizable.
         assert all(t["topic"] != "rzadki" for t in topics)
 
+    def test_limit_none_returns_full_set_for_autonomous_picker(self, tmp_path):
+        """The operator menu caps at 10, but the autonomous picker calls
+        topics(limit=None) so its least-recently-synthesized rule rotates
+        across the WHOLE corpus instead of being trapped on the 10 richest
+        tags (audit 2026-06-15 #3)."""
+        mem = tmp_path / "mem.jsonl"
+        tags = [f"temat{i:02d}" for i in range(12)]  # 12 eligible topics
+        _write_memory(mem, [_rec("a.txt", tags), _rec("b.txt", tags)])
+
+        # Default / explicit-10: operator suggestion menu stays bounded.
+        assert len(eligible_topics(mem)) == 10
+        assert len(eligible_topics(mem, limit=10)) == 10
+        # limit=None: the picker sees ALL eligible topics.
+        full = eligible_topics(mem, limit=None)
+        assert len(full) == 12
+        assert {t["topic"] for t in full} == set(tags)
+
+
+class TestCrossSourceCorpusCollapse:
+    """Cross-source WYDMUSZKA fix (audit 2026-06-16).
+
+    expert_<topic>.txt files are all the SAME expert LLM (gap_planner
+    ASK_EXPERT) answering different gap queries -- one voice, not N
+    corroborating sources. The gate, the picker's source count and the
+    ranking must collapse them to one LOGICAL source, else a single-corpus
+    topic masquerades as cross-source.
+    """
+
+    def test_source_group_collapses_only_expert_corpus(self):
+        from agent_core.world_model.belief_builder import _source_group
+        # expert_* -> one shared logical key (one LLM voice)
+        assert _source_group("expert_fizyka.txt") == "expert"
+        assert _source_group("expert_chemia.txt") == "expert"
+        # independently fetched documents stay distinct
+        assert _source_group("web_wiki_atom.txt") == "web_wiki_atom.txt"
+        assert _source_group("web_rss_news.txt") == "web_rss_news.txt"
+        assert _source_group("input_001.txt") == "input_001.txt"
+        assert _source_group("edu_x.txt") == "edu_x.txt"
+        # no false-match on a non-corpus name that merely starts with 'expert'
+        assert _source_group("expertise_x.txt") == "expertise_x.txt"
+        assert _source_group("") == ""
+
+    def test_expert_only_topic_is_not_synthesizable(self, tmp_path):
+        # Two expert_*.txt files are one LLM voice -> nothing to CROSS.
+        mem = tmp_path / "mem.jsonl"
+        _write_memory(mem, [
+            _rec("expert_fizyka.txt", ["kwanty"]),
+            _rec("expert_chemia.txt", ["kwanty"]),
+        ])
+
+        assert gather_material(mem, "kwanty") is None
+
+    def test_expert_plus_independent_source_is_cross_source(self, tmp_path):
+        # One expert file CROSSED with a real, independent web document
+        # clears the bar -- genuine cross-source material survives.
+        mem = tmp_path / "mem.jsonl"
+        _write_memory(mem, [
+            _rec("expert_fizyka.txt", ["kwanty"], ["A1"]),
+            _rec("web_wiki_kwanty.txt", ["kwanty"], ["B1"], summary="Inne."),
+        ])
+
+        material = gather_material(mem, "kwanty")
+        assert material is not None
+        assert material["source_files"] == ["expert_fizyka.txt",
+                                            "web_wiki_kwanty.txt"]
+
+    def test_eligible_reports_logical_source_count(self, tmp_path):
+        mem = tmp_path / "mem.jsonl"
+        _write_memory(mem, [
+            # 'sciema': 3 expert files = 1 logical source -> dropped
+            _rec("expert_a.txt", ["sciema"]),
+            _rec("expert_b.txt", ["sciema"]),
+            _rec("expert_c.txt", ["sciema"]),
+            # 'realny': 1 expert + 2 web = 3 logical sources
+            _rec("expert_a.txt", ["realny"]),
+            _rec("web_wiki_x.txt", ["realny"]),
+            _rec("web_rss_y.txt", ["realny"]),
+        ])
+
+        topics = eligible_topics(mem)
+
+        assert {"topic": "realny", "sources": 3} in topics
+        # expert-only topic never clears the cross-source bar, however many files
+        assert all(t["topic"] != "sciema" for t in topics)
+
 
 def _synth_rec(source, tags, key_points=None, summary="Synteza.", ts="2026-06-05T10:00:00Z"):
     r = _rec(source, tags, key_points, summary, ts)
@@ -839,6 +924,33 @@ class TestCheckSourceFaithfulness:
     def test_no_material_fails_closed(self):
         v = check_source_faithfulness(_FAITH_SYNTH, {"records": []}, _judge([]))
         assert v["ok"] is False and v["reason"] == "no_material_or_claims"
+
+    # audit 2026-06-15 #6: a verdict count != claim count is an unusable ruling.
+    # _FAITH_SYNTH has 4 claims (summary + 3 key_points).
+
+    def test_more_verdicts_than_claims_fails_closed(self):
+        # Judge over-emits (duplicated/phantom ids): 6 verdicts for 4 claims,
+        # 3 SUPPORTED. OLD code: supported=3/total=4=0.75 >= 0.5 -> reason "ok"
+        # (passes an ungrounded synthesis). NOW: unusable ruling -> fail closed.
+        v = check_source_faithfulness(
+            _FAITH_SYNTH, _FAITH_MATERIAL,
+            _judge(["SUPPORTED", "SUPPORTED", "SUPPORTED",
+                    "UNSTATED", "UNSTATED", "UNSTATED"]))
+        assert v["ok"] is False and v["reason"] == "judge_parse_failed"
+
+    def test_supported_ratio_cannot_exceed_one(self):
+        # The headline bug: all-SUPPORTED but MORE verdicts than claims ->
+        # supported (6) > total (4) -> ratio 1.5 -> OLD reason "ok". Rejected now.
+        v = check_source_faithfulness(
+            _FAITH_SYNTH, _FAITH_MATERIAL, _judge(["SUPPORTED"] * 6))
+        assert v["ok"] is False and v["reason"] == "judge_parse_failed"
+
+    def test_fewer_verdicts_than_claims_fails_closed(self):
+        # Fewer verdicts than claims -> claims left unjudged, alignment unknown.
+        # OLD code: supported=2/total=4=0.5 -> "ok". Now fail closed.
+        v = check_source_faithfulness(
+            _FAITH_SYNTH, _FAITH_MATERIAL, _judge(["SUPPORTED", "SUPPORTED"]))
+        assert v["ok"] is False and v["reason"] == "judge_parse_failed"
 
 
 class TestRunCycleFaithfulnessGate:

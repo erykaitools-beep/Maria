@@ -62,6 +62,40 @@ def test_expiry_skips_fresh_tasks(tmp_path):
     assert updated.status == TaskStatus.PENDING
 
 
+def test_expiry_cleans_stuck_in_progress_tasks(tmp_path):
+    # Audit 2026-06-16 #18: a self_repair task stuck IN_PROGRESS past the grace
+    # (e.g. daemon killed mid-flight) has no other reaper -> expiry cleans it.
+    now = time.time()
+    conductor = _conductor(tmp_path)
+    task = _repair_task(now + 23 * 3600)  # fresh expiry; irrelevant here
+    task.status = TaskStatus.IN_PROGRESS
+    task.updated_at = now - (3 * 3600)  # 3h stale > 2h grace
+    conductor.add_task(task)
+
+    cleaned = expire_stale_repair_tasks(conductor, None, None, now=now)
+
+    assert task.task_id in cleaned
+    updated = conductor.list_tasks(project="maria")[0]
+    assert updated.status == TaskStatus.CANCELLED
+    assert "in_progress self-repair stuck" in updated.notes
+
+
+def test_expiry_skips_recent_in_progress_tasks(tmp_path):
+    # A recently-active IN_PROGRESS task is within grace -> left alone.
+    now = time.time()
+    conductor = _conductor(tmp_path)
+    task = _repair_task(now + 23 * 3600)
+    task.status = TaskStatus.IN_PROGRESS
+    task.updated_at = now - 60  # 1 min ago
+    conductor.add_task(task)
+
+    cleaned = expire_stale_repair_tasks(conductor, None, None, now=now)
+
+    assert task.task_id not in cleaned
+    updated = conductor.list_tasks(project="maria")[0]
+    assert updated.status == TaskStatus.IN_PROGRESS
+
+
 def test_expiry_closes_bulletin(tmp_path):
     now = time.time()
     conductor = _conductor(tmp_path)

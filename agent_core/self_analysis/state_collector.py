@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from agent_core.planner.decision_filters import is_real_action
+from agent_core.planner.decision_filters import is_real_action, result_is_skipped
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +173,12 @@ class StateCollector:
             bid = b.get("belief_id", "")
             if bid:
                 by_id[bid] = b
-        # Drop superseded
-        active_beliefs = [b for b in by_id.values() if not b.get("superseded_by")]
+        # Drop superseded AND quarantined/retracted (status != active). Missing
+        # status key on an old record means active (backward compatible).
+        active_beliefs = [
+            b for b in by_id.values()
+            if not b.get("superseded_by") and b.get("status", "active") == "active"
+        ]
 
         facts = [b for b in active_beliefs if b.get("belief_type") == "fact"]
         candidates = [b for b in active_beliefs if b.get("belief_type") != "fact"]
@@ -334,12 +338,19 @@ class StateCollector:
         for r in by_id.values():
             status_counts[r.get("status", "unknown")] += 1
 
-        # Recent teacher plans (last 20)
+        # Recent teacher plans (last 20). Exclude skipped attempts (declined
+        # before any work -- e.g. no fresh material) so the rate measures
+        # ATTEMPTED learns only, matching _collect_action_distribution and
+        # decision_filters (T-LEARN-003: skips are neither success nor failure;
+        # counting them as failures drove the phantom "0% success" storm).
         teacher_plans = self._read_jsonl_recent(
             self._meta / "teacher_plans.jsonl", 0, limit=20
         )
-        learn_success = sum(1 for p in teacher_plans if p.get("result", {}).get("success"))
-        learn_total = len(teacher_plans)
+        attempted = [
+            p for p in teacher_plans if not result_is_skipped(p.get("result"))
+        ]
+        learn_success = sum(1 for p in attempted if p.get("result", {}).get("success"))
+        learn_total = len(attempted)
 
         return {
             "total_files": len(by_id),

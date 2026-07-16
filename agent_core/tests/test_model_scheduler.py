@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from agent_core.tests.spec_helpers import specced
+from models.ollama_brain import OllamaBrain
 from agent_core.llm.model_registry import (
     ModelRole, ModelSpec, ConcurrencyClass, WarmState,
     get_model, list_models, get_warm_models, get_heavy_models,
@@ -590,7 +591,7 @@ class TestLLMRouterWithScheduler:
         """Router without scheduler works exactly as before."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         mock_brain.think.return_value = "hello"
         mock_brain._ask_once.return_value = "answer"
         mock_brain.analyze_task.return_value = {"key": "value"}
@@ -604,7 +605,7 @@ class TestLLMRouterWithScheduler:
         """set_model_scheduler should wire the scheduler."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         router = LLMRouter(ollama_brain=mock_brain)
         assert router._model_scheduler is None
 
@@ -616,7 +617,7 @@ class TestLLMRouterWithScheduler:
         """ask_as_role without scheduler falls back to Ollama."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         mock_brain._ask_once.return_value = "ollama_response"
 
         router = LLMRouter(ollama_brain=mock_brain)
@@ -628,7 +629,7 @@ class TestLLMRouterWithScheduler:
         """ask_as_role with failed ensure_ready falls back to Ollama."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         mock_brain._ask_once.return_value = "fallback"
         mock_scheduler = specced(ModelScheduler)
         mock_scheduler.ensure_ready.return_value = EnsureResult(
@@ -645,7 +646,7 @@ class TestLLMRouterWithScheduler:
         """ask_as_role with successful ensure_ready uses scheduled model."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         mock_scheduler = specced(ModelScheduler)
         mock_scheduler.ensure_ready.return_value = EnsureResult(
             success=True, ollama_tag="qwen3:8b", role=ModelRole.PLANNER,
@@ -668,8 +669,7 @@ class TestLLMRouterWithScheduler:
         """get_stats should include scheduler status when available."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
-        mock_brain.model = "llama3.1:8b"
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
         mock_scheduler = specced(ModelScheduler)
         mock_scheduler.get_status.return_value = {"loaded_count": 1}
 
@@ -683,8 +683,7 @@ class TestLLMRouterWithScheduler:
         """get_stats without scheduler should not include scheduler key."""
         from agent_core.llm.router import LLMRouter
 
-        mock_brain = Mock()
-        mock_brain.model = "llama3.1:8b"
+        mock_brain = specced(OllamaBrain, model="llama3.1:8b")
 
         router = LLMRouter(ollama_brain=mock_brain)
         stats = router.get_stats()

@@ -6,7 +6,7 @@ import time
 import tempfile
 import shutil
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agent_core.consciousness.identity_store import (
     IdentityStore,
@@ -17,6 +17,9 @@ from agent_core.consciousness.identity_store import (
 from agent_core.consciousness.human_state import HumanStateMapper
 from agent_core.consciousness.self_model import SelfModelBuilder
 from agent_core.consciousness.core import ConsciousnessCore
+from agent_core.tests.spec_helpers import specced
+from maria_core.memory_engine.semantic.semantic_graph import SemanticGraph
+from models.ollama_brain import OllamaBrain
 
 
 # ===========================================================================
@@ -39,14 +42,13 @@ def identity_store(tmp_data_dir):
 
 @pytest.fixture
 def mock_graph():
-    """Create mock SemanticGraph."""
-    graph = MagicMock()
-    graph.nodes = {}
-    graph.edges = []
-    graph.find_node_by_label = MagicMock(return_value=None)
-    graph.find_nodes_by_type = MagicMock(return_value=[])
-    graph.add_node = MagicMock(return_value="node_maria_001")
-    graph.add_edge = MagicMock()
+    """Create specced SemanticGraph (enforces real method names + signatures)."""
+    # nodes/edges are instance attrs set in __init__, so the class spec does not
+    # know them -> attach via kwargs. Both are dicts on the real SemanticGraph.
+    graph = specced(SemanticGraph, nodes={}, edges={})
+    graph.find_node_by_label.return_value = None
+    graph.find_nodes_by_type.return_value = []
+    graph.add_node.return_value = "node_maria_001"
     return graph
 
 
@@ -464,7 +466,7 @@ class TestConsciousnessCore:
         """get_startup_greeting() uses brain to generate greeting."""
         consciousness.initialize()
 
-        mock_brain = MagicMock()
+        mock_brain = specced(OllamaBrain)
         mock_brain.think.return_value = "Witaj! Dobrze Cie widziec."
 
         greeting = consciousness.get_startup_greeting(mock_brain)
@@ -475,7 +477,7 @@ class TestConsciousnessCore:
         """get_startup_greeting() falls back on brain failure."""
         consciousness.initialize()
 
-        mock_brain = MagicMock()
+        mock_brain = specced(OllamaBrain)
         mock_brain.think.side_effect = Exception("Ollama offline")
 
         greeting = consciousness.get_startup_greeting(mock_brain)
@@ -486,7 +488,7 @@ class TestConsciousnessCore:
         """get_startup_greeting() passes identity context to brain."""
         consciousness.initialize()
 
-        mock_brain = MagicMock()
+        mock_brain = specced(OllamaBrain)
         mock_brain.think.return_value = "Witaj!"
 
         consciousness.get_startup_greeting(mock_brain)
@@ -542,7 +544,7 @@ class TestConsciousnessIntegration:
         assert len(feeling) > 0
 
         # Get greeting
-        mock_brain = MagicMock()
+        mock_brain = specced(OllamaBrain)
         mock_brain.think.return_value = "Witaj!"
         greeting = core.get_startup_greeting(mock_brain)
         assert isinstance(greeting, str)

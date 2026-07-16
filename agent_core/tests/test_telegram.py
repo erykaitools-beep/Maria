@@ -82,6 +82,35 @@ class TestTelegramBot:
         assert rows[0]["telegram_message_id"] == 1
 
     @patch("agent_core.telegram.bot.requests.post")
+    def test_send_photo_success(self, mock_post, tmp_path):
+        mock_post.return_value = MagicMock(
+            json=lambda: {"ok": True, "result": {"message_id": 7}}
+        )
+        img = tmp_path / "frame.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+        bot = self._bot(tmp_path)
+        assert bot.send_photo(str(img), caption="Widze ruch") is True
+        mock_post.assert_called_once()
+        assert "sendPhoto" in mock_post.call_args[0][0]
+        assert mock_post.call_args[1]["data"]["caption"] == "Widze ruch"
+        assert "photo" in mock_post.call_args[1]["files"]
+        rows = _jsonl(tmp_path / "telegram_outbox.jsonl")
+        assert rows[0]["kind"] == "send_photo"
+        assert rows[0]["status"] == "sent"
+        assert rows[0]["telegram_message_id"] == 7
+
+    @patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "0"}, clear=False)
+    def test_send_photo_when_not_configured(self, tmp_path):
+        outbox = tmp_path / "telegram_outbox.jsonl"
+        bot = TelegramBot(token="", chat_id=0, outbox_path=outbox)
+        img = tmp_path / "frame.jpg"
+        img.write_bytes(b"x")
+        assert bot.send_photo(str(img), caption="x") is False
+        rows = _jsonl(outbox)
+        assert rows[0]["kind"] == "send_photo"
+        assert rows[0]["error"] == "not_configured"
+
+    @patch("agent_core.telegram.bot.requests.post")
     def test_send_message_api_error(self, mock_post, tmp_path):
         mock_post.return_value = MagicMock(
             json=lambda: {"ok": False, "description": "Bad Request"}
@@ -357,6 +386,37 @@ class TestTelegramNotifier:
         notifier, bot = self._make_notifier()
         assert notifier.notify_mode_change("reduced", "active") is False
 
+    def test_notify_mode_change_cpu_only_suppressed(self):
+        """Self-inflicted CPU demotion tells the operator nothing to act on.
+
+        31/31 mode-change alerts in the 07-15 audit were Maria's own inference
+        saturating this mini-PC's CPU.
+        """
+        notifier, bot = self._make_notifier()
+        sent = notifier.notify_mode_change(
+            "active", "reduced",
+            trigger="ALERT: CPU saturated (96.5%)",
+            alerts=["ALERT: CPU saturated (96.5%)", "WARNING: CPU load elevated (93.7%)"],
+        )
+        assert sent is False
+        bot.send_message.assert_not_called()
+
+    def test_notify_mode_change_non_cpu_alert_still_sent(self):
+        """A non-CPU alert (RAM here) means something else -- it must go out."""
+        notifier, bot = self._make_notifier()
+        sent = notifier.notify_mode_change(
+            "active", "reduced",
+            trigger="ALERT: CPU saturated (96%), ALERT: RAM pressure critical",
+            alerts=["ALERT: CPU saturated (96%)", "ALERT: RAM pressure critical (120MB free)"],
+        )
+        assert sent is True
+        assert "reduced" in bot.send_message.call_args[0][0]
+
+    def test_notify_mode_change_no_alert_list_still_sent(self):
+        """Legacy callers pass no alert list -- behaviour is unchanged (sent)."""
+        notifier, bot = self._make_notifier()
+        assert notifier.notify_mode_change("active", "reduced", "RAM pressure") is True
+
     def test_notify_consecutive_failures(self):
         notifier, bot = self._make_notifier()
         assert notifier.notify_consecutive_failures("fetch", 3) is True
@@ -385,6 +445,143 @@ class TestTelegramNotifier:
         notifier._last_sent["creative_tension"] = time.time() - 8000
         assert notifier.notify_creative_tensions(tensions) is True
         assert bot.send_message.call_count == 2
+
+
+# ─── Quiet hours ───────────────────────────────────────────
+
+
+class TestNotifierQuietHours:
+    """Quiet hours suppress non-critical alerts; QUIET_HOURS_CRITICAL pierce.
+
+    Before this the notifier had no clock -- 9 of 23 messages on 07-15 landed
+    inside the 23-06 window.
+    """
+
+    def _make_notifier(self, quiet: bool):
+        bot = specced(TelegramBot)
+        bot.configured = True
+        bot.send_message.return_value = True
+        notifier = TelegramNotifier(bot=bot)
+        notifier.set_quiet_hours_check(lambda: quiet)
+        return notifier, bot
+
+    def test_non_critical_suppressed_when_quiet(self):
+        notifier, bot = self._make_notifier(quiet=True)
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM critical"]) is False
+        assert notifier.notify_self_analysis("x", ["y"]) is False
+        assert notifier.notify_mode_change(
+            "active", "reduced", "RAM pressure",
+            alerts=["ALERT: RAM pressure critical (120MB free)"],
+        ) is False
+        bot.send_message.assert_not_called()
+
+    def test_needs_human_pierces_quiet(self):
+        notifier, bot = self._make_notifier(quiet=True)
+        assert notifier.notify_needs_human("blocked") is True
+        bot.send_message.assert_called_once()
+
+    def test_consecutive_failure_pierces_quiet(self):
+        notifier, bot = self._make_notifier(quiet=True)
+        assert notifier.notify_consecutive_failures("fetch", 3) is True
+        bot.send_message.assert_called_once()
+
+    def test_non_critical_sent_when_not_quiet(self):
+        notifier, bot = self._make_notifier(quiet=False)
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM critical"]) is True
+        bot.send_message.assert_called_once()
+
+    def test_effector_pings_deferred_when_quiet(self):
+        """Effector approval/result/incident honor quiet hours -- the request
+        survives in the approval queue, so a night ping only defers."""
+        from types import SimpleNamespace
+
+        notifier, bot = self._make_notifier(quiet=True)
+        assert notifier.notify_effector_request("fs_write", {"path": "/x"}) is False
+        assert notifier.notify_effector_result("fs_write", True, "done") is False
+        outcome = SimpleNamespace(
+            attempts=[SimpleNamespace(error="boom")],
+            status=SimpleNamespace(value="failed"), total_duration_s=1.0,
+        )
+        task = SimpleNamespace(tool_name="fs_write", tool_args={"path": "/x"})
+        assert notifier.notify_effector_incident(task, outcome) is False
+        bot.send_message.assert_not_called()
+
+    def test_effector_request_sent_when_not_quiet(self):
+        notifier, bot = self._make_notifier(quiet=False)
+        assert notifier.notify_effector_request("fs_write", {"path": "/x"}) is True
+        bot.send_message.assert_called_once()
+
+    def test_in_quiet_hours_is_public(self):
+        """Callers on the send_raw path (outbox, self-repair, vision) read this."""
+        notifier, _ = self._make_notifier(quiet=True)
+        assert notifier.in_quiet_hours() is True
+        notifier.set_quiet_hours_check(lambda: False)
+        assert notifier.in_quiet_hours() is False
+
+    def test_fail_open_without_check(self):
+        """An un-wired notifier enforces no quiet hours -- it still sends."""
+        bot = specced(TelegramBot)
+        bot.configured = True
+        bot.send_message.return_value = True
+        notifier = TelegramNotifier(bot=bot)  # no set_quiet_hours_check
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM"]) is True
+
+    def test_fail_open_when_check_raises(self):
+        bot = specced(TelegramBot)
+        bot.configured = True
+        bot.send_message.return_value = True
+        notifier = TelegramNotifier(bot=bot)
+
+        def _boom():
+            raise RuntimeError("clock unavailable")
+
+        notifier.set_quiet_hours_check(_boom)
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM"]) is True
+
+    def test_survival_demotion_pierces_quiet(self):
+        """Real hardware failure (SURVIVAL, non-CPU) must wake the operator."""
+        notifier, bot = self._make_notifier(quiet=True)
+        sent = notifier.notify_mode_change(
+            "active", "survival",
+            trigger="CRITICAL: RAM pressure imminent OOM (40MB free)",
+            alerts=["CRITICAL: RAM pressure imminent OOM (40MB free)"],
+        )
+        assert sent is True
+        assert "survival" in bot.send_message.call_args[0][0]
+
+    def test_reduced_demotion_still_deferred_at_night(self):
+        """REDUCED is not a genuine-failure mode -- it waits until morning."""
+        notifier, bot = self._make_notifier(quiet=True)
+        sent = notifier.notify_mode_change(
+            "active", "reduced",
+            trigger="ALERT: RAM pressure critical (120MB free)",
+            alerts=["ALERT: RAM pressure critical (120MB free)"],
+        )
+        assert sent is False
+        bot.send_message.assert_not_called()
+
+    def test_survival_from_cpu_alone_still_filtered(self):
+        """Defensive: even SURVIVAL does not pierce on a purely-CPU trigger.
+
+        SURVIVAL never arises from CPU alone in practice (that tops out at
+        REDUCED), but the CPU filter runs before the critical check regardless.
+        """
+        notifier, bot = self._make_notifier(quiet=True)
+        sent = notifier.notify_mode_change(
+            "active", "survival",
+            alerts=["ALERT: CPU saturated (99%)"],
+        )
+        assert sent is False
+
+    def test_critical_constant_matches_wiring(self):
+        """The piercing categories are exactly the intended set."""
+        from agent_core.telegram.notifier import QUIET_HOURS_CRITICAL
+
+        assert QUIET_HOURS_CRITICAL == frozenset({
+            "needs_human",
+            "consecutive_failure",
+            "mode_change_survival",
+        })
 
 
 # ─── TelegramBridge ────────────────────────────────────────

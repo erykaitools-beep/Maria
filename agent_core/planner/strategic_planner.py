@@ -342,8 +342,9 @@ class StrategicPlanner:
         tc = self._time_ctx
         actions = []
 
-        if tc.is_learning_window and tc.is_weekday:
-            # Learning time - generic learn/exam cycle
+        if tc.is_learning_window:
+            # Learning time - generic learn/exam cycle (is_learning_window already
+            # encodes the day rule from PROFILE_LEARNING; no separate weekday gate).
             actions.append(PlannedAction(action_type="learn", reason="learning window active"))
             actions.append(PlannedAction(action_type="exam", reason="test after learning"))
             actions.append(PlannedAction(action_type="review", reason="consolidate"))

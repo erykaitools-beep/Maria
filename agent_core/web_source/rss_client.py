@@ -22,18 +22,67 @@ USER_AGENT = "MARIA-Bot/1.0 (educational AI agent; local use only)"
 # Atom namespace
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
-# Default Polish educational/science feeds — probed live 2026-04-25.
+# Default Polish educational/science feeds — re-probed live 2026-07-14/16.
 # R1.2 (broaden knowledge sources): grew the list from 1 to 5 active
 # feeds after two of the original three started 404'ing in 2026-03.
+# This profile runs WITHOUT ArticleFetcher (see web_source.run_fetch_session),
+# so the RSS <description> IS the content: a feed whose summaries fall under
+# ContentWriter.MIN_CONTENT_CHARS(200) is dead by construction. Probed
+# 2026-07-14: all 5 science feeds -> HTTP 200 with descriptions over that floor.
+#
+# 2026-07-16 (RSS staw): the 5 science feeds serve nauka/astronomia/biologia,
+# but Maria's live topics are dominated by CS/AI/math (uczenie maszynowe,
+# systemy uczące się, informatyka, wnioskowanie) — starved by construction. Added
+# 3 PL tech/AI feeds. Live-probed 2026-07-16 (UA MARIA-Bot): each -> HTTP 200,
+# 10/10 entries with descriptions well over 200 chars (med 690-753), CS/AI
+# relevance. kwantowo.pl (math/physics) REJECTED: descriptions ~90 chars (< 200),
+# dead by construction on this ArticleFetcher-less profile; math stays Wikipedia-
+# served. The fixed relevance filter (required=1 word-prefix) gates every feed,
+# so a broad tech feed cannot flood -- only topic-matching entries are written.
 DEFAULT_FEEDS = [
     "https://naukawpolsce.pl/rss.xml",   # PAP — nauka, ogólnonaukowy
     "https://www.crazynauka.pl/feed/",   # CrazyNauka — popularnonaukowy
     "https://kosmonauta.net/feed/",      # Kosmonauta — astronomia/kosmos
     "https://www.focus.pl/feed",         # Focus — popularnonaukowy
-    "https://www.granicenauki.pl/feed",  # Granice Nauki — biologia/medycyna
+    "https://zdrowie.pap.pl/rss.xml",    # PAP Zdrowie — biologia/medycyna
+    "https://itwiz.pl/feed/",            # ITwiz — IT/AI/dane/ML (biznesowy, med 690)
+    "https://homodigital.pl/feed/",      # HomoDigital — AI/cyfryzacja (med 704)
+    "https://niebezpiecznik.pl/feed/",   # Niebezpiecznik — bezpieczeństwo/informatyka (med 753)
+    # granicenauki.pl/feed         — 403 Cloudflare since ~2026-07 (removed
+    #   2026-07-14). Whole domain blocks this host, every path and any
+    #   User-Agent; not a feed-side fix. Replaced by zdrowie.pap.pl (same
+    #   bio/med niche, descriptions 431-703 chars).
     # polskieradio.pl/130/rss      — 404 since 2026-03 (removed)
     # kopalniawiedzy.pl/rss/feed.xml — 404 since 2026-03 (removed)
     # urania.edu.pl/rss            — 404 (removed 2026-04-25)
+    # kwantowo.pl/feed             — math/physics, ale opisy ~90 znaków (< 200):
+    #   martwy z definicji na profilu bez ArticleFetchera (odrzucony 2026-07-16).
+    # dobreprogramy/bulldogjob/computerworld/deltami/forsal/obserwatorfinansowy
+    #   — 0 wpisów w sondażu 2026-07-16 (zły path / blokada), pominięte.
+]
+
+# Market feeds for the "Kronika rynku" project (BTC / gold / silver).
+# Probed live 2026-07-10 (UA MARIA-Bot): all 4 -> HTTP 200, description
+# lengths all > MIN_CONTENT_CHARS(200). PL-first ordering is deliberate:
+# fetch_all concatenates feed-by-feed and the session stops at max_articles,
+# so the ONLY gold/silver sources (bankier/money) must come before the
+# crypto-heavy English feeds or they get starved (Kronika review B4/starvation).
+# CoinDesk dropped on purpose: its RSS summaries run 37-165 chars (< 200), so
+# every entry is silently rejected by ContentWriter (dead feed by construction).
+# Order does not decide the asset mix — run_fetch_session pulls the market
+# profile with interleave=True (round-robin across feeds), so no single
+# high-volume feed monopolises a small max_articles cap. The full article body
+# is fetched from each entry's page (ArticleFetcher), so thin RSS summaries are
+# not a problem. Probed live 2026-07-10: comparic/bithub carry gold+silver+BTC
+# with real (non-obfuscated) URLs and full body-fetchable content; bankier/money
+# add general-market context. (Google News RSS rejected: consent-wall + obfuscated
+# redirect URLs; investing.com metals rejected: title-only + stale.)
+MARKET_FEEDS = [
+    "https://comparic.pl/feed/",                  # PL — rynki/metale/krypto (zloto+srebro+BTC)
+    "https://bithub.pl/feed/",                    # PL — krypto + metale szlachetne (LBMA itd.)
+    "https://cointelegraph.com/rss",              # EN — krypto (glebia)
+    "https://www.bankier.pl/rss/wiadomosci.xml",  # PL — biznes/rynki (kontekst)
+    "https://www.money.pl/rss/all.xml",           # PL — biznes/rynki (kontekst)
 ]
 
 
@@ -107,24 +156,41 @@ class RSSClient:
                 return entries
             return self._parse_atom(root)
 
-    def fetch_all(self) -> List[Dict[str, Any]]:
+    def fetch_all(self, interleave: bool = False) -> List[Dict[str, Any]]:
         """
-        Fetch entries from all configured feeds.
+        Fetch entries from all configured feeds (deduplicated by link).
 
-        Returns combined entry list (deduplicated by link).
+        Args:
+            interleave: When True, round-robin across feeds (feed0[0],
+                feed1[0], ..., feed0[1], ...) instead of concatenating
+                feed-by-feed. Keeps a multi-asset profile balanced so one
+                high-volume feed cannot monopolise a small max_articles cap
+                (Kronika market profile: BTC / gold / silver starvation fix).
         """
         seen_links = set()
-        all_entries = []
+        per_feed: List[List[Dict[str, Any]]] = []
 
         for feed_url in self._feeds:
-            entries = self.fetch_entries(feed_url)
-            for entry in entries:
+            entries = []
+            for entry in self.fetch_entries(feed_url):
                 link = entry.get("link", "")
                 if link and link not in seen_links:
                     seen_links.add(link)
-                    all_entries.append(entry)
+                    entries.append(entry)
+            per_feed.append(entries)
 
-        return all_entries
+        if not interleave:
+            return [entry for feed in per_feed for entry in feed]
+
+        # Round-robin: take the i-th entry from each feed in turn.
+        combined: List[Dict[str, Any]] = []
+        idx = 0
+        while any(idx < len(feed) for feed in per_feed):
+            for feed in per_feed:
+                if idx < len(feed):
+                    combined.append(feed[idx])
+            idx += 1
+        return combined
 
     def _parse_rss20(self, root: ET.Element) -> List[Dict[str, Any]]:
         """Parse RSS 2.0 format."""

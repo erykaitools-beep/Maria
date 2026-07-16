@@ -29,21 +29,23 @@ class TestTimeContext:
         assert tc.is_learning_window is True
         assert tc.time_slot == SLOT_AFTERNOON_LEARN
 
-    def test_learning_window_closed_on_weekend(self):
-        # P2 (#5): a learning HOUR on a weekend is NOT a learning window -- the
-        # advisory view now matches the gate (Mon-Fri), vs the old hour-only
-        # "True on Saturday" that contradicted the gate.
+    def test_learning_window_open_on_weekend(self):
+        # 2026-06-20: window is 7-day, so a Saturday learning HOUR is now OPEN
+        # (advisory view delegates to the SSoT gate, which allows all days).
         tc = TimeContext(now=_berlin(10, 0, weekday=5))  # Saturday 10:00
-        assert tc.is_learning_window is False
+        assert tc.is_learning_window is True
 
-    def test_outside_learning_window_midday(self):
+    def test_midday_now_in_window_but_slot_unchanged(self):
+        # 2026-06-20: window widened to 08-21, so midday is now a learning window.
+        # The time-of-day SLOT label is independent of the window and stays MIDDAY.
         tc = TimeContext(now=_berlin(12, 0))
-        assert tc.is_learning_window is False
+        assert tc.is_learning_window is True
         assert tc.time_slot == SLOT_MIDDAY
 
     def test_evening_slot(self):
+        # Evening (18:30) is now inside the widened window; slot label stays EVENING.
         tc = TimeContext(now=_berlin(18, 30))
-        assert tc.is_learning_window is False
+        assert tc.is_learning_window is True
         assert tc.time_slot == SLOT_EVENING
 
     def test_quiet_hours_night(self):
@@ -63,42 +65,42 @@ class TestTimeContext:
         tc = TimeContext(now=_berlin(9, 30))
         remaining = tc.minutes_to_window_close
         assert remaining is not None
-        assert 85 <= remaining <= 95  # ~90 min to 11:00
+        assert 565 <= remaining <= 575  # ~570 min to 19:00 close
 
     def test_minutes_to_window_close_afternoon(self):
         tc = TimeContext(now=_berlin(15, 45))
         remaining = tc.minutes_to_window_close
         assert remaining is not None
-        assert 10 <= remaining <= 20  # ~15 min to 16:00
+        assert 190 <= remaining <= 200  # ~195 min to 19:00 close
 
     def test_minutes_to_window_close_outside(self):
-        tc = TimeContext(now=_berlin(12, 0))
+        tc = TimeContext(now=_berlin(23, 0))  # night, outside 09-19 window
         assert tc.minutes_to_window_close is None
 
-    def test_minutes_to_next_window_midday(self):
-        tc = TimeContext(now=_berlin(12, 0))
+    def test_minutes_to_next_window_before_open(self):
+        tc = TimeContext(now=_berlin(7, 0))
         minutes = tc.minutes_to_next_window
         assert minutes is not None
-        assert 115 <= minutes <= 125  # ~120 min to 14:00
+        assert 115 <= minutes <= 125  # ~120 min to 09:00 open
 
     def test_minutes_to_next_window_in_window(self):
         tc = TimeContext(now=_berlin(9, 30))
         assert tc.minutes_to_next_window is None
 
-    def test_minutes_to_next_window_evening(self):
-        tc = TimeContext(now=_berlin(18, 0))
+    def test_minutes_to_next_window_after_close(self):
+        tc = TimeContext(now=_berlin(23, 0))
         minutes = tc.minutes_to_next_window
         assert minutes is not None
-        # Next window tomorrow 9:00 = 15h = 900min
-        assert 890 <= minutes <= 910
+        # Next window tomorrow 09:00 = 10h = 600min
+        assert 595 <= minutes <= 605
 
     def test_good_for_heavy_action_in_window(self):
         tc = TimeContext(now=_berlin(9, 30))
         assert tc.is_good_for_heavy_action is True
 
     def test_not_good_for_heavy_near_close(self):
-        tc = TimeContext(now=_berlin(10, 57))
-        assert tc.is_good_for_heavy_action is False  # 3 min to close
+        tc = TimeContext(now=_berlin(18, 57))
+        assert tc.is_good_for_heavy_action is False  # 3 min to 19:00 close
 
     def test_not_good_for_heavy_quiet(self):
         tc = TimeContext(now=_berlin(23, 0))

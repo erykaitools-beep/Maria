@@ -11,11 +11,15 @@ import pytest
 
 from agent_core.tests.spec_helpers import specced
 from agent_core.homeostasis.core import HomeostasisCore
+from agent_core.homeostasis.state_model import Mode, SystemState
 from agent_core.evaluation.observer import EvaluationObserver
+from agent_core.evaluation.report import EvaluationReport
 from agent_core.teacher.teacher_agent import TeacherAgent
 from agent_core.goals.store import GoalStore
+from agent_core.goals.goal_model import Goal, GoalStatus, GoalType
 from agent_core.bulletin.bulletin_store import BulletinStore
 from agent_core.world_model import WorldModel
+from agent_core.world_model.query import WorldModelQuery
 from agent_core.registry.shared_context import SharedContext
 from agent_core.planner.planner_model import (
     Plan, PlanStatus, ActionType, PlannerState, create_plan,
@@ -30,7 +34,7 @@ from agent_core.planner.action_executor import ActionExecutor
 from agent_core.planner.planner_core import (
     PlannerCore, ROUTINE_INTERVAL_TICKS, EVALUATION_INTERVAL_SEC,
     HIGH_PRIORITY_EVENTS, NONPRODUCTIVE_REPEAT_THRESHOLD,
-    GOAL_CYCLE_THRESHOLD, OFF_WINDOW_LEARN_BUDGET,
+    GOAL_CYCLE_THRESHOLD, OFF_WINDOW_LEARN_BUDGET, FETCH_RETRY_CAP,
 )
 from agent_core.perception.event import PerceptionSource, create_event
 
@@ -93,14 +97,20 @@ def _make_goal(
 
 
 def _make_mock_core(mode="active", health=0.9, idle=0):
-    """Create a mock HomeostasisCore."""
+    """Create a mock HomeostasisCore returning a REAL SystemState.
+
+    SystemState is a pure data dataclass: create_autospec() only sees fields
+    that carry a plain class-level default, so `alerts` / `interpreted_state`
+    (default_factory) would be invisible and a mock would 'work' only until
+    production read them. The real dataclass is cheap and strictly honest.
+    """
     core = specced(HomeostasisCore)
-    state = MagicMock()
-    state.mode = MagicMock()
-    state.mode.value = mode
-    state.health_score = health
-    state.idle_seconds = idle
-    core.get_state.return_value = state
+    core.get_state.return_value = SystemState(
+        mode=Mode(mode),
+        health_score=health,
+        last_mode_change_time=time.time(),
+        idle_seconds=idle,
+    )
     core._teacher_thread = None
     return core
 
@@ -108,7 +118,7 @@ def _make_mock_core(mode="active", health=0.9, idle=0):
 def _make_mock_observer(metrics=None, recommendations=None):
     """Create a mock EvaluationObserver."""
     observer = specced(EvaluationObserver)
-    report = MagicMock()
+    report = specced(EvaluationReport)
     report.report_id = "eval-test"
     report.metrics = metrics or {
         "learning_velocity": 2.0,
@@ -160,9 +170,9 @@ class TestPlanStatus:
 
 class TestActionType:
     def test_all_types(self):
-        assert len(ActionType) == 15
+        assert len(ActionType) == 16
         values = {a.value for a in ActionType}
-        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop", "fetch", "experiment", "effector", "self_analyze", "creative", "ask_expert", "validate", "critique", "fs_write"}
+        assert values == {"learn", "exam", "review", "evaluate", "maintenance", "noop", "fetch", "experiment", "effector", "self_analyze", "creative", "ask_expert", "validate", "critique", "fs_write", "play"}
 
 
 class TestPlan:
@@ -284,7 +294,8 @@ class TestBeliefRebuildThrottle:
     which on a REDUCED-mode loop meant the builder ran once a minute.
     Each run enumerated ~22k concepts, cap=2000 pruned ~20k, and the
     next cycle recreated them (dedup misses pruned entries). CPU burn
-    for zero progress. Throttle: hourly for EVALUATE, always for LEARN.
+    for zero progress. Throttle: hourly, shared by EVALUATE and LEARN (LEARN lost its
+    bypass 2026-07-14 -- its rebuild was a measured no-op).
     """
 
     def _make_planner(self, tmp_path):
@@ -330,18 +341,58 @@ class TestBeliefRebuildThrottle:
         )
         assert wm.build.call_count == 1
 
-    def test_learn_always_rebuilds_ignoring_cooldown(self, tmp_path):
+    def test_learn_is_throttled_like_evaluate(self, tmp_path):
+        """LEARN obeys the cooldown too (changed 2026-07-14).
+
+        It used to bypass it, justified by "LEARN reflects real new knowledge".
+        Measured: a post-LEARN rebuild readmits ZERO beliefs -- it reproduces
+        the same 2000 bit for bit, because LEARN-minted topics (confidence
+        n_sources/5) lose compute_belief_score to incumbents with a saturated
+        revision_factor. That no-op drove 82 of 85 daily rebuilds at ~3s of
+        GIL-hold each. This test pins the throttle; it does NOT bless the
+        ratchet (belief_maintenance.py:151) that makes the rebuild pointless.
+        """
         planner = self._make_planner(tmp_path)
         wm = specced(WorldModel)
         wm.build.return_value = {"topics": 1, "files": 0, "concepts": 5}
         planner.set_world_model(wm)
 
-        # Recent build — well within cooldown.
+        # Recent build -- well within cooldown.
         planner._state.last_belief_build_ts = time.time() - 60
         planner._maybe_rebuild_beliefs(
             self._make_plan(ActionType.LEARN), {"success": True}
         )
-        assert wm.build.call_count == 1  # LEARN bypasses throttle
+        assert wm.build.call_count == 0  # throttled, no longer a free pass
+
+    def test_learn_rebuilds_after_cooldown(self, tmp_path):
+        """Throttled != disabled: past the window LEARN still rebuilds."""
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        wm.build.return_value = {"topics": 1, "files": 0, "concepts": 5}
+        planner.set_world_model(wm)
+
+        planner._state.last_belief_build_ts = time.time() - 7200
+        planner._maybe_rebuild_beliefs(
+            self._make_plan(ActionType.LEARN), {"success": True}
+        )
+        assert wm.build.call_count == 1
+
+    def test_learn_and_evaluate_share_one_cooldown(self, tmp_path):
+        """One window for both triggers -- LEARN right after EVALUATE must not
+        re-run the builder (that pairing was the hot path: 110 builds/24h)."""
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        wm.build.return_value = {"topics": 1, "files": 0, "concepts": 5}
+        planner.set_world_model(wm)
+
+        planner._maybe_rebuild_beliefs(
+            self._make_plan(ActionType.EVALUATE), {"success": True}
+        )
+        assert wm.build.call_count == 1
+        planner._maybe_rebuild_beliefs(
+            self._make_plan(ActionType.LEARN), {"success": True}
+        )
+        assert wm.build.call_count == 1
 
     def test_unsuccessful_plan_does_not_rebuild(self, tmp_path):
         planner = self._make_planner(tmp_path)
@@ -366,6 +417,92 @@ class TestBeliefRebuildThrottle:
                 self._make_plan(action), {"success": True}
             )
         assert wm.build.call_count == 0
+
+
+class TestBeliefMaintenanceThrottle:
+    """Regression: EVALUATE must not run BeliefStore maintenance every cycle.
+
+    2026-07-12: the call-site comment promised "~1/hour" but no throttle
+    existed -- with the K8 evaluate rut the full maintenance pass
+    (decay -> dedup -> prune -> compact, ~30s of GIL-bound CPU) ran every
+    planner cycle (91 runs/2h), degrading every homeostasis tick to ~1.4s.
+    Throttle mirrors _maybe_rebuild_beliefs (hourly for EVALUATE).
+    """
+
+    def _make_planner(self, tmp_path):
+        return PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+    def _make_plan(self, action_type):
+        from agent_core.planner.planner_model import create_plan
+        plan = create_plan(None, "test", action_type)
+        plan.result = {"success": True}
+        return plan
+
+    def test_evaluate_maintains_once_then_throttles(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        planner.set_world_model(wm)
+        ok = {"success": True}
+
+        planner._maybe_maintain_beliefs(self._make_plan(ActionType.EVALUATE), ok)
+        assert wm.maintain.call_count == 1
+        first_ts = planner._state.last_belief_maintenance_ts
+        assert first_ts > 0
+
+        planner._maybe_maintain_beliefs(self._make_plan(ActionType.EVALUATE), ok)
+        assert wm.maintain.call_count == 1  # gated by cooldown
+        assert planner._state.last_belief_maintenance_ts == first_ts
+
+    def test_evaluate_maintains_again_after_cooldown(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        planner.set_world_model(wm)
+
+        planner._state.last_belief_maintenance_ts = time.time() - 7200
+        planner._maybe_maintain_beliefs(
+            self._make_plan(ActionType.EVALUATE), {"success": True}
+        )
+        assert wm.maintain.call_count == 1
+
+    def test_maintain_passes_semantic_memory(self, tmp_path):
+        """The semantic dedup phase needs the LIVE semantic memory --
+        a bare maintain() silently skips it (2026-06-10 lesson)."""
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        planner.set_world_model(wm)
+        sentinel = object()
+        planner.set_semantic_memory(sentinel)
+
+        planner._maybe_maintain_beliefs(
+            self._make_plan(ActionType.EVALUATE), {"success": True}
+        )
+        wm.maintain.assert_called_once_with(semantic_memory=sentinel)
+
+    def test_unsuccessful_plan_does_not_maintain(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        planner.set_world_model(wm)
+
+        planner._maybe_maintain_beliefs(
+            self._make_plan(ActionType.EVALUATE), {"success": False}
+        )
+        assert wm.maintain.call_count == 0
+
+    def test_other_action_types_do_not_maintain(self, tmp_path):
+        planner = self._make_planner(tmp_path)
+        wm = specced(WorldModel)
+        planner.set_world_model(wm)
+
+        for action in (ActionType.NOOP, ActionType.LEARN, ActionType.EXAM,
+                       ActionType.REVIEW, ActionType.FETCH,
+                       ActionType.MAINTENANCE):
+            planner._maybe_maintain_beliefs(
+                self._make_plan(action), {"success": True}
+            )
+        assert wm.maintain.call_count == 0
 
 
 # ═══════════════════════════════════════════════════════
@@ -896,6 +1033,27 @@ class TestPlannerCoreGoalSelection:
         result = planner.run_cycle(60)
         assert result is not None
         assert result.action_type == ActionType.LEARN
+
+    def test_plan_metadata_carries_goal_type(self, planner_env):
+        """Regression (2026-07-05): executor/router window gates read
+        plan.metadata["goal_type"] == "USER" for the operator off-window
+        bypass, but no writer existed -- USER goals were night-blocked like
+        autonomous ones, drifted into creative loops, and got abandoned."""
+        planner, _ = planner_env
+        core = _make_mock_core()
+        planner.set_homeostasis_core(core)
+        planner.set_teacher_agent(_make_mock_teacher(chunks=1))
+        planner._state.last_evaluation_ts = time.time()
+
+        goal = _make_goal(
+            goal_type="user", priority=1.0,
+            metadata={"forced_action_type": "learn"},
+        )
+        planner.set_goal_store(_make_mock_goal_store([goal]))
+
+        result = planner.run_cycle(60)
+        assert result is not None
+        assert result.metadata.get("goal_type") == "USER"
 
 
 class TestStrategicWireA:
@@ -1562,6 +1720,320 @@ class TestGoalCycleDetection:
             assert planner._plan_made_progress(plan, result) is expected
 
 
+class TestB2FetchRewire:
+    """B2 (2026-06-18): exhausted learning goals autonomously fetch new
+    material instead of grinding LEARN->skip until the R1-A reaper."""
+
+    def _plan(self, goal_id="g1", action_type=ActionType.LEARN):
+        plan = create_plan(goal_id, "Test goal", action_type)
+        plan.status = PlanStatus.SKIPPED
+        return plan
+
+    def _exhausted_goal(self, goal_id="g1", topics=("fizyka",), **meta):
+        md = {"topics": list(topics)} if topics is not None else {}
+        md.update(meta)
+        return _make_goal(goal_id=goal_id, goal_type="learning", metadata=md)
+
+    def _wire(self, planner, goal):
+        store = _make_mock_goal_store([goal])
+        store.get.return_value = goal
+        planner.set_goal_store(store)
+        planner.set_bulletin_store(specced(BulletinStore))
+        return store
+
+    # -- arming via the goal-cycle detector --
+
+    def test_arms_needs_fetch_on_exhausted_learning_goal(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal()
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "skipped": True,
+                       "reason": "non_chunking_strategy"},
+            )
+
+        assert goal.metadata.get("needs_fetch") is True
+
+    def test_arms_on_idle_reason_too(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal()
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "skipped": True,
+                       "idle_reason": "filtered_out_all_candidates"},
+            )
+
+        assert goal.metadata.get("needs_fetch") is True
+
+    def test_does_not_arm_non_learning_goal(self, planner_env):
+        planner, _ = planner_env
+        goal = _make_goal(goal_id="g1", goal_type="meta",
+                          metadata={"topics": ["x"]})
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "reason": "non_chunking_strategy"},
+            )
+
+        assert goal.metadata.get("needs_fetch") is not True
+
+    def test_does_not_arm_without_topics(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal(topics=None)  # no topics -> nothing to fetch
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "reason": "non_chunking_strategy"},
+            )
+
+        assert goal.metadata.get("needs_fetch") is not True
+
+    def test_does_not_arm_when_fetch_budget_exhausted(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal(fetch_attempts=FETCH_RETRY_CAP)
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "reason": "non_chunking_strategy"},
+            )
+
+        assert goal.metadata.get("needs_fetch") is not True
+
+    def test_does_not_arm_without_exhausted_reason(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal()
+        self._wire(planner, goal)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(plan, {"success": False})  # no reason
+
+        assert goal.metadata.get("needs_fetch") is not True
+
+    # -- fetch budget lifecycle --
+
+    def test_clears_fetch_state_on_learn_progress(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal(needs_fetch=True, fetch_attempts=2)
+        self._wire(planner, goal)
+        plan = self._plan(action_type=ActionType.LEARN)
+
+        planner._track_goal_cycle(plan, {"success": True, "chunks_learned": 3})
+
+        assert "needs_fetch" not in goal.metadata
+        assert "fetch_attempts" not in goal.metadata
+
+    def test_fetch_progress_preserves_budget(self, planner_env):
+        planner, _ = planner_env
+        goal = self._exhausted_goal(fetch_attempts=2)
+        self._wire(planner, goal)
+        plan = self._plan(action_type=ActionType.FETCH)
+
+        # A successful FETCH counts as progress for the cycle counter, but it
+        # is NOT progress for the exhausted goal itself -- clearing the budget
+        # here would reset the cap on every fetch -> unbounded fetch loop.
+        planner._track_goal_cycle(plan, {"success": True})
+
+        assert goal.metadata.get("fetch_attempts") == 2
+
+    # -- consumer (PlannerCore._create_plan_for_goal) --
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_consumer_overrides_learn_to_fetch(self, _mock, tmp_path):
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        goal = _make_goal(
+            goal_type="learning",
+            metadata={"topics": ["fizyka"], "needs_fetch": True},
+        )
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "x.txt"}]},
+                "new_files_available": [{"id": "x.txt"}],  # _decide -> LEARN
+            },
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+
+        assert plan.action_type == ActionType.FETCH
+        assert plan.action_params.get("topics") == ["fizyka"]
+        assert goal.metadata.get("needs_fetch") is False
+        assert goal.metadata.get("fetch_attempts") == 1
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_consumer_skips_fetch_handoff(self, _mock, tmp_path):
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        goal = _make_goal(
+            goal_type="learning",
+            metadata={"topics": ["fizyka"], "needs_fetch": True,
+                      "source": "fetch_handoff", "file_ids": ["web_a.txt"]},
+        )
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "web_a.txt"}]},
+                "new_files_available": [{"id": "web_a.txt"}],
+            },
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+
+        # fetch-handoff goals must LEARN their freshly fetched files, not re-fetch
+        assert plan.action_type == ActionType.LEARN
+        assert goal.metadata.get("needs_fetch") is True  # flag untouched
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_consumer_keeps_flag_when_rate_limited(self, _mock, tmp_path):
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner._is_action_rate_limited = lambda name: name == "fetch"
+        goal = _make_goal(
+            goal_type="learning",
+            metadata={"topics": ["fizyka"], "needs_fetch": True},
+        )
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "x.txt"}]},
+                "new_files_available": [{"id": "x.txt"}],
+            },
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+
+        # rate-limited -> stays LEARN, flag preserved for the next cycle
+        assert plan.action_type != ActionType.FETCH
+        assert goal.metadata.get("needs_fetch") is True
+        assert "fetch_attempts" not in goal.metadata
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_consumer_does_not_spend_attempt_when_window_blocks(self, _mock, tmp_path):
+        # The window guard demotes FETCH -> NOOP -> the attempt must NOT be
+        # counted and needs_fetch must stay armed for the next open window.
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner._enforce_learning_window = (
+            lambda goal, action, *a, **k: (ActionType.NOOP, "outside_learning_window")
+        )
+        goal = _make_goal(
+            goal_type="learning",
+            metadata={"topics": ["fizyka"], "needs_fetch": True},
+        )
+        context = {
+            "knowledge_snapshot": {"files_by_status": {}, "new_files_available": []},
+            "evaluation_metrics": {},
+        }
+
+        plan = planner._create_plan_for_goal(goal, context)
+
+        assert plan.action_type == ActionType.NOOP
+        assert goal.metadata.get("needs_fetch") is True   # not spent
+        assert "fetch_attempts" not in goal.metadata
+
+    def test_arm_persists_through_real_store_reload(self, planner_env, tmp_path):
+        # Regression for the _mark_dirty() persistence bug: arming needs_fetch
+        # must survive a reload from goals.jsonl, not just live in the cache.
+        from agent_core.goals.store import GoalStore
+        from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
+
+        planner, _ = planner_env
+        store = GoalStore(tmp_path / "goals.jsonl")
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Naucz sie fizyki",
+            priority=0.8,
+            status=GoalStatus.ACTIVE,
+            created_by="planner",
+            goal_id="g-real",
+            metadata={"topics": ["fizyka"]},
+        )
+        store.create(goal)
+        store.save()
+        planner.set_goal_store(store)
+        planner.set_bulletin_store(specced(BulletinStore))
+        plan = self._plan(goal_id="g-real")
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "skipped": True,
+                       "reason": "non_chunking_strategy"},
+            )
+
+        reloaded = GoalStore(tmp_path / "goals.jsonl")
+        reloaded.load()
+        assert reloaded.get("g-real").metadata.get("needs_fetch") is True
+
+    def test_spend_attempt_persists_through_real_store_reload(self, tmp_path):
+        # The consumer's fetch_attempts increment + needs_fetch clear must
+        # survive a reload (not just mutate the in-memory cache object).
+        from unittest.mock import patch as _patch
+        from agent_core.goals.store import GoalStore
+        from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
+
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        store = GoalStore(tmp_path / "goals.jsonl")
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Naucz sie fizyki",
+            priority=0.8,
+            status=GoalStatus.ACTIVE,
+            created_by="planner",
+            goal_id="g-real",
+            metadata={"topics": ["fizyka"], "needs_fetch": True},
+        )
+        store.create(goal)
+        store.save()
+        planner.set_goal_store(store)
+
+        context = {
+            "knowledge_snapshot": {
+                "files_by_status": {"new": [{"id": "x.txt"}]},
+                "new_files_available": [{"id": "x.txt"}],
+            },
+            "evaluation_metrics": {},
+        }
+        with _patch("agent_core.environment.environment_model.is_learning_window",
+                    return_value=True):
+            plan = planner._create_plan_for_goal(store.get("g-real"), context)
+
+        assert plan.action_type == ActionType.FETCH
+
+        reloaded = GoalStore(tmp_path / "goals.jsonl")
+        reloaded.load()
+        rg = reloaded.get("g-real")
+        assert rg.metadata.get("needs_fetch") is False
+        assert rg.metadata.get("fetch_attempts") == 1
+
+
 class TestCreativeCooldown:
     """Planner-level cooldown on K13 creative reflection.
 
@@ -1625,6 +2097,125 @@ class TestCreativeCooldown:
         assert plan is None
 
 
+class TestNonLearningRotationCreativeCooldown:
+    """Selection-time creative cooldown in _decide_non_learning_action.
+
+    K7's creative 2/h limit did not bite before 07-07 (ANALYTICAL was never
+    rate-checked; since fixed), so pre-07-06 the off-window rotation picked
+    CREATIVE every ~60s cycle all night. The
+    rotation must consult the facade cooldown and fall through to the next
+    reflection action instead of skip-churning.
+    """
+
+    def _creative(self, planner, ready):
+        from agent_core.creative.facade import CreativeModule
+        creative = specced(CreativeModule)
+        creative.should_reflect.return_value = ready
+        planner._creative_module = creative
+        return creative
+
+    def test_falls_through_when_facade_on_cooldown(self, planner_env):
+        planner, _ = planner_env
+        creative = self._creative(planner, ready=False)
+        action = planner._decide_non_learning_action({})
+        assert action == ActionType.SELF_ANALYZE
+        creative.should_reflect.assert_called_once()
+
+    def test_creative_picked_when_ready(self, planner_env):
+        planner, _ = planner_env
+        self._creative(planner, ready=True)
+        assert planner._decide_non_learning_action({}) == ActionType.CREATIVE
+
+    def test_no_creative_module_keeps_old_order(self, planner_env):
+        planner, _ = planner_env
+        planner._creative_module = None
+        assert planner._decide_non_learning_action({}) == ActionType.CREATIVE
+
+
+class TestNonLearningRotationRealRateLimits:
+    """Night rotation against a REAL AutonomyPolicy (no K7 mocks).
+
+    2026-07-07: the creative cooldown fix pushed the night rotation onto
+    self_analyze, which ground K12 through NIM every ~60s all night. The
+    configured ANALYTICAL limits (self_analyze 2/h, critique 1/h, ...)
+    were dead because check() consulted the rate limiter only for GUARDED
+    actions; the fix arms ANALYTICAL too. FREE actions stay unlimited, so
+    evaluate is the rotation's floor once the ANALYTICAL candidates cap
+    out. A mocked-policy test cannot catch a wrong-component/precheck bug,
+    so these run on the real policy.
+
+    Rotation order (planner_core): creative, self_analyze, critique,
+    evaluate, validate. creative also has a should_reflect() selection
+    gate; wired False here so the rotation starts at self_analyze.
+    """
+
+    def _wire(self, planner, tmp):
+        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy.escalation import EscalationHandler
+        from agent_core.creative.facade import CreativeModule
+
+        policy = AutonomyPolicy(
+            escalation_handler=EscalationHandler(
+                log_path=tmp / "autonomy_decisions.jsonl"
+            ),
+        )
+        planner.set_autonomy_policy(policy)
+        # Creative stale na cooldownie -> rotacja zaczyna od self_analyze
+        creative = specced(CreativeModule)
+        creative.should_reflect.return_value = False
+        planner._creative_module = creative
+        return policy
+
+    def test_exhausted_self_analyze_falls_through_to_critique(
+        self, planner_env
+    ):
+        planner, tmp = planner_env
+        policy = self._wire(planner, tmp)
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit
+        assert planner._decide_non_learning_action({}) == ActionType.CRITIQUE
+
+    def test_analytical_candidates_capped_fall_through_to_evaluate(
+        self, planner_env
+    ):
+        # self_analyze (1/h) + critique (1/h) exhausted -> rotation lands on
+        # evaluate, the FREE zero-NIM floor (NOT validate, which is behind
+        # evaluate in the order and stays unreached). This is the night
+        # steady state: cheap local K4 churn instead of 70B NIM grind.
+        planner, tmp = planner_env
+        policy = self._wire(planner, tmp)
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit
+        policy.record_execution("critique", True)
+        assert planner._decide_non_learning_action({}) == ActionType.EVALUATE
+
+    def test_evaluate_floor_is_not_rate_limited(self, planner_env):
+        # evaluate is FREE: hammering it never caps, so the rotation always
+        # has a floor and never dead-ends into NOOP at night.
+        planner, tmp = planner_env
+        policy = self._wire(planner, tmp)
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit
+        policy.record_execution("critique", True)
+        for _ in range(10):
+            policy.record_execution("evaluate", True)
+        assert planner._decide_non_learning_action({}) == ActionType.EVALUATE
+
+    def test_rotation_prechecks_leave_no_escalation_records(
+        self, planner_env
+    ):
+        # Rotacja pyta o kazdego kandydata co cykl (~60s w nocy); te
+        # precheck-pytania o zablokowane self_analyze/critique NIE moga
+        # zasmiecac autonomy_decisions.jsonl.
+        planner, tmp = planner_env
+        policy = self._wire(planner, tmp)
+        policy.record_execution("self_analyze", True)  # 1/1 -- limit
+        policy.record_execution("critique", True)
+        for _ in range(5):
+            assert (
+                planner._decide_non_learning_action({}) == ActionType.EVALUATE
+            )
+        assert policy.get_recent_escalations() == []
+        assert not (tmp / "autonomy_decisions.jsonl").exists()
+
+
 class TestStaleGoalCleanup:
     """Per-type stale threshold (learning=3d, meta=5d, user=14d, maintenance=30d).
 
@@ -1633,8 +2224,11 @@ class TestStaleGoalCleanup:
     """
 
     def _make_real_goal(self, gid, gtype, status, age_days, progress=0.0,
-                        metadata=None):
+                        metadata=None, updated_age_days=None):
         from agent_core.goals.goal_model import Goal, GoalType, GoalStatus
+        # updated_age_days defaults to age_days (goal untouched since creation).
+        # Pass a smaller value to model a goal that progressed recently.
+        upd = age_days if updated_age_days is None else updated_age_days
         return Goal(
             id=gid,
             type=GoalType(gtype),
@@ -1645,7 +2239,7 @@ class TestStaleGoalCleanup:
             parent_goal_id=None,
             created_by="test",
             created_at=time.time() - age_days * 86400,
-            updated_at=time.time() - age_days * 86400,
+            updated_at=time.time() - upd * 86400,
             metadata=metadata or {},
         )
 
@@ -1670,6 +2264,119 @@ class TestStaleGoalCleanup:
         planner._cleanup_stale_goals()
 
         store.update_status.assert_not_called()
+
+    def test_stalled_learning_goal_abandoned_at_cap(self, planner_env):
+        """2026-06-20: an ACTIVE learning goal frozen below 1.0 for >= the stall
+        cap is abandoned even though its updated_at is fresh (the micro-progress
+        carousel the time-based reapers miss)."""
+        from agent_core.planner.planner_core import LEARNING_STALL_CYCLE_CAP
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=0.1, progress=0.4,
+            metadata={"stall_cycles": LEARNING_STALL_CYCLE_CAP},
+            updated_age_days=0.01,  # fresh -> time-based reaper must NOT fire
+        )
+        store = _make_mock_goal_store([g])
+        planner.set_goal_store(store)
+
+        planner._cleanup_stale_goals()
+
+        store.update_status.assert_called_once()
+        assert store.update_status.call_args.args[0] == "g1"
+        assert store.update_status.call_args.args[1].value == "abandoned"
+        assert store.update_status.call_args.kwargs["actor"] == (
+            "planner_stall_cap_cleanup"
+        )
+
+    def test_stalled_learning_goal_kept_under_cap(self, planner_env):
+        """Below the stall cap (and fresh) the goal is left alone."""
+        from agent_core.planner.planner_core import LEARNING_STALL_CYCLE_CAP
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=0.1, progress=0.4,
+            metadata={"stall_cycles": LEARNING_STALL_CYCLE_CAP - 1},
+            updated_age_days=0.01,
+        )
+        store = _make_mock_goal_store([g])
+        planner.set_goal_store(store)
+
+        planner._cleanup_stale_goals()
+
+        store.update_status.assert_not_called()
+
+    def test_graduated_goal_not_stall_reaped(self, planner_env):
+        """A goal at progress 1.0 is never reaped by the stall cap (it's done)."""
+        from agent_core.planner.planner_core import LEARNING_STALL_CYCLE_CAP
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=0.1, progress=1.0,
+            metadata={"stall_cycles": LEARNING_STALL_CYCLE_CAP + 50},
+            updated_age_days=0.01,
+        )
+        store = _make_mock_goal_store([g])
+        planner.set_goal_store(store)
+
+        planner._cleanup_stale_goals()
+
+        store.update_status.assert_not_called()
+
+    def test_track_learning_stall_increments_when_frozen(self, planner_env):
+        """stall_cycles climbs each cycle the goal makes no material progress and
+        sets no new progress high-water."""
+        planner, _ = planner_env
+        g = self._make_real_goal("g1", "learning", "active", age_days=0.1,
+                                 progress=0.4)
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Test goal", ActionType.LEARN)
+        no_chunk = {"success": True, "chunks_learned": 0}  # exhausted material
+        planner._track_learning_stall(plan, no_chunk)  # first seeds high-water (=0)
+        planner._track_learning_stall(plan, no_chunk)
+        planner._track_learning_stall(plan, no_chunk)
+
+        assert g.metadata["stall_cycles"] == 2
+        assert g.metadata["progress_peak"] == 0.4
+        store._mark_dirty.assert_called_with("g1")
+
+    def test_track_learning_stall_resets_on_new_chunk(self, planner_env):
+        """A LEARN that ingests a NEW chunk resets the counter even with frozen
+        progress -- a goal still learning new material is never reaped (review M2)."""
+        planner, _ = planner_env
+        g = self._make_real_goal("g1", "learning", "active", age_days=0.1,
+                                 progress=0.4)
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Test goal", ActionType.LEARN)
+        planner._track_learning_stall(plan, {"success": True, "chunks_learned": 0})
+        planner._track_learning_stall(plan, {"success": True, "chunks_learned": 0})
+        assert g.metadata["stall_cycles"] == 1
+
+        planner._track_learning_stall(plan, {"success": True, "chunks_learned": 3})
+        assert g.metadata["stall_cycles"] == 0
+
+    def test_track_learning_stall_resets_on_new_highwater(self, planner_env):
+        """A genuine progress gain (new high-water) resets the stall counter."""
+        planner, _ = planner_env
+        g = self._make_real_goal("g1", "learning", "active", age_days=0.1,
+                                 progress=0.4)
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Test goal", ActionType.LEARN)
+        no_chunk = {"success": True, "chunks_learned": 0}
+        planner._track_learning_stall(plan, no_chunk)
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["stall_cycles"] == 1
+
+        g.progress = 0.6  # real forward motion (verification lifted score)
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["stall_cycles"] == 0
+        assert g.metadata["progress_peak"] == 0.6
 
     def test_meta_goal_threshold_is_5d(self, planner_env):
         planner, _ = planner_env
@@ -1785,12 +2492,51 @@ class TestStaleGoalCleanup:
         assert store.update_status.call_args.args[0] == "g1"
         assert store.update_status.call_args.args[1].value == "abandoned"
 
-    def test_active_goal_with_progress_spared(self, planner_env):
-        """A progressing ACTIVE goal is never reaped, however long it's stuck
-        (reactivation-in-spirit: don't trash goals that are still moving)."""
+    def test_active_goal_recently_progressed_spared(self, planner_env):
+        """A goal that progressed RECENTLY is never reaped, however old it is --
+        update_progress bumps updated_at, so a still-moving goal stays fresh.
+        (R1 2026-06-17: 'still moving' is measured by progress recency, not just
+        progress level, so genuinely-progressing goals are safe.)"""
         planner, _ = planner_env
         g = self._make_real_goal(
             "g1", "learning", "active", age_days=60, progress=0.5,
+            updated_age_days=0.1,  # progressed ~2.4h ago -> still moving
+        )
+        store = _make_mock_goal_store([g])
+        planner.set_goal_store(store)
+
+        planner._cleanup_stale_goals()
+
+        store.update_status.assert_not_called()
+
+    def test_wedged_partial_progress_active_reaped(self, planner_env):
+        """R1 (2026-06-17): a learning goal that made partial progress then WEDGED
+        (files exhausted -> progress frozen for >7d) is reaped, even though
+        progress>0 -- the zombie the 'spare any progress forever' rule missed."""
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=60, progress=0.4,
+            updated_age_days=10,  # no progress in 10d -> frozen past _ACTIVE_STUCK_SEC (7d)
+        )
+        store = _make_mock_goal_store([g])
+        planner.set_goal_store(store)
+
+        planner._cleanup_stale_goals()
+
+        store.update_status.assert_called_once()
+        assert store.update_status.call_args.args[0] == "g1"
+        assert store.update_status.call_args.args[1].value == "abandoned"
+        assert (store.update_status.call_args.kwargs.get("actor")
+                == "planner_active_stuck_cleanup")
+        assert "wedged" in store.update_status.call_args.kwargs.get("reason", "")
+
+    def test_wedged_partial_progress_recent_spared(self, planner_env):
+        """R1 guard: a partial-progress goal that progressed within the stuck
+        window is NOT reaped (only frozen ones are)."""
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=60, progress=0.4,
+            updated_age_days=2,  # progressed 2d ago -> within 7d window
         )
         store = _make_mock_goal_store([g])
         planner.set_goal_store(store)
@@ -2650,6 +3396,38 @@ class TestRateLimitPreCheck:
         planner.set_autonomy_policy(policy)
         assert planner._is_action_rate_limited("fetch") is True
 
+    def test_action_block_reason_surfaces_specific_decision(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy.rate_limiter import ActionRateLimiter
+        # Rate-limited fetch: the reason must be the specific decision token
+        # (not a bare "blocked"), so logs read "K7 blocks fetch (rate_limited)"
+        # instead of an authority-denial-sounding "K7 blocks fetch".
+        limiter = ActionRateLimiter(limits={"fetch": 1})
+        limiter.record("fetch")
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(AutonomyPolicy(rate_limiter=limiter))
+        assert planner._action_block_reason("fetch") == "rate_limited"
+        # Bool wrapper stays consistent with the reason.
+        assert planner._is_action_rate_limited("fetch") is True
+
+    def test_action_block_reason_none_when_allowed_or_no_policy(self, tmp_path):
+        from agent_core.autonomy import AutonomyPolicy
+        planner = PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+        planner.set_autonomy_policy(AutonomyPolicy())
+        assert planner._action_block_reason("fetch") is None
+        # No policy at all -> never blocks.
+        planner2 = PlannerCore(
+            state_path=tmp_path / "state2.json",
+            decisions_path=tmp_path / "decisions2.jsonl",
+        )
+        assert planner2._action_block_reason("fetch") is None
+
     def test_decide_learning_action_skips_fetch_when_rate_limited(self, tmp_path):
         from agent_core.autonomy import AutonomyPolicy
         from agent_core.autonomy.rate_limiter import ActionRateLimiter
@@ -2708,8 +3486,9 @@ class TestK7FallthroughToK12:
 
         # Mock K12 self_analysis with proper return value
         from agent_core.self_analysis import SelfAnalysis
+        from agent_core.self_analysis.recommendation_model import AnalysisReport
         mock_sa = specced(SelfAnalysis)
-        mock_report = MagicMock()
+        mock_report = specced(AnalysisReport)
         mock_report.error = None
         mock_report.report_id = "report-test"
         mock_report.recommendations = []
@@ -2749,13 +3528,14 @@ class TestK7FallthroughToK12:
         planner.set_goal_store(_make_mock_goal_store([goal]))
 
         # K7: block LEARN but allow SELF_ANALYZE
-        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy import AutonomyPolicy, CheckResult
         from agent_core.self_analysis import SelfAnalysis
+        from agent_core.self_analysis.recommendation_model import AnalysisReport
         mock_k7 = specced(AutonomyPolicy)
-        blocked = MagicMock()
+        blocked = specced(CheckResult)
         blocked.allowed = False
         blocked.blocked_result = {"success": False, "blocked_by": "autonomy_policy"}
-        allowed = MagicMock()
+        allowed = specced(CheckResult)
         allowed.allowed = True
         mock_k7.check.side_effect = lambda **kw: (
             allowed if kw.get("action_type") == "self_analyze" else blocked
@@ -2764,7 +3544,7 @@ class TestK7FallthroughToK12:
 
         # K12: ready to analyze
         mock_sa = specced(SelfAnalysis)
-        mock_report = MagicMock()
+        mock_report = specced(AnalysisReport)
         mock_report.error = None
         mock_report.report_id = "report-test"
         mock_report.recommendations = []
@@ -2855,14 +3635,14 @@ class TestMaybeValidate:
 
     def test_no_trigger_when_k7_rate_limited(self, planner_env):
         from agent_core.cross_validation.cross_validator import CrossValidator
-        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy import AutonomyPolicy, CheckResult
         planner, _ = planner_env
         mock_validator = specced(CrossValidator)
         planner.executor._cross_validator = mock_validator
         planner._state.last_validation_ts = 0.0
 
         mock_k7 = specced(AutonomyPolicy)
-        check_result = MagicMock()
+        check_result = specced(CheckResult)
         check_result.allowed = False
         mock_k7.check.return_value = check_result
         planner.set_autonomy_policy(mock_k7)
@@ -2928,21 +3708,18 @@ class TestBeliefConfidenceUpdate:
     def test_update_beliefs_from_validation(self):
         """Beliefs linked to validated file get confidence updated."""
         from agent_core.world_model.belief_store import BeliefStore
+        from agent_core.world_model.belief_model import Belief, BeliefType
         executor = ActionExecutor()
 
         # Create mock world model with belief store
         mock_store = specced(BeliefStore)
-        mock_belief = MagicMock()
+        mock_belief = specced(Belief)
         mock_belief.source_id = "test_file.txt"
         mock_belief.belief_id = "belief-001"
         mock_belief.confidence = 0.5
-        mock_belief.belief_type = MagicMock(value="observation")
-        mock_belief.belief_type.name = "OBSERVATION"
-        # Import for type comparison
-        from agent_core.world_model.belief_model import BeliefType
         mock_belief.belief_type = BeliefType.OBSERVATION
         mock_store.get_current.return_value = [mock_belief]
-        mock_store.revise.return_value = MagicMock()
+        mock_store.revise.return_value = specced(Belief)
 
         mock_wm = specced(WorldModel, store=mock_store)
         executor.set_world_model(mock_wm)
@@ -2973,16 +3750,16 @@ class TestBeliefConfidenceUpdate:
         """Low validation score demotes belief to HYPOTHESIS."""
         from agent_core.world_model.belief_store import BeliefStore
         executor = ActionExecutor()
-        from agent_core.world_model.belief_model import BeliefType
+        from agent_core.world_model.belief_model import Belief, BeliefType
 
         mock_store = specced(BeliefStore)
-        mock_belief = MagicMock()
+        mock_belief = specced(Belief)
         mock_belief.source_id = "bad_file.txt"
         mock_belief.belief_id = "belief-002"
         mock_belief.confidence = 0.6
         mock_belief.belief_type = BeliefType.FACT
         mock_store.get_current.return_value = [mock_belief]
-        mock_store.revise.return_value = MagicMock()
+        mock_store.revise.return_value = specced(Belief)
 
         mock_wm = specced(WorldModel, store=mock_store)
         executor.set_world_model(mock_wm)
@@ -2998,10 +3775,10 @@ class TestBeliefConfidenceUpdate:
         """Only beliefs matching file_id are updated."""
         from agent_core.world_model.belief_store import BeliefStore
         executor = ActionExecutor()
-        from agent_core.world_model.belief_model import BeliefType
+        from agent_core.world_model.belief_model import Belief, BeliefType
 
         mock_store = specced(BeliefStore)
-        other_belief = MagicMock()
+        other_belief = specced(Belief)
         other_belief.source_id = "other_file.txt"
         mock_store.get_current.return_value = [other_belief]
 
@@ -3023,12 +3800,12 @@ class TestUpdateLearningGoal:
         """Learning goal progress updated after successful LEARN."""
         executor = ActionExecutor()
 
-        mock_goal = MagicMock()
-        mock_goal.type = MagicMock(value="learning")
+        mock_goal = specced(Goal)
+        mock_goal.type = GoalType.LEARNING
         mock_goal.progress = 0.0
         mock_goal.metadata = {"topic": "genetyka", "topics": ["genetyka"]}
         mock_goal.description = "Nauka: genetyka"
-        mock_goal.status = MagicMock(value="active")
+        mock_goal.status = GoalStatus.ACTIVE
 
         mock_store = specced(GoalStore)
         mock_store.get.return_value = mock_goal
@@ -3051,8 +3828,8 @@ class TestUpdateLearningGoal:
         """Non-learning goals are skipped."""
         executor = ActionExecutor()
 
-        mock_goal = MagicMock()
-        mock_goal.type = MagicMock(value="maintenance")
+        mock_goal = specced(Goal)
+        mock_goal.type = GoalType.MAINTENANCE
 
         mock_store = specced(GoalStore)
         mock_store.get.return_value = mock_goal
@@ -3066,15 +3843,15 @@ class TestUpdateLearningGoal:
         """When goal transitions to achieved, outcome is set."""
         executor = ActionExecutor()
 
-        mock_goal = MagicMock()
-        mock_goal.type = MagicMock(value="learning")
+        mock_goal = specced(Goal)
+        mock_goal.type = GoalType.LEARNING
         mock_goal.progress = 0.8
         mock_goal.metadata = {"topic": "fizyka"}
         mock_goal.description = "Nauka: fizyka"
 
         # After update_progress, goal status becomes achieved
-        mock_goal_achieved = MagicMock()
-        mock_goal_achieved.status = MagicMock(value="achieved")
+        mock_goal_achieved = specced(Goal)
+        mock_goal_achieved.status = GoalStatus.ACHIEVED
 
         mock_store = specced(GoalStore)
         mock_store.get.side_effect = [mock_goal, mock_goal_achieved]
@@ -3272,7 +4049,7 @@ class TestGoalActivation:
         from agent_core.planner.planner_model import create_plan, PlanStatus
         plan = create_plan(goal_id, "Nauka: test", action_type)
         planner._create_plan_for_goal = lambda g, ctx: plan
-        result = MagicMock()
+        result = specced(Plan)
         result.status = PlanStatus.COMPLETED
         result.result = {"success": True}
         planner._finalize_plan = lambda p: result
@@ -3386,6 +4163,66 @@ class TestReconcileLearningGoals:
         planner._reconcile_learning_goals(self._ctx(["a.txt", "b.txt"]))
 
         assert store.get("g-active").status == GoalStatus.ACHIEVED
+
+    def test_project_child_not_false_closed_on_preexisting(self, planner_env, monkeypatch):
+        """2026-07-11 fix: a /project sub-goal must NOT be harvested via
+        token-match on a PRE-EXISTING verified file (the confirmed false-close --
+        Kronika children closed on a Wikipedia 'Rok 2026' page they predated).
+        The freshness floor drops the stale token-match; the plain USER goal (no
+        project_parent) is not a reconcile candidate and stays untouched."""
+        from agent_core.goals.goal_model import Goal, GoalType, GoalStatus
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "off")  # exercise freshness floor
+        planner, tmp_path = planner_env
+        store = self._store(tmp_path)
+        child = Goal(
+            id="g-child", type=GoalType.USER, description="podstawy funding",
+            priority=0.6, status=GoalStatus.ACTIVE, progress=0.0,
+            parent_goal_id="g-parent", created_by="operator",
+            created_at=time.time(), updated_at=time.time(),
+            metadata={"project_parent": "g-parent",
+                      "topics": ["podstawy funding"]},
+        )
+        store.create(child)
+        plain = self._goal("g-plain-user", "active", {"file_ids": ["a.txt"]})
+        plain.type = GoalType.USER  # non-project USER goal stays untouched
+        store.create(plain)
+        planner.set_goal_store(store)
+        analyzer = self._analyzer(topic_files=["a.txt"])
+        analyzer.files_created_since.return_value = set()  # a.txt predates the child
+        planner.set_knowledge_analyzer(analyzer)
+
+        planner._reconcile_learning_goals(self._ctx(["a.txt"]))
+
+        child_after = store.get("g-child")
+        assert child_after.status == GoalStatus.ACTIVE
+        assert child_after.progress == 0.0
+        assert store.get("g-plain-user").status == GoalStatus.ACTIVE
+
+    def test_project_child_closes_on_fresh_verified(self, planner_env, monkeypatch):
+        """A /project sub-goal DOES close when its OWN freshly-indexed material
+        (created at/after the goal) is independently verified -- the legit path
+        survives the fix."""
+        from agent_core.goals.goal_model import Goal, GoalType, GoalStatus
+        monkeypatch.setenv("KRONIKA_PROVENANCE_GATE", "off")
+        planner, tmp_path = planner_env
+        store = self._store(tmp_path)
+        child = Goal(
+            id="g-child2", type=GoalType.USER, description="podstawy funding",
+            priority=0.6, status=GoalStatus.ACTIVE, progress=0.0,
+            parent_goal_id="g-parent", created_by="operator",
+            created_at=time.time(), updated_at=time.time(),
+            metadata={"project_parent": "g-parent",
+                      "topics": ["podstawy funding"]},
+        )
+        store.create(child)
+        planner.set_goal_store(store)
+        analyzer = self._analyzer(topic_files=["fresh.txt"])
+        analyzer.files_created_since.return_value = {"fresh.txt"}  # indexed after creation
+        planner.set_knowledge_analyzer(analyzer)
+
+        planner._reconcile_learning_goals(self._ctx(["fresh.txt"]))
+
+        assert store.get("g-child2").status == GoalStatus.ACHIEVED
 
     def test_pending_goal_all_completed_achieved(self, planner_env):
         """PENDING goals don't auto-achieve via update_progress -> explicit."""
@@ -3599,8 +4436,9 @@ class TestHandlerSkipLogic:
         from agent_core.bulletin.expert_bridge import ExpertBridge
         from agent_core.llm.router import LLMRouter
 
+        from agent_core.bulletin.expert_bridge import ExpertResponse
         mock_bridge = specced(ExpertBridge)
-        mock_resp = MagicMock()
+        mock_resp = specced(ExpertResponse)
         mock_resp.success = False
         mock_resp.reason = "expert_material_already_exists"
         mock_resp.gap_action = ""
@@ -3629,8 +4467,9 @@ class TestHandlerSkipLogic:
         from agent_core.bulletin.expert_bridge import ExpertBridge
         from agent_core.llm.router import LLMRouter
 
+        from agent_core.bulletin.expert_bridge import ExpertResponse
         mock_bridge = specced(ExpertBridge)
-        mock_resp = MagicMock()
+        mock_resp = specced(ExpertResponse)
         mock_resp.success = False
         mock_resp.reason = "topic_well_covered"
         mock_resp.gap_action = ""
@@ -3658,8 +4497,9 @@ class TestHandlerSkipLogic:
         from agent_core.bulletin.expert_bridge import ExpertBridge
         from agent_core.llm.router import LLMRouter
 
+        from agent_core.bulletin.expert_bridge import ExpertResponse
         mock_bridge = specced(ExpertBridge)
-        mock_resp = MagicMock()
+        mock_resp = specced(ExpertResponse)
         mock_resp.success = False
         mock_resp.reason = "llm_error"
         mock_resp.gap_action = ""
@@ -3772,7 +4612,7 @@ class TestPickExpertTopicDedup:
         planner = PlannerCore.__new__(PlannerCore)
         planner._knowledge_analyzer = None
 
-        mock_wm = specced(WorldModel, query=MagicMock())
+        mock_wm = specced(WorldModel, query=specced(WorldModelQuery))
         mock_wm.query.get_knowledge_gaps.return_value = [
             {"topic": "logika formalna"},
             {"topic": "algebra liniowa"},
@@ -3792,7 +4632,7 @@ class TestPickExpertTopicDedup:
         planner = PlannerCore.__new__(PlannerCore)
         planner._knowledge_analyzer = None
 
-        mock_wm = specced(WorldModel, query=MagicMock())
+        mock_wm = specced(WorldModel, query=specced(WorldModelQuery))
         mock_wm.query.get_knowledge_gaps.return_value = [
             {"topic": "fizyka"},
         ]
@@ -3825,13 +4665,52 @@ class TestPickExpertTopicDedup:
 
 
 class TestGapLearnableGoalFilter:
-    """Warstwa 1: block strategy/meta goals from gap-pipeline."""
+    """Warstwa 1: block strategy/meta goals from gap-pipeline.
+
+    MOCK-HIDDEN BUG (revealed 2026-07-14, specced sweep). These tests used to
+    feed `MagicMock()` with a `goal_type` attribute. No such attribute exists
+    on the real Goal: `agent_core.goals.goal_model.Goal` names the field `type`
+    (`goal_type` is only the *parameter* name of the create_goal() factory, and
+    a real field on the unrelated creative MetaGoal). The mock invented the
+    phantom, so the tests passed while production read
+    `getattr(goal, "goal_type", None)` -> always None -> `not isinstance(None,
+    str)` -> `return True`. The filter is DEAD in prod: every meta/maintenance
+    goal still reaches the gap pipeline, producing exactly the absurd
+    'Maria nie ma wiedzy o Zmiana mechanizmu uczenia' bulletin entries the
+    docstring at planner_core.py:2939 says it prevents.
+
+    These now use REAL Goal objects (the only thing that exposes it -- specced()
+    blocks phantom READS but not phantom WRITES, so specced(Goal) + setattr
+    would have stayed green too). The blocked-path tests are xfail(strict=True)
+    pending an operator decision on the one-word prod fix
+    (planner_core.py:2961 `"goal_type"` -> `"type"`); strict makes them fail
+    loudly as XPASS the moment that lands, so they get un-xfailed.
+    """
+
+    #: planner_core.py:2961 reads a field the real Goal does not have.
+    _DEAD_FILTER = pytest.mark.xfail(
+        strict=True,
+        reason="prod bug: _is_gap_learnable_goal reads phantom goal.goal_type "
+               "(real field is goal.type) -> filter always allows",
+    )
 
     def _mk_planner(self):
         from agent_core.planner.planner_core import PlannerCore
         p = PlannerCore.__new__(PlannerCore)
         p._goal_store = None
         return p
+
+    def _wire_goal(self, p, goal_type, metadata=None):
+        """Wire a REAL Goal (as GoalStore.get actually returns) into planner."""
+        store = specced(GoalStore)
+        store.get.return_value = Goal(
+            id="g1", type=goal_type, description="Zmiana mechanizmu uczenia",
+            priority=0.5, status=GoalStatus.ACTIVE, progress=0.0,
+            parent_goal_id=None, created_by="test", created_at=time.time(),
+            updated_at=time.time(), metadata=metadata or {},
+        )
+        p._goal_store = store
+        return store
 
     def test_no_goal_id_allows(self):
         p = self._mk_planner()
@@ -3844,52 +4723,50 @@ class TestGapLearnableGoalFilter:
 
     def test_learning_goal_allowed(self):
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(); g.goal_type = MagicMock(value="learning")
-        store.get.return_value = g
-        p._goal_store = store
+        self._wire_goal(p, GoalType.LEARNING)
         assert p._is_gap_learnable_goal("g1") is True
 
     def test_user_goal_allowed(self):
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(); g.goal_type = MagicMock(value="user")
-        store.get.return_value = g
-        p._goal_store = store
+        self._wire_goal(p, GoalType.USER)
         assert p._is_gap_learnable_goal("g1") is True
 
+    @_DEAD_FILTER
     def test_meta_goal_blocked(self):
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(); g.goal_type = MagicMock(value="meta")
-        store.get.return_value = g
-        p._goal_store = store
+        self._wire_goal(p, GoalType.META)
         assert p._is_gap_learnable_goal("g1") is False
 
+    @_DEAD_FILTER
     def test_maintenance_goal_blocked(self):
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(); g.goal_type = MagicMock(value="maintenance")
-        store.get.return_value = g
-        p._goal_store = store
+        self._wire_goal(p, GoalType.MAINTENANCE)
         assert p._is_gap_learnable_goal("g1") is False
 
+    @_DEAD_FILTER
     def test_capability_meta_blocked(self):
-        """Creative module's capability_meta goals must not hit gap pipeline."""
+        """Creative module's capability_meta goals must not hit gap pipeline.
+
+        Second phantom in the old test: no stored Goal ever carries
+        type="capability_meta". GoalAdapter (creative/goal_adapter.py:20)
+        collapses EVERY MetaGoalType to GoalType "meta" and keeps the original
+        in metadata["meta_goal_type"], so this is what reaches the store.
+        """
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(); g.goal_type = MagicMock(value="capability_meta")
-        store.get.return_value = g
-        p._goal_store = store
+        self._wire_goal(p, GoalType.META,
+                        metadata={"meta_goal_type": "capability_meta"})
         assert p._is_gap_learnable_goal("g1") is False
 
+    @_DEAD_FILTER
     def test_raw_string_goal_type(self):
-        """goal_type may be raw string (not Enum) — handle both."""
+        """Goal type may be a raw string (not Enum) -- handle both.
+
+        Goal is not frozen, so a raw string can be set post-construction; this
+        pins the defensive getattr(..., "value", raw) branch.
+        """
         p = self._mk_planner()
-        store = specced(GoalStore)
-        g = MagicMock(spec=["goal_type"]); g.goal_type = "meta"
-        store.get.return_value = g
-        p._goal_store = store
+        store = self._wire_goal(p, GoalType.META)
+        store.get.return_value.type = "meta"  # raw string, not Enum
         assert p._is_gap_learnable_goal("g1") is False
 
     def test_missing_goal_allows(self):
@@ -4138,10 +5015,11 @@ class TestLearningWindowEnforcement:
         run -- otherwise the daily allowance drains on no-ops."""
         planner = self._bare_planner()  # full off-window budget
         core = specced(HomeostasisCore)
-        state = MagicMock()
-        state.mode.value = "reduced"
-        state.health_score = 0.5
-        core.get_state.return_value = state
+        core.get_state.return_value = SystemState(
+            mode=Mode.REDUCED,
+            health_score=0.5,
+            last_mode_change_time=time.time(),
+        )
         planner._homeostasis_core = core
         planner.guard = specced(PlannerGuard)
         planner.guard.is_heavy_action_allowed.return_value = (False, "reduced")
@@ -4715,3 +5593,61 @@ class TestUpdateBeliefsFromValidationPersistence:
         assert len(current) == 1
         assert current[0].confidence == pytest.approx(0.5 * 0.6 + 0.83 * 0.4)
         assert current[0].belief_type == BeliefType.FACT  # 0.83 promotes
+
+
+class TestPublishFocus:
+    """E3 rung2: planner publishes its committed focus to SelfContext (write-only,
+    fail-soft, never consulted for decisions -> ADR-013 determinism preserved)."""
+
+    def _planner(self, tmp_path):
+        from agent_core.planner.planner_core import PlannerCore
+        return PlannerCore(
+            state_path=tmp_path / "state.json",
+            decisions_path=tmp_path / "decisions.jsonl",
+        )
+
+    def _plan(self, action_type):
+        from agent_core.planner.planner_model import create_plan
+        return create_plan("g1", "Naucz sie pythona", action_type)
+
+    def test_publish_focus_records_goal_and_action(self, tmp_path):
+        from types import SimpleNamespace
+        from agent_core.planner.planner_model import ActionType
+
+        recorded = {}
+
+        class _SC:
+            def set_active_focus(self, goal_id=None, description=None, action=None, ts=None):
+                recorded.update(goal_id=goal_id, description=description, action=action)
+
+        planner = self._planner(tmp_path)
+        planner.set_self_context(_SC())
+        goal = SimpleNamespace(id="g1", description="Naucz sie pythona")
+        planner._publish_focus(goal, self._plan(ActionType.LEARN))
+
+        assert recorded["goal_id"] == "g1"
+        assert recorded["description"] == "Naucz sie pythona"
+        assert recorded["action"] == "learn"   # ActionType.LEARN.value is lowercase
+
+    def test_publish_focus_noop_without_self_context(self, tmp_path):
+        from types import SimpleNamespace
+        from agent_core.planner.planner_model import ActionType
+
+        planner = self._planner(tmp_path)  # set_self_context never called
+        goal = SimpleNamespace(id="g1", description="x")
+        # Must not raise when no SelfContext is wired (pre-E3 / degraded mode).
+        planner._publish_focus(goal, self._plan(ActionType.LEARN))
+
+    def test_publish_focus_failsoft_on_error(self, tmp_path):
+        from types import SimpleNamespace
+        from agent_core.planner.planner_model import ActionType
+
+        class _Boom:
+            def set_active_focus(self, **kw):
+                raise RuntimeError("blackboard down")
+
+        planner = self._planner(tmp_path)
+        planner.set_self_context(_Boom())
+        goal = SimpleNamespace(id="g1", description="x")
+        # A SelfContext hiccup must NEVER break the deterministic loop.
+        planner._publish_focus(goal, self._plan(ActionType.LEARN))

@@ -46,13 +46,19 @@ def build_approval_inbox(meta_dir: Path) -> Dict[str, Any]:
         from agent_core.hands.outbox import OutboxProposalStore
         outbox = OutboxProposalStore(path=meta_dir / "outbox_proposals.jsonl")
         for rec in outbox.list_pending():
+            content = rec.get("content")
+            content = str(content) if content is not None else ""
             items.append({
                 "kind": "note",
                 "id": rec.get("id", ""),
                 "title": rec.get("filename") or "(notatka)",
-                "detail": _preview(rec.get("reason") or rec.get("content")),
+                # Prefer the note BODY for the preview (what Maria actually wants
+                # to post), falling back to the one-word reason. The FULL body
+                # rides in extra["content"] so the app can show the whole note on
+                # tap instead of only "autonomous".
+                "detail": _preview(content or rec.get("reason")),
                 "created_at": rec.get("created_at"),
-                "extra": {"reason": rec.get("reason", "")},
+                "extra": {"reason": rec.get("reason", ""), "content": content},
             })
             counts["note"] += 1
     except Exception as e:  # pragma: no cover - defensive
@@ -72,19 +78,22 @@ def build_approval_inbox(meta_dir: Path) -> Dict[str, Any]:
                     continue
                 art = t.artifacts or {}
                 evidence = art.get("evidence_summary")
+                full = (
+                    t.notes
+                    or (str(evidence) if evidence else "")
+                    or t.description
+                    or ""
+                )
                 items.append({
                     "kind": "repair",
                     "id": t.task_id,
                     "title": t.title or "(naprawa)",
-                    "detail": _preview(
-                        t.notes
-                        or (str(evidence) if evidence else "")
-                        or t.description
-                    ),
+                    "detail": _preview(full),
                     "created_at": t.created_at,
                     "extra": {
                         "repair_kind": art.get("repair_kind"),
                         "expires_at": art.get("expires_at"),
+                        "content": full,
                     },
                 })
                 counts["repair"] += 1
@@ -107,6 +116,7 @@ def build_approval_inbox(meta_dir: Path) -> Dict[str, Any]:
                     "priority": entry.priority,
                     "requested_by": entry.requested_by,
                     "reason_code": entry.reason_code,
+                    "content": entry.summary or "",
                 },
             })
             counts["review"] += 1

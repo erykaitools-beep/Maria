@@ -335,9 +335,24 @@ def _service_status(snapshot: Dict[str, Any], service_name: str) -> str:
 
 
 def _is_unavailable(service_name: str, status: str) -> bool:
+    """Whether a snapshot status string means the service is DOWN.
+
+    Vocabulary must match what tool_registry actually emits per service (audit
+    2026-06-16):
+    - NIM: emits "available" / "depleted" / "unknown". "depleted" is RPM/budget
+      back-pressure (normal -- NIM is reachable, just rate/budget-limited), NOT an
+      outage, so it must NOT trip model_unavailable (was a false positive). Only a
+      genuine "unavailable" counts.
+    - OpenClaw emits "disconnected", Codex "not_configured" -- the old check only
+      matched "unavailable", so an actually-down effector NEVER tripped (false
+      negative). Treat both as down.
+    Ollama is hardcoded "available" in tool_registry (no cheap reliable probe;
+    a fake one would lie -- see ADR note), so its liveness is covered by
+    detect_thread_unhealthy (PlannerCycle/TeacherAutoSession wedge), not here.
+    """
     if service_name == "NVIDIA NIM API":
-        return status in ("unavailable", "depleted")
-    return status == "unavailable"
+        return status == "unavailable"
+    return status in ("unavailable", "disconnected", "not_configured")
 
 
 def _service_short_name(service_name: str) -> str:

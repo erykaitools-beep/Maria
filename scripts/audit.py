@@ -57,6 +57,14 @@ MANAGED_LOGS = [
 # Max acceptable file size before rotation warning (50 MB)
 LOG_SIZE_WARN_MB = 50
 
+# Idle planner actions are NOT loops (correct idleness: no goals / outside
+# learning window). Mirror the canonical set from the live codebase so the
+# audit and the daemon agree on what counts as "doing nothing".
+try:
+    from agent_core.planner.decision_filters import IDLE_ACTION_TYPES
+except Exception:
+    IDLE_ACTION_TYPES = frozenset({"skip", "noop"})
+
 
 def load_jsonl(path: Path, max_lines: int = 0) -> list:
     """Load JSONL file, return list of dicts. Skips malformed lines."""
@@ -89,7 +97,15 @@ def check_planner_loops(decisions: list, window_hours: int = 96) -> list:
     counter = Counter()
     for d in recent:
         action = d.get("action_type", "?")
-        topic = d.get("action_params", {}).get("topic", "")
+        # Idle actions (skip/noop) are correct idleness, not loops -- exclude them.
+        # A genuine skip-loop still surfaces via stuck_history / consecutive_noop_count
+        # in check_health_state (noop_count > 50).
+        if action in IDLE_ACTION_TYPES:
+            continue
+        params = d.get("action_params", {})
+        # Real schema field is 'topics' (plural list); 'topic' singular is empty/legacy.
+        # Fall back to goal_description so distinct topics don't collapse into one key.
+        topic = params.get("topic") or (params.get("topics") or [""])[0] or d.get("goal_description", "")
         skipped = d.get("result", {}).get("skipped", False)
         if skipped:
             key = f"{action}+{topic}+SKIPPED"
@@ -185,20 +201,40 @@ def check_oneshot_goals(decisions: list, goals_by_id: dict) -> list:
 
 
 def check_mode_oscillations(events: list, window_hours: int = 24) -> list:
-    """Count mode changes in recent window."""
+    """Detect rapid mode FLAPPING (short-dwell ping-pong), not normal diurnal cycling."""
     issues = []
     cutoff = time.time() - (window_hours * 3600)
-    mode_changes = [
-        e for e in events
-        if e.get("event_type") == "mode_change" and e.get("timestamp", 0) > cutoff
-    ]
+    mode_changes = sorted(
+        [e for e in events
+         if e.get("event_type") == "mode_change" and e.get("timestamp", 0) > cutoff],
+        key=lambda e: e.get("timestamp", 0),
+    )
 
-    if len(mode_changes) > 20:
+    # A flap = a transition followed by the next one within MIN_DWELL_SEC.
+    # Normal sleep/wake diurnal cycling has long dwells and is NOT flagged; only
+    # tight ping-pong (e.g. a CPU spike thrashing reduced<->sleep<->active within
+    # minutes) counts. A flat count of mode changes mislabels healthy day/night
+    # cycling as unstable.
+    MIN_DWELL_SEC = 10 * 60
+    flaps = sum(
+        1 for a, b in zip(mode_changes, mode_changes[1:])
+        if (b.get("timestamp", 0) - a.get("timestamp", 0)) < MIN_DWELL_SEC
+    )
+    if flaps > 6:
+        issues.append({
+            "type": "mode_oscillation",
+            "severity": "warning",
+            "flaps_under_10min": flaps,
+            "changes_24h": len(mode_changes),
+            "message": f"{flaps} rapid mode flaps (<10min dwell) in {window_hours}h (>6 = unstable)",
+        })
+    elif len(mode_changes) > 40:
+        # Raw backstop: an absurd change count even without a tight flap pattern.
         issues.append({
             "type": "mode_oscillation",
             "severity": "warning",
             "changes_24h": len(mode_changes),
-            "message": f"{len(mode_changes)} mode changes in {window_hours}h (>20 = unstable)",
+            "message": f"{len(mode_changes)} mode changes in {window_hours}h (>40 = unstable)",
         })
 
     # Check if currently in REDUCED/SLEEP for >6h
@@ -321,7 +357,10 @@ def run_audit() -> dict:
     # Run checks
     checks = [
         ("planner_loops", check_planner_loops, [decisions]),
-        ("stale_goals", check_stale_goals, [goals]),
+        # Dedup goals.jsonl append-log to latest-state per id (matches GoalStore
+        # semantics) -- otherwise historical pending/active lines of already-closed
+        # goals are recounted as stale (the 436-ghost bug).
+        ("stale_goals", check_stale_goals, [list(goals_by_id.values())]),
         ("oneshot_loops", check_oneshot_goals, [decisions, goals_by_id]),
         ("mode_oscillations", check_mode_oscillations, [events]),
         ("log_sizes", check_log_sizes, []),

@@ -461,11 +461,11 @@ class Goal:
     priority: float              # 0.0 do 1.0
     status: GoalStatus
     progress: float              # 0.0 do 1.0
-    parent_goal_id: Optional[str]  # Hierarchia celow
+    parent_goal_id: Optional[str]  # Hierarchia (Etap B: rollup, max glebokosc 3)
     created_by: str              # "system" / "user" / "teacher" / "homeostasis"
     created_at: float            # time.time()
     updated_at: float            # time.time()
-    deadline: Optional[float]    # Opcjonalny (informacyjny, Planner moze uzyc)
+    deadline: Optional[float]    # Epoch (Etap B: urgency w selekcji + reaper, flag-gated)
     audit_trail: List[AuditEntry] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 ```
@@ -626,10 +626,36 @@ class GoalStore:
 
 - Brak generowania celow przez LLM w v1 (czysta logika / keyword matching)
 - Brak grafu zaleznosci miedzy celami (tylko parent-child)
-- Brak enforcement deadline (informacyjny, Planner moze uzyc w przyszlosci)
 - Brak szablonow celow
-- Brak automatycznego tworzenia sub-celow
+- Brak AUTONOMICZNEGO tworzenia sub-celow (drzewa tworzy operator przez /project)
 - Auto-sugestia NIGDY nie aktywuje celu bez potwierdzenia usera (human-in-the-loop)
+
+### Digital Human Etap B: drzewa pod-celow + terminy (2026-06-22)
+
+Dwa martwe pola (`parent_goal_id`, `deadline`, 0 czytelnikow) ozywione. Wszystko
+za flagami `.env` DOMYSLNIE OFF (flag -> observe -> cutover); kod bez zmian przy OFF.
+
+- **Schema-guard (zawsze-on, bez flagi):** `store.create/propose` odrzucaja zly
+  link rodzica (parent nie istnieje / self-parent / cykl / glebokosc >
+  `MAX_HIERARCHY_DEPTH=3`) przez osierocenie celu (flat) + log ERROR. Fail-SAFE:
+  `create()` zwraca id jak dawniej. No-op dla istniejacej (plaskiej) populacji.
+- **Rollup (`GOAL_ROLLUP_ENABLED`):** faza planera STEP 2.35. Dziecko terminalne
+  -> rodzic awansuje `progress = terminalne/wszystkie`; wszystkie ACHIEVED ->
+  rodzic ACHIEVED; ktorekolwiek FAILED/ABANDONED/CANCELLED (reszta terminalna) ->
+  rodzic FAILED (`ANY_FAIL_FAILS_PARENT`). **MAINTENANCE pomijane** (seed-tree
+  health<-ram/cpu nie auto-domyka sie). Agreguje TYLKO status terminalnych dzieci
+  -- NIGDY nie re-ewaluuje `success_criteria`/egzaminu liscia (nie koliduje z
+  domknieciem 2026-05-31). `agent_core/goals/rollup.py`.
+- **Deadline urgency (`GOAL_DEADLINE_ENABLED`):** `goal_selector._compute_effective_priority`
+  mnozy efektywny priorytet przez mnoznik terminu (overdue x3.0; <=24h ramp
+  1.0->2.0; daleko/None x1.0), multiplikatywnie po aging, clamp 3.0. Tylko
+  RE-ORDERUJE feasible set; nie zmienia bram wykonalnosci. `deadline` = absolutny
+  epoch (TZ-safe).
+- **Deadline reaper (`GOAL_DEADLINE_REAP_ENABLED`, OSOBNA flaga):** overdue
+  still-active non-MAINTENANCE/non-META -> FAILED (`deadline_overdue`). Osobny tor
+  od age-reaper. OFF nawet gdy urgency=cutover.
+- **Kran operatora:** `/project <nazwa> | <termin> | <podcel1> ; <podcel2>` tworzy
+  USER-rodzica + USER-dzieci (deadline dziedziczony). `/projects` = podglad drzewa.
 
 ---
 
@@ -982,7 +1008,7 @@ Jak koordynowac zdarzenia miedzy modulami?
 
 ### Uzasadnienie
 
-1. **Tick loop JUZ jest agregatorem** - 19 faz sekwencyjnie, wszystkie dane przechodza przez jeden punkt w `HomeostasisCore._execute_tick()`
+1. **Tick loop JUZ jest agregatorem** - 21 faz sekwencyjnie, wszystkie dane przechodza przez jeden punkt w `HomeostasisCore._execute_tick()`
 2. **Deterministyczna kolejnosc** - fazy gwarantuja ze sensor reading jest przetworzony PRZED mode regulator. Event bus tego nie gwarantuje.
 3. **Prostota threading** - ADR-002 mowi "threading nie asyncio". Pub/sub z threading = locki, race conditions. Tick loop = 1 watek + 1 deque dla external events.
 4. **5-6 zrodel, nie setki** - event bus sie oplaca przy dziesieciach producentow. Maria ma 6.

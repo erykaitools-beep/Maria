@@ -117,6 +117,33 @@ def test_gate_refuses_nim_down_for_nim_repair(tmp_path):
     assert conductor.list_tasks(project="maria") == []
 
 
+def test_gate_allows_nim_self_report_when_nim_down(tmp_path):
+    # Audit 2026-06-16 #14: a model_unavailable candidate whose SUBJECT is NIM
+    # must still create its alert even though NIM is down -- otherwise a genuine
+    # NIM outage can never surface (the gate blocked the very task flagging it).
+    creator, conductor, _, _, notifier = _creator(
+        tmp_path,
+        snapshot=_snapshot(nim_status="unavailable"),
+    )
+    nim_candidate = RepairCandidate(
+        repair_kind="model_unavailable",
+        summary="NIM API unavailable across last 2 snapshots",
+        evidence_summary={
+            "subject": "NVIDIA NIM API",
+            "service_name": "NVIDIA NIM API",
+            "one_line": "NIM: available -> unavailable -> unavailable",
+        },
+        detected_at=time.time(),
+    )
+
+    task_id = creator.create(nim_candidate, "sps-test")
+
+    assert task_id is not None
+    task = conductor.list_tasks(project="maria")[0]
+    assert task.artifacts["repair_kind"] == "model_unavailable"
+    assert task.artifacts["approval_required"] is True  # still an alert, not a fix
+
+
 def test_gate_refuses_cooldown(tmp_path):
     creator, conductor, _, _, _ = _creator(tmp_path)
     existing = create_task(

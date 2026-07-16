@@ -133,12 +133,25 @@ class Conductor:
         are not. Tasks marked ``approval_required`` are held for
         operator approval before autonomous dispatch. Used when the tick
         loop wants something to dispatch without human interaction.
+
+        FAIL-CLOSED on the live repo (audit 2026-06-16): for project=='maria'
+        (whose dispatcher targets /home/maria/maria, the running repo) a
+        MISSING ``approval_required`` key defaults to True (held) -- a forgotten
+        flag must never auto-dispatch Codex onto production. self_repair-phase
+        tasks are NEVER autonomously routed regardless of the flag: per ADR-031
+        self-repair is an ALERT, ``/approve_repair`` CLOSES it, it is never
+        dispatched. Other projects keep the fail-open default (legit autonomous
+        builds in their own sandboxes).
         """
+        # Live-repo dispatch defaults to held; sandboxed projects to dispatchable.
+        approval_default = project == "maria"
         ready = [
             t for t in self._queue.list(project=project, status=TaskStatus.PENDING)
             if t.assignee in BUILDER_ASSIGNEES
             and self._deps_satisfied(t)
-            and not t.artifacts.get("approval_required", False)
+            and t.phase != "self_repair"
+            and t.phase != "effector_undo"
+            and not t.artifacts.get("approval_required", approval_default)
         ]
         if not ready:
             return None
@@ -173,6 +186,16 @@ class Conductor:
                 status=TaskStatus.PENDING,
             )
             if task.phase == "self_repair"
+        ]
+
+    def get_pending_undo_suggestions(self) -> List[Task]:
+        """List maria effector-undo suggestions waiting for operator approval."""
+        return [
+            task for task in self._queue.list(
+                project="maria",
+                status=TaskStatus.PENDING,
+            )
+            if task.phase == "effector_undo"
         ]
 
     # --- Lifecycle (assignees / operator) ----------------------------
@@ -237,3 +260,53 @@ class Conductor:
             status=TaskStatus.PENDING,
             blockers=[],
         )
+
+    def requeue_stale_in_progress(
+        self,
+        project: str,
+        assignee: Assignee = Assignee.CODEX,
+        max_requeues: int = 2,
+    ) -> List[Task]:
+        """Boot-time sweep: return orphaned IN_PROGRESS tasks to the pool.
+
+        Dispatch is synchronous inside the tick loop, so on a fresh process
+        no dispatch can be in flight -- any IN_PROGRESS task with the given
+        assignee is an orphan from a crash mid-dispatch (2026-06-30: the
+        liveness watchdog os._exit'ed during a Codex run; os._exit bypasses
+        the dispatcher's BLOCKED-on-exception handler, stranding the task).
+
+        Each sweep increments ``stale_requeue_count`` in task.artifacts.
+        Past ``max_requeues`` the task goes BLOCKED instead -- a task whose
+        dispatch keeps dying would otherwise crash-loop on every boot.
+
+        Call ONLY at process boot, before the tick loop starts. Mid-run an
+        IN_PROGRESS task means a dispatch genuinely in flight.
+        """
+        requeued: List[Task] = []
+        stale = self._queue.list(
+            project=project, status=TaskStatus.IN_PROGRESS
+        )
+        for task in stale:
+            if task.assignee != assignee:
+                continue
+            artifacts = dict(task.artifacts)
+            count = int(artifacts.get("stale_requeue_count", 0)) + 1
+            artifacts["stale_requeue_count"] = count
+            if count > max_requeues:
+                updated = self._queue.update(
+                    task.task_id,
+                    status=TaskStatus.BLOCKED,
+                    artifacts=artifacts,
+                    blockers=list(task.blockers) + [
+                        f"orphaned in_progress {count}x (crash mid-dispatch?)"
+                    ],
+                )
+            else:
+                updated = self._queue.update(
+                    task.task_id,
+                    status=TaskStatus.PENDING,
+                    artifacts=artifacts,
+                )
+            if updated is not None:
+                requeued.append(updated)
+        return requeued

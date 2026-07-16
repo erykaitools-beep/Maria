@@ -87,6 +87,12 @@ class CorrectiveActionGenerator:
         self._recent_actions: List[CorrectiveAction] = []
         self._last_consolidation_request = 0
         self._consolidation_cooldown = 300  # 5 minutes
+        self._last_cpu_pause_request = 0
+        self._cpu_pause_cooldown = 300  # 5 minutes
+        self._last_alert_snapshot_request = 0
+        self._alert_snapshot_cooldown = 300  # 5 minutes
+        self._last_thermal_request = 0
+        self._thermal_cooldown = 300  # 5 minutes
 
     def generate_actions(
         self,
@@ -126,13 +132,19 @@ class CorrectiveActionGenerator:
         # Action 2: Pause background learning
         cpu_load = state.get("cpu_load", 0)
         if cpu_load > self.CPU_PAUSE_LEARNING:
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="learning_engine",
-                action="pause",
-                urgency=Urgency.SOON,
-                reason=f"CPU saturation at {cpu_load:.0f}%",
-            ))
+            # Check cooldown: the pause is idempotent (learning stays paused
+            # between re-issues), so re-emitting every tick while CPU is
+            # chronically saturated only spams the event log. Mode_regulator
+            # already debounces actual mode flips; this throttles the corrective.
+            if now - self._last_cpu_pause_request > self._cpu_pause_cooldown:
+                actions.append(CorrectiveAction(
+                    action_type=ActionType.SIGNAL_MODULE,
+                    target="learning_engine",
+                    action="pause",
+                    urgency=Urgency.SOON,
+                    reason=f"CPU saturation at {cpu_load:.0f}%",
+                ))
+                self._last_cpu_pause_request = now
 
         # Action 3: Reduce inference batch size
         inference_latency = state.get("inference_latency_ms", 0)
@@ -169,32 +181,43 @@ class CorrectiveActionGenerator:
 
         # Action 6: Snapshot before risky operations
         if any("ALERT" in a for a in alerts):
-            actions.append(CorrectiveAction(
-                action_type=ActionType.TRIGGER_SNAPSHOT,
-                target="homeostasis",
-                action="checkpoint",
-                urgency=Urgency.SOON,
-                reason="ALERT condition detected",
-            ))
+            # Check cooldown: one checkpoint per ALERT episode is enough.
+            # Alerts persist across ticks while the condition holds, so an
+            # uncooled trigger re-snapshots every second (830 events / 45 min
+            # on 2026-07-12) and each snapshot is a real disk write.
+            if now - self._last_alert_snapshot_request > self._alert_snapshot_cooldown:
+                actions.append(CorrectiveAction(
+                    action_type=ActionType.TRIGGER_SNAPSHOT,
+                    target="homeostasis",
+                    action="checkpoint",
+                    urgency=Urgency.SOON,
+                    reason="ALERT condition detected",
+                ))
+                self._last_alert_snapshot_request = now
 
         # Action 7: Thermal throttling
         temp_c = state.get("temp_c", 50)
         if temp_c > 85:
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="llm",
-                action="reduce_batch_size",
-                urgency=Urgency.IMMEDIATE,
-                reason=f"Thermal stress at {temp_c:.1f}°C",
-                parameters={"factor": 0.5},
-            ))
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="learning_engine",
-                action="pause",
-                urgency=Urgency.IMMEDIATE,
-                reason=f"Thermal stress at {temp_c:.1f}°C",
-            ))
+            # Check cooldown: both signals are idempotent (batch stays reduced,
+            # learning stays paused), so re-issuing every hot tick only spams
+            # the event log — same rationale as the CPU pause above.
+            if now - self._last_thermal_request > self._thermal_cooldown:
+                actions.append(CorrectiveAction(
+                    action_type=ActionType.SIGNAL_MODULE,
+                    target="llm",
+                    action="reduce_batch_size",
+                    urgency=Urgency.IMMEDIATE,
+                    reason=f"Thermal stress at {temp_c:.1f}°C",
+                    parameters={"factor": 0.5},
+                ))
+                actions.append(CorrectiveAction(
+                    action_type=ActionType.SIGNAL_MODULE,
+                    target="learning_engine",
+                    action="pause",
+                    urgency=Urgency.IMMEDIATE,
+                    reason=f"Thermal stress at {temp_c:.1f}°C",
+                ))
+                self._last_thermal_request = now
 
         # Track actions for reporting
         self._recent_actions = actions

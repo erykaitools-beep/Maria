@@ -8,6 +8,22 @@
 > Eryk explicit 2026-04-22: *"mapa ktora mapa jest tez rownolegla dla mari 2.0
 > w strone agi"*. ROADMAP.md i ten dokument opisują jego ścieżkę do AGI.
 
+## Poprawka ratyfikowana 2026-07-08 (Eryk, BEZWARUNKOWO) — zdanie „nie trenujemy wag"
+
+> Zatwierdzona wraz z `BLUEPRINT.md` 4.5. Oryginalne „nie trenujemy wag" (niżej w tekście)
+> zastąpione precyzyjniejszym:
+>
+> **„Nie trenujemy wag, które niosą TOŻSAMOŚĆ. Trenujemy wagi-ORGANY, które niosą
+> UMIEJĘTNOŚCI — pod Bramką Zmian, z dietą-jako-tożsamością i egzaminem pożegnalnym przy wymianie."**
+>
+> Powód: (1) „tożsamość NIE w wagach" ZOSTAJE w mocy — organy to wymienne ciało; tożsamość
+> mieszka w Osnowie + bibliotece programów + biografii. (2) Litera „zero wag" była już naruszona
+> (`JEPA_MAPPING.md` rev 3, zatwierdzony 2026-05-09, planuje trenowalny predyktor B3 pod warstwą
+> self-modification). (3) Sprzęt CPU-only wymusza rój małych organów; czysta synteza programów
+> bez LLM może nie sięgnąć otwartych domen (`AGI_HYPOTHESES.md`). Zdania „tożsamość w bibliotece
+> programów" i „LLM = wymienny parser" — bez zmian. Doktryna jest fundamentem 2.0; klauzula
+> falsyfikacji konkretnego organu (`BLUEPRINT.md` 7-BIS/8.5.5) żyje dalej jako higiena eksperymentu.
+
 ## Jedno zdanie
 
 **Maria 2.0 przestaje być wrapperem nad LLMem. Staje się adaptacyjnym systemem
@@ -169,7 +185,7 @@ Maria 2.0 jest sukcesem gdy:
 
 ## Co Maria 2.0 NIE jest
 
-- Nie jest nowym LLMem (nie trenujemy wag)
+- Nie jest nowym LLMem (nie trenujemy wag LLM; → poprawka 2026-07-08 u góry: wagi-organy niosące UMIEJĘTNOŚCI trenujemy pod bramką, tożsamości NIE)
 - Nie jest frameworkiem do prompt engineeringu
 - Nie jest DSL-em dla ludzi (Python zostaje jako implementation language)
 - Nie jest kolejnym logging formatem (ChatGPT-owa wersja była tym — odrzucona)

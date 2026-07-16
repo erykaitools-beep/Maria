@@ -112,6 +112,26 @@ class TestHomeostasisEventLogger:
         assert event["trigger"]["constraint"] == "ram_critical"
         assert event["trigger"]["value"] == 4.0
 
+    def test_sleep_to_reduced_trigger_is_cpu_high_not_unknown(self, logger):
+        """Regression (2026-06-15): SLEEP->REDUCED (a CPU spike from a long
+        local inference firing during sleep) used to log trigger='unknown'
+        because only ACTIVE->REDUCED was mapped. It must now resolve cpu_high."""
+        state = {"ram_available_pct": 80.0, "cpu_load": 96.0, "temp_c": 60.0}
+
+        logger.log_mode_change(
+            from_mode=Mode.SLEEP,
+            to_mode=Mode.REDUCED,
+            interpreted_state=state,
+            alerts=["ALERT: CPU saturated"],
+            health_score=0.7,
+            tick_count=300,
+        )
+        logger.flush()
+
+        event = logger.get_mode_transitions(limit=1)[0]
+        assert event["trigger"]["constraint"] == "cpu_high"
+        assert event["trigger"]["value"] == 96.0
+
     def test_log_alert(self, logger, temp_log_path):
         """Test logging alerts."""
         logger.log_alert(

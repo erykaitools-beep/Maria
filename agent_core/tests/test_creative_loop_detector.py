@@ -308,17 +308,22 @@ class TestCreativeModuleLoopHandling:
     def test_handle_suppressed_loop_posts_one_bulletin_per_type(self, tmp_path):
         module = self._make_module(tmp_path)
 
-        # Wire a bulletin store + matching goal store so the report has counts.
+        # Post-R1: recurrence is measured from the bulletin source. Seed 4
+        # creative advisories (distinct topics so dedup keeps them) so detect()
+        # counts capability_meta:4.
         from agent_core.bulletin import BulletinStore
-        bulletin = BulletinStore(
-            path=tmp_path / "cognitive_bulletin.jsonl"
-        )
+        from agent_core.bulletin.bulletin_model import EntryType
+        bulletin = BulletinStore(path=tmp_path / "cognitive_bulletin.jsonl")
         module.set_bulletin_store(bulletin)
-
-        store = _GoalStoreStub([
-            _abandoned_goal("capability_meta", i * 3600) for i in range(1, 5)
-        ])
-        module._loop_detector.set_goal_store(store)
+        for i in range(4):
+            bulletin.create_and_post(
+                entry_type=EntryType.IMPROVEMENT,
+                topic=f"creative_meta:capability_meta:{i}",
+                reason_code="creative_capability_meta",
+                summary=f"advisory {i}",
+                requested_by="creative",
+                metadata={"meta_goal_type": "capability_meta"},
+            )
 
         candidates = [
             _make_meta_goal(MetaGoalType.CAPABILITY_META, "A"),
@@ -327,12 +332,14 @@ class TestCreativeModuleLoopHandling:
         ]
         module._handle_suppressed_loop(candidates)
 
-        from agent_core.bulletin.bulletin_model import EntryType
-        entries = bulletin.get_by_type(EntryType.IMPROVEMENT)
-        # One bulletin entry for the type, even though three candidates were
-        # suppressed.
-        assert len(entries) == 1
-        e = entries[0]
+        # Exactly one suppression entry posted, even though three candidates
+        # were suppressed and four advisories seeded the count.
+        supp = [
+            e for e in bulletin.get_by_type(EntryType.IMPROVEMENT)
+            if e.reason_code == "creative_loop_suppression"
+        ]
+        assert len(supp) == 1
+        e = supp[0]
         assert e.requested_by == "creative"
         assert e.metadata["meta_goal_type"] == "capability_meta"
         assert e.metadata["abandon_count"] == 4
@@ -383,3 +390,125 @@ class TestCreativeModuleLoopHandling:
         # Detector now sees the store passed via facade.
         report = module._loop_detector.detect()
         assert "capability_meta" in report.suppressed_types
+
+
+# =============================================================================
+# Bulletin source (post-R1) -- D3 now measures recurrence from creative
+# advisories, not the dead GoalStore source.
+# =============================================================================
+
+
+@dataclass
+class _BulletinEntryStub:
+    reason_code: str
+    created_at: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class _BulletinStoreStub:
+    """Mimics BulletinStore.get_by_type returning OPEN improvement entries."""
+
+    def __init__(self, entries: List[_BulletinEntryStub]):
+        self._entries = entries
+
+    def get_by_type(self, entry_type) -> List[_BulletinEntryStub]:
+        return list(self._entries)
+
+
+def _creative_advisory(meta_goal_type: str, age_seconds: float,
+                       reason_code: Optional[str] = None) -> _BulletinEntryStub:
+    return _BulletinEntryStub(
+        reason_code=reason_code or f"creative_{meta_goal_type}",
+        created_at=time.time() - age_seconds,
+        metadata={"meta_goal_type": meta_goal_type},
+    )
+
+
+class TestLoopDetectorBulletinSource:
+
+    def test_at_threshold_from_bulletin(self):
+        store = _BulletinStoreStub([
+            _creative_advisory("capability_meta", 3600),
+            _creative_advisory("capability_meta", 7200),
+            _creative_advisory("capability_meta", 14400),
+        ])
+        det = LoopDetector(bulletin_store=store, abandon_threshold=3)
+        report = det.detect()
+        assert "capability_meta" in report.suppressed_types
+        assert report.counts["capability_meta"] == 3
+
+    def test_below_threshold_from_bulletin(self):
+        store = _BulletinStoreStub([
+            _creative_advisory("architectural_meta", 3600),
+            _creative_advisory("architectural_meta", 7200),
+        ])
+        det = LoopDetector(bulletin_store=store, abandon_threshold=3)
+        assert det.detect().suppressed_types == set()
+
+    def test_outside_window_excluded_from_bulletin(self):
+        nine_days = 9 * 86400
+        store = _BulletinStoreStub([
+            _creative_advisory("capability_meta", nine_days + i) for i in range(4)
+        ])
+        det = LoopDetector(bulletin_store=store, window_days=7, abandon_threshold=3)
+        assert det.detect().counts == {}
+
+    def test_suppression_advisory_does_not_self_amplify(self):
+        """The detector's OWN creative_loop_suppression posts must NOT count --
+        else suppression feeds itself and never lifts."""
+        store = _BulletinStoreStub([
+            _creative_advisory("capability_meta", 100,
+                               reason_code="creative_loop_suppression")
+            for _ in range(5)
+        ])
+        det = LoopDetector(bulletin_store=store, abandon_threshold=3)
+        report = det.detect()
+        assert report.counts == {}
+        assert report.suppressed_types == set()
+
+    def test_non_creative_reason_codes_excluded(self):
+        store = _BulletinStoreStub([
+            _BulletinEntryStub("k12_strategy_change", time.time(),
+                               {"meta_goal_type": "capability_meta"}),
+            _BulletinEntryStub("need_material", time.time(),
+                               {"meta_goal_type": "capability_meta"}),
+        ])
+        det = LoopDetector(bulletin_store=store, abandon_threshold=1)
+        assert det.detect().counts == {}
+
+    def test_bulletin_preferred_over_goal_store(self):
+        """When both wired, the live bulletin source wins (goal source is dead)."""
+        goals = _GoalStoreStub([_abandoned_goal("architectural_meta", 3600)
+                                for _ in range(9)])
+        bull = _BulletinStoreStub([_creative_advisory("capability_meta", 3600)
+                                   for _ in range(3)])
+        det = LoopDetector(goal_store=goals, bulletin_store=bull, abandon_threshold=3)
+        report = det.detect()
+        # Counts come from bulletin (capability), not goals (architectural).
+        assert report.counts == {"capability_meta": 3}
+        assert "architectural_meta" not in report.counts
+
+    def test_bulletin_meta_goal_types_match_enum(self):
+        """Guard against string/enum.value drift: the meta_goal_type values the
+        detector keys on must equal MetaGoalType.*.value, or filter_candidates
+        (which uses candidate.goal_type.value) silently never matches."""
+        enum_values = {t.value for t in MetaGoalType}
+        for live_type in ("capability_meta", "architectural_meta", "exploration_meta"):
+            assert live_type in enum_values
+
+    def test_filter_candidates_end_to_end_from_bulletin(self):
+        store = _BulletinStoreStub([
+            _creative_advisory("capability_meta", 3600) for _ in range(3)
+        ])
+        det = LoopDetector(bulletin_store=store, abandon_threshold=3)
+
+        cap = MetaGoal.create(
+            title="x", goal_type=MetaGoalType.CAPABILITY_META,
+            priority=0.7, why_now="", evidence_refs=[], expected_value="",
+        )
+        arch = MetaGoal.create(
+            title="y", goal_type=MetaGoalType.ARCHITECTURAL_META,
+            priority=0.7, why_now="", evidence_refs=[], expected_value="",
+        )
+        kept, suppressed = det.filter_candidates([cap, arch])
+        assert cap in suppressed and arch in kept

@@ -63,7 +63,21 @@ def safe_llm_call(
     try:
         response = llm_fn(prompt)
         if response and response.strip():
-            return response.strip()
+            response = response.strip()
+            # Reasoning journal: every creative LLM thought passes through
+            # here -- capture the prose before parsing strips it down.
+            try:
+                from agent_core.tracing.reasoning_journal import (
+                    get_reasoning_journal,
+                )
+                get_reasoning_journal().record(
+                    source=f"creative.{context_label}",
+                    reasoning=response,
+                    prompt_hint=prompt,
+                )
+            except Exception:
+                pass
+            return response
         logger.warning(f"[{context_label}] LLM returned empty response")
         return None
     except Exception as e:
