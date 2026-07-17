@@ -163,7 +163,7 @@ All config is in `.env` (created by `install.sh`). Nothing is required for basic
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
 | `TELEGRAM_BOT_TOKEN` | *(empty)* | Telegram bot token (optional) |
 | `TELEGRAM_CHAT_ID` | *(empty)* | Your Telegram chat ID (optional) |
-| `NIM_API_KEY` | *(empty)* | NVIDIA NIM API key (optional, for stronger analysis) |
+| `NVIDIA_NIM_API_KEY` | *(empty)* | NVIDIA NIM API key (optional, for stronger analysis) |
 
 ### Optional: Telegram Bot
 
