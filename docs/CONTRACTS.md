@@ -1008,7 +1008,7 @@ How should events be coordinated between modules?
 
 ### Rationale
 
-1. **The tick loop IS ALREADY an aggregator** - roughly 20 phases run sequentially, and all data passes through a single point in `HomeostasisCore._execute_tick()`
+1. **The tick loop IS ALREADY an aggregator** - roughly 21 phases run sequentially, and all data passes through a single point in `HomeostasisCore._execute_tick()`
 2. **Deterministic ordering** - the phases guarantee that a sensor reading is processed BEFORE the mode regulator. An event bus does not guarantee this.
 3. **Threading simplicity** - ADR-002 says "threading, not asyncio". Pub/sub with threading = locks, race conditions. The tick loop = 1 thread + 1 deque for external events.
 4. **5-6 sources, not hundreds** - an event bus pays off with dozens of producers. Maria has 6.

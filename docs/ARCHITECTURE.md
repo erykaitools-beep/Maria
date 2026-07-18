@@ -4,7 +4,7 @@
 Version: 2026-04-07 | 383 Python files | 113,552 lines of code | 3,352 tests
 
 > **[HISTORICAL — 2026-04-07]** This document describes the state as of April 2026 and is
-> NOT current: the code now runs **20 tick phases** (April 2026 had 11; historical) and the
+> NOT current: the code now runs **21 tick phases** (April 2026 had 11; historical) and the
 > test suite has grown to **7,145 collected** (up from 3,352). For current module and phase
 > status see **`docs/SYSTEM_STATUS.md`**. Do not treat this file as runtime truth until it is
 > regenerated.
@@ -94,7 +94,7 @@ maria/
 **Files:**
 | File | Description |
 |------|------|
-| core.py | HomeostasisCore - 1Hz loop with 20 tick phases (April 2026 had 11; historical - see docs/SYSTEM_STATUS.md) |
+| core.py | HomeostasisCore - 1Hz loop with 21 tick phases (April 2026 had 11; historical - see docs/SYSTEM_STATUS.md) |
 | state_model.py | Mode (ACTIVE/REDUCED/SLEEP/SURVIVAL), ResourceMetrics, SystemState |
 | interpreter.py | Converts metrics into semantic state (EMA smoothing) |
 | constraints.py | Threshold validation, alert generation |
@@ -106,7 +106,7 @@ maria/
 | snapshot.py | Atomic state snapshots |
 | api.py | HomeostasisInterface + EventBus |
 
-**Tick phases (1Hz):** *(historical list up to phase 11; the code now runs 20 phases plus sub-phases 8.5/9.5/9.6/9.7 — full list: docs/SYSTEM_STATUS.md)*
+**Tick phases (1Hz):** *(historical list up to phase 11; the code now runs 21 phases plus sub-phases 8.5/9.5/9.6/9.7 — full list: docs/SYSTEM_STATUS.md)*
 
 | Phase | What it does | Frequency |
 |------|---------|---------------|

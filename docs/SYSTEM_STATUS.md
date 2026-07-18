@@ -110,7 +110,7 @@ real data on "how this will actually work" will come from. We return to 2.0 once
 ## Stale docs — do NOT treat as runtime truth
 
 - `docs/ARCHITECTURE.md` — April 2026; claims 11 phases / 3352 tests. The code
-  actually runs 20 phases (Phase 20 = conversation condense, 06-21) and 7,145
+  actually runs 21 phases (Phase 20 = conversation condense, 06-21) and 7,145
   collected tests. Historical until regenerated.
 - Web UI `_JSONL_DATA_FLOW` (`maria_ui/app.py:2469`) — a manual map that omits,
   among others, `self_state_snapshots`, `maria_task_queue`, `creative_events`,
