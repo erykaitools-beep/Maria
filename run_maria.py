@@ -10,7 +10,8 @@ Uruchamia homeostasis tick loop (1Hz) z:
 Usage:
     python run_maria.py
 
-Systemd: maria.service (ExecStart=/home/maria/maria/venv/bin/python run_maria.py)
+Note: the shipped systemd unit (scripts/maria.service) runs the unified
+launcher `maria.py`; run_maria.py is a headless development entry point.
 Signals: SIGTERM/SIGINT -> graceful shutdown
 """
 

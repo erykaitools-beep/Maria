@@ -1,76 +1,76 @@
-# M.A.R.I.A. - Specyfikacja Percepcji Wizualnej (Oko)
+# M.A.R.I.A. - Visual Perception Specification (The Eye)
 
-> **Data utworzenia:** 2026-02-01
-> **Status:** Architektura do opracowania
-> **Filozofia:** Oko jako organ, nie urzadzenie - graceful degradation zamiast 0/1
-> **Podejscie:** Wolniej, ale dokladniej. Kazda faza w pelni przetestowana.
+> **Created:** 2026-02-01
+> **Status:** Architecture to be developed
+> **Philosophy:** The eye as an organ, not a device - graceful degradation instead of 0/1
+> **Approach:** Slower, but more thorough. Every phase fully tested.
 
 ---
 
-## 1. Zasada nadrzedna: Biologiczna inspiracja
+## 1. Guiding principle: Biological inspiration
 
-### Ludzkie oko vs. kamera cyfrowa
+### The human eye vs. a digital camera
 
-| Aspekt | Kamera cyfrowa | Ludzkie oko | M.A.R.I.A. Vision |
+| Aspect | Digital camera | Human eye | M.A.R.I.A. Vision |
 |--------|----------------|-------------|-------------------|
-| Awaria | 0 lub 1 (dziala/nie dziala) | Graceful degradation | Graceful degradation |
-| Adaptacja | Brak / manualna | Automatyczna (zrenica) | Multi-mode adaptation |
-| Przetwarzanie | Surowy obraz | Wstepne w siatkówce | Edge preprocessing |
-| Uwaga | Caly kadr rowny | Fovea (centrum ostre) | Attention mechanism |
-| Bol | Brak | Sygnalizuje problem | Health alerts |
+| Failure | 0 or 1 (works/doesn't work) | Graceful degradation | Graceful degradation |
+| Adaptation | None / manual | Automatic (pupil) | Multi-mode adaptation |
+| Processing | Raw image | Pre-processed in the retina | Edge preprocessing |
+| Attention | Entire frame equal | Fovea (sharp center) | Attention mechanism |
+| Pain | None | Signals a problem | Health alerts |
 
-### Graceful Degradation - kluczowa zasada
+### Graceful Degradation - the key principle
 
 ```
 FULL VISION (100%)
     |
-    v uszkodzenie koloru
+    v color damage
 GRAYSCALE VISION (80%)
     |
-    v uszkodzenie rozdzielczosci
+    v resolution damage
 LOW-RES VISION (60%)
     |
-    v uszkodzenie ostrosci
+    v sharpness damage
 BLUR DETECTION (40%)
     |
-    v uszkodzenie streamu
+    v stream damage
 FRAME-BY-FRAME (20%)
     |
-    v uszkodzenie sensora
+    v sensor damage
 LIGHT/DARK ONLY (5%)
     |
-    v calkowita awaria
-BLIND MODE (0%) - tylko inne zmysly
+    v total failure
+BLIND MODE (0%) - other senses only
 ```
 
-Maria NIGDY nie mowi "kamera nie dziala" - mowi "widze bardzo slabo" lub "widze tylko swiatlo".
+Maria NEVER says "the camera is broken" - she says "I see very poorly" or "I only see light".
 
 ---
 
-## 2. Architektura warstwowa
+## 2. Layered architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    MARIA CONSCIOUSNESS                       │
-│              (Unified Perception - jedno "ja")               │
+│                     MARIA CONSCIOUSNESS                     │
+│              (Unified Perception - one "self")              │
 ├─────────────────────────────────────────────────────────────┤
-│                    VISION CORTEX                             │
-│     Integracja wszystkich kanalow wizualnych                 │
-│     Attention mechanism, memory binding                      │
+│                        VISION CORTEX                        │
+│     Integration of all visual channels                      │
+│     Attention mechanism, memory binding                     │
 ├──────────────┬──────────────┬──────────────┬────────────────┤
-│   FACE       │   SCENE      │    OCR       │    MOTION      │
-│   MODULE     │   MODULE     │   MODULE     │    MODULE      │
+│   FACE       │   SCENE      │   OCR        │   MOTION       │
+│   MODULE     │   MODULE     │   MODULE     │   MODULE       │
 │              │              │              │                │
-│  Twarze,     │  Obiekty,    │  Tekst,      │  Ruch,         │
-│  emocje,     │  przestrzen, │  dokumenty,  │  gesty,        │
-│  identyfikacja│ kontekst    │  ekrany      │  niebezpieczenstwo│
+│  Faces,      │  Objects,    │  Text,       │  Motion,       │
+│  emotions,   │  space,      │  documents,  │  gestures,     │
+│  identity    │  context     │  screens     │  danger        │
 ├──────────────┴──────────────┴──────────────┴────────────────┤
-│                    PREPROCESSING LAYER                       │
-│     Normalizacja, denoising, color correction                │
-│     Quality assessment, degradation detection                │
+│                     PREPROCESSING LAYER                     │
+│     Normalization, denoising, color correction              │
+│     Quality assessment, degradation detection               │
 ├─────────────────────────────────────────────────────────────┤
-│                    SENSOR ABSTRACTION                        │
-│     Unified interface for all camera types                   │
+│                     SENSOR ABSTRACTION                      │
+│     Unified interface for all camera types                  │
 ├──────────┬──────────┬──────────┬──────────┬─────────────────┤
 │  USB     │  IP/RTSP │  RPi     │  Thermal │  Future         │
 │  Webcam  │  Camera  │  Camera  │  IR      │  sensors...     │
@@ -81,47 +81,47 @@ Maria NIGDY nie mowi "kamera nie dziala" - mowi "widze bardzo slabo" lub "widze 
 
 ## 3. Sensor Abstraction Layer
 
-### Interfejs bazowy (protocol)
+### Base interface (protocol)
 
 ```python
 class VisionSensor(Protocol):
     """
-    Abstrakcyjny interfejs dla wszystkich sensorow wizualnych.
-    Kazdy sensor musi implementowac te metody.
+    Abstract interface for all vision sensors.
+    Every sensor must implement these methods.
     """
 
     @property
     def sensor_id(self) -> str:
-        """Unikalny identyfikator sensora."""
+        """Unique sensor identifier."""
         ...
 
     @property
     def capabilities(self) -> SensorCapabilities:
-        """Co sensor potrafi (rozdzielczosc, FPS, tryby)."""
+        """What the sensor can do (resolution, FPS, modes)."""
         ...
 
     @property
     def health(self) -> SensorHealth:
-        """Stan zdrowia sensora (0.0-1.0 + szczegoly)."""
+        """Sensor health state (0.0-1.0 + details)."""
         ...
 
     def capture_frame(self) -> Optional[Frame]:
         """
-        Pobierz pojedyncza klatke.
-        Zwraca None jesli sensor calkowicie niesprawny.
+        Capture a single frame.
+        Returns None if the sensor is completely non-functional.
         """
         ...
 
     def get_stream(self) -> Iterator[Frame]:
-        """Generator klatek (dla ciaglego streamu)."""
+        """Frame generator (for a continuous stream)."""
         ...
 
     def set_mode(self, mode: VisionMode) -> bool:
-        """Zmien tryb (dzien/noc/IR/etc)."""
+        """Change mode (day/night/IR/etc)."""
         ...
 
     def diagnose(self) -> DiagnosticReport:
-        """Pelna diagnostyka sensora."""
+        """Full sensor diagnostics."""
         ...
 ```
 
@@ -130,9 +130,9 @@ class VisionSensor(Protocol):
 ```python
 @dataclass
 class SensorCapabilities:
-    """Co sensor potrafi."""
+    """What the sensor can do."""
 
-    # Rozdzielczosc
+    # Resolution
     max_resolution: Tuple[int, int]  # (width, height)
     supported_resolutions: List[Tuple[int, int]]
 
@@ -140,17 +140,17 @@ class SensorCapabilities:
     max_fps: float
     supported_fps: List[float]
 
-    # Tryby
+    # Modes
     supported_modes: List[VisionMode]
     # VisionMode: DAYLIGHT, LOWLIGHT, NIGHT, IR, THERMAL, HDR
 
-    # Funkcje
+    # Features
     has_autofocus: bool
     has_zoom: bool
     zoom_range: Optional[Tuple[float, float]]
     has_pan_tilt: bool
 
-    # Jakosciowe
+    # Quality
     dynamic_range_db: float
     low_light_sensitivity: float  # 0-1
     color_depth: int  # bits
@@ -162,25 +162,25 @@ class SensorCapabilities:
 @dataclass
 class SensorHealth:
     """
-    Stan zdrowia sensora - klucz do graceful degradation.
+    Sensor health state - the key to graceful degradation.
 
-    Zamiast "dziala/nie dziala" mamy spectrum stanow.
+    Instead of "works/doesn't work" we have a spectrum of states.
     """
 
-    # Ogolny stan (0.0 = martwy, 1.0 = idealny)
+    # Overall state (0.0 = dead, 1.0 = perfect)
     overall: float
 
-    # Szczegolowe komponenty
-    connection: float      # 0-1: polaczenie fizyczne/sieciowe
-    stream: float         # 0-1: ciaglosc streamu
-    resolution: float     # 0-1: vs maksymalna
-    color: float          # 0-1: poprawnosc kolorow
-    focus: float          # 0-1: ostrosc obrazu
-    exposure: float       # 0-1: poprawnosc ekspozycji
-    noise: float          # 0-1: poziom szumu (1=brak szumu)
-    latency_ms: float     # opoznienie
+    # Detailed components
+    connection: float      # 0-1: physical/network connection
+    stream: float         # 0-1: stream continuity
+    resolution: float     # 0-1: vs maximum
+    color: float          # 0-1: color correctness
+    focus: float          # 0-1: image sharpness
+    exposure: float       # 0-1: exposure correctness
+    noise: float          # 0-1: noise level (1=no noise)
+    latency_ms: float     # latency
 
-    # Problemy
+    # Problems
     issues: List[SensorIssue]
     # SensorIssue: DISCONNECTED, LOW_FPS, OVEREXPOSED,
     #              UNDEREXPOSED, BLURRY, NOISY, FROZEN,
@@ -188,14 +188,14 @@ class SensorHealth:
 
     def to_human_description(self) -> str:
         """
-        Opis dla Marii - jak mowi o swoim wzroku.
+        Description for Maria - how she talks about her sight.
 
         Examples:
-            overall=1.0: "Widze wyraznie i ostro"
-            overall=0.7: "Widze, ale obraz jest troche rozmyty"
-            overall=0.4: "Widze bardzo slabo, duzo szumu"
-            overall=0.1: "Ledwo rozpoznaje swiatlo od ciemnosci"
-            overall=0.0: "Nie widze nic - moje oko nie dziala"
+            overall=1.0: "I see clearly and sharply"
+            overall=0.7: "I can see, but the image is a bit blurry"
+            overall=0.4: "I see very poorly, a lot of noise"
+            overall=0.1: "I can barely tell light from dark"
+            overall=0.0: "I see nothing - my eye is not working"
         """
         ...
 ```
@@ -204,44 +204,44 @@ class SensorHealth:
 
 ## 4. Preprocessing Layer
 
-### Cel: Normalizacja i ocena jakosci
+### Purpose: Normalization and quality assessment
 
 ```python
 class VisionPreprocessor:
     """
-    Wstepne przetwarzanie obrazu - jak siatkówka.
+    Image pre-processing - like the retina.
 
-    Zadania:
-    1. Normalizacja (rozdzielczosc, format, orientacja)
-    2. Korekcja (balans bieli, ekspozycja, denoising)
-    3. Ocena jakosci (czy obraz nadaje sie do analizy)
-    4. Detekcja degradacji (co jest nie tak)
+    Tasks:
+    1. Normalization (resolution, format, orientation)
+    2. Correction (white balance, exposure, denoising)
+    3. Quality assessment (whether the image is suitable for analysis)
+    4. Degradation detection (what is wrong)
     """
 
     def process(self, raw_frame: Frame) -> ProcessedFrame:
         """
-        Przetworz surowa klatke.
+        Process a raw frame.
 
         Returns:
-            ProcessedFrame z:
-            - normalized_image: znormalizowany obraz
+            ProcessedFrame with:
+            - normalized_image: the normalized image
             - quality_score: 0-1
-            - degradation_flags: co jest nie tak
-            - processing_time_ms: czas przetwarzania
+            - degradation_flags: what is wrong
+            - processing_time_ms: processing time
         """
         ...
 
     def assess_quality(self, frame: Frame) -> QualityAssessment:
         """
-        Ocen jakosc obrazu bez modyfikacji.
+        Assess image quality without modification.
 
-        Metryki:
-        - sharpness: ostrosc (Laplacian variance)
-        - brightness: jasnosc (mean luminance)
-        - contrast: kontrast (std dev)
-        - noise_level: poziom szumu
-        - color_balance: balans kolorow
-        - motion_blur: rozmycie ruchowe
+        Metrics:
+        - sharpness: sharpness (Laplacian variance)
+        - brightness: brightness (mean luminance)
+        - contrast: contrast (std dev)
+        - noise_level: noise level
+        - color_balance: color balance
+        - motion_blur: motion blur
         """
         ...
 ```
@@ -251,61 +251,61 @@ class VisionPreprocessor:
 ```python
 class DegradationDetector:
     """
-    Wykrywanie i klasyfikacja problemow z obrazem.
+    Detection and classification of image problems.
 
-    Pozwala Marii wiedziec CO jest nie tak,
-    nie tylko ZE cos jest nie tak.
+    Lets Maria know WHAT is wrong,
+    not just THAT something is wrong.
     """
 
     def detect(self, frame: Frame) -> List[Degradation]:
         """
-        Wykryj wszystkie problemy z obrazem.
+        Detect all problems with the image.
 
         Degradation types:
-        - TOTAL_BLACK: calkowita ciemnosc
-        - TOTAL_WHITE: przeswietlenie
-        - FROZEN: obraz zamrozony (identyczny do poprzedniego)
-        - PARTIAL_FRAME: niekompletna klatka
-        - HEAVY_NOISE: duzo szumu
-        - MOTION_BLUR: rozmycie ruchowe
-        - FOCUS_BLUR: rozmycie ostrosci
-        - COLOR_SHIFT: przesuniecie kolorow
-        - LOW_CONTRAST: niski kontrast
-        - ARTIFACTS: artefakty kompresji
-        - OCCLUSION: cos zaslania obiektyw
+        - TOTAL_BLACK: complete darkness
+        - TOTAL_WHITE: overexposure
+        - FROZEN: frozen image (identical to the previous one)
+        - PARTIAL_FRAME: incomplete frame
+        - HEAVY_NOISE: a lot of noise
+        - MOTION_BLUR: motion blur
+        - FOCUS_BLUR: focus blur
+        - COLOR_SHIFT: color shift
+        - LOW_CONTRAST: low contrast
+        - ARTIFACTS: compression artifacts
+        - OCCLUSION: something is blocking the lens
         """
         ...
 
     def suggest_recovery(self, degradation: Degradation) -> RecoveryAction:
         """
-        Zaproponuj jak naprawic problem.
+        Suggest how to fix the problem.
 
         RecoveryAction:
-        - RETRY_CAPTURE: sprobuj ponownie
-        - SWITCH_MODE: zmien tryb (np. na night)
-        - REDUCE_RESOLUTION: zmniejsz rozdzielczosc
-        - INCREASE_EXPOSURE: zwieksz ekspozycje
-        - CLEAN_LENS: powiadom o zabrudzeniu obiektywu
-        - RESTART_SENSOR: zrestartuj sensor
-        - FALLBACK_SENSOR: przelacz na zapasowy sensor
-        - ACCEPT_DEGRADED: zaakceptuj gorsza jakosc
+        - RETRY_CAPTURE: try again
+        - SWITCH_MODE: change mode (e.g. to night)
+        - REDUCE_RESOLUTION: lower the resolution
+        - INCREASE_EXPOSURE: increase exposure
+        - CLEAN_LENS: notify about a dirty lens
+        - RESTART_SENSOR: restart the sensor
+        - FALLBACK_SENSOR: switch to a backup sensor
+        - ACCEPT_DEGRADED: accept lower quality
         """
         ...
 ```
 
 ---
 
-## 5. Vision Modules (wymienny backend AI)
+## 5. Vision Modules (swappable AI backend)
 
-### Abstrakcyjny interfejs
+### Abstract interface
 
 ```python
 class VisionModule(Protocol):
     """
-    Bazowy interfejs dla modulow analizy wizualnej.
+    Base interface for vision-analysis modules.
 
-    Kazdy modul (Face, Scene, OCR, Motion) implementuje
-    ten interfejs, ale z wlasnym OutputType.
+    Every module (Face, Scene, OCR, Motion) implements
+    this interface, but with its own OutputType.
     """
 
     @property
@@ -313,12 +313,12 @@ class VisionModule(Protocol):
 
     @property
     def required_quality(self) -> float:
-        """Minimalna jakosc obrazu do dzialania (0-1)."""
+        """Minimum image quality required to operate (0-1)."""
         ...
 
     @property
     def can_work_degraded(self) -> bool:
-        """Czy modul moze dzialac z gorszym obrazem."""
+        """Whether the module can operate with a degraded image."""
         ...
 
     def analyze(
@@ -327,14 +327,14 @@ class VisionModule(Protocol):
         context: Optional[VisionContext] = None
     ) -> ModuleOutput:
         """
-        Analizuj obraz.
+        Analyze the image.
 
         Args:
-            frame: Przetworzony obraz
-            context: Kontekst (poprzednie klatki, znane osoby, etc.)
+            frame: The processed image
+            context: Context (previous frames, known people, etc.)
 
         Returns:
-            Wynik analizy (specyficzny dla modulu)
+            Analysis result (module-specific)
         """
         ...
 
@@ -344,9 +344,9 @@ class VisionModule(Protocol):
         degradations: List[Degradation]
     ) -> Optional[ModuleOutput]:
         """
-        Analizuj mimo degradacji - graceful degradation.
+        Analyze despite degradation - graceful degradation.
 
-        Moze zwrocic czesciowy wynik lub None.
+        May return a partial result or None.
         """
         ...
 ```
@@ -356,44 +356,44 @@ class VisionModule(Protocol):
 ```python
 @dataclass
 class FaceModuleOutput:
-    """Wynik analizy twarzy."""
+    """Face analysis result."""
 
     faces_detected: int
     faces: List[FaceData]
 
     @dataclass
     class FaceData:
-        # Lokalizacja
+        # Location
         bounding_box: Tuple[int, int, int, int]
         landmarks: Optional[Dict[str, Tuple[int, int]]]
 
-        # Identyfikacja
+        # Identification
         identity: Optional[str]  # "operator", "unknown", None
         identity_confidence: float
 
-        # Emocje (opcjonalne)
+        # Emotions (optional)
         emotion: Optional[str]
         emotion_confidence: float
 
-        # Uwaga
+        # Attention
         looking_at_camera: bool
         eye_contact: bool
 
-        # Jakosc detekcji
+        # Detection quality
         detection_confidence: float
 
 class FaceModule(VisionModule):
     """
-    Modul rozpoznawania twarzy.
+    Face recognition module.
 
     Backend options:
     - Local: face_recognition library
     - Local: InsightFace
-    - Ollama: LLaVA dla opisu
-    - External: dedykowany serwer
+    - Ollama: LLaVA for description
+    - External: dedicated server
     """
 
-    required_quality = 0.5  # Moze dzialac z gorszym obrazem
+    required_quality = 0.5  # Can operate with a degraded image
     can_work_degraded = True
 
     def __init__(self, backend: FaceBackend):
@@ -401,15 +401,15 @@ class FaceModule(VisionModule):
         self.known_faces: Dict[str, FaceEmbedding] = {}
 
     def register_face(self, name: str, images: List[Frame]) -> bool:
-        """Zarejestruj nowa osobe."""
+        """Register a new person."""
         ...
 
     def analyze_degraded(self, frame, degradations) -> Optional[FaceModuleOutput]:
         """
         Graceful degradation:
-        - Wysoki szum: tylko detekcja, bez identyfikacji
-        - Niski kontrast: zwieksz kontrast przed analiza
-        - Motion blur: uzyj poprzedniej klatki jako referencji
+        - High noise: detection only, no identification
+        - Low contrast: increase contrast before analysis
+        - Motion blur: use the previous frame as a reference
         """
         ...
 ```
@@ -419,13 +419,13 @@ class FaceModule(VisionModule):
 ```python
 @dataclass
 class SceneModuleOutput:
-    """Wynik analizy sceny."""
+    """Scene analysis result."""
 
-    # Opis sceny
+    # Scene description
     scene_type: str  # "living_room", "office", "outdoor", etc.
     scene_description: str  # Natural language
 
-    # Obiekty
+    # Objects
     objects: List[DetectedObject]
 
     @dataclass
@@ -435,27 +435,27 @@ class SceneModuleOutput:
         bounding_box: Tuple[int, int, int, int]
         attributes: Dict[str, Any]  # color, size, state
 
-    # Przestrzen
+    # Space
     depth_estimation: Optional[np.ndarray]
     layout: Optional[RoomLayout]
 
-    # Kontekst
+    # Context
     lighting: str  # "bright", "dim", "dark"
     time_of_day_guess: str  # "day", "evening", "night"
     activity_detected: Optional[str]  # "person_sitting", "movement"
 
 class SceneModule(VisionModule):
     """
-    Modul analizy sceny.
+    Scene analysis module.
 
     Backend options:
-    - Ollama LLaVA: opis naturalny
-    - YOLO: detekcja obiektow
+    - Ollama LLaVA: natural-language description
+    - YOLO: object detection
     - Depth estimation models
-    - Kombinacja powyzszych
+    - A combination of the above
     """
 
-    required_quality = 0.3  # Moze dzialac nawet z bardzo slabym obrazem
+    required_quality = 0.3  # Can operate even with a very poor image
     can_work_degraded = True
 ```
 
@@ -464,7 +464,7 @@ class SceneModule(VisionModule):
 ```python
 @dataclass
 class OCRModuleOutput:
-    """Wynik analizy tekstu."""
+    """Text analysis result."""
 
     text_regions: List[TextRegion]
     full_text: str
@@ -476,26 +476,26 @@ class OCRModuleOutput:
         confidence: float
         language: str
 
-        # Typ tekstu
+        # Text type
         text_type: str  # "printed", "handwritten", "screen"
 
-        # Formatowanie (jesli wykryte)
+        # Formatting (if detected)
         is_heading: bool
         is_list_item: bool
 
 class OCRModule(VisionModule):
     """
-    Modul OCR.
+    OCR module.
 
     Backend options:
     - Tesseract (local)
     - EasyOCR (local)
     - PaddleOCR (local)
-    - Ollama LLaVA (dla opisu dokumentow)
+    - Ollama LLaVA (for document description)
     """
 
-    required_quality = 0.6  # Potrzebuje lepszej jakosci
-    can_work_degraded = False  # OCR bez jakosci nie ma sensu
+    required_quality = 0.6  # Needs higher quality
+    can_work_degraded = False  # OCR without quality makes no sense
 ```
 
 ### Motion Module
@@ -503,12 +503,12 @@ class OCRModule(VisionModule):
 ```python
 @dataclass
 class MotionModuleOutput:
-    """Wynik analizy ruchu."""
+    """Motion analysis result."""
 
     motion_detected: bool
     motion_level: float  # 0-1
 
-    # Regiony ruchu
+    # Motion regions
     motion_regions: List[MotionRegion]
 
     @dataclass
@@ -517,30 +517,30 @@ class MotionModuleOutput:
         velocity: Tuple[float, float]  # pixels/frame
         direction: float  # degrees
 
-    # Klasyfikacja
+    # Classification
     motion_type: str  # "person_walking", "object_moving", "camera_shake"
 
-    # Bezpieczenstwo
+    # Safety
     is_suspicious: bool
     alert_level: str  # "none", "attention", "warning", "danger"
 
 class MotionModule(VisionModule):
     """
-    Modul detekcji ruchu.
+    Motion detection module.
 
-    Techniki:
+    Techniques:
     - Frame differencing
     - Optical flow
     - Background subtraction
     """
 
-    required_quality = 0.2  # Dziala nawet z bardzo slabym obrazem
+    required_quality = 0.2  # Works even with a very poor image
     can_work_degraded = True
 ```
 
 ---
 
-## 6. Vision Cortex - integracja
+## 6. Vision Cortex - integration
 
 ### Unified Vision Output
 
@@ -548,37 +548,37 @@ class MotionModule(VisionModule):
 @dataclass
 class VisionPercept:
     """
-    Zunifikowana percepcja wizualna - to widzi Maria.
+    Unified visual perception - this is what Maria sees.
 
-    Integruje wyniki wszystkich modulow w jedna,
-    spojne reprezentacje tego co Maria "widzi".
+    Integrates the results of all modules into a single,
+    coherent representation of what Maria "sees".
     """
 
     timestamp: float
 
-    # Stan wzroku
+    # Vision state
     vision_health: SensorHealth
     vision_mode: VisionMode
     quality: float
 
-    # Wyniki modulow (opcjonalne - zaleznie od jakosci)
+    # Module results (optional - depending on quality)
     faces: Optional[FaceModuleOutput]
     scene: Optional[SceneModuleOutput]
     text: Optional[OCRModuleOutput]
     motion: Optional[MotionModuleOutput]
 
-    # Podsumowanie dla swiadomosci
+    # Summary for consciousness
     summary: str  # Natural language summary
-    attention_point: Optional[Tuple[int, int]]  # Gdzie patrzec
+    attention_point: Optional[Tuple[int, int]]  # Where to look
 
-    # Alerty
+    # Alerts
     alerts: List[VisionAlert]
 
     def to_consciousness_input(self) -> Dict[str, Any]:
         """
-        Przeksztalc na input dla Maria Consciousness.
+        Transform into input for Maria Consciousness.
 
-        Uzywa dual format: human + technical.
+        Uses a dual format: human + technical.
         """
         human = self._generate_human_description()
         technical = self._generate_technical_data()
@@ -590,12 +590,12 @@ class VisionPercept:
 
     def _generate_human_description(self) -> str:
         """
-        Jak Maria opisuje co widzi.
+        How Maria describes what she sees.
 
         Examples:
-            "Widze operatora siedzacego przy biurku. Wyglada na skupionego."
-            "Widze cos sie rusza w rogu pokoju, ale obraz jest rozmyty."
-            "Widze bardzo slabo - chyba jest ciemno lub cos zaslania mi obiektyw."
+            "I see the operator sitting at the desk. He looks focused."
+            "I see something moving in the corner of the room, but the image is blurry."
+            "I see very poorly - it's probably dark or something is blocking my lens."
         """
         ...
 ```
@@ -605,12 +605,12 @@ class VisionPercept:
 ```python
 class VisionCortex:
     """
-    Centralny integrator percepcji wizualnej.
+    Central integrator of visual perception.
 
-    Koordynuje:
-    - Sensory (camera abstraction)
+    Coordinates:
+    - Sensors (camera abstraction)
     - Preprocessing
-    - Moduly analizy
+    - Analysis modules
     - Attention mechanism
     - Memory binding
     """
@@ -627,31 +627,31 @@ class VisionCortex:
         self.attention = attention
         self.preprocessor = VisionPreprocessor()
 
-        # Stan
+        # State
         self._last_percept: Optional[VisionPercept] = None
         self._health_history: List[SensorHealth] = []
 
     def perceive(self) -> VisionPercept:
         """
-        Glowna funkcja percepcji - jeden "tick" widzenia.
+        The main perception function - one "tick" of seeing.
 
         Pipeline:
-        1. Wybierz najlepszy sensor
-        2. Pobierz klatke
-        3. Preprocessing + ocena jakosci
-        4. Uruchom moduly (rownolegle, z uwzglednieniem jakosci)
-        5. Zintegruj wyniki
-        6. Zaktualizuj attention
-        7. Zwroc VisionPercept
+        1. Select the best sensor
+        2. Capture a frame
+        3. Preprocessing + quality assessment
+        4. Run the modules (in parallel, taking quality into account)
+        5. Integrate the results
+        6. Update attention
+        7. Return VisionPercept
         """
         ...
 
     def _select_best_sensor(self) -> VisionSensor:
         """
-        Wybierz najlepszy dzialajacy sensor.
+        Select the best working sensor.
 
-        Graceful degradation: jesli glowny nie dziala,
-        przelacz na zapasowy.
+        Graceful degradation: if the primary one fails,
+        switch to a backup.
         """
         ...
 
@@ -661,12 +661,12 @@ class VisionCortex:
         quality: float
     ) -> Dict[str, ModuleOutput]:
         """
-        Uruchom moduly adaptacyjnie - zalezne od jakosci.
+        Run the modules adaptively - depending on quality.
 
-        Wysoka jakosc: wszystkie moduly
-        Srednia: podstawowe moduly
-        Niska: tylko motion detection
-        Bardzo niska: tylko light/dark detection
+        High quality: all modules
+        Medium: basic modules
+        Low: motion detection only
+        Very low: light/dark detection only
         """
         ...
 ```
@@ -675,34 +675,34 @@ class VisionCortex:
 
 ## 7. Vision Modes
 
-### Tryby pracy kamery
+### Camera operating modes
 
 ```python
 class VisionMode(Enum):
-    """Tryby pracy systemu wizualnego."""
+    """Operating modes of the vision system."""
 
-    # Standardowe
-    DAYLIGHT = "daylight"          # Normalne oswietlenie
-    LOWLIGHT = "lowlight"          # Slabe oswietlenie (wzmocnienie)
-    NIGHT = "night"                # Tryb nocny (IR / long exposure)
+    # Standard
+    DAYLIGHT = "daylight"          # Normal lighting
+    LOWLIGHT = "lowlight"          # Low lighting (amplification)
+    NIGHT = "night"                # Night mode (IR / long exposure)
 
-    # Specjalne
+    # Special
     HDR = "hdr"                    # High Dynamic Range
-    THERMAL = "thermal"            # Kamera termowizyjna
-    IR = "ir"                      # Podczerwien
+    THERMAL = "thermal"            # Thermal camera
+    IR = "ir"                      # Infrared
 
-    # Adaptacyjne
-    AUTO = "auto"                  # Automatyczny dobor
-    MOTION_PRIORITY = "motion"     # Priorytet detekcji ruchu (wysoki FPS)
-    DETAIL_PRIORITY = "detail"     # Priorytet szczegulow (wysoka rozdzielczosc)
+    # Adaptive
+    AUTO = "auto"                  # Automatic selection
+    MOTION_PRIORITY = "motion"     # Motion detection priority (high FPS)
+    DETAIL_PRIORITY = "detail"     # Detail priority (high resolution)
 
 class VisionModeManager:
     """
-    Zarzadzanie trybami - automatyczna adaptacja.
+    Mode management - automatic adaptation.
     """
 
     def assess_conditions(self, frame: Frame) -> LightingConditions:
-        """Ocen warunki oswietleniowe."""
+        """Assess lighting conditions."""
         ...
 
     def recommend_mode(
@@ -711,12 +711,12 @@ class VisionModeManager:
         task: VisionTask
     ) -> VisionMode:
         """
-        Zaproponuj optymalny tryb.
+        Suggest the optimal mode.
 
-        Np.:
-        - Ciemno + motion detection = NIGHT + MOTION_PRIORITY
-        - Jasno + OCR = DAYLIGHT + DETAIL_PRIORITY
-        - Bardzo jasno = HDR
+        E.g.:
+        - Dark + motion detection = NIGHT + MOTION_PRIORITY
+        - Bright + OCR = DAYLIGHT + DETAIL_PRIORITY
+        - Very bright = HDR
         """
         ...
 
@@ -727,9 +727,9 @@ class VisionModeManager:
         to_mode: VisionMode
     ) -> bool:
         """
-        Plynne przejscie miedzy trybami.
+        Smooth transition between modes.
 
-        Unika nagłych zmian jasnosci ktore moga "oslepic".
+        Avoids sudden brightness changes that could "blind".
         """
         ...
 ```
@@ -738,21 +738,21 @@ class VisionModeManager:
 
 ## 8. Attention Mechanism
 
-### Inspiracja biologiczna
+### Biological inspiration
 
 ```python
 class AttentionMechanism:
     """
-    Mechanizm uwagi - jak fovea w oku.
+    Attention mechanism - like the fovea in the eye.
 
-    Biologiczne oko nie przetwarza calego pola widzenia
-    z ta sama dokladnoscia - centrum jest ostre (fovea),
-    peryferia sa rozmyte ale wykrywaja ruch.
+    The biological eye does not process the entire field of view
+    with the same precision - the center is sharp (fovea),
+    the periphery is blurry but detects motion.
 
-    Implementacja:
-    - Attention point: gdzie Maria "patrzy"
-    - Saliency map: co przyciaga uwage
-    - Priority queue: co analizowac najpierw
+    Implementation:
+    - Attention point: where Maria "looks"
+    - Saliency map: what draws attention
+    - Priority queue: what to analyze first
     """
 
     def __init__(self):
@@ -762,14 +762,14 @@ class AttentionMechanism:
 
     def compute_saliency(self, frame: Frame) -> np.ndarray:
         """
-        Oblicz mape istotnosci.
+        Compute the saliency map.
 
-        Co przyciaga uwage:
-        - Ruch (najwyzszy priorytet)
-        - Twarze
-        - Tekst
-        - Jasne/kontrastowe regiony
-        - Nieoczekiwane zmiany
+        What draws attention:
+        - Motion (highest priority)
+        - Faces
+        - Text
+        - Bright/high-contrast regions
+        - Unexpected changes
         """
         ...
 
@@ -780,47 +780,47 @@ class AttentionMechanism:
         context: VisionContext
     ) -> Tuple[int, int]:
         """
-        Zaktualizuj punkt uwagi.
+        Update the attention point.
 
-        Bierze pod uwage:
+        Takes into account:
         - Saliency map
-        - Wykryte obiekty/twarze
-        - Kontekst (np. operator mowil, wiec patrz na niego)
-        - Historia (nie skakaj chaotycznie)
+        - Detected objects/faces
+        - Context (e.g. the operator spoke, so look at him)
+        - History (don't jump around chaotically)
         """
         ...
 
     def get_foveal_region(self) -> Tuple[int, int, int, int]:
         """
-        Pobierz region wysokiej ostrosci (centrum uwagi).
+        Get the high-sharpness region (center of attention).
 
-        Ten region jest analizowany z wieksza dokladnoscia.
+        This region is analyzed with greater precision.
         """
         ...
 ```
 
 ---
 
-## 9. Integracja z Maria Consciousness
+## 9. Integration with Maria Consciousness
 
 ### VisionPercept -> Unified Perception
 
 ```python
 class VisionPerceptionAdapter:
     """
-    Adapter integrujacy VisionCortex z Maria Consciousness.
+    Adapter integrating VisionCortex with Maria Consciousness.
 
-    Przeksztalca VisionPercept na format zgodny z
-    Unified Perception z CONSCIOUSNESS_SPEC.md.
+    Transforms VisionPercept into a format compatible with
+    the Unified Perception from CONSCIOUSNESS_SPEC.md.
     """
 
     def adapt(self, percept: VisionPercept) -> Dict[str, Any]:
         """
-        Przeksztalc percepcje wizualna na input dla swiadomosci.
+        Transform visual perception into input for consciousness.
 
         Output format (dual):
         {
-            "human": "Widze operatora przy biurku, wyglada na zajętego.",
+            "human": "I see the operator at the desk, he looks busy.",
             "technical": {
                 "faces": [...],
                 "objects": [...],
@@ -835,43 +835,43 @@ class VisionPerceptionAdapter:
         ...
 ```
 
-### Proaktywne powiadomienia
+### Proactive notifications
 
 ```python
 class VisionAlertSystem:
     """
-    System alertow wizualnych.
+    Visual alert system.
 
-    Maria proaktywnie informuje o:
-    - Wykryciu osoby (nowej/znanej)
-    - Podejrzanym ruchu
-    - Problemach z widzeniem
-    - Zmianach w otoczeniu
+    Maria proactively reports:
+    - Detection of a person (new/known)
+    - Suspicious motion
+    - Vision problems
+    - Changes in the surroundings
     """
 
     def check_alerts(self, percept: VisionPercept) -> List[VisionAlert]:
         """
-        Sprawdz czy sa powody do alertu.
+        Check whether there are reasons for an alert.
         """
         alerts = []
 
-        # Nowa osoba
+        # New person
         if percept.faces and any(f.identity == "unknown" for f in percept.faces.faces):
             alerts.append(VisionAlert(
                 type="new_person",
                 priority="attention",
-                message="Widze kogos kogo nie znam"
+                message="I see someone I don't know"
             ))
 
-        # Podejrzany ruch
+        # Suspicious motion
         if percept.motion and percept.motion.is_suspicious:
             alerts.append(VisionAlert(
                 type="suspicious_motion",
                 priority="warning",
-                message="Wykrylam podejrzany ruch"
+                message="I detected suspicious motion"
             ))
 
-        # Problemy z widzeniem
+        # Vision problems
         if percept.vision_health.overall < 0.5:
             alerts.append(VisionAlert(
                 type="vision_degraded",
@@ -884,16 +884,16 @@ class VisionAlertSystem:
 
 ---
 
-## 10. Implementacja - fazy (systematyczne podejscie)
+## 10. Implementation - phases (systematic approach)
 
-> **Zasada:** Wolniej, ale dokladniej. Kazda faza musi byc w pelni przetestowana
-> przed przejsciem do nastepnej. Brak skrotow typu MVP.
+> **Principle:** Slower, but more thorough. Every phase must be fully tested
+> before moving on to the next. No MVP-style shortcuts.
 
-### Faza 1: Sensor Abstraction Layer
+### Phase 1: Sensor Abstraction Layer
 
-**Cel:** Solidne fundamenty - abstrakcja sensorow z graceful degradation.
+**Goal:** Solid foundations - sensor abstraction with graceful degradation.
 
-**Struktura:**
+**Structure:**
 ```
 agent_core/vision/
 ├── __init__.py
@@ -908,41 +908,41 @@ agent_core/vision/
 ├── models.py                # Frame, VisionMode, enums
 └── tests/
     ├── __init__.py
-    ├── test_health.py       # Testy graceful degradation
+    ├── test_health.py       # Graceful degradation tests
     ├── test_mock_sensor.py
-    └── test_usb_webcam.py   # Testy z prawdziwa kamera
+    └── test_usb_webcam.py   # Tests with a real camera
 ```
 
 **Deliverables:**
-- [ ] `VisionSensor` protocol z pelna dokumentacja
-- [ ] `SensorCapabilities` - co sensor potrafi
-- [ ] `SensorHealth` z 7 poziomami degradacji (100% -> 5%)
-- [ ] `SensorIssue` enum (wszystkie mozliwe problemy)
-- [ ] `MockSensor` do testow (symuluje rozne awarie)
-- [ ] `USBWebcamSensor` - implementacja dla USB kamer
-- [ ] Testy: min. 30 test cases dla graceful degradation
-- [ ] Dokumentacja: jak dodac nowy typ sensora
+- [ ] `VisionSensor` protocol with full documentation
+- [ ] `SensorCapabilities` - what the sensor can do
+- [ ] `SensorHealth` with 7 degradation levels (100% -> 5%)
+- [ ] `SensorIssue` enum (all possible problems)
+- [ ] `MockSensor` for testing (simulates various failures)
+- [ ] `USBWebcamSensor` - implementation for USB cameras
+- [ ] Tests: min. 30 test cases for graceful degradation
+- [ ] Documentation: how to add a new sensor type
 
-**Kryteria ukonczenia:**
-- Wszystkie testy przechodza
-- MockSensor moze symulowac kazdy poziom degradacji
-- USBWebcam dziala z prawdziwa kamera
-- Maria moze powiedziec "widze dobrze/slabo/bardzo slabo/nic"
+**Completion criteria:**
+- All tests pass
+- MockSensor can simulate every degradation level
+- USBWebcam works with a real camera
+- Maria can say "I see well/poorly/very poorly/nothing"
 
 ---
 
-### Faza 2: Preprocessing Layer
+### Phase 2: Preprocessing Layer
 
-**Cel:** Ocena jakosci obrazu i detekcja problemow.
+**Goal:** Image quality assessment and problem detection.
 
-**Struktura:**
+**Structure:**
 ```
 agent_core/vision/
 ├── preprocessing/
 │   ├── __init__.py
 │   ├── quality.py           # QualityAssessment
 │   ├── degradation.py       # DegradationDetector
-│   ├── normalizer.py        # Normalizacja obrazu
+│   ├── normalizer.py        # Image normalization
 │   ├── recovery.py          # RecoveryAction suggestions
 │   └── metrics.py           # Sharpness, brightness, noise metrics
 └── tests/
@@ -952,26 +952,26 @@ agent_core/vision/
 ```
 
 **Deliverables:**
-- [ ] `QualityAssessment` - ocena jakosci (sharpness, brightness, contrast, noise)
-- [ ] `DegradationDetector` - wykrywanie 12+ typow problemow
-- [ ] `RecoveryAction` - sugestie naprawy
-- [ ] `VisionPreprocessor` - glowna klasa przetwarzania
-- [ ] Metryki: Laplacian variance, histogram analysis, noise estimation
-- [ ] Testy z obrazami testowymi (rozne typy degradacji)
-- [ ] Benchmark: czas przetwarzania < 50ms na klatke
+- [ ] `QualityAssessment` - quality assessment (sharpness, brightness, contrast, noise)
+- [ ] `DegradationDetector` - detection of 12+ problem types
+- [ ] `RecoveryAction` - recovery suggestions
+- [ ] `VisionPreprocessor` - the main processing class
+- [ ] Metrics: Laplacian variance, histogram analysis, noise estimation
+- [ ] Tests with test images (various degradation types)
+- [ ] Benchmark: processing time < 50ms per frame
 
-**Kryteria ukonczenia:**
-- Poprawna detekcja wszystkich 12 typow degradacji
-- Sensowne sugestie naprawy dla kazdego typu
-- Maria wie CO jest nie tak, nie tylko ZE cos jest nie tak
+**Completion criteria:**
+- Correct detection of all 12 degradation types
+- Sensible recovery suggestions for each type
+- Maria knows WHAT is wrong, not just THAT something is wrong
 
 ---
 
-### Faza 3: Vision Modules
+### Phase 3: Vision Modules
 
-**Cel:** Moduly analizy obrazu z wymiennymi backendami.
+**Goal:** Image analysis modules with swappable backends.
 
-**Struktura:**
+**Structure:**
 ```
 agent_core/vision/
 ├── modules/
@@ -997,7 +997,7 @@ agent_core/vision/
 │       ├── recognizer.py    # FaceModule
 │       ├── detection.py     # Face detection only
 │       ├── embedding.py     # Face embeddings
-│       └── known_faces.py   # Database znanych twarzy
+│       └── known_faces.py   # Database of known faces
 └── tests/
     ├── test_motion.py
     ├── test_scene.py
@@ -1008,50 +1008,50 @@ agent_core/vision/
 **Deliverables per module:**
 
 **Motion Module:**
-- [ ] Frame differencing (prosty, szybki)
-- [ ] Optical flow (dokladniejszy)
-- [ ] Klasyfikacja ruchu (osoba/obiekt/kamera)
+- [ ] Frame differencing (simple, fast)
+- [ ] Optical flow (more accurate)
+- [ ] Motion classification (person/object/camera)
 - [ ] Alert levels (none/attention/warning/danger)
-- [ ] Graceful degradation: dziala nawet przy quality=0.2
+- [ ] Graceful degradation: works even at quality=0.2
 
 **Scene Module:**
-- [ ] YOLO backend (obiekty)
-- [ ] LLaVA backend (opis naturalny)
-- [ ] Depth estimation (opcjonalne)
+- [ ] YOLO backend (objects)
+- [ ] LLaVA backend (natural-language description)
+- [ ] Depth estimation (optional)
 - [ ] Lighting/time-of-day detection
-- [ ] Graceful degradation: opis ogolny przy slabej jakosci
+- [ ] Graceful degradation: general description at low quality
 
 **OCR Module:**
 - [ ] Tesseract backend
 - [ ] EasyOCR backend
-- [ ] Region detection (gdzie jest tekst)
+- [ ] Region detection (where the text is)
 - [ ] Language detection
-- [ ] Graceful degradation: NIE dziala przy slabej jakosci (wymaga quality>0.6)
+- [ ] Graceful degradation: does NOT work at low quality (requires quality>0.6)
 
 **Face Module:**
-- [ ] Detekcja twarzy (bounding boxes)
-- [ ] Landmarks (oczy, nos, usta)
-- [ ] Embeddings (wektory cech)
-- [ ] Rozpoznawanie (porownanie z baza)
-- [ ] Rejestracja nowych osob
-- [ ] Emocje (opcjonalne)
-- [ ] Graceful degradation: tylko detekcja przy slabej jakosci
+- [ ] Face detection (bounding boxes)
+- [ ] Landmarks (eyes, nose, mouth)
+- [ ] Embeddings (feature vectors)
+- [ ] Recognition (comparison against the database)
+- [ ] Registration of new people
+- [ ] Emotions (optional)
+- [ ] Graceful degradation: detection only at low quality
 
-**Kryteria ukonczenia:**
-- Kazdy modul ma min. 2 wymienne backendy
-- Testy z prawdziwymi obrazami
-- Dokumentacja: jak dodac nowy backend
+**Completion criteria:**
+- Each module has min. 2 swappable backends
+- Tests with real images
+- Documentation: how to add a new backend
 
 ---
 
-### Faza 4: Vision Cortex (integracja)
+### Phase 4: Vision Cortex (integration)
 
-**Cel:** Zintegrowana percepcja wizualna jako jeden "zmysl".
+**Goal:** Integrated visual perception as a single "sense".
 
-**Struktura:**
+**Structure:**
 ```
 agent_core/vision/
-├── cortex.py                # VisionCortex - glowny integrator
+├── cortex.py                # VisionCortex - the main integrator
 ├── attention.py             # AttentionMechanism
 ├── modes.py                 # VisionModeManager
 ├── percept.py               # VisionPercept - unified output
@@ -1064,30 +1064,30 @@ agent_core/vision/
 ```
 
 **Deliverables:**
-- [ ] `VisionCortex` - koordynator wszystkich komponentow
-- [ ] `AttentionMechanism` - gdzie Maria "patrzy"
-- [ ] `VisionModeManager` - automatyczna zmiana trybow
-- [ ] `VisionPercept` - zunifikowany output
-- [ ] `VisionAlertSystem` - proaktywne powiadomienia
-- [ ] Adapter do Maria Consciousness (dual format)
+- [ ] `VisionCortex` - coordinator of all components
+- [ ] `AttentionMechanism` - where Maria "looks"
+- [ ] `VisionModeManager` - automatic mode switching
+- [ ] `VisionPercept` - unified output
+- [ ] `VisionAlertSystem` - proactive notifications
+- [ ] Adapter to Maria Consciousness (dual format)
 - [ ] REPL command: `/vision` (status, preview, etc.)
 - [ ] Web UI API: `/api/vision`
 
-**Kryteria ukonczenia:**
-- Pipeline dziala end-to-end
-- Maria moze opisac co widzi w naturalnym jezyku
-- Graceful degradation na kazdym poziomie
-- Integracja ze swiadomoscia (Unified Perception)
+**Completion criteria:**
+- Pipeline works end-to-end
+- Maria can describe what she sees in natural language
+- Graceful degradation at every level
+- Integration with consciousness (Unified Perception)
 
 ---
 
-## 11. Testowanie
+## 11. Testing
 
 ### Unit tests
 
 ```python
 def test_graceful_degradation():
-    """Sensor z problemami nadal zwraca czesciowe dane."""
+    """A sensor with problems still returns partial data."""
     sensor = MockSensor(health=0.3, issues=[SensorIssue.HEAVY_NOISE])
     frame = sensor.capture_frame()
 
@@ -1096,15 +1096,15 @@ def test_graceful_degradation():
     assert SensorIssue.HEAVY_NOISE in frame.degradations
 
 def test_module_fallback():
-    """Modul przechodzi w tryb degraded przy slabej jakosci."""
+    """The module switches to degraded mode at low quality."""
     module = FaceModule(backend=MockBackend())
 
-    # Dobra jakosc - pelna analiza
+    # Good quality - full analysis
     good_frame = ProcessedFrame(quality=0.9)
     result = module.analyze(good_frame)
     assert result.faces is not None
 
-    # Slaba jakosc - tylko detekcja (bez identyfikacji)
+    # Low quality - detection only (no identification)
     bad_frame = ProcessedFrame(quality=0.3)
     result = module.analyze_degraded(bad_frame, [Degradation.HEAVY_NOISE])
     assert result.faces_detected >= 0
@@ -1115,7 +1115,7 @@ def test_module_fallback():
 
 ```python
 def test_full_perception_pipeline():
-    """Caly pipeline od sensora do VisionPercept."""
+    """The full pipeline from sensor to VisionPercept."""
     cortex = VisionCortex(
         sensors=[MockSensor()],
         modules={"motion": MotionModule(), "scene": SceneModule()},
@@ -1131,32 +1131,32 @@ def test_full_perception_pipeline():
 
 ---
 
-## 12. Przyszle rozszerzenia
+## 12. Future extensions
 
 ### Multi-camera fusion
 
 ```
-- Wiele kamer -> jedno spojne widzenie
-- Stereoskopia (gleboksc)
-- 360 stopni
+- Multiple cameras -> a single coherent view
+- Stereoscopy (depth)
+- 360 degrees
 ```
 
 ### Learning
 
 ```
-- Uczenie sie nowych twarzy
-- Uczenie sie normalnego stanu pokoju
+- Learning new faces
+- Learning the normal state of the room
 - Anomaly detection
 ```
 
 ### Integration with other senses
 
 ```
-- Vision + Audio: rozpoznawanie kto mowi
-- Vision + Motion sensors: weryfikacja
-- Vision + Time: patterns (kto przychodzi o ktorej)
+- Vision + Audio: recognizing who is speaking
+- Vision + Motion sensors: verification
+- Vision + Time: patterns (who comes at what time)
 ```
 
 ---
 
-*Ten dokument definiuje architekture. Szczegolowa implementacja kazdego modulu powinna byc opracowana osobno, z uwzglednieniem wybranego backendu AI.*
+*This document defines the architecture. The detailed implementation of each module should be developed separately, taking the chosen AI backend into account.*

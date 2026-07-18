@@ -64,6 +64,8 @@ audit/
 
 # Input files (user-provided learning materials)
 input/*.txt
+# ...except the shipped sample, so input/ exists and has something to learn on a fresh clone
+!input/EXAMPLE.txt
 
 # Archive (legacy/deprecated code)
 archive/
@@ -112,6 +114,7 @@ maria_ui/static/mobile/
 # Private funding/strategy docs -- NEVER publish (ADR-029). Kept on disk, out of git.
 # The PUBLIC funding docs in docs/funding/ (README, FUNDING_BRIEF, CURRENT_PROJECT_STATUS,
 # HARDWARE_BENCHMARK_PLAN, PUBLIC_DELIVERABLES) ARE tracked so the public snapshot keeps them.
+docs/funding/application_working/
 docs/funding/FUNDING_STRATEGY_MARIA.md
 docs/funding/GRANT_READINESS_CHECKLIST.md
 docs/funding/NEXT_30_DAYS_FUNDING_PLAN.md

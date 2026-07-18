@@ -49,8 +49,8 @@ def check_environment():
     issues = []
 
     # Python version
-    if sys.version_info < (3, 8):
-        issues.append(f"Python 3.8+ required (got {sys.version})")
+    if sys.version_info < (3, 10):
+        issues.append(f"Python 3.10+ required (got {sys.version})")
 
     # .env file
     env_path = BASE_DIR / ".env"
@@ -556,7 +556,7 @@ def main():
         onboarding = OnboardingFlow(ctx, self_model)
         ctx.onboarding_flow = onboarding
 
-        if onboarding.should_run() and mode != "daemon":
+        if onboarding.should_run() and mode != "daemon" and sys.stdin.isatty():
             result = onboarding.run(input_fn=input)
             if result.get("text"):
                 print(result["text"])

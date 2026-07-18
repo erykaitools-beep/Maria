@@ -26,18 +26,18 @@ logger = logging.getLogger(__name__)
 # Available autonomy presets
 AUTONOMY_PRESETS = {
     "low": {
-        "label": "Ostrozna",
-        "description": "Potrzebuje zatwierdzenia dla wiekszosci dzialan",
+        "label": "Cautious",
+        "description": "I ask for approval before most actions",
         "authority_level": "OBSERVE",
     },
     "medium": {
-        "label": "Zrownowazana",
-        "description": "Ucze sie sama, pytam o wazne decyzje",
+        "label": "Balanced",
+        "description": "I learn on my own and ask about important decisions",
         "authority_level": "SUGGEST",
     },
     "high": {
-        "label": "Autonomiczna",
-        "description": "Dzialaj samodzielnie, informuj o wynikach",
+        "label": "Autonomous",
+        "description": "I act independently and report the results",
         "authority_level": "CONFIRM",
     },
 }
@@ -126,26 +126,26 @@ class OnboardingFlow:
         personality = self._self_model.get_personality()
 
         content_lines = [
-            f"Jestem {identity['name']} ({identity['full_name']}).",
+            f"I am {identity['name']} ({identity['full_name']}).",
             f"{identity.get('expanded', '')}.",
             "",
-            f"Moj cel: {identity['purpose']}.",
+            f"My purpose: {identity['purpose']}.",
         ]
 
         traits = personality.get("traits", [])
         if traits:
-            content_lines.append(f"Moje cechy osobowosci: {', '.join(traits)}.")
+            content_lines.append(f"My personality traits: {', '.join(traits)}.")
 
         age = identity.get("age_string")
         session = identity.get("session_count")
         if age:
-            content_lines.append(f"Mam {age}.")
+            content_lines.append(f"I am {age} old.")
         if session:
-            content_lines.append(f"To moja {session}. sesja.")
+            content_lines.append(f"This is my session number {session}.")
 
         return OnboardingStep(
             key="introduction",
-            title="Kim jestem?",
+            title="Who am I?",
             content="\n".join(content_lines),
             data={"identity": identity, "personality": personality},
         )
@@ -156,7 +156,7 @@ class OnboardingFlow:
         all_caps = self._self_model.get_capabilities()
 
         content_lines = [
-            f"Mam {len(all_caps)} zarejestrowanych zdolnosci:",
+            f"I have {len(all_caps)} registered capabilities:",
         ]
 
         for group_label, caps in sorted(grouped.items()):
@@ -168,13 +168,13 @@ class OnboardingFlow:
         guarded = sum(1 for c in all_caps if c["k7_classification"] == "guarded")
         restricted = sum(1 for c in all_caps if c["k7_classification"] == "restricted")
         content_lines.append(
-            f"Klasyfikacja autonomii: {free} swobodnych, "
-            f"{guarded} nadzorowanych, {restricted} ograniczonych."
+            f"Autonomy classification: {free} free, "
+            f"{guarded} guarded, {restricted} restricted."
         )
 
         return OnboardingStep(
             key="capabilities",
-            title="Co potrafie?",
+            title="What can I do?",
             content="\n".join(content_lines),
             data={"capabilities_grouped": grouped, "total": len(all_caps)},
         )
@@ -184,14 +184,14 @@ class OnboardingFlow:
         awareness = self._self_model.get_awareness()
 
         content_lines = [
-            "Ucze sie autonomicznie z plikow tekstowych w folderze input/.",
+            "I learn autonomously from text files in the input/ folder.",
             "",
-            "Proces nauki:",
-            "  1. Pliki trafiaja do input/ (reczny upload lub web fetch)",
-            "  2. Dziele tekst na fragmenty (chunki)",
-            "  3. Ucze sie kazdego fragmentu (LLM ekstrakcja wiedzy)",
-            "  4. Sprawdzam sie egzaminami (spaced repetition)",
-            "  5. Buduje graf wiedzy z polaczeniami",
+            "Learning process:",
+            "  1. Files arrive in input/ (manual upload or web fetch)",
+            "  2. I split the text into fragments (chunks)",
+            "  3. I learn each fragment (LLM knowledge extraction)",
+            "  4. I test myself with exams (spaced repetition)",
+            "  5. I build a knowledge graph with connections",
             "",
         ]
 
@@ -200,20 +200,20 @@ class OnboardingFlow:
             by_status = awareness.get("files_by_status", {})
             learned = by_status.get("learned", 0) + by_status.get("completed", 0)
             content_lines.append(
-                f"Aktualnie: {files_total} plikow w bazie, {learned} nauczonych."
+                f"Currently: {files_total} files in the database, {learned} learned."
             )
         else:
             content_lines.append(
-                "Baza wiedzy jest pusta. Wrzuc pliki .txt do input/ aby zaczac nauke."
+                "The knowledge base is empty. Drop .txt files into input/ to start learning."
             )
 
         input_count = awareness.get("input_files_count", 0)
         if input_count > 0:
-            content_lines.append(f"Plikow w input/: {input_count}")
+            content_lines.append(f"Files in input/: {input_count}")
 
         return OnboardingStep(
             key="learning",
-            title="Jak sie ucze?",
+            title="How do I learn?",
             content="\n".join(content_lines),
             data={"awareness": awareness},
         )
@@ -223,7 +223,7 @@ class OnboardingFlow:
         limitations = self._self_model.get_limitations()
 
         content_lines = [
-            "Wazne ograniczenia, o ktorych warto wiedziec:",
+            "Important limitations worth knowing about:",
             "",
         ]
         for i, lim in enumerate(limitations, 1):
@@ -231,13 +231,13 @@ class OnboardingFlow:
 
         content_lines.extend([
             "",
-            "Dzialanie: offline-first, lokalne LLM (Ollama).",
-            "Komunikacja: Telegram (@ClawBot) lub Web UI.",
+            "Operation: offline-first, local LLM (Ollama).",
+            "Communication: Telegram (@ClawBot) or Web UI.",
         ])
 
         return OnboardingStep(
             key="limitations",
-            title="Moje ograniczenia",
+            title="My limitations",
             content="\n".join(content_lines),
             data={"limitations": limitations},
         )
@@ -248,9 +248,9 @@ class OnboardingFlow:
         mode_label = self._self_model.get_status().get("mode_label", mode)
 
         content_lines = [
-            f"Stan: {mode_label}.",
+            f"State: {mode_label}.",
             "",
-            "Dostepne poziomy autonomii:",
+            "Available autonomy levels:",
         ]
 
         for key, preset in AUTONOMY_PRESETS.items():
@@ -260,14 +260,14 @@ class OnboardingFlow:
 
         content_lines.extend([
             "",
-            "Mozesz zmienic poziom autonomii pozniej komenda /authority.",
+            "You can change the autonomy level later with the /authority command.",
             "",
-            "Jestem gotowa do pracy!",
+            "I am ready to work!",
         ])
 
         return OnboardingStep(
             key="ready",
-            title="Gotowa!",
+            title="Ready!",
             content="\n".join(content_lines),
             data={
                 "mode": mode,
@@ -326,8 +326,8 @@ class OnboardingFlow:
 
         output_lines.append("")
         output_lines.append("=" * 50)
-        output_lines.append("  Witaj! Jestem M.A.R.I.A.")
-        output_lines.append("  Oto krotkie wprowadzenie.")
+        output_lines.append("  Welcome! I am M.A.R.I.A.")
+        output_lines.append("  Here is a short introduction.")
         output_lines.append("=" * 50)
 
         for i, step in enumerate(steps, 1):
@@ -344,26 +344,26 @@ class OnboardingFlow:
         if input_fn is not None:
             try:
                 print("\n".join(output_lines))
-                name = input_fn("\n  Jak masz na imie? > ").strip()
+                name = input_fn("\n  What is your name? > ").strip()
                 if name:
                     preferences["name"] = name
-                    print(f"\n  Milo Cie poznac, {name}!")
+                    print(f"\n  Nice to meet you, {name}!")
                 else:
-                    print("\n  Mozesz podac imie pozniej przez /profile.")
+                    print("\n  You can provide your name later via /profile.")
 
-                print("\n  Jaki poziom autonomii preferujesz?")
+                print("\n  Which level of autonomy do you prefer?")
                 for key, preset in AUTONOMY_PRESETS.items():
                     print(f"    [{key}] {preset['label']}: {preset['description']}")
                 level = input_fn(
-                    "\n  Wybierz [low/medium/high] (domyslnie: medium) > "
+                    "\n  Choose [low/medium/high] (default: medium) > "
                 ).strip().lower()
                 if level in AUTONOMY_PRESETS:
                     preferences["autonomy_level"] = level
-                print(f"  Ustawiono: {AUTONOMY_PRESETS[preferences['autonomy_level']]['label']}")
+                print(f"  Set to: {AUTONOMY_PRESETS[preferences['autonomy_level']]['label']}")
             except (EOFError, KeyboardInterrupt):
                 pass  # Use defaults
 
-        output_lines.append("  Onboarding zakonczony. Milej pracy!")
+        output_lines.append("  Onboarding complete. Enjoy your work!")
         output_lines.append("=" * 50)
         output_lines.append("")
 

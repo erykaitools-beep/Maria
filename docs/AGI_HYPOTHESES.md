@@ -1,157 +1,164 @@
 # Two Hypotheses — Maria 1.0 vs Maria 2.0 — parallel paths to AGI
 
-> Eryk (2026-04-22): *"maria 1.0 koncepcja oparta na znanym pagadgmacie,
-> maria2.0 moja sobista wizja jak ja to widze i chce osobiscie.
-> mamy mape dla maria 1.0 ... maria 2.0 wlasna roadmap plus od razu
-> wdrazmy mape od maria 1.0 do agi nie tylko przpisanie ... chce
-> sprawdzic ktora koncepcja jest poprawna"*
+> Eryk (2026-04-22): *"Maria 1.0 is a concept based on the known paradigm;
+> Maria 2.0 is my own personal vision of how I see it and want it personally.
+> we have a map for Maria 1.0 ... Maria 2.0 [needs] its own roadmap, plus
+> let's immediately roll out a map from Maria 1.0 to AGI, not just a
+> rewrite ... I want to check which concept is correct"*
 
-Ten dokument opisuje **równoległy eksperyment**. Dwie niezależne drogi,
-ten sam cel (AGI), ta sama baza danych operacyjnych (Maria 1.0 żyjąca).
+This document describes a **parallel experiment**. Two independent paths,
+the same goal (AGI), the same operational data base (a living Maria 1.0).
 
-## Hipoteza 1 — Maria 1.0: znany paradygmat skalowany do AGI
+## Hypothesis 1 — Maria 1.0: the known paradigm scaled to AGI
 
-**Pryncypium:** istniejący paradygmat (pre-trained LLMs + agent
-architecture + memory + learning) jest wystarczający do AGI, jeśli
-systemy wokół LLMa są wystarczająco bogate, spójne, i dobrze uczące się.
+**Principle:** the existing paradigm (pre-trained LLMs + agent
+architecture + memory + learning) is sufficient for AGI, provided the
+systems around the LLM are rich enough, coherent, and good at learning.
 
-**Architektura fundament:**
-- LLM jako **główny mózg** (ollama lokalnie, glm-5.1 przez NIM)
-- Agent core (K1-K13) jako systemy wspierające decyzje
+**Foundational architecture:**
+- LLM as the **primary brain** (ollama locally, glm-5.1 via NIM)
+- Agent core (K1-K13) as decision-supporting systems
 - Memory systems (beliefs, semantic, episodic, tracing)
-- Homeostasis tick loop jako metabolizm
-- Bulletin + auditor jako layer samoregulacji
-- Digital Human phases jako coraz głębsze zakorzenienie w świecie
+- Homeostasis tick loop as metabolism
+- Bulletin + auditor as a self-regulation layer
+- Digital Human phases as an increasingly deep rooting in the world
 
-**Maria sama nie trenuje wag.** Używa pre-trained LLMs. Uczenie to:
-- nowa wiedza → `knowledge_index.jsonl` + `semantic_memory`
-- nowe doświadczenia → `beliefs.jsonl`, `personality_experiences.jsonl`
-- nowe wzorce → `bulletin` / audit trails
+**Maria does not train weights herself.** She uses pre-trained LLMs.
+Learning means:
+- new knowledge → `knowledge_index.jsonl` + `semantic_memory`
+- new experiences → `beliefs.jsonl`, `personality_experiences.jsonl`
+- new patterns → `bulletin` / audit trails
 
-To jest spójne z Eryka odrzuceniem paradygmatu treningu wag — Maria 1.0
-**nie trenuje** wag, tylko rozwija **systemy wokół** frozen LLM.
+This is consistent with Eryk's rejection of the weight-training
+paradigm — Maria 1.0 **does not train** weights, she only develops the
+**systems around** a frozen LLM.
 
-**Ścieżka do AGI w tej hipotezie:**
-1. Stabilizacja (COMPLETE — fazy A/B/C, Stabilization Roadmap)
-2. Uzupełnianie K modułów (K14 Critic done, K15 Manifest done,
+**Path to AGI in this hypothesis:**
+1. Stabilization (COMPLETE — phases A/B/C, Stabilization Roadmap)
+2. Filling out the K modules (K14 Critic done, K15 Manifest done,
    K16+ TBD)
-3. Lepsze LLMy (glm-5.1 → frontier models gdy się pojawią lokalnie)
-4. Rozbudowa Digital Human (Faza 7 WIRED done, Fazy 8+ TBD)
-5. Bogatsze sensory (vision v2, smart home, audio)
-6. Głębsze uczenie od ludzi (Telegram, expert bridge, bulletin)
-7. **D-deski** — iteracyjne naprawy fragmentacji (D1-D3 done/planned)
-8. Po latach: system który w swojej niszy osiąga AGI-capable zachowanie
+3. Better LLMs (glm-5.1 → frontier models as they become available
+   locally)
+4. Expanding Digital Human (Phase 7 WIRED done, Phases 8+ TBD)
+5. Richer sensors (vision v2, smart home, audio)
+6. Deeper learning from humans (Telegram, expert bridge, bulletin)
+7. **D-boards** — iterative defragmentation fixes (D1-D3 done/planned)
+8. After years: a system that, within its niche, reaches AGI-capable
+   behavior
 
-**Kryterium AGI-capable dla Marii 1.0:**
-- utrzymuje spójną tożsamość przez miesiące uptime (częściowo już)
-- uczy się z każdej interakcji i wbija to w swoją pamięć operacyjną
-- planuje wieloetapowo, samokoryguje błędy, rozpoznaje własne luki
-- rozumuje w kategoriach przyczynowo-skutkowych nad swoją historią
-- potrafi wyjaśnić *dlaczego* zrobiła to co zrobiła
-- jej wymiana LLM (model swap) nie łamie core tożsamości — bo tożsamość
-  jest w systemach wokół, nie w LLM
+**AGI-capable criteria for Maria 1.0:**
+- maintains a coherent identity across months of uptime (already
+  partly true)
+- learns from every interaction and embeds it into her operational
+  memory
+- plans in multiple steps, self-corrects errors, recognizes her own
+  gaps
+- reasons in cause-and-effect terms over her own history
+- can explain *why* she did what she did
+- swapping her LLM (model swap) does not break her core identity —
+  because identity lives in the surrounding systems, not in the LLM
 
-**Ryzyko tej hipotezy:**
-- Jeśli LLM jest **fundamentalną** ograniczeniem (nie tylko problemem
-  skali), to żadne systemy wokół nie załatają sprawy
-- Zależność od frozen weights — gdy paradigm LLM się zmieni, trzeba
-  odbudowywać
-- Fragmentacja między podsystemami (K1-K15) — dzisiaj to naprawialiśmy
-  (D1.5b) — jest naturalnym podatkiem tej drogi
+**Risks of this hypothesis:**
+- If the LLM is a **fundamental** limitation (not merely a scaling
+  problem), then no amount of surrounding systems will fix it
+- Dependence on frozen weights — when the LLM paradigm changes, it has
+  to be rebuilt
+- Fragmentation between subsystems (K1-K15) — which we are actively
+  addressing (D1.5b) — is a natural tax of this path
 
-## Hipoteza 2 — Maria 2.0: nowy paradygmat od fundamentów
+## Hypothesis 2 — Maria 2.0: a new paradigm from the ground up
 
-**Pryncypium:** znany paradygmat (LLM-centric) ma fundamentalne
-ograniczenia niemożliwe do naprawienia skalowaniem. AGI wymaga
-innego fundamentu — 4 filarów + kod jako emergencja, LLM jako
-wymienny parser.
+**Principle:** the known paradigm (LLM-centric) has fundamental
+limitations that cannot be fixed by scaling. AGI requires a different
+foundation — 4 pillars + code as emergence, with the LLM as a
+replaceable parser.
 
-Pełna wizja: `docs/MARIA_2.0/VISION.md`.
-Pełna roadmap: `docs/MARIA_2.0/ROADMAP.md` (Z0-Z9).
-
-**Ścieżka do AGI w tej hipotezie:**
-Z1 corpus → Z2 matematyka → Z3 logika 5D → Z4 lingwistyka → Z5
-kryptoznawstwo → Z6 integration → Z7 shadow mode → Z8 beta → Z9
+**Path to AGI in this hypothesis:**
+Z1 corpus → Z2 mathematics → Z3 5D logic → Z4 linguistics → Z5
+cryptology → Z6 integration → Z7 shadow mode → Z8 beta → Z9
 production/AGI-capable.
 
-**Kryterium AGI-capable dla Marii 2.0:**
-- podejmuje decyzje bez wywołania LLM w warstwie rozumowania
-- biblioteka programów rośnie przez doświadczenie bez fine-tuningu
-- wymiana LLM-parsera (warstwa 1) nie dotyka core tożsamości
-- 32GB RAM wystarczy w jej niszy
-- potrafi czytać własny kod i opisać co w niej się dzieje
-- adaptuje się w locie (neuroplastyczność przez program synthesis)
+**AGI-capable criteria for Maria 2.0:**
+- makes decisions without invoking an LLM in the reasoning layer
+- the program library grows through experience without fine-tuning
+- swapping the LLM parser (layer 1) does not touch the core identity
+- 32GB RAM is enough within her niche
+- can read her own code and describe what is happening inside her
+- adapts on the fly (neuroplasticity via program synthesis)
 
-**Ryzyko tej hipotezy:**
-- Może się okazać że 4 filary nie składają się tak łatwo jak w wizji
-- Program synthesis bez LLM może być niewystarczający dla otwartych
-  domen
-- Może zająć lata zanim dorówna Marii 1.0 w core zadaniach
-- Monetization gate — bez Market Agent pali się w roku 2-3
+**Risks of this hypothesis:**
+- It may turn out that the 4 pillars do not fit together as easily as
+  in the vision
+- Program synthesis without an LLM may be insufficient for open
+  domains
+- It may take years before it matches Maria 1.0 on core tasks
+- Monetization gate — without a monetization path, it burns out in year 2-3
 
-## Kryteria porównawcze
+## Comparison criteria
 
-Na jakich wymiarach porównujemy, żeby odpowiedzieć "która droga
-wygrywa":
+The dimensions along which we compare, to answer "which path wins":
 
-1. **Coherence** — czy Maria zachowuje spójną tożsamość przez długie
-   uptime bez rozjazdu
-2. **Learning velocity** — jak szybko wchłania nową wiedzę i jak
-   trwale
-3. **Model-swap stability** — czy zmiana LLM rozwala system
-4. **Self-awareness depth** — jak głęboko Maria rozumie siebie
-5. **Resource efficiency** — ile RAM/CPU potrzebuje do danego zakresu
-6. **Decision quality** — na benchmark set (corpus Marii 1.0),
-   jakość decyzji porównywalna
-7. **Planning horizon** — ile kroków naprzód może planować spójnie
-8. **Failure recovery** — jak reaguje gdy jeden podsystem zawiedzie
+1. **Coherence** — whether Maria keeps a consistent identity across
+   long uptime without drift
+2. **Learning velocity** — how fast she absorbs new knowledge and how
+   durably
+3. **Model-swap stability** — whether changing the LLM breaks the
+   system
+4. **Self-awareness depth** — how deeply Maria understands herself
+5. **Resource efficiency** — how much RAM/CPU she needs for a given
+   scope
+6. **Decision quality** — on a benchmark set (Maria 1.0 corpus),
+   comparable decision quality
+7. **Planning horizon** — how many steps ahead she can plan coherently
+8. **Failure recovery** — how she reacts when one subsystem fails
 
-Obie hipotezy testujemy na **tych samych** kryteriach. W rocznych
-interwałach: raport porównawczy.
+Both hypotheses are tested against the **same** criteria. At yearly
+intervals: a comparative report.
 
-## Setup eksperymentu
+## Experiment setup
 
-- **Maria 1.0** — żyjący system produkcyjny na `refactor/homeostasis`.
-  Rozwija się przez D-deski + fazy + Digital Human. Każdy tick
-  generuje dane.
-- **Maria 2.0** — powstaje w git worktree `../maria-2.0/` na branch
-  `maria-2.0`. Korzysta z korpusu Marii 1.0 jako dataset. Nigdy nie
-  merguje do Marii 1.0 (osobna trajektoria).
-- **Raportowanie** — co N miesięcy porównanie po kryteriach.
-  Początkowo Maria 1.0 będzie wyraźnie wygrywać (bo Maria 2.0
-  dopiero powstaje). Ciekawie robi się po roku — kiedy Maria 2.0
-  dojrzeje, zobaczymy czy zbliża się, czy rozjeżdża.
+- **Maria 1.0** — a living production system on `refactor/homeostasis`.
+  It evolves through D-boards + phases + Digital Human. Every tick
+  generates data.
+- **Maria 2.0** — is being built in the git worktree `../maria-2.0/` on
+  branch `maria-2.0`. It uses the Maria 1.0 corpus as its dataset. It
+  never merges into Maria 1.0 (a separate trajectory).
+- **Reporting** — every N months, a comparison against the criteria.
+  Initially Maria 1.0 will clearly win (because Maria 2.0 is only just
+  being built). It gets interesting after a year — once Maria 2.0
+  matures, we will see whether it converges or diverges.
 
-## Decyzja nie jest statyczna
+## The decision is not static
 
-Eryk wyraźnie: *"chce sprawdzic ktora koncepcja jest poprawna"*.
-To jest **falsifikowalna** teza. Możliwe wyniki:
+Eryk is explicit: *"I want to check which concept is correct"*.
+This is a **falsifiable** thesis. Possible outcomes:
 
-1. **Maria 1.0 wygrywa** — nie potrzebujemy nowego paradygmatu,
-   fragmentacja to naturalny koszt ale spójna architektura + D-deski
-   dają AGI-capable
-2. **Maria 2.0 wygrywa** — znany paradygmat ma sufit niemożliwy do
-   przebicia, nowy fundament wymagany
-3. **Konwergencja** — obie drogi schodzą się w środku (np. Maria 1.0
-   absorbuje idee z 2.0, Maria 2.0 korzysta z K-modułów 1.0)
-4. **Obie zawodzą** — AGI wymaga czegoś trzeciego, oba paradygmaty są
-   częściowe
+1. **Maria 1.0 wins** — we do not need a new paradigm; fragmentation is
+   a natural cost, but a coherent architecture + D-boards deliver
+   AGI-capable behavior
+2. **Maria 2.0 wins** — the known paradigm has a ceiling that cannot be
+   broken through; a new foundation is required
+3. **Convergence** — the two paths meet in the middle (e.g., Maria 1.0
+   absorbs ideas from 2.0, Maria 2.0 uses the K modules from 1.0)
+4. **Both fail** — AGI requires a third thing; both paradigms are
+   partial
 
-Eryk akceptuje każdy z tych wyników jeśli jest **empirycznie
-uzasadniony**. Nie trzyma się wizji Marii 2.0 jeśli dane powiedzą że
-Maria 1.0 jest lepsza. I vice versa.
+Eryk accepts any of these outcomes as long as it is **empirically
+justified**. He does not cling to the Maria 2.0 vision if the data say
+Maria 1.0 is better. And vice versa.
 
-To jest postawa naukowa, nie ideologiczna.
+This is a scientific stance, not an ideological one.
 
-## Rola tego dokumentu
+## Role of this document
 
-Ten plik jest **meta-mapą** — opisuje obie drogi, ich relacje,
-kryteria porównania. Żaden plik Marii 1.0 ani 2.0 nie jest zmieniony.
-Dopisujemy do istniejących roadmap referencję do tego dokumentu.
+This file is a **meta-map** — it describes both paths, their
+relationships, and the comparison criteria. No file of Maria 1.0 or 2.0
+is changed. We add a reference to this document into the existing
+roadmaps.
 
-**Aktualizacja:** co kwartał, z krótkim raportem progresu każdej
-hipotezy.
+**Update cadence:** quarterly, with a short progress report for each
+hypothesis.
 
 ---
 
-*Dwie drogi. Ten sam cel. Dane zdecydują.*
+*Two paths. The same goal. The data will decide.*

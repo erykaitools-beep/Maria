@@ -526,11 +526,11 @@ class TestOnboardingFlowSteps:
 
     def test_step_titles(self, onboarding):
         steps = onboarding.get_steps()
-        assert steps[0]["title"] == "Kim jestem?"
-        assert steps[1]["title"] == "Co potrafie?"
-        assert steps[2]["title"] == "Jak sie ucze?"
-        assert steps[3]["title"] == "Moje ograniczenia"
-        assert steps[4]["title"] == "Gotowa!"
+        assert steps[0]["title"] == "Who am I?"
+        assert steps[1]["title"] == "What can I do?"
+        assert steps[2]["title"] == "How do I learn?"
+        assert steps[3]["title"] == "My limitations"
+        assert steps[4]["title"] == "Ready!"
 
     def test_introduction_step_content(self, onboarding):
         steps = onboarding.get_steps()
@@ -548,12 +548,12 @@ class TestOnboardingFlowSteps:
     def test_learning_step_has_file_info(self, onboarding):
         steps = onboarding.get_steps()
         learning = steps[2]
-        assert "4 plikow" in learning["content"]
+        assert "4 files" in learning["content"]
 
     def test_limitations_step_lists(self, onboarding):
         steps = onboarding.get_steps()
         lims = steps[3]
-        assert "ograniczenia" in lims["title"].lower()
+        assert "limitations" in lims["title"].lower()
         assert "llama3.1" in lims["content"]
 
     def test_ready_step_has_presets(self, onboarding):
@@ -588,16 +588,16 @@ class TestOnboardingFlowRun:
     def test_run_text_has_header(self, onboarding):
         result = onboarding.run()
         assert "M.A.R.I.A." in result["text"]
-        assert "Onboarding zakonczony" in result["text"]
+        assert "Onboarding complete" in result["text"]
 
     def test_run_text_contains_all_steps(self, onboarding):
         result = onboarding.run()
         text = result["text"]
-        assert "Kim jestem?" in text
-        assert "Co potrafie?" in text
-        assert "Jak sie ucze?" in text
-        assert "Moje ograniczenia" in text
-        assert "Gotowa!" in text
+        assert "Who am I?" in text
+        assert "What can I do?" in text
+        assert "How do I learn?" in text
+        assert "My limitations" in text
+        assert "Ready!" in text
 
     def test_run_marks_completed(self, onboarding, mock_identity_store):
         onboarding.run()
@@ -688,7 +688,7 @@ class TestOnboardingFlowEdgeCases:
         flow = OnboardingFlow(ctx, model)
         result = flow.run()
         assert result["completed"] is True
-        assert "pusta" in result["text"]
+        assert "knowledge base is empty" in result["text"]
 
 
 # ===========================================================================

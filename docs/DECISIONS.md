@@ -1,202 +1,191 @@
 # M.A.R.I.A. - Architecture Decision Records (ADR)
 > Version: 0.2 | Last updated: 2026-01-26
 
-## Format ADR
+## ADR Format
 
 ```
-### ADR-XXX: Tytul decyzji
-**Data:** YYYY-MM-DD
+### ADR-XXX: Decision title
+**Date:** YYYY-MM-DD
 **Status:** PROPOSED | ACCEPTED | DEPRECATED | SUPERSEDED
 
-**Kontekst:** Opis sytuacji i problemu
+**Context:** Description of the situation and the problem
 
-**Decyzja:** Co postanowilismy
+**Decision:** What we decided
 
-**Alternatywy:**
-1. Alternatywa A - dlaczego odrzucona
-2. Alternatywa B - dlaczego odrzucona
+**Alternatives:**
+1. Alternative A - why it was rejected
+2. Alternative B - why it was rejected
 
-**Konsekwencje:**
-- Pozytywne: ...
-- Negatywne: ...
+**Consequences:**
+- Positive: ...
+- Negative: ...
 
-**Refs:** linki do powiazanych dokumentow/issues
+**Refs:** links to related documents/issues
 ```
 
 ---
 
-## Zaakceptowane decyzje
+## Accepted Decisions
 
-### ADR-001: JSONL jako format pamieci
-**Data:** ~2024 (zastalosci)
+### ADR-001: JSONL as the memory format
+**Date:** ~2024 (pre-existing)
 **Status:** ACCEPTED
 
-**Kontekst:** System potrzebuje trwalego przechowywania danych (indeks wiedzy, pamiec, wyniki egzaminow).
+**Context:** The system needs durable data storage (knowledge index, memory, exam results).
 
-**Decyzja:** Uzycie formatu JSONL (JSON Lines) - jeden obiekt JSON per linia.
+**Decision:** Use the JSONL (JSON Lines) format - one JSON object per line.
 
-**Alternatywy:**
-1. SQLite - odrzucone: dodatkowa zaleznosc, bardziej skomplikowane
-2. Pojedynczy JSON - odrzucone: problemy z appendem, caly plik w pamieci
+**Alternatives:**
+1. SQLite - rejected: extra dependency, more complex
+2. Single JSON file - rejected: append problems, whole file held in memory
 
-**Konsekwencje:**
-- Pozytywne: prosty append, czytelny format, latwy debug
-- Negatywne: wolne wyszukiwanie (skanowanie calego pliku), brak indeksow
+**Consequences:**
+- Positive: simple append, readable format, easy debugging
+- Negative: slow lookups (scanning the whole file), no indexes
 
 ---
 
-### ADR-002: Ollama jako backend LLM
-**Data:** ~2024 (zastalosci)
+### ADR-002: Ollama as the LLM backend
+**Date:** ~2024 (pre-existing)
 **Status:** ACCEPTED
 
-**Kontekst:** System potrzebuje lokalnego LLM do analizy tekstu, generowania pytan, oceny.
+**Context:** The system needs a local LLM for text analysis, question generation, and grading.
 
-**Decyzja:** Uzycie Ollama z modelem llama3.1:8b.
+**Decision:** Use Ollama with the llama3.1:8b model.
 
-**Alternatywy:**
-1. OpenAI API - odrzucone: wymaga internetu, koszty, prywatnosc
-2. Inne lokalne (llama.cpp bezposrednio) - odrzucone: Ollama prostsze API
+**Alternatives:**
+1. OpenAI API - rejected: requires internet, costs, privacy
+2. Other local options (llama.cpp directly) - rejected: Ollama has a simpler API
 
-**Konsekwencje:**
-- Pozytywne: offline-first, darmowe, kontrola nad danymi
-- Negatywne: wymaga GPU lub dobrego CPU, wolniejsze niz cloud
+**Consequences:**
+- Positive: offline-first, free, control over the data
+- Negative: requires a GPU or a strong CPU, slower than cloud
 
 ---
 
-### ADR-003: Adaptive chunking z overlapping
-**Data:** ~2024 (zastalosci)
+### ADR-003: Adaptive chunking with overlap
+**Date:** ~2024 (pre-existing)
 **Status:** ACCEPTED
 
-**Kontekst:** Teksty do nauki moga byc dlugie. LLM ma ograniczony context window.
+**Context:** Learning texts can be long. The LLM has a limited context window.
 
-**Decyzja:** Podzial tekstu na chunki ~1200 znakow z 150-znakowym overlapem. Szukanie naturalnych granic (paragrafy, zdania).
+**Decision:** Split text into ~1200-character chunks with a 150-character overlap. Look for natural boundaries (paragraphs, sentences).
 
-**Konsekwencje:**
-- Pozytywne: zachowanie kontekstu na granicach, lepsze summary
-- Negatywne: duplikacja fragmentow, wieksze zuzycie tokenow
+**Consequences:**
+- Positive: context preserved at boundaries, better summaries
+- Negative: fragment duplication, higher token usage
 
 ---
 
-## Oczekujace decyzje (PROPOSED)
-
-### ADR-004: Synchronizacja JSONL i SemanticGraph
-**Data:** 2026-01-26
+### ADR-004: JSONL and SemanticGraph synchronization
+**Date:** 2026-01-26
 **Status:** ACCEPTED
 
-**Kontekst:** System ma dwa systemy pamieci:
-1. JSONL files (memory_store.py) - surowe dane
-2. SemanticGraph (semantic_graph.py) - graf wiedzy
+**Context:** The system has two memory subsystems:
+1. JSONL files (memory_store.py) - raw data
+2. SemanticGraph (semantic_graph.py) - knowledge graph
 
-Obecnie nie sa zsynchronizowane.
+They are currently not synchronized.
 
-**Opcje:**
-A) JSONL jako source of truth, graf tylko in-memory cache
-B) Graf jako source of truth, JSONL jako backup/log
-C) Oba rownoprawne, synchronizacja dwukierunkowa
+**Options:**
+A) JSONL as source of truth, graph only an in-memory cache
+B) Graph as source of truth, JSONL as backup/log
+C) Both equal, two-way synchronization
 
-**Decyzja:** Opcja A - JSONL jest source of truth, graf jest pochodnym indeksem/cache.
+**Decision:** Option A - JSONL is the source of truth, the graph is a derived index/cache.
 
-**Uzasadnienie (od wlasciciela):** Graf semantyczny ma byc in-memory cache budowany z JSONL przy starcie. JSONL zawsze zawiera pelne dane, graf jest tylko ich reprezentacja do szybkiego wyszukiwania.
+**Rationale (from the project owner):** The semantic graph is meant to be an in-memory cache built from JSONL at startup. JSONL always holds the complete data; the graph is only a representation of it for fast lookups.
 
-**Konsekwencje:**
-- Pozytywne: Jasna hierarchia danych, prostsze recovery (odbuduj graf z JSONL)
-- Negatywne: Czas startu moze byc dluzszy przy duzych danych (budowanie grafu)
+**Consequences:**
+- Positive: clear data hierarchy, simpler recovery (rebuild the graph from JSONL)
+- Negative: startup time may be longer with large datasets (building the graph)
 
-**Refs:** Q-005, homeostasis_spec.md (Episodic + Semantic = recovery)
-
----
-
-### ADR-005: Cap na episodic_memory
-**Data:** 2026-01-26
-**Status:** PROPOSED
-
-**Kontekst:** `episodic_memory` (lista w brain_memory_integration.py) rosnie bez ograniczen. Przy dlugich sesjach moze zuzywac duzo RAM.
-
-**Opcje:**
-A) FIFO z maxlen (np. 1000 epizodow)
-B) Time-based pruning (usun starsze niz N godzin)
-C) Importance-based pruning (usun epizody z success=False)
-
-**Decyzja:** TBD
+**Refs:** Q-005
 
 ---
 
-## Resolved Questions (odpowiedzi od wlasciciela)
+## Pending Decisions (PROPOSED)
 
-### Q-001: Czy folder archive/ jest uzywany?
-**Data:** 2026-01-26
+*None currently.*
+
+---
+
+## Resolved Questions (answers from the project owner)
+
+### Q-001: Is the archive/ folder used?
+**Date:** 2026-01-26
 **Status:** RESOLVED
 
-**Kontekst:** Folder `archive/` zawiera stary kod (brain/, tools/, perception.py). Nie jest importowany przez zadne aktywne moduly.
+**Context:** The `archive/` folder contains old code (brain/, tools/, perception.py). It is not imported by any active module.
 
-**Odpowiedz:** Folder `archive/` NIE jest uzywany. Nalezy go oznaczyc jako deprecated i nie brac pod uwage przy refaktoryzacji.
+**Answer:** The `archive/` folder is NOT used. It should be marked as deprecated and ignored during refactoring.
 
-**Akcja:** Dodac `archive/` do `.gitignore` lub usunac w Etapie 5 refaktoryzacji.
-
----
-
-### Q-002: Intencja dwoch entry pointow (main.py vs run_maria.py)
-**Data:** 2026-01-26
-**Status:** RESOLVED
-
-**Kontekst:**
-- `main.py` - interaktywny REPL z wieloma komendami
-- `run_maria.py` - daemon uruchamiajacy learning cycle
-
-**Odpowiedz:** Opcja A - ALTERNATYWNIE. Uzytkownik wybiera jeden z entry pointow:
-- `main.py` dla interaktywnej pracy
-- `run_maria.py` dla batch learning
-
-NIE maja dzialac rownolegle.
-
-**Akcja:** Dodac walidacje w obu plikach - sprawdzac czy drugi proces juz dziala (PID file lub port check).
+**Action:** Add `archive/` to `.gitignore` or remove it in refactoring Stage 5.
 
 ---
 
-### Q-003: orchestrator.py main() z max_iterations=0
-**Data:** 2026-01-26
+### Q-002: Intent behind two entry points (main.py vs run_maria.py)
+**Date:** 2026-01-26
 **Status:** RESOLVED
 
-**Kontekst:** W `orchestrator.py:191-195`:
+**Context:**
+- `main.py` - interactive REPL with many commands
+- `run_maria.py` - daemon running the learning cycle
+
+**Answer:** Option A - MUTUALLY EXCLUSIVE. The user picks one of the entry points:
+- `main.py` for interactive work
+- `run_maria.py` for batch learning
+
+They are NOT meant to run in parallel.
+
+**Action:** Add validation in both files - check whether the other process is already running (PID file or port check).
+
+---
+
+### Q-003: orchestrator.py main() with max_iterations=0
+**Date:** 2026-01-26
+**Status:** RESOLVED
+
+**Context:** In `orchestrator.py:191-195`:
 ```python
 def main():
-    maria_learning_cycle(max_iterations=0, ...)  # Zero iteracji?
+    maria_learning_cycle(max_iterations=0, ...)  # Zero iterations?
 ```
 
-**Odpowiedz:** `max_iterations=0` oznacza NIESKONCZONA PETLE (infinite loop). To jest intencjonalne zachowanie.
+**Answer:** `max_iterations=0` means an INFINITE LOOP. This is intentional behavior.
 
-**Akcja:** Zmienic parametr na `None` lub `-1` dla lepszej czytelnosci. Dodac komentarz wyjasniajacy.
+**Action:** Change the parameter to `None` or `-1` for readability. Add an explanatory comment.
 
 ---
 
-### Q-004: Czy maria_web_learning.py i maria_api_bridge.py maja byc zaimplementowane?
-**Data:** 2026-01-26
+### Q-004: Should maria_web_learning.py and maria_api_bridge.py be implemented?
+**Date:** 2026-01-26
 **Status:** RESOLVED
 
-**Kontekst:** main.py probuje importowac te moduly, ale nie istnieja w repo.
+**Context:** main.py tries to import these modules, but they do not exist in the repo.
 
-**Odpowiedz:** NIE implementowac teraz. To sa planowane funkcje na przyszlosc (roadmap), ale nie sa czescia obecnego scope.
+**Answer:** Do NOT implement them now. These are planned future features (roadmap), but not part of the current scope.
 
-**Akcja:** Pozostawic importy jako opcjonalne (try/except) z komentarzem "TODO: future feature". Dodac do ROADMAP.md jako Faza C lub D.
+**Action:** Keep the imports optional (try/except) with a "TODO: future feature" comment. Add to ROADMAP.md as Phase C or D.
 
 ---
 
-### Q-005: Docelowa integracja graf <-> JSONL
-**Data:** 2026-01-26
+### Q-005: Target integration graph <-> JSONL
+**Date:** 2026-01-26
 **Status:** RESOLVED → ADR-004
 
-**Kontekst:** Graf semantyczny i JSONL storage to dwa odrebne systemy.
+**Context:** The semantic graph and JSONL storage are two separate systems.
 
-**Odpowiedz:** Opcja A - JSONL jest source of truth, graf jest pochodnym indeksem/cache budowanym z JSONL przy starcie.
+**Answer:** Option A - JSONL is the source of truth, the graph is a derived index/cache built from JSONL at startup.
 
-**Akcja:** Zaimplementowac w `agent_core/memory/semantic_store.py` metode `rebuild_from_jsonl()`.
-
----
-
-## Open Questions (pytania do wlasciciela)
-
-*Brak aktualnie otwartych pytan.*
+**Action:** Implement a `rebuild_from_jsonl()` method in `agent_core/memory/semantic_store.py`.
 
 ---
 
-*Dodawaj nowe pytania i decyzje w miare postepow prac.*
+## Open Questions (questions for the project owner)
+
+*No open questions currently.*
+
+---
+
+*Add new questions and decisions as work progresses.*

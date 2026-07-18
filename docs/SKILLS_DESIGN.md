@@ -1,28 +1,30 @@
 # Skills as artifact — design (Hermes-inspired)
 
-> Inspirowane: Hermes Agent (Nous Research, MIT, luty 2026). Format SKILL.md
-> kompatybilny z agentskills.io. **Promote() flow Maria-style** (sandbox-first,
-> human gate) — NIE Hermes autonomous create.
+> Inspired by: Hermes Agent (Nous Research, MIT, February 2026). SKILL.md format
+> compatible with agentskills.io. **Maria-style promote() flow** (sandbox-first,
+> human gate) — NOT Hermes autonomous create.
 >
-> Decyzja: 2026-05-15 (Eryk wybór "zaczynamy od Skills as artifact, pelna Faza 1").
-> Postmortem 24h autonomy test (2026-05-14) zostaje w pamięci — wszystko co
-> zmienia stan produkcji idzie przez sandbox→promote z PROPOSED flow.
+> Decision: 2026-05-15 (the project owner chose to start with Skills as artifact,
+> full Phase 1). The 24h autonomy test postmortem (2026-05-14) informs this:
+> everything that changes production state goes through sandbox→promote with the
+> PROPOSED flow.
 
-## Po co Mariji Skills
+## Why Maria needs Skills
 
-Maria ma już:
-- **Goals as data** (4 typy, audit trail, PROPOSED flow z human gate) — *co* chcemy osiągnąć
-- **Action audit** (action_audit.jsonl per record) — *co* się stało
-- **Decision traces** (episode-based) — *jak* się decydowało
-- **Bulletin board** (cognitive_bulletin.jsonl) — *fakty/notatki*
-- **Knowledge index** (knowledge_index.jsonl, MERGE on id) — *wiedza zewnętrzna*
+Maria already has:
+- **Goals as data** (4 types, audit trail, PROPOSED flow with a human gate) — *what* we want to achieve
+- **Action audit** (action_audit.jsonl per record) — *what* happened
+- **Decision traces** (episode-based) — *how* decisions were made
+- **Bulletin board** (cognitive_bulletin.jsonl) — *facts/notes*
+- **Knowledge index** (knowledge_index.jsonl, MERGE on id) — *external knowledge*
 
-Czego brakuje: **procedural memory**. Workflow `fetch → learn → exam → review`
-co cykl planner ReAct zgaduje od zera. Bulletin notuje że "tak się robi" jako
-fakt, ale to nie jest *reusable procedure* z when-to-use / steps / pitfalls.
+What's missing: **procedural memory**. The `fetch → learn → exam → review`
+workflow is guessed from scratch by the planner's ReAct loop every cycle. The
+bulletin records that "this is how it's done" as a fact, but that is not a
+*reusable procedure* with when-to-use / steps / pitfalls.
 
-Skill = **kondensat udanej procedury** którą planner może później przywołać
-zamiast wymyślać od zera.
+A Skill = **a condensate of a successful procedure** that the planner can later
+recall instead of reinventing it from scratch.
 
 ## Format SKILL.md (agentskills.io compatible)
 
@@ -64,12 +66,12 @@ tags: [learning, fetch]
 
 ## L0 / L1 / L2 progressive disclosure (Hermes idea)
 
-- **L0** — tylko YAML frontmatter (~200 tokenów). Załadowane do planner *zawsze*
-  jako catalog: "Maria wie że ten skill istnieje, do czego, jaki status".
-- **L1** — pełen SKILL.md (~2-5K tokenów). On-demand kiedy planner decyduje
-  że ten skill jest relevantny dla bieżącego goal.
-- **L2** — zewnętrzne pliki referenced (np. `examples/`, `tests/`). Opcjonalne,
-  ładowane tylko jak planner explicitly request.
+- **L0** — YAML frontmatter only (~200 tokens). Loaded into the planner *always*
+  as a catalog: "Maria knows this skill exists, what it's for, and its status".
+- **L1** — the full SKILL.md (~2-5K tokens). On-demand when the planner decides
+  this skill is relevant to the current goal.
+- **L2** — referenced external files (e.g. `examples/`, `tests/`). Optional,
+  loaded only when the planner explicitly requests them.
 
 ## Storage layout
 
@@ -79,15 +81,15 @@ meta_data/skills/
   <skill_id>/
     SKILL.md                           # L1 full content
     examples/                          # L2 optional
-    tests/                             # L2 optional (np. expected outputs)
+    tests/                             # L2 optional (e.g. expected outputs)
   archive/                             # archived skills (rollback path)
     <timestamp>/
       <skill_id>/
         SKILL.md
 ```
 
-**index.jsonl** jest derived/cache (ADR-001 pattern). Single source = SKILL.md
-files. Index rebuilt z files na startup + on save.
+**index.jsonl** is derived/cache (ADR-001 pattern). Single source = SKILL.md
+files. The index is rebuilt from the files on startup and on save.
 
 ## SkillStatus lifecycle
 
@@ -98,34 +100,34 @@ DRAFT --(human approve)--> SANDBOX --(N sandbox successes)--> PRODUCTION
                                     (sandbox failure)                 (stale 90d)
 ```
 
-- **DRAFT** — utworzone (przez teacher z N successful executions, albo manually
-  przez Eryka). NIE używane przez planner. Czeka na human review.
-- **SANDBOX** — Eryk approved jako "spróbuj". Planner może użyć w sandbox sessions
-  (K2 sandbox). NIE w production.
-- **PRODUCTION** — sandbox success rate przekroczył threshold (np. 3/3 lub 5/7).
-  Eryk approve drugiego gate'a — promote() do production. Planner używa w real
-  workflows.
-- **ARCHIVED** — stale (default 90d bez używania) lub explicit Eryk archive.
-  Rollback path: tar.gz snapshot w `archive/<ts>/`.
+- **DRAFT** — created (by the teacher from N successful executions, or manually
+  by the project owner). NOT used by the planner. Awaits human review.
+- **SANDBOX** — the project owner approved it as "give it a try". The planner may
+  use it in sandbox sessions (K2 sandbox). NOT in production.
+- **PRODUCTION** — the sandbox success rate exceeded a threshold (e.g. 3/3 or 5/7).
+  The project owner approves a second gate — promote() to production. The planner
+  uses it in real workflows.
+- **ARCHIVED** — stale (default 90d without use) or explicitly archived by the
+  project owner. Rollback path: a tar.gz snapshot in `archive/<ts>/`.
 
-**Każde przejście wymaga human gate.** To zachowuje ADR-010 (sandbox-first) i
-ADR-011 (goals as data, audit trail) z extension na skills.
+**Every transition requires a human gate.** This preserves ADR-010 (sandbox-first)
+and ADR-011 (goals as data, audit trail), extended to skills.
 
-## Trigger: kiedy teacher tworzy DRAFT skill
+## Trigger: when the teacher creates a DRAFT skill
 
-Hermes: po 5+ tool calls, error recovery, user correction, non-trivial workflow.
+Hermes: after 5+ tool calls, error recovery, user correction, a non-trivial workflow.
 
-Maria: po **N successful executions tego samego goal-action sequence** w trace
-log. Konkretnie:
-- N=5 successful executions w ostatnich 30 dniach
-- Sekwencja co najmniej 2 actions (single action = nie skill, to już prosty)
-- Episode traces dostępne (ADR-022)
+Maria: after **N successful executions of the same goal-action sequence** in the
+trace log. Specifically:
+- N=5 successful executions in the last 30 days
+- A sequence of at least 2 actions (a single action = not a skill, that's already trivial)
+- Episode traces available (ADR-022)
 
-Implementacja: `agent_core/teacher/skill_extractor.py` (Faza 2/3).
-Czyta `meta_data/decision_traces.jsonl`, znajduje powtarzalne wzorce, generuje
-DRAFT SKILL.md przez NIM (nie cloud, per ADR-008). Eryk dostaje notification.
+Implementation: `agent_core/teacher/skill_extractor.py` (Phase 2/3).
+Reads `meta_data/decision_traces.jsonl`, finds recurring patterns, and generates
+a DRAFT SKILL.md via NIM (not cloud, per ADR-008). The project owner gets a notification.
 
-## Skill schema (JSON Schema dla YAML frontmatter)
+## Skill schema (JSON Schema for the YAML frontmatter)
 
 ```json
 {
@@ -149,66 +151,62 @@ DRAFT SKILL.md przez NIM (nie cloud, per ADR-008). Eryk dostaje notification.
 }
 ```
 
-**Wymagane sekcje markdown** (po YAML frontmatter):
+**Required markdown sections** (after the YAML frontmatter):
 - `## When to Use` (1+ paragraph)
 - `## Procedure` (numbered list, 1+ items)
-- `## Pitfalls` (optional, ale recommended)
+- `## Pitfalls` (optional, but recommended)
 - `## Verification` (1+ paragraph)
 
-Validator: jeśli któraś required section pusta → skill INVALID, nie ładuje się do
-runtime, ale plik na disk zostaje (manual fix path).
+Validator: if any required section is empty → the skill is INVALID and won't load
+into the runtime, but the file stays on disk (manual fix path).
 
-## Integration points (Faza 2/3, nie dziś)
+## Integration points (Phase 2/3, future)
 
-| Moduł | Co robi z Skills |
+| Module | What it does with Skills |
 |-------|------------------|
-| `agent_core/teacher/skill_extractor.py` | Czyta decision_traces, generuje DRAFT |
-| `agent_core/planner/` | Wczytuje L0 catalog na start, request L1 on-demand |
-| `agent_core/sandbox/` | Wykonuje SANDBOX skills w sandbox session |
-| `agent_core/bulletin/` | Notify Eryk gdy DRAFT/SANDBOX czeka na approval |
-| `agent_core/critic/` | Audit skill output (analogiczne do current critique) |
-| `agent_core/telegram/` | Komendy: `/skills`, `/skill_approve <id>`, `/skill_archive <id>` |
+| `agent_core/teacher/skill_extractor.py` | Reads decision_traces, generates a DRAFT |
+| `agent_core/planner/` | Loads the L0 catalog at startup, requests L1 on-demand |
+| `agent_core/sandbox/` | Executes SANDBOX skills in a sandbox session |
+| `agent_core/bulletin/` | Notifies the project owner when a DRAFT/SANDBOX awaits approval |
+| `agent_core/critic/` | Audits skill output (analogous to the current critique) |
+| `agent_core/telegram/` | Commands: `/skills`, `/skill_approve <id>`, `/skill_archive <id>` |
 | `maria_ui/` | Skills view, approve/reject UI buttons |
 
-## ADR-030 (LANDED 2026-05-16 jako Faza M w ROADMAP v2.2, entry w ARCHITECTURE.md ADR table)
+## ADR-030 (LANDED 2026-05-16 as Phase M in ROADMAP v2.2, entry in the ARCHITECTURE.md ADR table)
 
 **ADR-030: Skills as artifact (procedural memory, Hermes-inspired, Maria-gated)**
-- Skills = procedural memory wypełniający lukę między goals (cel) i traces (jak było)
-- Format SKILL.md compatible z agentskills.io (cross-agent portability)
-- L0/L1/L2 progressive disclosure (Hermes pattern, sensible)
-- Lifecycle DRAFT→SANDBOX→PRODUCTION→ARCHIVED, **każde przejście human gate**
-- NIE adoptujemy Hermes autonomous create (kłóci się z ADR-010/011)
-- NIE adoptujemy Hermes GEPA cloud-heavy (kłóci się z ADR-008)
-- Storage `meta_data/skills/`, JSONL index derived from SKILL.md files (ADR-001)
+- Skills = procedural memory filling the gap between goals (the objective) and traces (how it went)
+- SKILL.md format compatible with agentskills.io (cross-agent portability)
+- L0/L1/L2 progressive disclosure (a sensible Hermes pattern)
+- Lifecycle DRAFT→SANDBOX→PRODUCTION→ARCHIVED, **every transition a human gate**
+- We do NOT adopt Hermes autonomous create (conflicts with ADR-010/011)
+- We do NOT adopt Hermes GEPA cloud-heavy (conflicts with ADR-008)
+- Storage in `meta_data/skills/`, JSONL index derived from SKILL.md files (ADR-001)
 
-## Faza 1 scope (DZISIAJ 2026-05-15)
+## Phase 1 scope (2026-05-15)
 
-**W zakresie:**
-- ✓ Design doc (ten plik)
+**In scope:**
+- ✓ Design doc (this file)
 - ✓ `agent_core/skills/__init__.py`
 - ✓ `agent_core/skills/skill_model.py` — Skill dataclass, SkillStatus enum, parser
 - ✓ `agent_core/skills/schema.py` — JSON Schema validator
-- ✓ `agent_core/skills/skill_store.py` — load/save z storage layout, L0 catalog
+- ✓ `agent_core/skills/skill_store.py` — load/save with the storage layout, L0 catalog
 - ✓ `agent_core/skills/skill_manager.py` — create_draft, patch, promote (human gate)
-- ✓ Tests dla każdego modułu (~30 unit tests)
+- ✓ Tests for each module (~30 unit tests)
 - ✓ Commit Phase 1
 
-**Poza zakresem (Faza 2/3):**
-- skill_extractor.py (teacher trigger po N successes)
+**Out of scope (Phase 2/3):**
+- skill_extractor.py (teacher trigger after N successes)
 - Planner integration (L0 catalog read, L1 on-demand)
-- Sandbox K2 integration (execute SANDBOX skills in sandbox session)
+- Sandbox K2 integration (execute SANDBOX skills in a sandbox session)
 - Telegram commands (/skills, /skill_approve)
 - Web UI Skills view
-- ADR-030 entry w ARCHITECTURE.md (LANDED 2026-05-16 Faza M, ROADMAP v2.2)
+- ADR-030 entry in ARCHITECTURE.md (LANDED 2026-05-16, Phase M, ROADMAP v2.2)
 
-## Open questions — answered 2026-05-15 (Eryk gate review)
+## Open questions — answered 2026-05-15 (project owner gate review)
 
-1. **N threshold dla DRAFT extraction**: **5 successful w 30d** (default trzymamy).
-2. **Sandbox success rate dla promote**: **5/7 zero critical failures + explicit Eryk approval**. Dla skills krytycznych/safety-affecting: **3/3 zero failures + manual log review**.
-3. **Stale archive threshold**: **90d** dla PRODUCTION skills; **30d** dla SANDBOX/DRAFT które nigdy nie zostały użyte.
-4. **Kto może tworzyć DRAFT**: **teacher + manual** teraz. K12 może proponować później — przez tę samą DRAFT gate. Eryk z chat/manual może tworzyć drafty.
-5. **Język SKILL.md**: **EN** dla frontmatter/name/tags (interop z agentskills.io); body bilingual dozwolony dla Maria internal skills (PL notes OK), ale `description` musi być EN ≤140 znaków.
-
-Zastosowane w batchu 2026-05-15 (24 DRAFTs → 1 canonical + 7 SANDBOX + 17 archived) przez `scripts/apply_skills_review_2026_05_15.py`. Mapping audyt: `meta_data/skills/review_2026-05-15_mapping.txt`.
-
-Follow-up (osobny commit): refactor `goal_pattern_to_candidate` w `agent_core/teacher/skill_extractor.py` żeby generował EN-only slugs (`goal-pattern-<dominant_actions>-<episode_band>`) zamiast slugify PL `goal_description`. Aktualne PL slugi w storze są historical artifact tej batch i zostają jako-są.
+1. **N threshold for DRAFT extraction**: **5 successful in 30d** (we keep the default).
+2. **Sandbox success rate for promote**: **5/7 with zero critical failures + explicit project-owner approval**. For critical/safety-affecting skills: **3/3 with zero failures + manual log review**.
+3. **Stale archive threshold**: **90d** for PRODUCTION skills; **30d** for SANDBOX/DRAFT skills that were never used.
+4. **Who can create a DRAFT**: **teacher + manual** for now. K12 may propose later — through the same DRAFT gate. The project owner can create drafts from chat or manually.
+5. **SKILL.md language**: **EN** for frontmatter/name/tags (interop with agentskills.io); a bilingual body is allowed for Maria-internal skills (PL notes OK), but `description` must be EN, ≤140 characters.

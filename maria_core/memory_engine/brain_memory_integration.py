@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 
-from models.ollama_brain import OllamaBrain   # ⬅ ważne: bez _v3, bo plik nazywa się ollama_brain.py
+from models.ollama_brain import OllamaBrain   # note: no _v3 suffix, the file is ollama_brain.py
 
 
 class BrainMemoryLoop:
@@ -27,7 +27,7 @@ class BrainMemoryLoop:
         else:
             self.maria_brain = OllamaBrain(log_fn=self.log_fn)
 
-        self.log_fn("[BrainMemoryLoop] ✓ System Gotowy (V3.1 Stable)")
+        self.log_fn("[BrainMemoryLoop] System ready (V3.1 Stable)")
 
     # === TEKST NA CHUNKI ===
 
@@ -67,7 +67,7 @@ class BrainMemoryLoop:
         context: opcjonalny opis kontekstu (np. 'logika formalna', 'kurs programowania')
         """
         self.log_fn(
-            f"\n[M.A.R.I.A.] 👁 Odbieram percepcję ({len(perception)} znaków), context={context!r}"
+            f"\n[M.A.R.I.A.] Receiving perception ({len(perception)} chars), context={context!r}"
         )
 
         chunks = self.split_large_text(perception)

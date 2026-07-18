@@ -1,49 +1,49 @@
-# M.A.R.I.A. - Kontrakty Architektoniczne
+# M.A.R.I.A. - Architectural Contracts
 
-> Version: 1.6 | Utworzono: 2026-03-01 | Korekty: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED izolacja), v1.3 (Kontrakt K5: Planner), v1.4 (Kontrakt K6: World Model), v1.5 (Kontrakt K7: Autonomy Policy), v1.6 (Kontrakt K8: Deliberation)
-> Zatwierdzone przez: M.A.R.I.A. Project
+> Version: 1.6 | Created: 2026-03-01 | Revisions: v1.1 (event_id, registry, promote tx, auto-goals), v1.2 (dedup/priority/ttl per type, trace_id trade-off, ROLLBACK reason, PROPOSED isolation), v1.3 (Contract K5: Planner), v1.4 (Contract K6: World Model), v1.5 (Contract K7: Autonomy Policy), v1.6 (Contract K8: Deliberation)
+> Approved by: M.A.R.I.A. Project
 >
-> Ten dokument definiuje formalne kontrakty ("konstytucje") dla nowych warstw systemu.
-> Kazda implementacja MUSI byc zgodna z tymi kontraktami.
+> This document defines the formal contracts ("constitutions") for the system's new layers.
+> Every implementation MUST comply with these contracts.
 
 ---
 
-## Spis tresci
+## Table of Contents
 
-1. [Unified Perception - PerceptionEvent](#kontrakt-1-unified-perception)
-2. [Sandbox / Production Boundary](#kontrakt-2-sandbox--production-boundary)
-3. [Goal System](#kontrakt-3-goal-system)
-4. [Agent Evaluation](#kontrakt-4-agent-evaluation)
-5. [Planner - ReAct Loop](#kontrakt-5-planner)
-6. [World Model / Belief System](#kontrakt-6-world-model--belief-system)
-7. [Autonomy Policy / Governance](#kontrakt-7-autonomy-policy--governance)
-8. [Deliberation / Strategic Planning](#kontrakt-8-deliberation--strategic-planning)
-9. [Decyzja: Tick Aggregator](#decyzja-5-tick-aggregator)
-10. [Struktura plikow](#struktura-plikow)
-11. [Integracja z istniejacym kodem](#integracja)
+1. [Unified Perception - PerceptionEvent](#contract-1-unified-perception)
+2. [Sandbox / Production Boundary](#contract-2-sandbox--production-boundary)
+3. [Goal System](#contract-3-goal-system)
+4. [Agent Evaluation](#contract-4-agent-evaluation)
+5. [Planner - ReAct Loop](#contract-5-planner)
+6. [World Model / Belief System](#contract-6-world-model--belief-system)
+7. [Autonomy Policy / Governance](#contract-7-autonomy-policy--governance)
+8. [Deliberation / Strategic Planning](#contract-8-deliberation--strategic-planning)
+9. [Decision: Tick Aggregator](#decision-5-tick-aggregator-adr-009)
+10. [File Structure](#file-structure)
+11. [Integration with existing code](#integration)
 
 ---
 
-## Kontrakt 1: Unified Perception
+## Contract 1: Unified Perception
 
 ### Problem
 
-System ma 5+ rownolegych, niespojnych strumieni danych:
+The system has 5+ parallel, inconsistent data streams:
 - Homeostasis sensors (5x dataclasses)
 - User REPL (string commands)
 - Learning results (JSONL)
 - Consciousness events (JSONL)
 - Teacher decisions (JSONL)
 
-Brak wspolnego formatu. Moduly nie wiedza co sie dzieje w innych modulach.
+There is no common format. Modules don't know what is happening in other modules.
 
-### Rozwiazanie: PerceptionEvent
+### Solution: PerceptionEvent
 
-Jeden format dla WSZYSTKICH bodzcow.
+One format for ALL stimuli.
 
 ```python
 class PerceptionSource(Enum):
-    """Zrodlo zdarzenia percepcji."""
+    """Source of a perception event."""
     SENSOR = "sensor"                # Homeostasis sensors (5x)
     USER = "user"                    # REPL input, Web UI chat
     LEARNING = "learning"            # learn_next_chunk results, file scan
@@ -56,32 +56,32 @@ class PerceptionSource(Enum):
 
 @dataclass(frozen=True)
 class PerceptionEvent:
-    """Uniwersalny format zdarzenia percepcji."""
-    event_id: str                # UUID4 - unikalny identyfikator tego zdarzenia
-    source: PerceptionSource     # Kto wygenerowel zdarzenie
-    event_type: str              # np. "resource_reading", "user_message", "exam_result"
-    priority: float              # 0.0 (ignoruj) do 1.0 (reaguj natychmiast)
+    """Universal perception-event format."""
+    event_id: str                # UUID4 - unique identifier of this event
+    source: PerceptionSource     # Who generated the event
+    event_type: str              # e.g. "resource_reading", "user_message", "exam_result"
+    priority: float              # 0.0 (ignore) to 1.0 (react immediately)
     timestamp: float             # time.time()
-    payload: Dict[str, Any]      # Dane zrodlowe (struktura wg Event Type Registry)
-    ttl: float                   # Sekundy do wygasniecia (0 = bez limitu)
-    parent_event_id: Optional[str]  # event_id zdarzenia-przyczyny (lancuch kauzalny)
+    payload: Dict[str, Any]      # Source data (structure per the Event Type Registry)
+    ttl: float                   # Seconds until expiry (0 = no limit)
+    parent_event_id: Optional[str]  # event_id of the causing event (causal chain)
 ```
 
-### Semantyka identyfikatorow
+### Identifier semantics
 
-- **`event_id`** - unikalny UUID4 per zdarzenie. Kazde zdarzenie ma DOKLADNIE jeden.
-- **`parent_event_id`** - referuje `event_id` zdarzenia ktore BEZPOSREDNIO spowodowalo to zdarzenie.
-  - Przyklad lancucha: teacher_decision(id=A) → learn_chunk(id=B, parent=A) → exam_result(id=C, parent=B)
-  - Sledzenie calego lancucha: podazaj `parent_event_id` rekurencyjnie do `None`.
-- **Brak osobnego `correlation_id` / `trace_id`** - swiadomy trade-off:
-  - `parent_event_id` daje drzewo przyczynowosci (wystarczajace na skali 5-6 zrodel)
-  - `trace_id` / `correlation_id` daloby grupowanie rownoleglych eventow w jedna "sprawe" (np. caly user flow)
-  - Na dzis: nie potrzebne. Jesli w przyszlosci bedzie potrzebne: dodanie 1 opcjonalnego pola, zero breaking changes.
-  - **Kiedy dodac:** gdy pojawi sie Planner (Warstwa 2) i bedzie potrzebowal sledzic wiele rownoczesnych akcji.
+- **`event_id`** - unique UUID4 per event. Every event has EXACTLY one.
+- **`parent_event_id`** - references the `event_id` of the event that DIRECTLY caused this event.
+  - Example chain: teacher_decision(id=A) → learn_chunk(id=B, parent=A) → exam_result(id=C, parent=B)
+  - Tracing the whole chain: follow `parent_event_id` recursively until `None`.
+- **No separate `correlation_id` / `trace_id`** - a deliberate trade-off:
+  - `parent_event_id` gives a causality tree (sufficient at the scale of 5-6 sources)
+  - `trace_id` / `correlation_id` would allow grouping parallel events into a single "case" (e.g. an entire user flow)
+  - For now: not needed. If needed in the future: add 1 optional field, zero breaking changes.
+  - **When to add:** once the Planner (Layer 2) appears and needs to track many concurrent actions.
 
-### Tabela priorytetow
+### Priority table
 
-| Priority | Typ zdarzenia | Przyklad |
+| Priority | Event type | Example |
 |----------|--------------|---------|
 | **1.0** | CRITICAL alerts | RAM OOM, thermal shutdown, SURVIVAL |
 | **0.9** | User input | REPL command, chat message |
@@ -91,59 +91,59 @@ class PerceptionEvent:
 | **0.3** | Periodic sensor readings | 1Hz tick data (resource, cognitive) |
 | **0.1** | State snapshots, audit | Periodic logging |
 
-### TTL domyslne
+### Default TTLs
 
-| Typ zdarzenia | TTL | Uzasadnienie |
+| Event type | TTL | Rationale |
 |---------------|-----|-------------|
-| Sensor readings | 5s | Stale data jest bezuzyteczna |
-| User input | 0 (brak) | Zawsze relevantne |
-| Learning/exam results | 300s (5 min) | Kontekst biezacej sesji |
-| Mode changes | 0 (brak) | Historycznie wazne |
+| Sensor readings | 5s | Stale data is useless |
+| User input | 0 (none) | Always relevant |
+| Learning/exam results | 300s (5 min) | Context of the current session |
+| Mode changes | 0 (none) | Historically important |
 
 ### Event Type Registry
 
-Rejestr mapujacy `event_type` → wymagane pola `payload`.
-NIE walidowany w runtime - to specyfikacja, nie enforcement.
-Cel: zeby payload nie zrobil anarchii po 3 sprintach.
+A registry mapping `event_type` → required `payload` fields.
+NOT validated at runtime - this is a specification, not enforcement.
+Purpose: to keep the payload from descending into anarchy after 3 sprints.
 
-| event_type | source | priority | ttl | dedup | Wymagane pola payload | Opcjonalne |
+| event_type | source | priority | ttl | dedup | Required payload fields | Optional |
 |-----------|--------|----------|-----|-------|----------------------|------------|
-| `resource_reading` | SENSOR | 0.3 | 5s | tak | `ram_available_mb`, `ram_available_pct`, `cpu_percent`, `temp_c`, `disk_used_pct` | `inference_latency_ms`, `swap_used_pct`, `load_avg_1m` |
-| `cognitive_reading` | SENSOR | 0.3 | 5s | tak | `context_coherence`, `inference_latency_ms`, `error_count_1h`, `goal_stack_depth` | `memory_entries`, `contradiction_count`, `attention_fragmentation` |
-| `thermal_reading` | SENSOR | 0.3 | 5s | tak | `cpu_temp_c`, `is_throttling` | `fan_speed_rpm` |
-| `power_reading` | SENSOR | 0.3 | 5s | tak | `uptime_seconds`, `is_on_battery` | `voltage_v` |
-| `time_reading` | SENSOR | 0.3 | 5s | tak | `idle_streak_sec`, `hour_of_day`, `session_duration_sec` | `day_of_week` |
-| `user_message` | USER | 0.9 | 0 | nie | `text`, `channel` | `user_id` |
-| `user_command` | USER | 0.9 | 0 | nie | `command`, `args` | `channel` |
-| `chunk_learned` | LEARNING | 0.7 | 300s | nie | `file_id`, `chunk_index`, `chunks_total` | `summary_preview` |
-| `file_scan_result` | LEARNING | 0.5 | 300s | tak | `new_files`, `changed_files`, `total_files` | |
-| `exam_result` | EXAM | 0.8 | 300s | nie | `file_id`, `score`, `passed`, `attempt` | `num_questions` |
-| `teacher_decision` | TEACHER | 0.5 | 300s | nie | `strategy_type`, `target_file_id` | `reason`, `iteration` |
-| `teacher_session_complete` | TEACHER | 0.5 | 300s | nie | `chunks_learned`, `exams_run`, `exams_passed` | `errors` |
-| `trait_emerged` | CONSCIOUSNESS | 0.5 | 300s | nie | `trait`, `score` | `previous_score` |
-| `trait_faded` | CONSCIOUSNESS | 0.5 | 300s | nie | `trait`, `score` | `previous_score` |
-| `dream_generated` | CONSCIOUSNESS | 0.5 | 300s | nie | `dream_count`, `session_id` | `themes` |
-| `sleep_cycle` | CONSCIOUSNESS | 0.5 | 300s | nie | `phases_completed` | `dream_count` |
-| `mode_change` | SYSTEM | 0.8 | 0 | nie | `from_mode`, `to_mode` | `trigger`, `health_score` |
-| `alert` | SYSTEM | 1.0 | 0 | nie | `alert_type`, `severity`, `message` | `value`, `threshold` |
-| `sandbox_promoted` | LEARNING | 0.7 | 300s | nie | `session_id`, `files_promoted`, `chunks_promoted` | |
-| `sandbox_discarded` | LEARNING | 0.3 | 300s | nie | `session_id`, `reason` | |
-| `goal_created` | SYSTEM | 0.5 | 0 | nie | `goal_id`, `goal_type`, `description` | `priority` |
-| `goal_achieved` | SYSTEM | 0.5 | 0 | nie | `goal_id`, `goal_type` | `duration_sec` |
+| `resource_reading` | SENSOR | 0.3 | 5s | yes | `ram_available_mb`, `ram_available_pct`, `cpu_percent`, `temp_c`, `disk_used_pct` | `inference_latency_ms`, `swap_used_pct`, `load_avg_1m` |
+| `cognitive_reading` | SENSOR | 0.3 | 5s | yes | `context_coherence`, `inference_latency_ms`, `error_count_1h`, `goal_stack_depth` | `memory_entries`, `contradiction_count`, `attention_fragmentation` |
+| `thermal_reading` | SENSOR | 0.3 | 5s | yes | `cpu_temp_c`, `is_throttling` | `fan_speed_rpm` |
+| `power_reading` | SENSOR | 0.3 | 5s | yes | `uptime_seconds`, `is_on_battery` | `voltage_v` |
+| `time_reading` | SENSOR | 0.3 | 5s | yes | `idle_streak_sec`, `hour_of_day`, `session_duration_sec` | `day_of_week` |
+| `user_message` | USER | 0.9 | 0 | no | `text`, `channel` | `user_id` |
+| `user_command` | USER | 0.9 | 0 | no | `command`, `args` | `channel` |
+| `chunk_learned` | LEARNING | 0.7 | 300s | no | `file_id`, `chunk_index`, `chunks_total` | `summary_preview` |
+| `file_scan_result` | LEARNING | 0.5 | 300s | yes | `new_files`, `changed_files`, `total_files` | |
+| `exam_result` | EXAM | 0.8 | 300s | no | `file_id`, `score`, `passed`, `attempt` | `num_questions` |
+| `teacher_decision` | TEACHER | 0.5 | 300s | no | `strategy_type`, `target_file_id` | `reason`, `iteration` |
+| `teacher_session_complete` | TEACHER | 0.5 | 300s | no | `chunks_learned`, `exams_run`, `exams_passed` | `errors` |
+| `trait_emerged` | CONSCIOUSNESS | 0.5 | 300s | no | `trait`, `score` | `previous_score` |
+| `trait_faded` | CONSCIOUSNESS | 0.5 | 300s | no | `trait`, `score` | `previous_score` |
+| `dream_generated` | CONSCIOUSNESS | 0.5 | 300s | no | `dream_count`, `session_id` | `themes` |
+| `sleep_cycle` | CONSCIOUSNESS | 0.5 | 300s | no | `phases_completed` | `dream_count` |
+| `mode_change` | SYSTEM | 0.8 | 0 | no | `from_mode`, `to_mode` | `trigger`, `health_score` |
+| `alert` | SYSTEM | 1.0 | 0 | no | `alert_type`, `severity`, `message` | `value`, `threshold` |
+| `sandbox_promoted` | LEARNING | 0.7 | 300s | no | `session_id`, `files_promoted`, `chunks_promoted` | |
+| `sandbox_discarded` | LEARNING | 0.3 | 300s | no | `session_id`, `reason` | |
+| `goal_created` | SYSTEM | 0.5 | 0 | no | `goal_id`, `goal_type`, `description` | `priority` |
+| `goal_achieved` | SYSTEM | 0.5 | 0 | no | `goal_id`, `goal_type` | `duration_sec` |
 
-**Kolumny:**
-- **priority** - domyslny priorytet (adapter moze nadpisac, np. alert CRITICAL = 1.0, WARNING = 0.5)
-- **ttl** - domyslny czas zycia (0 = bez limitu)
-- **dedup** - czy mozna dedupowac (tak = jesli identyczny payload w buforze, nowy event zastepuje stary)
+**Columns:**
+- **priority** - default priority (an adapter can override it, e.g. CRITICAL alert = 1.0, WARNING = 0.5)
+- **ttl** - default time-to-live (0 = no limit)
+- **dedup** - whether it can be deduplicated (yes = if an identical payload is in the buffer, the new event replaces the old one)
 
-**Dodawanie nowych event_type:** Dopisz do tej tabeli PRZED implementacja adaptera.
-Jesli payload nie pasuje do zadnego istniejacego typu, to znak ze potrzebny nowy typ.
+**Adding new event_types:** Add to this table BEFORE implementing the adapter.
+If the payload does not fit any existing type, that is a sign a new type is needed.
 
-### Adaptery (mapowanie istniejacych strumieni)
+### Adapters (mapping existing streams)
 
-6 adapterow, kazdy z metoda `to_perception_event()`:
+6 adapters, each with a `to_perception_event()` method:
 
-| Adapter | Zrodlo | Event types |
+| Adapter | Source | Event types |
 |---------|--------|-------------|
 | `sensor_adapter.py` | ResourceMetrics, CognitiveMetrics, ThermalMetrics, PowerMetrics, TimeMetrics | `resource_reading`, `cognitive_reading`, `thermal_reading`, `power_reading`, `time_reading` |
 | `user_adapter.py` | REPL input, WebUI messages | `user_message`, `user_command` |
@@ -152,7 +152,7 @@ Jesli payload nie pasuje do zadnego istniejacego typu, to znak ze potrzebny nowy
 | `consciousness_adapter.py` | ExperienceTracker, SleepProcessor | `trait_emerged`, `trait_faded`, `dream_generated`, `sleep_cycle` |
 | `teacher_adapter.py` | TeacherAgent decisions | `teacher_decision`, `teacher_session_complete` |
 
-### Przyklad: Sensor reading → PerceptionEvent
+### Example: Sensor reading → PerceptionEvent
 
 ```python
 PerceptionEvent(
@@ -174,7 +174,7 @@ PerceptionEvent(
 )
 ```
 
-### Przyklad: User message → PerceptionEvent
+### Example: User message → PerceptionEvent
 
 ```python
 PerceptionEvent(
@@ -184,7 +184,7 @@ PerceptionEvent(
     priority=0.9,
     timestamp=1709312405.0,
     payload={
-        "text": "Co wiesz o fizyce kwantowej?",
+        "text": "What do you know about quantum physics?",
         "channel": "repl",
     },
     ttl=0,
@@ -192,7 +192,7 @@ PerceptionEvent(
 )
 ```
 
-### Przyklad: Exam result (downstream of teacher decision)
+### Example: Exam result (downstream of teacher decision)
 
 ```python
 PerceptionEvent(
@@ -209,7 +209,7 @@ PerceptionEvent(
         "attempt": 1,
     },
     ttl=300.0,
-    parent_event_id="m3n4o5p6-...",  # event_id teacher_decision ktory wywoial ten egzamin
+    parent_event_id="m3n4o5p6-...",  # event_id of the teacher_decision that triggered this exam
 )
 ```
 
@@ -217,73 +217,73 @@ PerceptionEvent(
 
 ```python
 class PerceptionBuffer:
-    """Sliding window ostatnich zdarzen percepcji."""
+    """Sliding window of the most recent perception events."""
 
     def __init__(self, maxlen: int = 200):
         self._buffer: deque = deque(maxlen=maxlen)
 
     def push(self, event: PerceptionEvent) -> None:
-        """Dodaj zdarzenie do bufora."""
+        """Add an event to the buffer."""
         self._buffer.append(event)
 
     def get_recent(self, n: int = 10, source: Optional[PerceptionSource] = None) -> List[PerceptionEvent]:
-        """Pobierz N ostatnich zdarzen, opcjonalnie filtruj po zrodle."""
+        """Get the N most recent events, optionally filtered by source."""
         ...
 
     def get_by_priority(self, min_priority: float = 0.5) -> List[PerceptionEvent]:
-        """Pobierz zdarzenia o priorytecie >= min_priority."""
+        """Get events with priority >= min_priority."""
         ...
 
     def drain_expired(self) -> int:
-        """Usun wygasle zdarzenia (ttl). Zwraca liczbe usunietych."""
+        """Remove expired events (ttl). Returns the number removed."""
         ...
 ```
 
-### Czego NIE obejmuje
+### What it does NOT cover
 
-- Brak async/threading w PerceptionEvent (adaptery sa synchroniczne)
-- Brak walidacji schema w runtime (payload jest trusted, rejestr to dokumentacja)
-- Brak persystencji w warstwie percepcji (kazdy subsystem ma wlasny JSONL)
-- Brak adapterow Vision/Smart Home (dodane gdy Warstwa 4/6 bedzie budowana)
-- Brak deduplikacji (przy 1Hz z 5-6 zrodel duplikaty nie sa problemem)
+- No async/threading in PerceptionEvent (adapters are synchronous)
+- No runtime schema validation (the payload is trusted, the registry is documentation)
+- No persistence in the perception layer (each subsystem has its own JSONL)
+- No Vision/Smart Home adapters (added when Layer 4/6 is built)
+- No deduplication (at 1Hz from 5-6 sources, duplicates are not a problem)
 
 ---
 
-## Kontrakt 2: Sandbox / Production Boundary
+## Contract 2: Sandbox / Production Boundary
 
 ### Problem
 
-Nauka pisze bezposrednio do produkcyjnych JSONL. Brak walidacji przed zapisem.
-Jeden zly wynik LLM = smieci w bazie wiedzy na zawsze.
+Learning writes directly to production JSONL. No validation before writing.
+One bad LLM result = garbage in the knowledge base forever.
 
-### Zasada naczelna
+### Guiding principle
 
-**KAZDA operacja nauki idzie przez sandbox. Promote() to JEDYNY most do produkcji.**
+**EVERY learning operation goes through the sandbox. promote() is the ONLY bridge to production.**
 
 ### Schema
 
 ```python
 class SandboxStatus(Enum):
-    ACTIVE = "active"            # Sandbox jest aktywny, trwa nauka
-    READY_TO_PROMOTE = "ready"   # Kryteria spelnione, czeka na promote
-    PROMOTED = "promoted"        # Zawartosc przeniesiona do produkcji
-    DISCARDED = "discarded"      # Zawartosc odrzucona
+    ACTIVE = "active"            # Sandbox is active, learning in progress
+    READY_TO_PROMOTE = "ready"   # Criteria met, awaiting promote
+    PROMOTED = "promoted"        # Content moved to production
+    DISCARDED = "discarded"      # Content discarded
 
 
 @dataclass
 class SandboxSession:
-    """Jedna izolowana sesja nauki."""
+    """A single isolated learning session."""
     session_id: str              # UUID
     created_at: float            # time.time()
     status: SandboxStatus
 
-    # Sciezki
+    # Paths
     sandbox_dir: Path            # meta_data/sandbox/sess_<id>/
     sandbox_index: Path          # sandbox_dir / "knowledge_index.jsonl"
     sandbox_memory: Path         # sandbox_dir / "maria_longterm_memory.jsonl"
     sandbox_exams: Path          # sandbox_dir / "exam_results.jsonl"
 
-    # Metryki (aktualizowane po kazdej operacji)
+    # Metrics (updated after each operation)
     files_learned: int = 0
     chunks_learned: int = 0
     exams_passed: int = 0
@@ -292,7 +292,7 @@ class SandboxSession:
     validation_errors: List[str] = field(default_factory=list)
 
     def meets_promote_criteria(self) -> bool:
-        """Sprawdz czy sandbox jest gotowy do promocji."""
+        """Check whether the sandbox is ready for promotion."""
         return (
             len(self.validation_errors) == 0
             and self.exams_total > 0
@@ -303,82 +303,82 @@ class SandboxSession:
 
 @dataclass
 class PromoteResult:
-    """Wynik operacji promote()."""
+    """Result of a promote() operation."""
     success: bool
     files_promoted: int
     chunks_promoted: int
     errors: List[str] = field(default_factory=list)
 ```
 
-### Operacje dozwolone w sandboxie
+### Operations allowed in the sandbox
 
-| Operacja | Dozwolona? | Uwagi |
+| Operation | Allowed? | Notes |
 |----------|-----------|-------|
-| `learn_next_chunk()` | TAK | Z `index_path=sandbox_index, memory_path=sandbox_memory` |
-| `run_exam_if_ready()` | TAK | Z `index_path=sandbox_index, exam_path=sandbox_exams` |
-| Re-learn (retry) | TAK | Ponowna nauka z innymi promptami |
-| Modyfikacja semantic_graph | NIE | Dopiero po promote |
-| Modyfikacja personality traits | NIE | Nauka nie zmienia osobowosci |
+| `learn_next_chunk()` | YES | With `index_path=sandbox_index, memory_path=sandbox_memory` |
+| `run_exam_if_ready()` | YES | With `index_path=sandbox_index, exam_path=sandbox_exams` |
+| Re-learn (retry) | YES | Re-learning with different prompts |
+| Modifying semantic_graph | NO | Only after promote |
+| Modifying personality traits | NO | Learning does not change personality |
 
-**Kluczowe:** Bez zmian w `learning_agent.py` / `exam_agent.py` - juz przyjmuja parametry sciezek.
+**Key:** No changes to `learning_agent.py` / `exam_agent.py` - they already accept path parameters.
 
-### Reguly promote()
+### promote() rules
 
-**Warunki obowiazkowe (wszystkie musza byc spelnione):**
+**Mandatory conditions (all must be met):**
 
-1. `chunks_learned > 0` - cos zostalo nauczone
-2. `exams_total > 0` - przynajmniej jeden egzamin
-3. `avg_score >= 0.6` - sredni wynik >= prog zdania (EXAM_PASS_THRESHOLD)
-4. Wszystkie JSONL w sandboxie parsuja sie poprawnie
-5. Brak wpisow w `validation_errors`
+1. `chunks_learned > 0` - something was learned
+2. `exams_total > 0` - at least one exam
+3. `avg_score >= 0.6` - average score >= pass threshold (EXAM_PASS_THRESHOLD)
+4. All JSONL in the sandbox parse correctly
+5. No entries in `validation_errors`
 
-**Mechanizm:**
-- Promote = APPEND rekordow z sandbox JSONL do production JSONL
-- Uzywa istniejacego file locking z `memory_store.py`
-- Index records mergowane po `file_id` (nowszy `updated_at` wygrywa)
-- Promote jest **atomowy per sesja**: wszystko albo nic
-- Po udanym promote: katalog sandbox sesji jest kasowany
+**Mechanism:**
+- Promote = APPEND records from sandbox JSONL to production JSONL
+- Uses the existing file locking from `memory_store.py`
+- Index records merged by `file_id` (newer `updated_at` wins)
+- Promote is **atomic per session**: all or nothing
+- After a successful promote: the sandbox session directory is deleted
 
 **Transaction log (`meta_data/promote_log.jsonl`):**
 
-Kazdy promote zapisuje markery START/COMMIT (lub ROLLBACK) zeby wykryc przerwane operacje:
+Each promote writes START/COMMIT (or ROLLBACK) markers to detect interrupted operations:
 
 ```json
 {"ts": 1709312500.0, "marker": "START", "session_id": "sess_abc123", "files": 2, "chunks": 8}
 {"ts": 1709312500.5, "marker": "COMMIT", "session_id": "sess_abc123", "result": "ok"}
 ```
 
-Jesli na starcie systemu znajdziemy START bez COMMIT:
-1. Sandbox dir jeszcze istnieje → dane nie zostaly przeniesione, status OK (sandbox intact)
-2. Sandbox dir nie istnieje → partial append moglo wystapic → WARNING w logach, manual review
+If, at system startup, we find a START without a COMMIT:
+1. Sandbox dir still exists → data was not moved, status OK (sandbox intact)
+2. Sandbox dir does not exist → a partial append may have occurred → WARNING in logs, manual review
 
 ```json
 {"ts": 1709312500.0, "marker": "ROLLBACK", "session_id": "sess_abc123", "reason": "validation_error", "exception": "JSONDecodeError at line 42"}
 ```
 
-Reguly:
-- START zawsze PRZED pierwszym appendem do produkcji
-- COMMIT po WSZYSTKICH appendach zakonczonych + sandbox dir usuniety
-- ROLLBACK jesli jakikolwiek append sie nie powiodl (sandbox dir pozostaje)
-  - ROLLBACK MUSI zawierac `reason` (krotki opis) i `exception` (string bledu lub null)
-- **Na starcie systemu:** scan promote_log.jsonl, jesli ostatni wpis to START bez COMMIT:
-  1. Jesli sandbox dir istnieje → **auto-DISCARD** sesji (nie zombie, czyste zamkniecie)
-  2. Jesli sandbox dir NIE istnieje → WARNING w logach + manual review (partial append)
-  3. W obu przypadkach: dopisz ROLLBACK marker z `reason: "startup_recovery"`
+Rules:
+- START always BEFORE the first append to production
+- COMMIT after ALL appends complete + sandbox dir removed
+- ROLLBACK if any append fails (sandbox dir remains)
+  - ROLLBACK MUST include `reason` (short description) and `exception` (error string or null)
+- **At system startup:** scan promote_log.jsonl; if the last entry is a START without a COMMIT:
+  1. If sandbox dir exists → **auto-DISCARD** the session (not a zombie, clean closure)
+  2. If sandbox dir does NOT exist → WARNING in logs + manual review (partial append)
+  3. In both cases: append a ROLLBACK marker with `reason: "startup_recovery"`
 
-### Reguly discard()
+### discard() rules
 
-| Trigger | Akcja |
+| Trigger | Action |
 |---------|-------|
-| User jawnie wywola `/sandbox discard` | Kasuj katalog sandbox sesji |
-| Sandbox starszy niz 24h bez promote | Auto-discard |
-| System wchodzi w SURVIVAL | Auto-discard WSZYSTKICH aktywnych |
-| Discard | = kasuje caly katalog `sandbox_dir` |
+| User explicitly runs `/sandbox discard` | Delete the sandbox session directory |
+| Sandbox older than 24h without promote | Auto-discard |
+| System enters SURVIVAL | Auto-discard ALL active sessions |
+| Discard | = deletes the entire `sandbox_dir` directory |
 
 ### Flow
 
 ```
-Teacher/User zleca nauke
+Teacher/User requests learning
   |
   v
 SandboxManager.create_session()
@@ -386,11 +386,11 @@ SandboxManager.create_session()
   |
   v
 seed_from_production(file_ids)
-  ← kopiuje rekordy z memory/knowledge_index.jsonl
+  ← copies records from memory/knowledge_index.jsonl
   |
   v
 learn_next_chunk(path=sandbox)
-  ← pisze do sandbox JSONL
+  ← writes to sandbox JSONL
   |
   v
 run_exam_if_ready(path=sandbox)
@@ -399,52 +399,52 @@ run_exam_if_ready(path=sandbox)
 meets_promote_criteria()?
   |
   ├── YES → promote()
-  |         ├── append do memory/*.jsonl
-  |         ├── kasuj sandbox dir
+  |         ├── append to memory/*.jsonl
+  |         ├── delete sandbox dir
   |         └── emit PerceptionEvent(source=LEARNING, type="sandbox_promoted")
   |
-  └── NO  → retry (re-learn) lub discard()
+  └── NO  → retry (re-learn) or discard()
             └── emit PerceptionEvent(source=LEARNING, type="sandbox_discarded")
 ```
 
-### Ograniczenia
+### Constraints
 
-- Max 1 aktywna sandbox sesja (Maria uczy sie ~10 plikow, nie milionow)
-- Brak sandbox dla chat/conversation (tylko nauka)
-- Brak partial promote (cherry-picking pojedynczych plikow)
-- Brak versioning/rollback produkcji (od tego jest backup.sh)
+- Max 1 active sandbox session (Maria learns ~10 files, not millions)
+- No sandbox for chat/conversation (learning only)
+- No partial promote (cherry-picking individual files)
+- No production versioning/rollback (that is what backup.sh is for)
 
 ---
 
-## Kontrakt 3: Goal System
+## Contract 3: Goal System
 
 ### Problem
 
-Cele sa implicit - hardcoded thresholdy w mode_regulator, if/elif chain w teacher P1-P6.
-Nie mozna ich zmieniac w runtime, nie maja historii, nie mozna ich obserwowac.
+Goals are implicit - hardcoded thresholds in mode_regulator, an if/elif chain in teacher P1-P6.
+They cannot be changed at runtime, have no history, and cannot be observed.
 
-### Rozwiazanie: Minimalny model celow
+### Solution: Minimal goal model
 
 ```python
 class GoalType(Enum):
-    META = "meta"                # Misja systemu (1 cel, zawsze aktywny)
-    USER = "user"                # Cele od uzytkownika (przez /goal create)
-    LEARNING = "learning"        # Cele nauki (generowane z Teacher P1-P6)
-    MAINTENANCE = "maintenance"  # Cele utrzymania (z homeostasis thresholds)
+    META = "meta"                # System mission (1 goal, always active)
+    USER = "user"                # Goals from the user (via /goal create)
+    LEARNING = "learning"        # Learning goals (generated from Teacher P1-P6)
+    MAINTENANCE = "maintenance"  # Maintenance goals (from homeostasis thresholds)
 
 
 class GoalStatus(Enum):
-    PROPOSED = "proposed"        # Auto-sugerowany, czeka na potwierdzenie usera
-    PENDING = "pending"          # Zatwierdzony, nie rozpoczety
-    ACTIVE = "active"            # W trakcie realizacji
-    ACHIEVED = "achieved"        # Zrealizowany
-    FAILED = "failed"            # Nie udalo sie
-    ABANDONED = "abandoned"      # Swiadomie porzucony
+    PROPOSED = "proposed"        # Auto-suggested, awaiting user confirmation
+    PENDING = "pending"          # Approved, not started
+    ACTIVE = "active"            # In progress
+    ACHIEVED = "achieved"        # Achieved
+    FAILED = "failed"            # Failed
+    ABANDONED = "abandoned"      # Deliberately abandoned
 
 
 @dataclass
 class AuditEntry:
-    """Zapis zmiany statusu celu."""
+    """Record of a goal status change."""
     timestamp: float
     old_status: str
     new_status: str
@@ -454,61 +454,61 @@ class AuditEntry:
 
 @dataclass
 class Goal:
-    """Pojedynczy cel w systemie celow Marii."""
+    """A single goal in Maria's goal system."""
     id: str                      # UUID
     type: GoalType
-    description: str             # Human-readable (po polsku OK)
-    priority: float              # 0.0 do 1.0
+    description: str             # Human-readable (Polish is fine)
+    priority: float              # 0.0 to 1.0
     status: GoalStatus
-    progress: float              # 0.0 do 1.0
-    parent_goal_id: Optional[str]  # Hierarchia (Etap B: rollup, max glebokosc 3)
+    progress: float              # 0.0 to 1.0
+    parent_goal_id: Optional[str]  # Hierarchy (Stage B: rollup, max depth 3)
     created_by: str              # "system" / "user" / "teacher" / "homeostasis"
     created_at: float            # time.time()
     updated_at: float            # time.time()
-    deadline: Optional[float]    # Epoch (Etap B: urgency w selekcji + reaper, flag-gated)
+    deadline: Optional[float]    # Epoch (Stage B: urgency in selection + reaper, flag-gated)
     audit_trail: List[AuditEntry] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 ```
 
-### Mapowanie obecnych implicit goals
+### Mapping of current implicit goals
 
-#### META (seed goal, tworzony na pierwszym uruchomieniu)
+#### META (seed goal, created on first run)
 
 ```
 Goal(
     id="goal-meta-learn",
     type=META,
-    description="Autonomiczna nauka i strukturyzacja wiedzy z plikow tekstowych",
+    description="Autonomous learning and structuring of knowledge from text files",
     priority=1.0,
     status=ACTIVE,
-    progress=<obliczany z knowledge_coverage>,
+    progress=<computed from knowledge_coverage>,
     parent_goal_id=None,
     created_by="system",
 )
 ```
 
-#### LEARNING (generowane z Teacher P1-P6)
+#### LEARNING (generated from Teacher P1-P6)
 
 | Teacher Priority | Goal description | Priority | Metadata |
 |-----------------|------------------|----------|----------|
-| P1 | "Kontynuuj nauke: {file} ({n}/{m} chunkow)" | 0.9 | `teacher_priority: 1, file_id, chunks_done, chunks_total` |
-| P2 | "Egzamin z: {file}" | 0.85 | `teacher_priority: 2, file_id` |
-| P3 | "Zacznij nowy plik: {file}" | 0.7 | `teacher_priority: 3, file_id` |
-| P4 | "Powtorka: {file} (wynik: {score}%)" | 0.6 | `teacher_priority: 4, file_id, last_score` |
-| P5 | "Ponow trudny temat: {file}" | 0.5 | `teacher_priority: 5, file_id` |
-| P6 | "NIM analiza luk wiedzy" | 0.4 | `teacher_priority: 6` |
+| P1 | "Continue learning: {file} ({n}/{m} chunks)" | 0.9 | `teacher_priority: 1, file_id, chunks_done, chunks_total` |
+| P2 | "Exam on: {file}" | 0.85 | `teacher_priority: 2, file_id` |
+| P3 | "Start a new file: {file}" | 0.7 | `teacher_priority: 3, file_id` |
+| P4 | "Review: {file} (score: {score}%)" | 0.6 | `teacher_priority: 4, file_id, last_score` |
+| P5 | "Retry a hard topic: {file}" | 0.5 | `teacher_priority: 5, file_id` |
+| P6 | "NIM knowledge-gap analysis" | 0.4 | `teacher_priority: 6` |
 
-#### MAINTENANCE (zawsze aktywne)
+#### MAINTENANCE (always active)
 
 ```
 Goal(id="goal-maint-health", type=MAINTENANCE,
-     description="Utrzymaj health_score >= 0.7",
+     description="Maintain health_score >= 0.7",
      priority=1.0, status=ACTIVE,
      progress=<current health / threshold>,
      metadata={"metric": "health_score", "threshold": 0.7})
 
 Goal(id="goal-maint-ram", type=MAINTENANCE,
-     description="RAM dostepny > 20%",
+     description="RAM available > 20%",
      priority=0.95, status=ACTIVE,
      parent_goal_id="goal-maint-health",
      metadata={"metric": "ram_available_pct", "threshold": 20})
@@ -520,160 +520,160 @@ Goal(id="goal-maint-cpu", type=MAINTENANCE,
      metadata={"metric": "cpu_load", "threshold": 75})
 ```
 
-#### USER (dwa tryby tworzenia)
+#### USER (two creation modes)
 
-**Tryb 1: Jawny** - uzytkownik tworzy cel komenda REPL:
+**Mode 1: Explicit** - the user creates a goal with a REPL command:
 ```
-# /goal create "Naucz sie wszystkiego o fizyce"
+# /goal create "Learn everything about physics"
 Goal(id="goal-user-physics", type=USER,
-     description="Naucz sie wszystkiego o fizyce",
-     priority=0.8, status=PENDING,       # Od razu PENDING (zatwierdzony)
+     description="Learn everything about physics",
+     priority=0.8, status=PENDING,       # Immediately PENDING (approved)
      created_by="user")
 ```
 
-**Tryb 2: Auto-sugerowany** - Maria wykrywa intencje w rozmowie i PROPONUJE cel:
+**Mode 2: Auto-suggested** - Maria detects an intent in conversation and PROPOSES a goal:
 ```
-# User pisze: "Chcialbym wiedziec wiecej o astronomii"
-# Maria wykrywa intencje i tworzy PROPOSED goal:
+# User writes: "I'd like to know more about astronomy"
+# Maria detects the intent and creates a PROPOSED goal:
 Goal(id="goal-user-astronomy", type=USER,
-     description="Poglebic wiedze o astronomii",
-     priority=0.7, status=PROPOSED,      # PROPOSED - czeka na potwierdzenie
-     created_by="consciousness",          # Maria sama zaproponowala
-     metadata={"source_message": "Chcialbym wiedziec wiecej o astronomii",
+     description="Deepen knowledge of astronomy",
+     priority=0.7, status=PROPOSED,      # PROPOSED - awaiting confirmation
+     created_by="consciousness",          # Maria proposed it herself
+     metadata={"source_message": "I'd like to know more about astronomy",
                "confidence": 0.8})
 
-# Maria pyta: "Czy chcesz zebym postawila sobie cel: 'Poglebic wiedze o astronomii'?"
-# User: tak → status PROPOSED → PENDING (audit: "user confirmed")
-# User: nie → status PROPOSED → ABANDONED (audit: "user rejected")
+# Maria asks: "Do you want me to set myself the goal: 'Deepen knowledge of astronomy'?"
+# User: yes → status PROPOSED → PENDING (audit: "user confirmed")
+# User: no  → status PROPOSED → ABANDONED (audit: "user rejected")
 ```
 
-**Reguly auto-sugestii:**
-- Maria NIGDY nie aktywuje auto-celu bez potwierdzenia usera
-- **PROPOSED nie wplywa na system** (izolacja od planowania):
-  - Nie zmienia teacher priorities (P1-P6 ignoruja PROPOSED)
-  - Nie generuje zadan nauki
-  - Nie zmienia planu dnia
-  - Nie wplywa na mode regulator ani homeostasis
-  - Dopiero po CONFIRM (PROPOSED → PENDING) cel wchodzi do systemu
-- PROPOSED goals starsze niz 24h bez odpowiedzi → auto-ABANDONED
-- Max 3 PROPOSED goals jednoczesnie (nie zalewaj usera pytaniami)
-- Wykrywanie intencji: czysta logika (keyword matching na "chce", "naucz", "pokaz", itp.) - zero LLM w v1
+**Auto-suggestion rules:**
+- Maria NEVER activates an auto-goal without user confirmation
+- **PROPOSED does not affect the system** (isolation from planning):
+  - Does not change teacher priorities (P1-P6 ignore PROPOSED)
+  - Does not generate learning tasks
+  - Does not change the day's plan
+  - Does not affect the mode regulator or homeostasis
+  - Only after CONFIRM (PROPOSED → PENDING) does the goal enter the system
+- PROPOSED goals older than 24h without a response → auto-ABANDONED
+- Max 3 PROPOSED goals at once (do not flood the user with questions)
+- Intent detection: pure logic (keyword matching on Polish cues like "chce", "naucz", "pokaz", etc.) - zero LLM in v1
 
-### Reguly
+### Rules
 
-| Regula | Wartosc | Uzasadnienie |
+| Rule | Value | Rationale |
 |--------|---------|-------------|
-| Max aktywnych celow | 20 | Maria uczy sie ~10 plikow; 20 daje zapas |
-| Max PROPOSED celow | 3 | Nie zalewaj usera pytaniami |
-| Max glebokosc hierarchii | 3 | META → LEARNING/MAINTENANCE → sub-goal |
-| Audit trail | Obowiazkowy | Kazda zmiana statusu = AuditEntry z reason i actor |
-| Auto-ACHIEVED | progress >= 1.0 przy ACTIVE | System automatycznie zamyka zrealizowane cele |
-| PROPOSED timeout | 24h | PROPOSED bez odpowiedzi → auto-ABANDONED |
-| MAINTENANCE reset | Co sesje | MAINTENANCE goals nigdy ACHIEVED, resetowane na starcie |
-| ABANDON overflow | Najnizszy PENDING | Przy przekroczeniu 20 aktywnych |
-| Persystencja | `meta_data/goals.jsonl` | Append-only, ostatni rekord per id wygrywa |
-| Runtime modyfikacja | Tak | Kazdy modul z `SharedContext.goal_store` moze CRUD |
-| Auto-sugestia | Human-in-the-loop | Maria NIGDY nie aktywuje celu bez potwierdzenia usera |
-| PROPOSED izolacja | Zero wplywu | PROPOSED nie zmienia priorities, nie generuje zadan, nie zmienia planu |
+| Max active goals | 20 | Maria learns ~10 files; 20 gives headroom |
+| Max PROPOSED goals | 3 | Do not flood the user with questions |
+| Max hierarchy depth | 3 | META → LEARNING/MAINTENANCE → sub-goal |
+| Audit trail | Mandatory | Every status change = AuditEntry with reason and actor |
+| Auto-ACHIEVED | progress >= 1.0 when ACTIVE | The system automatically closes achieved goals |
+| PROPOSED timeout | 24h | PROPOSED without a response → auto-ABANDONED |
+| MAINTENANCE reset | Every session | MAINTENANCE goals are never ACHIEVED, reset at startup |
+| ABANDON overflow | Lowest PENDING | When 20 active is exceeded |
+| Persistence | `meta_data/goals.jsonl` | Append-only, last record per id wins |
+| Runtime modification | Yes | Any module with `SharedContext.goal_store` can CRUD |
+| Auto-suggestion | Human-in-the-loop | Maria NEVER activates a goal without user confirmation |
+| PROPOSED isolation | Zero impact | PROPOSED does not change priorities, generate tasks, or change the plan |
 
 ### GoalStore API
 
 ```python
 class GoalStore:
-    """CRUD + persystencja celow."""
+    """CRUD + goal persistence."""
 
     def create(self, goal: Goal) -> str:
-        """Utworz cel (status PENDING lub ACTIVE), zwroc id."""
+        """Create a goal (status PENDING or ACTIVE), return id."""
 
     def propose(self, goal: Goal) -> str:
-        """Utworz cel ze statusem PROPOSED (czeka na potwierdzenie usera). Zwroc id."""
+        """Create a goal with status PROPOSED (awaiting user confirmation). Return id."""
 
     def confirm(self, goal_id: str) -> bool:
-        """User potwierdza PROPOSED goal → PENDING. Zwraca False jesli goal nie jest PROPOSED."""
+        """User confirms a PROPOSED goal → PENDING. Returns False if the goal is not PROPOSED."""
 
     def reject(self, goal_id: str) -> bool:
-        """User odrzuca PROPOSED goal → ABANDONED. Zwraca False jesli goal nie jest PROPOSED."""
+        """User rejects a PROPOSED goal → ABANDONED. Returns False if the goal is not PROPOSED."""
 
     def get(self, goal_id: str) -> Optional[Goal]:
-        """Pobierz cel po id."""
+        """Get a goal by id."""
 
     def get_active(self, goal_type: Optional[GoalType] = None) -> List[Goal]:
-        """Pobierz aktywne cele (PENDING + ACTIVE), opcjonalnie filtruj po typie."""
+        """Get active goals (PENDING + ACTIVE), optionally filtered by type."""
 
     def get_proposed(self) -> List[Goal]:
-        """Pobierz cele czekajace na potwierdzenie usera (status PROPOSED)."""
+        """Get goals awaiting user confirmation (status PROPOSED)."""
 
     def update_status(self, goal_id: str, status: GoalStatus, reason: str, actor: str) -> bool:
-        """Zmien status z audit trail."""
+        """Change status with an audit trail entry."""
 
     def update_progress(self, goal_id: str, progress: float) -> bool:
-        """Aktualizuj postep (auto-ACHIEVED przy 1.0)."""
+        """Update progress (auto-ACHIEVED at 1.0)."""
 
     def abandon_lowest(self) -> Optional[str]:
-        """Porzuc najnizszy priorytet PENDING goal. Zwraca id lub None."""
+        """Abandon the lowest-priority PENDING goal. Returns id or None."""
 
     def expire_proposed(self) -> int:
-        """Auto-ABANDON PROPOSED goals starszych niz 24h. Zwraca liczbe porzuconych."""
+        """Auto-ABANDON PROPOSED goals older than 24h. Returns the number abandoned."""
 
     def load(self) -> None:
-        """Zaladuj z meta_data/goals.jsonl."""
+        """Load from meta_data/goals.jsonl."""
 
     def save(self) -> None:
-        """Zapisz do meta_data/goals.jsonl (append-only)."""
+        """Save to meta_data/goals.jsonl (append-only)."""
 ```
 
-### Czego NIE obejmuje
+### What it does NOT cover
 
-- Brak generowania celow przez LLM w v1 (czysta logika / keyword matching)
-- Brak grafu zaleznosci miedzy celami (tylko parent-child)
-- Brak szablonow celow
-- Brak AUTONOMICZNEGO tworzenia sub-celow (drzewa tworzy operator przez /project)
-- Auto-sugestia NIGDY nie aktywuje celu bez potwierdzenia usera (human-in-the-loop)
+- No LLM goal generation in v1 (pure logic / keyword matching)
+- No dependency graph between goals (parent-child only)
+- No goal templates
+- No AUTONOMOUS sub-goal creation (trees are created by the operator via /project)
+- Auto-suggestion NEVER activates a goal without user confirmation (human-in-the-loop)
 
-### Digital Human Etap B: drzewa pod-celow + terminy (2026-06-22)
+### Digital Human Stage B: sub-goal trees + deadlines (2026-06-22)
 
-Dwa martwe pola (`parent_goal_id`, `deadline`, 0 czytelnikow) ozywione. Wszystko
-za flagami `.env` DOMYSLNIE OFF (flag -> observe -> cutover); kod bez zmian przy OFF.
+Two dead fields (`parent_goal_id`, `deadline`, 0 readers) brought to life. Everything
+behind `.env` flags, OFF BY DEFAULT (flag -> observe -> cutover); code unchanged when OFF.
 
-- **Schema-guard (zawsze-on, bez flagi):** `store.create/propose` odrzucaja zly
-  link rodzica (parent nie istnieje / self-parent / cykl / glebokosc >
-  `MAX_HIERARCHY_DEPTH=3`) przez osierocenie celu (flat) + log ERROR. Fail-SAFE:
-  `create()` zwraca id jak dawniej. No-op dla istniejacej (plaskiej) populacji.
-- **Rollup (`GOAL_ROLLUP_ENABLED`):** faza planera STEP 2.35. Dziecko terminalne
-  -> rodzic awansuje `progress = terminalne/wszystkie`; wszystkie ACHIEVED ->
-  rodzic ACHIEVED; ktorekolwiek FAILED/ABANDONED/CANCELLED (reszta terminalna) ->
-  rodzic FAILED (`ANY_FAIL_FAILS_PARENT`). **MAINTENANCE pomijane** (seed-tree
-  health<-ram/cpu nie auto-domyka sie). Agreguje TYLKO status terminalnych dzieci
-  -- NIGDY nie re-ewaluuje `success_criteria`/egzaminu liscia (nie koliduje z
-  domknieciem 2026-05-31). `agent_core/goals/rollup.py`.
+- **Schema-guard (always-on, no flag):** `store.create/propose` reject a bad
+  parent link (parent does not exist / self-parent / cycle / depth >
+  `MAX_HIERARCHY_DEPTH=3`) by orphaning the goal (flat) + logging ERROR. Fail-SAFE:
+  `create()` returns an id as before. No-op for the existing (flat) population.
+- **Rollup (`GOAL_ROLLUP_ENABLED`):** planner phase STEP 2.35. A terminal child
+  -> the parent's `progress = terminal/total`; all ACHIEVED ->
+  parent ACHIEVED; any FAILED/ABANDONED/CANCELLED (rest terminal) ->
+  parent FAILED (`ANY_FAIL_FAILS_PARENT`). **MAINTENANCE skipped** (the seed-tree
+  health<-ram/cpu does not auto-close). Aggregates ONLY the status of terminal children
+  -- NEVER re-evaluates a leaf's `success_criteria`/exam (does not collide with the
+  2026-05-31 closure). `agent_core/goals/rollup.py`.
 - **Deadline urgency (`GOAL_DEADLINE_ENABLED`):** `goal_selector._compute_effective_priority`
-  mnozy efektywny priorytet przez mnoznik terminu (overdue x3.0; <=24h ramp
-  1.0->2.0; daleko/None x1.0), multiplikatywnie po aging, clamp 3.0. Tylko
-  RE-ORDERUJE feasible set; nie zmienia bram wykonalnosci. `deadline` = absolutny
+  multiplies the effective priority by a deadline multiplier (overdue x3.0; <=24h ramp
+  1.0->2.0; far/None x1.0), multiplicatively after aging, clamp 3.0. Only
+  RE-ORDERS the feasible set; does not change feasibility gates. `deadline` = absolute
   epoch (TZ-safe).
-- **Deadline reaper (`GOAL_DEADLINE_REAP_ENABLED`, OSOBNA flaga):** overdue
-  still-active non-MAINTENANCE/non-META -> FAILED (`deadline_overdue`). Osobny tor
-  od age-reaper. OFF nawet gdy urgency=cutover.
-- **Kran operatora:** `/project <nazwa> | <termin> | <podcel1> ; <podcel2>` tworzy
-  USER-rodzica + USER-dzieci (deadline dziedziczony). `/projects` = podglad drzewa.
+- **Deadline reaper (`GOAL_DEADLINE_REAP_ENABLED`, SEPARATE flag):** overdue
+  still-active non-MAINTENANCE/non-META -> FAILED (`deadline_overdue`). A separate track
+  from the age-reaper. OFF even when urgency=cutover.
+- **Operator tap:** `/project <name> | <deadline> | <subgoal1> ; <subgoal2>` creates
+  a USER parent + USER children (deadline inherited). `/projects` = tree view.
 
 ---
 
-## Kontrakt 4: Agent Evaluation
+## Contract 4: Agent Evaluation
 
 ### Problem
 
-Ewaluacja jest rozproszona: exam scores w jednym JSONL, health_score w innym,
-teacher stats w pamieci. Brak jednego spojnego obrazu "jak Maria sobie radzi".
+Evaluation is scattered: exam scores in one JSONL, health_score in another,
+teacher stats in memory. There is no single coherent picture of "how Maria is doing".
 
-### Zasada naczelna
+### Guiding principle
 
-**Scisle READ-ONLY** (rozszerzenie ADR-006, jak introspection).
-Observer czyta logi i metryki, NIGDY ich nie modyfikuje.
+**Strictly READ-ONLY** (an extension of ADR-006, like introspection).
+The observer reads logs and metrics, NEVER modifies them.
 
-### 5 kluczowych metryk
+### 5 key metrics
 
-| # | Metryka | Definicja | Zrodlo danych | Okno |
+| # | Metric | Definition | Data source | Window |
 |---|---------|-----------|---------------|------|
 | 1 | `learning_velocity` | chunks / hour | `teacher_plans.jsonl` | Rolling 1h |
 | 2 | `retention_rate` | exams_passed / exams_total | `exam_results.jsonl` | All-time |
@@ -681,7 +681,7 @@ Observer czyta logi i metryki, NIGDY ich nie modyfikuje.
 | 4 | `system_stability` | avg health_score | `homeostasis_events.jsonl` | Rolling 1h |
 | 5 | `personality_growth` | sum \|trait_delta\| | `personality_experiences.jsonl` | Last N sessions |
 
-### Format raportu (JSON)
+### Report format (JSON)
 
 ```json
 {
@@ -722,7 +722,7 @@ Observer czyta logi i metryki, NIGDY ich nie modyfikuje.
       "critical_alerts_24h": 0
     },
     "personality_growth": {
-      "traits_emerged": ["wytrwala"],
+      "traits_emerged": ["persistent"],
       "traits_faded": [],
       "total_trait_delta": 0.12,
       "sessions_analyzed": 5
@@ -738,72 +738,72 @@ Observer czyta logi i metryki, NIGDY ich nie modyfikuje.
   },
 
   "recommendations": [
-    "Retention rate < 80% - rozwazyc wiecej powtórek (P4)",
-    "2 hard topics - rozwazyc retry po ukonczeniu jeszcze 1 pliku"
+    "Retention rate < 80% - consider more reviews (P4)",
+    "2 hard topics - consider a retry after finishing 1 more file"
   ]
 }
 ```
 
-### Reguly
+### Rules
 
-| Regula | Wartosc |
+| Rule | Value |
 |--------|---------|
-| Tryb | READ-ONLY (ADR-006 rozszerzony) |
-| Pisze do | TYLKO `meta_data/evaluation_reports.jsonl` (wlasne raporty) |
-| Czestotliwosc | On-demand (`/evaluate`) + co 300 tickow (5 min) w ACTIVE |
-| LLM | ZERO (czysta logika, thresholdy) |
-| Wzorzec implementacji | Jak `knowledge_analyzer.py` (czyta JSONL, zero side effects) |
+| Mode | READ-ONLY (ADR-006 extended) |
+| Writes to | ONLY `meta_data/evaluation_reports.jsonl` (its own reports) |
+| Frequency | On-demand (`/evaluate`) + every 300 ticks (5 min) in ACTIVE |
+| LLM | ZERO (pure logic, thresholds) |
+| Implementation pattern | Like `knowledge_analyzer.py` (reads JSONL, zero side effects) |
 
-### Rekomendacje (thresholdy)
+### Recommendations (thresholds)
 
-| Warunek | Rekomendacja |
+| Condition | Recommendation |
 |---------|-------------|
-| `retention_rate < 0.8` | "Rozwazyc wiecej powtórek (P4)" |
-| `retention_rate < 0.6` | "Retention krytycznie niska - uproszic prompty" |
-| `learning_velocity == 0` przez 2h | "Brak nauki od 2h" |
-| `knowledge_coverage > 0.9` | "Prawie wszystko nauczone - szukac nowych materialow" |
-| `system_stability < 0.7` | "System niestabilny - sprawdzic zasoby" |
-| `personality_growth == 0` przez 3 sesje | "Brak ewolucji osobowosci" |
+| `retention_rate < 0.8` | "Consider more reviews (P4)" |
+| `retention_rate < 0.6` | "Retention critically low - simplify prompts" |
+| `learning_velocity == 0` for 2h | "No learning for 2h" |
+| `knowledge_coverage > 0.9` | "Almost everything learned - look for new materials" |
+| `system_stability < 0.7` | "System unstable - check resources" |
+| `personality_growth == 0` for 3 sessions | "No personality evolution" |
 
-### Feed do Goal System (przyszlosc)
+### Feed into Goal System (future)
 
-Observer **SUGERUJE**, GoalStore **DECYDUJE**:
+The observer **SUGGESTS**, the GoalStore **DECIDES**:
 
 ```
 retention_rate < 0.7
-  → sugestia: boost priority celow P4 (powtorki) o +0.1
+  → suggestion: boost the priority of P4 goals (reviews) by +0.1
 
-learning_velocity == 0 przez 2h
-  → sugestia: nowy cel LEARNING "wznow nauke"
+learning_velocity == 0 for 2h
+  → suggestion: new LEARNING goal "resume learning"
 
 knowledge_coverage > 0.9
-  → sugestia: cel META "szukaj nowych materialow"
+  → suggestion: META goal "look for new materials"
 ```
 
-Observer nigdy nie modyfikuje celow bezposrednio.
-Sugestie to `List[GoalAdjustment]` ktore GoalStore moze przyjac lub zignorowac.
+The observer never modifies goals directly.
+Suggestions are a `List[GoalAdjustment]` that the GoalStore may accept or ignore.
 
-### Czego NIE obejmuje
+### What it does NOT cover
 
-- Brak wywolan LLM (czysta matematyka + thresholdy)
-- Brak modyfikacji zrodlowych JSONL
-- Brak alertow (to domena homeostasis)
-- Brak trendow/wykresow (to domena Web UI)
-- Brak porownania miedzy sesjami (future feature)
+- No LLM calls (pure math + thresholds)
+- No modification of source JSONL
+- No alerts (that is homeostasis's domain)
+- No trends/charts (that is the Web UI's domain)
+- No cross-session comparison (future feature)
 
 ---
 
-## Kontrakt 5: Planner
+## Contract 5: Planner
 
 ### Problem
 
-K1-K4 daly Marii percepcje, sandbox, cele i ewaluacje - ale nie ma "sprawcy" ktory to laczy.
-Teacher (P1-P6) dziala na if/elif chain z hardcoded priorytetami, Phase 10 tick loop
-odpala go co 10min idle. Brak centralnej petli decyzyjnej.
+K1-K4 gave Maria perception, sandbox, goals, and evaluation - but there is no "agent" that ties it together.
+The Teacher (P1-P6) runs on an if/elif chain with hardcoded priorities; the Phase 10 tick loop
+fires it every 10min of idle. There is no central decision loop.
 
-### Rozwiazanie: Rule-based ReAct Loop (ADR-013)
+### Solution: Rule-based ReAct Loop (ADR-013)
 
-Planner v1 = deterministyczny, rule-based, zero LLM. Testable i przewidywalny.
+Planner v1 = deterministic, rule-based, zero LLM. Testable and predictable.
 
 ```
 OBSERVE -> THINK -> ACT -> EVALUATE
@@ -811,18 +811,18 @@ OBSERVE -> THINK -> ACT -> EVALUATE
    +-------- REPEAT ----------+
 ```
 
-- **OBSERVE:** Odczytaj PerceptionBuffer (K1), GoalStore (K3), EvaluationObserver (K4)
-- **THINK:** GoalSelector wybiera cel, PlannerGuard sprawdza gating rules
-- **ACT:** ActionExecutor deleguje do Teacher/Sandbox (K2)
-- **EVALUATE:** Emit PerceptionEvent(PLANNER), log decision
+- **OBSERVE:** Read the PerceptionBuffer (K1), GoalStore (K3), EvaluationObserver (K4)
+- **THINK:** GoalSelector picks a goal, PlannerGuard checks the gating rules
+- **ACT:** ActionExecutor delegates to Teacher/Sandbox (K2)
+- **EVALUATE:** Emit PerceptionEvent(PLANNER), log the decision
 
-### Planner zastepuje Phase 10
+### Planner replaces Phase 10
 
-Phase 10 tick loop (teacher auto-trigger) zostaje zastapiona PlannerCore:
-- Jesli PlannerCore podlaczony: `planner.run_cycle(tick)` w Phase 10
-- Jesli nie: fallback na stary `_check_teacher_trigger()` (backward-compatible)
+The Phase 10 tick loop (teacher auto-trigger) is replaced by PlannerCore:
+- If PlannerCore is connected: `planner.run_cycle(tick)` in Phase 10
+- If not: fall back to the old `_check_teacher_trigger()` (backward-compatible)
 
-### Model danych
+### Data model
 
 ```python
 class PlanStatus(Enum):
@@ -834,32 +834,32 @@ class PlanStatus(Enum):
 
 
 class ActionType(Enum):
-    LEARN = "learn"          # Deleguj nauke do Teacher
-    EXAM = "exam"            # Deleguj egzamin do Teacher
-    REVIEW = "review"        # Deleguj powtorke do Teacher
-    EVALUATE = "evaluate"    # Wygeneruj raport K4
-    MAINTENANCE = "maintenance"  # Sprawdz metryki zdrowia
-    NOOP = "noop"            # Nic do zrobienia
+    LEARN = "learn"          # Delegate learning to Teacher
+    EXAM = "exam"            # Delegate an exam to Teacher
+    REVIEW = "review"        # Delegate a review to Teacher
+    EVALUATE = "evaluate"    # Generate a K4 report
+    MAINTENANCE = "maintenance"  # Check health metrics
+    NOOP = "noop"            # Nothing to do
 
 
 @dataclass
 class Plan:
-    """Pojedynczy krok planowania (nie drzewo/graf)."""
+    """A single planning step (not a tree/graph)."""
     plan_id: str             # UUID
     timestamp: float
-    goal_id: Optional[str]   # Cel ktory realizuje
+    goal_id: Optional[str]   # The goal it serves
     goal_description: str
     action_type: ActionType
     action_params: Dict[str, Any]
     status: PlanStatus
     result: Dict[str, Any] = field(default_factory=dict)
-    trace_id: Optional[str] = None  # Opcjonalny (per ChatGPT review)
+    trace_id: Optional[str] = None  # Optional (per ChatGPT review)
     duration_ms: float = 0.0
 
 
 @dataclass
 class PlannerState:
-    """Stan persystentny Plannera (planner_state.json)."""
+    """Persistent Planner state (planner_state.json)."""
     total_cycles: int = 0
     total_plans: int = 0
     last_plan_id: Optional[str] = None
@@ -869,92 +869,92 @@ class PlannerState:
 
 ### Planner Guard (gating rules)
 
-Planner NIE planuje jesli warunki nie sa spelnione:
+The Planner does NOT plan if the conditions are not met:
 
-| Regula | Warunek blokujacy | Uzasadnienie |
+| Rule | Blocking condition | Rationale |
 |--------|-------------------|-------------|
-| Health | `health_score < 0.7` | System nie zdrowy - nie obciazaj |
-| Mode | `mode != ACTIVE` | W REDUCED/SLEEP/SURVIVAL nie planuj nauki |
-| Sandbox | Aktywna sesja sandbox | Poczekaj na promote/discard |
-| Retention | `retention_rate < 0.5` | Za duzo oblanych - nie dodawaj nowej nauki |
-| Teacher | Teacher thread aktywny | Nie interferuj z biezaca sesja |
+| Health | `health_score < 0.7` | System not healthy - do not load it |
+| Mode | `mode != ACTIVE` | In REDUCED/SLEEP/SURVIVAL, do not plan learning |
+| Sandbox | Active sandbox session | Wait for promote/discard |
+| Retention | `retention_rate < 0.5` | Too many failures - do not add new learning |
+| Teacher | Teacher thread active | Do not interfere with the current session |
 
 ```python
 class PlannerGuard:
     def can_plan(self, health, mode, sandbox_active,
                  retention, teacher_running) -> Tuple[bool, List[str]]:
-        """Zwraca (can_plan, list_of_block_reasons)."""
+        """Returns (can_plan, list_of_block_reasons)."""
 ```
 
 ### Goal Selector (aging factor)
 
-Zapobiega starvation (dlugo czekajacy cel jest promowany):
+Prevents starvation (a long-waiting goal is promoted):
 
 ```python
 effective_priority = priority * (1.0 + min(hours_pending * 0.1, 4.0))
 ```
 
-- Po 1h pending: x1.1
-- Po 10h pending: x2.0
-- Po 24h pending: x3.4
+- After 1h pending: x1.1
+- After 10h pending: x2.0
+- After 24h pending: x3.4
 - Max: x5.0 (clamp)
 
 Feasibility check per goal type:
-- MAINTENANCE / META / USER: zawsze feasible
-- LEARNING: wymaga dostepnych plikow do nauki
+- MAINTENANCE / META / USER: always feasible
+- LEARNING: requires files available to learn
 
 ### Action Executor
 
-Planner decyduje CO, Executor robi JAK:
+The Planner decides WHAT, the Executor does HOW:
 
-| ActionType | Delegacja |
+| ActionType | Delegation |
 |-----------|-----------|
 | LEARN / EXAM / REVIEW | `TeacherAgent.run_session(max_iterations=1)` |
 | EVALUATE | `EvaluationObserver.generate_report()` |
-| MAINTENANCE | Update goal progress z system metrics |
-| NOOP | Nic nie rob |
+| MAINTENANCE | Update goal progress from system metrics |
+| NOOP | Do nothing |
 
 ### Hybrid Frequency
 
-| Trigger | Warunek | Opis |
+| Trigger | Condition | Description |
 |---------|---------|------|
-| Routine | Co 60 tickow (~1min) | Regularny cykl planowania |
-| Event-driven | `exam_result` | Natychmiast po egzaminie |
-| Event-driven | `alert` | Natychmiast na alert |
-| Event-driven | `user_command` | Natychmiast na komende usera |
-| Event-driven | `sandbox_promoted` | Natychmiast po promote |
+| Routine | Every 60 ticks (~1min) | Regular planning cycle |
+| Event-driven | `exam_result` | Immediately after an exam |
+| Event-driven | `alert` | Immediately on an alert |
+| Event-driven | `user_command` | Immediately on a user command |
+| Event-driven | `sandbox_promoted` | Immediately after a promote |
 
-### Percepcja (nowe typy)
+### Perception (new types)
 
 PerceptionSource += `PLANNER`
 
 | event_type | source | priority | ttl | dedup | Payload |
 |-----------|--------|----------|-----|-------|---------|
-| `planner_decision` | PLANNER | 0.5 | 300s | nie | `plan_id`, `goal_id`, `action_type`, `goal_description` |
-| `planner_cycle_complete` | PLANNER | 0.3 | 60s | tak | `tick`, `planned`, `guard_blocked`, `no_goals` |
+| `planner_decision` | PLANNER | 0.5 | 300s | no | `plan_id`, `goal_id`, `action_type`, `goal_description` |
+| `planner_cycle_complete` | PLANNER | 0.3 | 60s | yes | `tick`, `planned`, `guard_blocked`, `no_goals` |
 
-### Persystencja
+### Persistence
 
-| Plik | Format | Opis |
+| File | Format | Description |
 |------|--------|------|
-| `meta_data/planner_state.json` | JSON | Biezacy stan (cykle, ostatni plan) |
-| `meta_data/planner_decisions.jsonl` | JSONL (append) | Historia decyzji |
+| `meta_data/planner_state.json` | JSON | Current state (cycles, last plan) |
+| `meta_data/planner_decisions.jsonl` | JSONL (append) | Decision history |
 
 ### Cooldown
 
-- Evaluation co 1h (nie czesciej) - anty-oscylacja na recommendations
-- Planner Guard blokuje planowanie nauki gdy retention < 0.5
+- Evaluation every 1h (no more often) - anti-oscillation on recommendations
+- Planner Guard blocks planning learning when retention < 0.5
 
 ### REPL commands
 
-| Komenda | Opis |
+| Command | Description |
 |---------|------|
-| `/plan` | Ostatnia decyzja plannera |
-| `/plan status` | Cykle, plany, ostatni eval |
-| `/plan history [N]` | Historia decyzji (domyslnie 10) |
-| `/plan goals` | Ranking celow wg effective priority |
+| `/plan` | The planner's last decision |
+| `/plan status` | Cycles, plans, last eval |
+| `/plan history [N]` | Decision history (default 10) |
+| `/plan goals` | Ranking of goals by effective priority |
 
-### Struktura plikow
+### File structure
 
 ```
 agent_core/planner/
@@ -962,93 +962,93 @@ agent_core/planner/
   planner_model.py     # Plan, PlanStatus, ActionType, PlannerState
   planner_guard.py     # PlannerGuard.can_plan() - 5 gating rules
   goal_selector.py     # GoalSelector.select_goal() - aging + feasibility
-  action_executor.py   # ActionExecutor.execute() - delegacja
-  planner_core.py      # PlannerCore - centralny ReAct loop
+  action_executor.py   # ActionExecutor.execute() - delegation
+  planner_core.py      # PlannerCore - central ReAct loop
 
 agent_core/modules/
   planner_module.py    # REPL /plan commands
 ```
 
-### Modyfikacje istniejacych plikow
+### Modifications to existing files
 
-| Plik | Zmiana |
+| File | Change |
 |------|--------|
 | `agent_core/perception/event.py` | +PLANNER source, +2 event types |
 | `agent_core/registry/shared_context.py` | +planner_core field |
-| `agent_core/homeostasis/core.py` | Phase 10: planner z fallbackiem na teacher |
+| `agent_core/homeostasis/core.py` | Phase 10: planner with fallback to teacher |
 | `agent_core/modules/homeostasis_module.py` | Wire PlannerCore |
 | `main.py` | `registry.try_register(make_planner, "planner")` |
 
-### Nowe ADR
+### New ADRs
 
-| ADR | Decyzja |
+| ADR | Decision |
 |-----|---------|
 | **ADR-013** | Planner v1 rule-based (zero LLM, deterministic, testable) |
 
-### Czego NIE obejmuje (v1)
+### What it does NOT cover (v1)
 
-- Brak LLM w petli decyzyjnej (rule-based only)
-- Brak multi-step planow (Plan = single step)
-- Brak drzew/grafow planowania
-- Brak priorytyzacji miedzy rownoleglymi celami (sekwencyjny)
-- Brak rollback planow (failed = log + next cycle)
-- Brak auto-generowania celow (to domena GoalStore)
+- No LLM in the decision loop (rule-based only)
+- No multi-step plans (Plan = single step)
+- No planning trees/graphs
+- No prioritization among parallel goals (sequential)
+- No plan rollback (failed = log + next cycle)
+- No auto-generation of goals (that is the GoalStore's domain)
 
 ---
 
-## Decyzja 5: Tick Aggregator (ADR-009)
+## Decision 5: Tick Aggregator (ADR-009)
 
-### Pytanie
+### Question
 
-Jak koordynowac zdarzenia miedzy modulami?
-- Opcja A: Pelny pub/sub event bus
-- Opcja B: Lightweight tick aggregator (rozszerzenie istniejacego tick loop)
+How should events be coordinated between modules?
+- Option A: A full pub/sub event bus
+- Option B: A lightweight tick aggregator (extension of the existing tick loop)
 
-### Decyzja: Opcja B - Tick Aggregator
+### Decision: Option B - Tick Aggregator
 
-### Uzasadnienie
+### Rationale
 
-1. **Tick loop JUZ jest agregatorem** - 21 faz sekwencyjnie, wszystkie dane przechodza przez jeden punkt w `HomeostasisCore._execute_tick()`
-2. **Deterministyczna kolejnosc** - fazy gwarantuja ze sensor reading jest przetworzony PRZED mode regulator. Event bus tego nie gwarantuje.
-3. **Prostota threading** - ADR-002 mowi "threading nie asyncio". Pub/sub z threading = locki, race conditions. Tick loop = 1 watek + 1 deque dla external events.
-4. **5-6 zrodel, nie setki** - event bus sie oplaca przy dziesieciach producentow. Maria ma 6.
-5. **1s latency jest OK** - Maria uczy sie z plikow tekstowych, nie potrzebuje sub-sekundowej reakcji na zdarzenia.
-6. **HomeostasisEventBus juz istnieje i NIE jest uzywany** - `agent_core/homeostasis/api.py` ma pub/sub ale tick loop robi wszystko inline. System naturalnie ciagy ku synchronicznej agregacji.
+1. **The tick loop IS ALREADY an aggregator** - roughly 20 phases run sequentially, and all data passes through a single point in `HomeostasisCore._execute_tick()`
+2. **Deterministic ordering** - the phases guarantee that a sensor reading is processed BEFORE the mode regulator. An event bus does not guarantee this.
+3. **Threading simplicity** - ADR-002 says "threading, not asyncio". Pub/sub with threading = locks, race conditions. The tick loop = 1 thread + 1 deque for external events.
+4. **5-6 sources, not hundreds** - an event bus pays off with dozens of producers. Maria has 6.
+5. **1s latency is OK** - Maria learns from text files; it does not need sub-second reaction to events.
+6. **HomeostasisEventBus already exists and is NOT used** - `agent_core/homeostasis/api.py` has pub/sub, but the tick loop does everything inline. The system naturally gravitates toward synchronous aggregation.
 
-### Mechanizm
+### Mechanism
 
-Rozszerzenie Phase 8 tick loop o agregacje:
+Extend Phase 8 of the tick loop with aggregation:
 
 ```python
-# W HomeostasisCore._execute_tick(), po Phase 7:
+# In HomeostasisCore._execute_tick(), after Phase 7:
 
 # PHASE 8: AGGREGATE
 tick_summary = TickSummary(
     tick=self._tick_count,
     timestamp=time.time(),
-    sensor_events=sensor_events,         # Z Phase 1
-    interpreted_state=interpreted_state,  # Z Phase 2
-    alerts=alerts,                        # Z Phase 3
-    mode=self.state.mode,                 # Z Phase 4
-    actions=actions,                      # Z Phase 5-6
-    health=self.state.health_score,       # Z Phase 7
+    sensor_events=sensor_events,         # From Phase 1
+    interpreted_state=interpreted_state,  # From Phase 2
+    alerts=alerts,                        # From Phase 3
+    mode=self.state.mode,                 # From Phase 4
+    actions=actions,                      # From Phase 5-6
+    health=self.state.health_score,       # From Phase 7
     external_events=self._drain_external_queue(),
 )
 self._perception_buffer.ingest_tick(tick_summary)
 ```
 
-External events (z watku REPL, teacher, etc.) wrzucane przez thread-safe deque:
+External events (from the REPL thread, teacher, etc.) are pushed via a thread-safe deque:
 
 ```python
-# Thread-safe kolejka dla zdarzen spoza tick loop
+# Thread-safe queue for events outside the tick loop
 self._external_queue: deque = deque(maxlen=50)
 
 def push_external_event(self, event: PerceptionEvent) -> None:
-    """Wolane z watku REPL, teacher thread, etc. Thread-safe (deque jest thread-safe)."""
+    """Called from the REPL thread, teacher thread, etc. Thread-safe (deque is thread-safe)."""
     self._external_queue.append(event)
 
 def _drain_external_queue(self) -> List[PerceptionEvent]:
-    """Wolane TYLKO z watku tick loop. Oproznia kolejke."""
+    """Called ONLY from the tick loop thread. Drains the queue."""
     events = []
     while self._external_queue:
         try:
@@ -1058,26 +1058,26 @@ def _drain_external_queue(self) -> List[PerceptionEvent]:
     return events
 ```
 
-### Porownanie
+### Comparison
 
-| Aspekt | Event Bus (A) | Tick Aggregator (B) |
+| Aspect | Event Bus (A) | Tick Aggregator (B) |
 |--------|---------------|---------------------|
-| Kolejnosc | Nieokreslona (callback order) | Deterministyczna (fazy) |
-| Thread safety | Zlozony (locki na emit/subscribe) | Prosty (1 deque) |
-| Latency | ~0ms | Max 1s (nastepny tick) |
-| Zmiany w kodzie | Nowa klasa + rejestracja subscribentow | 10-15 linii w `_execute_tick()` |
-| Testowanie | Lifecycle subscribentow | Istniejace testy tick loop |
-| Debuggowanie | Kazdy emit/callback do logowania | Print tick summary |
+| Ordering | Undefined (callback order) | Deterministic (phases) |
+| Thread safety | Complex (locks on emit/subscribe) | Simple (1 deque) |
+| Latency | ~0ms | Max 1s (next tick) |
+| Code changes | New class + subscriber registration | 10-15 lines in `_execute_tick()` |
+| Testing | Subscriber lifecycle | Existing tick-loop tests |
+| Debugging | Every emit/callback to log | Print tick summary |
 
-### HomeostasisEventBus - co z nim?
+### HomeostasisEventBus - what about it?
 
-Zostaje jak jest (ma testy, nie przeszkadza). Jesli przyszly modul potrzebuje push-style notifications (np. Web UI real-time alerts), moze subskrybowac. Ale core perception flow idzie przez tick aggregator, nie przez event bus.
+It stays as-is (it has tests, it does not get in the way). If a future module needs push-style notifications (e.g. Web UI real-time alerts), it can subscribe. But the core perception flow goes through the tick aggregator, not the event bus.
 
 ---
 
-## Struktura plikow
+## File Structure
 
-### Nowe pliki (do utworzenia przy implementacji)
+### New files (to be created during implementation)
 
 ```
 agent_core/
@@ -1110,13 +1110,13 @@ agent_core/
     planner_model.py            # Plan, PlanStatus, ActionType, PlannerState
     planner_guard.py            # PlannerGuard (5 gating rules)
     goal_selector.py            # GoalSelector (aging + feasibility)
-    action_executor.py          # ActionExecutor (delegacja)
+    action_executor.py          # ActionExecutor (delegation)
     planner_core.py             # PlannerCore (ReAct loop)
   world_model/
     __init__.py                 # WorldModel facade (K6)
     belief_model.py             # Belief (frozen), EntityType, BeliefType, BeliefSource
     belief_store.py             # BeliefStore (JSONL, MERGE, cap 2000)
-    belief_builder.py           # Buduje beliefs z JSONL (zero LLM)
+    belief_builder.py           # Builds beliefs from JSONL (zero LLM)
     query.py                    # WorldModelQuery (topic confidence, gaps)
   autonomy/
     __init__.py                 # AutonomyPolicy facade + CheckResult (K7)
@@ -1127,15 +1127,15 @@ agent_core/
   deliberation/
     __init__.py                 # Deliberation facade (K8)
     strategy.py                 # Strategy + Step dataclasses
-    strategy_templates.py       # 3 szablony + TEMPLATE_REGISTRY
-    deliberator.py              # Wybor i prowadzenie strategii
+    strategy_templates.py       # 3 templates + TEMPLATE_REGISTRY
+    deliberator.py              # Strategy selection and execution
     intent_tracker.py           # IntentTracker (JSONL intents)
   modules/
     evaluation_module.py        # REPL /evaluate command
     planner_module.py           # REPL /plan commands
 ```
 
-### Dane (nowe pliki JSONL)
+### Data (new JSONL files)
 
 ```
 meta_data/
@@ -1146,8 +1146,8 @@ meta_data/
   beliefs.jsonl                 # Beliefs store (K6, MERGE semantics)
   autonomy_decisions.jsonl      # Autonomy escalation log (K7, append-only)
   deliberation_intents.jsonl    # Intent log (K8, append-only, bounded 500)
-  sandbox/                      # Katalog sandbox sesji
-    sess_<uuid>/                # Jedna sesja
+  sandbox/                      # Sandbox sessions directory
+    sess_<uuid>/                # One session
       knowledge_index.jsonl
       maria_longterm_memory.jsonl
       exam_results.jsonl
@@ -1155,66 +1155,70 @@ meta_data/
 
 ---
 
-## Integracja
+## Integration
 
-### Istniejace pliki do modyfikacji
+### Existing files to modify
 
-| Plik | Zmiana |
+| File | Change |
 |------|--------|
-| `agent_core/registry/shared_context.py` | Nowe pola: `perception_buffer`, `goal_store`, `evaluation_observer`, `sandbox_manager`, `knowledge_analyzer`, `world_model`, `autonomy_policy`, `deliberation` |
+| `agent_core/registry/shared_context.py` | New fields: `perception_buffer`, `goal_store`, `evaluation_observer`, `sandbox_manager`, `knowledge_analyzer`, `world_model`, `autonomy_policy`, `deliberation` |
 | `agent_core/homeostasis/core.py` | Phase 8: tick aggregation + external queue. Periodic evaluation trigger. |
-| `agent_core/modules/homeostasis_module.py` | Wiring nowych komponentow w `init()` |
-| `agent_core/modules/teacher_module.py` | Sandbox paths zamiast production paths |
+| `agent_core/modules/homeostasis_module.py` | Wiring new components in `init()` |
+| `agent_core/modules/teacher_module.py` | Sandbox paths instead of production paths |
 | `maria_core/sys/config.py` | `SANDBOX_DIR = BASE_DIR / "meta_data" / "sandbox"` |
 
-### Nowe ADR
+### New ADRs
 
-| ADR | Decyzja |
+| ADR | Decision |
 |-----|---------|
-| **ADR-009** | Tick Aggregator zamiast Event Bus (KISS, deterministyczna kolejnosc) |
-| **ADR-010** | Sandbox-first learning (kazda nauka przez sandbox, promote jako jedyny most) |
-| **ADR-011** | Goals as data (cele sa obiektami danych z audit trail, nie hardcoded logika) |
-| **ADR-012** | Evaluation READ-ONLY (rozszerzenie ADR-006 na ewaluacje agenta) |
-| **ADR-013** | Planner v1 rule-based (zero LLM, deterministyczny, testowalny) |
+| **ADR-009** | Tick Aggregator instead of Event Bus (KISS, deterministic ordering) |
+| **ADR-010** | Sandbox-first learning (all learning through the sandbox, promote as the only bridge) |
+| **ADR-011** | Goals as data (goals are data objects with an audit trail, not hardcoded logic) |
+| **ADR-012** | Evaluation READ-ONLY (extension of ADR-006 to agent evaluation) |
+| **ADR-013** | Planner v1 rule-based (zero LLM, deterministic, testable) |
 
 ---
 
-*Utworzono: 2026-03-01*
-*Zatwierdzone przez: M.A.R.I.A. Project*
-*Warstwa 1 (K1-K4): Zaimplementowana (941 testow)*
-*Warstwa 2 (K5 Planner): Zaimplementowana (1023 testow)*
-*Warstwa 3 (K6 World Model): Zaimplementowana (1194 testow)*
-*Warstwa 4 (K7 Autonomy Policy): Zaimplementowana (1239 testow)*
-*Warstwa 5 (K8 Deliberation): Zaimplementowana (1288 testow)*
+*Created: 2026-03-01*
+*Approved by: M.A.R.I.A. Project*
+
+Implementation milestones (test counts below are historical — the cumulative suite size at the time each layer was completed):
+*Layer 1 (K1-K4): Implemented (~941 tests)*
+*Layer 2 (K5 Planner): Implemented (~1023 tests)*
+*Layer 3 (K6 World Model): Implemented (~1194 tests)*
+*Layer 4 (K7 Autonomy Policy): Implemented (~1239 tests)*
+*Layer 5 (K8 Deliberation): Implemented (~1288 tests)*
+
+*Current test suite: 7,145 collected (`pytest agent_core/tests/ --collect-only -q`), CI green on `main`.*
 
 ---
 
-## Kontrakt 6: World Model / Belief System
+## Contract 6: World Model / Belief System
 
 ### Problem
 
-System uczy sie plikow i zdaje egzaminy, ale nie ma reprezentacji "co wie" ani "jak dobrze to zna".
-Brak srodka ciezkosci wiedzy: planner nie wie, ktore tematy sa slabe, ktore mocne.
-Nie ma feedback loop: zdany egzamin nie wzmacnia "pewnosci" tematu.
+The system learns files and passes exams, but has no representation of "what it knows" or "how well it knows it".
+There is no center of gravity for knowledge: the planner does not know which topics are weak and which are strong.
+There is no feedback loop: a passed exam does not strengthen a topic's "confidence".
 
-### Rozwiazanie
+### Solution
 
-Belief system jako frozen dataclasses z JSONL persistence (MERGE semantics):
+A belief system as frozen dataclasses with JSONL persistence (MERGE semantics):
 
-1. **Belief** - jednostka wiedzy: entity + confidence + source
-2. **BeliefStore** - JSONL store z indeksami (cap 2000, MERGE)
-3. **BeliefBuilder** - buduje beliefs z istniejacych JSONL (READ-ONLY, zero LLM)
-4. **WorldModelQuery** - API zapytan (topic confidence, knowledge gaps)
-5. **WorldModel** - fasada
+1. **Belief** - a unit of knowledge: entity + confidence + source
+2. **BeliefStore** - a JSONL store with indexes (cap 2000, MERGE)
+3. **BeliefBuilder** - builds beliefs from existing JSONL (READ-ONLY, zero LLM)
+4. **WorldModelQuery** - query API (topic confidence, knowledge gaps)
+5. **WorldModel** - facade
 
-### Struktura
+### Structure
 
 ```
 agent_core/world_model/
     __init__.py          # WorldModel facade
     belief_model.py      # Belief (frozen), EntityType, BeliefType, BeliefSource
     belief_store.py      # BeliefStore (JSONL, MERGE, cap 2000)
-    belief_builder.py    # Buduje beliefs z knowledge_index + longterm_memory
+    belief_builder.py    # Builds beliefs from knowledge_index + longterm_memory
     query.py             # WorldModelQuery - topic confidence, gaps, summaries
 ```
 
@@ -1225,9 +1229,9 @@ class EntityType(Enum):
     TOPIC, FILE, CONCEPT, MODULE, PERSON, PLACE
 
 class BeliefType(Enum):
-    FACT          # Potwierdzone (exam score >= 0.7)
-    OBSERVATION   # Nauczone ale niezweryfikowane
-    HYPOTHESIS    # Wnioskowane
+    FACT          # Confirmed (exam score >= 0.7)
+    OBSERVATION   # Learned but unverified
+    HYPOTHESIS    # Inferred
 
 class BeliefSource(Enum):
     LEARNING, EXAM, MEMORY_FACT, SYSTEM, USER
@@ -1235,67 +1239,67 @@ class BeliefSource(Enum):
 @dataclass(frozen=True)
 class Belief:
     belief_id: str
-    entity: str               # O czym (np. "fizyka kwantowa")
+    entity: str               # What it's about (e.g. "quantum physics")
     entity_type: EntityType
     belief_type: BeliefType
-    content: str              # Tresc
+    content: str              # Content
     confidence: float         # 0.0-1.0
     source: BeliefSource
-    source_id: str            # Skad (np. file_id)
+    source_id: str            # Where from (e.g. file_id)
     tags: Tuple[str, ...]
-    revision: int             # Wersja (inkrementowana przy revise)
-    superseded_by: Optional[str]  # Jesli zastapiony nowszym
+    revision: int             # Version (incremented on revise)
+    superseded_by: Optional[str]  # If superseded by a newer one
 ```
 
 ### BeliefStore
 
-- JSONL persistence z MERGE semantics (last record per belief_id wins)
-- Cap: **2000 beliefs** (najslabsze confidence pruned)
-- Indeksy: by_entity, by_entity_type, by_tag
-- `revise()`: tworzy nowy rekord, oznacza stary jako superseded
+- JSONL persistence with MERGE semantics (last record per belief_id wins)
+- Cap: **2000 beliefs** (weakest confidence pruned)
+- Indexes: by_entity, by_entity_type, by_tag
+- `revise()`: creates a new record, marks the old one as superseded
 
 ### BeliefBuilder (zero LLM)
 
-- `build_topic_beliefs()` - z tagow w `maria_longterm_memory.jsonl`, confidence = min(1.0, file_count/5)
-- `build_file_beliefs()` - z `knowledge_index.jsonl`, typ/confidence na bazie statusu + exam score
-- `build_concept_beliefs()` - z key_points w longterm memory
-- `update_from_exam()` - zdany: +0.1 conf, OBSERVATION->FACT; oblany: -0.15 conf
-- Idempotentny (bezpiecznie uruchamiac wielokrotnie)
+- `build_topic_beliefs()` - from tags in `maria_longterm_memory.jsonl`, confidence = min(1.0, file_count/5)
+- `build_file_beliefs()` - from `knowledge_index.jsonl`, type/confidence based on status + exam score
+- `build_concept_beliefs()` - from key_points in longterm memory
+- `update_from_exam()` - pass: +0.1 conf, OBSERVATION->FACT; fail: -0.15 conf
+- Idempotent (safe to run repeatedly)
 
-### Integracja z PlannerCore
+### Integration with PlannerCore
 
 - `_gather_context()` -> `wm.query.get_world_summary()` + `get_knowledge_gaps()`
-- `_auto_create_learning_goal()` -> preferuje temat z najnizszym confidence
-- `_finalize_plan()` -> po egzaminie `wm.process_exam_result()` + `wm.save()`
+- `_auto_create_learning_goal()` -> prefers the topic with the lowest confidence
+- `_finalize_plan()` -> after an exam `wm.process_exam_result()` + `wm.save()`
 - `homeostasis_module.py` -> lazy build on init
 
-### Limity
+### Limits
 
-- Max 2000 beliefs (pruning najslabszych)
+- Max 2000 beliefs (weakest pruned)
 - JSONL bounded read (MERGE, last wins)
 - Zero LLM, zero side effects (READ-ONLY sources)
 
 ---
 
-## Kontrakt 7: Autonomy Policy / Governance
+## Contract 7: Autonomy Policy / Governance
 
 ### Problem
 
-Planner (K5) nie ma ograniczen: moze uruchamiac fetch w nieskonczonosc (1430 prob),
-wykonywac akcje w trybie SLEEP, nie reaguje na powtarzajace sie bledy.
-Brak polityki autonomii: co wolno, co wymaga zatwierdzenia, co zabronione.
+The Planner (K5) has no constraints: it can run fetch endlessly (1430 attempts),
+execute actions in SLEEP mode, and does not react to repeated errors.
+There is no autonomy policy: what is allowed, what requires approval, what is forbidden.
 
-### Rozwiazanie
+### Solution
 
-Warstwa miedzy PlannerGuard a ActionExecutor:
+A layer between PlannerGuard and ActionExecutor:
 
-1. **ActionClassification** - 4 klasy akcji (FREE/GUARDED/RESTRICTED/FORBIDDEN)
-2. **ActionRateLimiter** - sliding window rate limiting per ActionType
-3. **PolicyEngine** - lancuch regul (first match wins)
-4. **EscalationHandler** - logowanie decyzji + HITL placeholder
-5. **AutonomyPolicy** - fasada
+1. **ActionClassification** - 4 action classes (FREE/GUARDED/RESTRICTED/FORBIDDEN)
+2. **ActionRateLimiter** - sliding-window rate limiting per ActionType
+3. **PolicyEngine** - a chain of rules (first match wins)
+4. **EscalationHandler** - decision logging + HITL placeholder
+5. **AutonomyPolicy** - facade
 
-### Struktura
+### Structure
 
 ```
 agent_core/autonomy/
@@ -1308,34 +1312,34 @@ agent_core/autonomy/
 
 ### Action Classification
 
-| Klasa | Akcje | Ograniczenia |
+| Class | Actions | Constraints |
 |-------|-------|-------------|
-| **FREE** | learn, exam, review, evaluate, noop | Bez ograniczen |
-| **GUARDED** | maintenance, fetch | Rate limit + logowanie |
-| **RESTRICTED** | (przyszle) | Wymaga warunkow lub HITL |
-| **FORBIDDEN** | (przyszle) | Nigdy autonomicznie |
+| **FREE** | learn, exam, review, evaluate, noop | No constraints |
+| **GUARDED** | maintenance, fetch | Rate limit + logging |
+| **RESTRICTED** | (future) | Requires conditions or HITL |
+| **FORBIDDEN** | (future) | Never autonomously |
 
-Nieznane akcje -> RESTRICTED (safe-by-default).
+Unknown actions -> RESTRICTED (safe-by-default).
 
 ### Rate Limiter
 
 - Sliding window: **3600s (1h)**
 - `fetch`: max **5/h**
 - `maintenance`: max **10/h**
-- FREE actions: bez limitu
+- FREE actions: no limit
 
 ### Policy Rules (3 built-in)
 
-| Regula | Warunek | Decyzja |
+| Rule | Condition | Decision |
 |--------|---------|---------|
-| `rule_consecutive_failure_breaker` | >= 3 kolejne bledy tej samej akcji | BLOCK |
-| `rule_degraded_mode_restrict` | tryb != ACTIVE + akcja GUARDED+ | BLOCK |
-| `rule_restricted_actions_block` | akcja FORBIDDEN | BLOCK |
-|                                  | akcja RESTRICTED | ESCALATE |
+| `rule_consecutive_failure_breaker` | >= 3 consecutive failures of the same action | BLOCK |
+| `rule_degraded_mode_restrict` | mode != ACTIVE + GUARDED+ action | BLOCK |
+| `rule_restricted_actions_block` | FORBIDDEN action | BLOCK |
+|                                  | RESTRICTED action | ESCALATE |
 
-PolicyEngine: lancuch regul, first non-None result wins. Jesli wszystkie None -> ALLOW.
+PolicyEngine: a chain of rules, first non-None result wins. If all None -> ALLOW.
 
-### Integracja z PlannerCore
+### Integration with PlannerCore
 
 ```
 PlannerCore._finalize_plan(plan):
@@ -1355,11 +1359,11 @@ PlannerCore._finalize_plan(plan):
 
 ### Persistence
 
-- `meta_data/autonomy_decisions.jsonl` - log escalacji i blokad
+- `meta_data/autonomy_decisions.jsonl` - escalation and block log
 - Rate limiter: in-memory (sliding window, resets on restart)
 - Consecutive failures: in-memory (resets on restart)
 
-### Limity
+### Limits
 
 - fetch: 5/h, maintenance: 10/h
 - 3 consecutive failures -> block
@@ -1368,70 +1372,69 @@ PlannerCore._finalize_plan(plan):
 
 ### Effector Authority Levels (Phase 5, ADR-026)
 
-DRUGA, niezalezna os autonomii. Klasa akcji (wyzej, FREE/GUARDED/RESTRICTED/FORBIDDEN)
-mowi CO to za akcja; authority level mowi JAK DALEKO Maria moze siegnac EFEKTOREM
-(OpenClaw). Dotyczy WYLACZNIE `action_type == "effector"` -- nie nauki, egzaminu,
-FS_WRITE/outbox ani zadnej innej akcji. Te dwie osie sa czesto mylone; rozjazd miedzy
-nimi pozwolil na cichy dryf (live=BOUNDED vs docs=OBSERVE) -- stad ta sekcja.
+A SECOND, independent axis of autonomy. The action class (above, FREE/GUARDED/RESTRICTED/FORBIDDEN)
+says WHAT kind of action it is; the authority level says HOW FAR Maria may reach with the EFFECTOR
+(OpenClaw). It applies ONLY to `action_type == "effector"` -- not to learning, exams,
+FS_WRITE/outbox, or any other action. These two axes are often confused; the drift between
+them allowed a silent divergence (live=BOUNDED vs docs=OBSERVE) -- hence this section.
 
-| Poziom | Zachowanie efektora (`rule_effector_authority`) |
+| Level | Effector behavior (`rule_effector_authority`) |
 |--------|--------------------------------------------------|
-| **OBSERVE** (domyslny) | widzi narzedzia, nigdy nie wola -> BLOCK |
-| **SUGGEST** | proponuje, operator dostaje powiadomienie, brak wykonania -> ESCALATE |
-| **CONFIRM** | proponuje, operator zatwierdza (Telegram), potem wykonanie -> ESCALATE + queue |
-| **BOUNDED** | autonomiczne dla narzedzi nie-niebezpiecznych, confirm dla niebezpiecznych |
-| **UNRESTRICTED** | pelna autonomia -- ZABLOKOWANE (gated do jawnego unlocku Phase 5) |
+| **OBSERVE** (default) | sees tools, never calls -> BLOCK |
+| **SUGGEST** | proposes, the operator gets a notification, no execution -> ESCALATE |
+| **CONFIRM** | proposes, the operator approves (Telegram), then execution -> ESCALATE + queue |
+| **BOUNDED** | autonomous for non-dangerous tools, confirm for dangerous ones |
+| **UNRESTRICTED** | full autonomy -- BLOCKED (gated behind an explicit Phase 5 unlock) |
 
-Zmiana poziomu: TYLKO operator przez `/authority <level>`. `MAX_ALLOWED_LEVEL = BOUNDED`
-(clamp przy ladowaniu). Stan: `meta_data/authority_config.json` (runtime, gitignored).
+Changing the level: ONLY the operator, via `/authority <level>`. `MAX_ALLOWED_LEVEL = BOUNDED`
+(clamped on load). State: `meta_data/authority_config.json` (runtime, gitignored).
 
-**Reconciliacja K7 (2026-06-07):** poziom spoczynkowy = **OBSERVE** (zgodny z domyslnym
-kodem i tym dokumentem). Niezmienniki, ktore czynia OBSERVE wystarczajacym:
-- Autonomiczny planer **NIGDY** nie emituje akcji EFFECTOR (zamek:
-  `TestAutonomousNeverEmitsEffector` w `test_planner.py`). Jedyne plany efektora tworzy
-  `_execute_approved_effector` -- sciezka operatora `/do` -> `/efapprove`, ktora niesie
-  `already_approved=True` i omija regule authority. Wniosek: zejscie na OBSERVE nie psuje
-  `/do`.
-- Awans poziomu mozliwy tylko operatorsko. `auto_promotion` PROPONUJE (PROPOSED goal,
-  czeka na `/approve`), nigdy nie stosuje sam (`created_by="auto_promotion"` poza
-  `AUTO_CONFIRM_SOURCES`); dodatkowo **gated OFF** flaga `AUTO_PROMOTION_ENABLED`
-  (domyslnie wylaczona) -- do swiadomego wlaczenia dopiero gdy beda autonomiczne rungi
-  efektora.
-- Podniesienie authority powyzej OBSERVE jest **swiadomym warunkiem wstepnym** przed
-  podlaczeniem jakiejkolwiek autonomicznej sciezki efektora -- nie cichym domyslnym.
+**K7 reconciliation (2026-06-07):** the resting level = **OBSERVE** (consistent with the default
+code and this document). The invariants that make OBSERVE sufficient:
+- The autonomous planner **NEVER** emits an EFFECTOR action (lock:
+  `TestAutonomousNeverEmitsEffector` in `test_planner.py`). The only effector plans are created by
+  `_execute_approved_effector` -- the operator path `/do` -> `/efapprove`, which carries
+  `already_approved=True` and bypasses the authority rule. Conclusion: dropping to OBSERVE does not
+  break `/do`.
+- Level promotion is only possible by the operator. `auto_promotion` PROPOSES (a PROPOSED goal,
+  awaiting `/approve`), never applies on its own (`created_by="auto_promotion"` outside
+  `AUTO_CONFIRM_SOURCES`); additionally it is **gated OFF** by the `AUTO_PROMOTION_ENABLED` flag
+  (disabled by default) -- to be enabled deliberately only once autonomous effector rungs exist.
+- Raising authority above OBSERVE is a **deliberate precondition** before
+  connecting any autonomous effector path -- not a silent default.
 
-(Historycznie poziom ustawiono recznie na BOUNDED 2026-05-14 podczas testu 24h i nie
-ruszono przez 24 dni -- uspiony, bo brak autonomicznego triggera efektora.)
+(Historically the level was set manually to BOUNDED on 2026-05-14 during a 24h test and was not
+touched for 24 days -- dormant, because there was no autonomous effector trigger.)
 
 ---
 
-## Kontrakt 8: Deliberation / Strategic Planning
+## Contract 8: Deliberation / Strategic Planning
 
 ### Problem
 
-Planner (K5) podejmuje jednorazowe decyzje (single-step plans) co 60 tickow.
-Brak wielokrokowego planowania: nie potrafi np. "najpierw LEARN, potem EXAM, a jak obleje - REVIEW i ponowny EXAM".
-Kazdy cykl to niezalezna decyzja bez kontynuacji strategii.
+The Planner (K5) makes one-off decisions (single-step plans) every 60 ticks.
+There is no multi-step planning: it cannot, for example, "first LEARN, then EXAM, and if it fails - REVIEW and EXAM again".
+Each cycle is an independent decision with no strategy continuation.
 
-### Rozwiazanie
+### Solution
 
-Multi-step strategies jako data (ADR-011), rule-based (ADR-013):
+Multi-step strategies as data (ADR-011), rule-based (ADR-013):
 
-1. **Strategy + Step** - wielokrokowy plan z fallbackami
-2. **Strategy Templates** - gotowe szablony dla typowych flow
-3. **Deliberator** - wybiera i prowadzi strategie
-4. **IntentTracker** - zapamietuje dlaczego wybrano strategie (JSONL)
-5. **Deliberation** - fasada laczaca wszystko
+1. **Strategy + Step** - a multi-step plan with fallbacks
+2. **Strategy Templates** - ready-made templates for common flows
+3. **Deliberator** - selects and runs strategies
+4. **IntentTracker** - remembers why a strategy was chosen (JSONL)
+5. **Deliberation** - facade tying it all together
 
-### Struktura
+### Structure
 
 ```
 agent_core/deliberation/
     __init__.py              # Deliberation facade
     strategy.py              # Strategy + Step dataclasses
-    strategy_templates.py    # 3 szablony + TEMPLATE_REGISTRY
-    deliberator.py           # Wybor i prowadzenie strategii
-    intent_tracker.py        # JSONL log intencji
+    strategy_templates.py    # 3 templates + TEMPLATE_REGISTRY
+    deliberator.py           # Strategy selection and execution
+    intent_tracker.py        # JSONL intent log
 ```
 
 ### Strategy Model
@@ -1466,7 +1469,7 @@ class Strategy:
 | `explore_new` | FETCH -> LEARN -> EXAM | new_files_available |
 | `consolidate` | REVIEW -> EXAM -> EVALUATE | weak_topics detected |
 
-### Integracja z PlannerCore
+### Integration with PlannerCore
 
 ```
 PlannerCore._create_plan_for_goal(goal, context)
@@ -1481,7 +1484,7 @@ PlannerCore._create_plan_for_goal(goal, context)
     |       |
     |       +-> return action dict (action_type, params, strategy_id)
     |
-    +-> if None -> fallback to _decide_learning_action() (stare zachowanie)
+    +-> if None -> fallback to _decide_learning_action() (old behavior)
 
 PlannerCore._finalize_plan(plan)
     |
@@ -1490,15 +1493,15 @@ PlannerCore._finalize_plan(plan)
 
 ### Backward compatible
 
-- `deliberation=None` -> PlannerCore uzywa starej logiki (_decide_learning_action)
-- Deliberation jest **advisory**: jesli nie ma strategii, planner dziala jak wczesniej
+- `deliberation=None` -> PlannerCore uses the old logic (_decide_learning_action)
+- Deliberation is **advisory**: if there is no strategy, the planner works as before
 
 ### Persistence
 
-- `meta_data/deliberation_intents.jsonl` - log intencji (bounded 500 records)
-- Strategies in-memory only (v1), tworzone on-demand z templates
+- `meta_data/deliberation_intents.jsonl` - intent log (bounded 500 records)
+- Strategies in-memory only (v1), created on-demand from templates
 
-### Rozszerzalnosc (v2 path)
+### Extensibility (v2 path)
 
 | Element | v1 | v2 path |
 |---------|-----|---------|
@@ -1509,7 +1512,7 @@ PlannerCore._finalize_plan(plan)
 | Persistence | In-memory + intents JSONL | Full JSONL strategies |
 | Integration | Advisory (optional) | Primary -> replacement |
 
-### Limity
+### Limits
 
 - Max 10 active strategies
 - Max 5 strategies per goal (oldest trimmed)
@@ -1518,32 +1521,32 @@ PlannerCore._finalize_plan(plan)
 
 ---
 
-## Kontrakt 9: Meta-Cognition (K9)
+## Contract 9: Meta-Cognition (K9)
 
 **Status:** IMPLEMENTED (2026-03-20)
 **ADR:** ADR-013 (rule-based, zero LLM), ADR-011 (reflections as data)
-**Testy:** 73 (test_meta_cognition.py)
+**Tests:** 73 at implementation (test_meta_cognition.py)
 
-### Cel
+### Purpose
 
-System meta-poznawczy: sledzi zalozenia przed wykonaniem akcji, porownuje wynik z oczekiwaniem, buduje pewnosc per akcja/temat, sygnalizuje "potrzebuje czlowieka".
+A meta-cognitive system: it tracks assumptions before executing an action, compares the result with expectations, builds confidence per action/topic, and signals "I need a human".
 
-"System powinien wiedziec czego nie wie."
+"The system should know what it does not know."
 
-### Struktura
+### Structure
 
 ```
 agent_core/meta_cognition/
-    __init__.py              # MetaCognition facade (6 metod publicznych)
+    __init__.py              # MetaCognition facade (6 public methods)
     reflection_model.py      # Dataclasses: Reflection, Assumption, Lesson + 5 enums
     reflection_store.py      # JSONL persistence (meta_data/reflections.jsonl)
-    confidence_tracker.py    # Pewnosc per action_type i per topic (exponential decay)
-    reflector.py             # Buduje zalozenia, porownuje wynik, wykrywa wzorce
+    confidence_tracker.py    # Confidence per action_type and per topic (exponential decay)
+    reflector.py             # Builds assumptions, compares the result, detects patterns
 ```
 
 ### Enums
 
-| Enum | Wartosci |
+| Enum | Values |
 |------|----------|
 | AssumptionType | TOPIC_LEARNABLE, EXAM_WILL_PASS, FETCH_RELEVANT, RETENTION_STABLE, STRATEGY_EFFECTIVE |
 | OutcomeMatch | MATCH (delta<=0.15), PARTIAL (0.15-0.4), MISMATCH (>0.4), UNKNOWN (fallback bool) |
@@ -1555,55 +1558,55 @@ agent_core/meta_cognition/
 
 **Assumption**: assumption_type, description, basis
 **Lesson**: lesson_type, assumption_type (optional), message, severity
-**Reflection**: 2-fazowy rekord (mutable):
-- Phase 1 (przed exec): reflection_id, plan_id, step_id, action_type, goal_id, topic, assumptions[], expected_success, confidence_before, timestamp_started
-- Phase 2 (po exec): actual_success, outcome_match, confidence_after, lessons[], timestamp_finished
+**Reflection**: a 2-phase record (mutable):
+- Phase 1 (before exec): reflection_id, plan_id, step_id, action_type, goal_id, topic, assumptions[], expected_success, confidence_before, timestamp_started
+- Phase 2 (after exec): actual_success, outcome_match, confidence_after, lessons[], timestamp_finished
 - Properties: duration_ms, is_reflected
 
 ### Facade API (MetaCognition)
 
-| Metoda | Kiedy | Co robi |
+| Method | When | What it does |
 |--------|-------|---------|
-| `record_decision(plan_id, action_type, goal_id, topic, context)` | Przed exec | Buduje zalozenia, zapisuje oczekiwany wynik |
-| `reflect(plan_id, success, result)` | Po exec | Porownuje wynik z oczekiwaniem, wyciaga lekcje |
-| `get_decision_confidence(action_type, topic)` | Przed decyzja | 0.6*action + 0.4*topic (exponential decay) |
-| `analyze_patterns()` | Okresowo | Wykrywa wzorce bledow |
-| `need_human()` | Kiedy potrzeba | True gdy pewnosc za niska |
-| `get_status()` | REPL/WebUI | Pelny status do wyswietlenia |
+| `record_decision(plan_id, action_type, goal_id, topic, context)` | Before exec | Builds assumptions, records the expected outcome |
+| `reflect(plan_id, success, result)` | After exec | Compares the result with expectations, extracts lessons |
+| `get_decision_confidence(action_type, topic)` | Before a decision | 0.6*action + 0.4*topic (exponential decay) |
+| `analyze_patterns()` | Periodically | Detects error patterns |
+| `need_human()` | When needed | True when confidence is too low |
+| `get_status()` | REPL/WebUI | Full status for display |
 
 ### Confidence Tracker
 
-- Per action_type: success rate z exponential decay (DECAY=0.85)
-- Per topic: success rate z exponential decay
+- Per action_type: success rate with exponential decay (DECAY=0.85)
+- Per topic: success rate with exponential decay
 - Combined: `0.6 * action_conf + 0.4 * topic_conf`
-- DEFAULT_CONFIDENCE = 0.5 (gdy brak historii)
+- DEFAULT_CONFIDENCE = 0.5 (when there is no history)
 - LOW_CONFIDENCE_THRESHOLD = 0.3
-- MIN_SAMPLES = 3 (min refleksji do meaningful confidence)
+- MIN_SAMPLES = 3 (min reflections for meaningful confidence)
 
 ### "Need Human" Signal
 
-True gdy dowolne z:
-- Consecutive failures >= 3 dla dowolnego action_type
-- Ta sama assumption_type wrong >= 3x w ostatnich 20 refleksji
-- Temat z confidence < 0.3 i >= 3 proby
+True when any of:
+- Consecutive failures >= 3 for any action_type
+- The same assumption_type wrong >= 3x in the last 20 reflections
+- A topic with confidence < 0.3 and >= 3 attempts
 
-V1: advisory (logowane, widoczne w get_status), NIE blokujace.
+V1: advisory (logged, visible in get_status), NOT blocking.
 
-### Integracja z PlannerCore
+### Integration with PlannerCore
 
 ```
 PlannerCore._finalize_plan(plan)
     |
-    +-> PRZED execute:  meta_cognition.record_decision(plan_id, action, topic, context)
-    |                     -> buduje assumptions z kontekstu (rule-based)
-    |                     -> zapisuje Reflection z expected_success + confidence_before
+    +-> BEFORE execute:  meta_cognition.record_decision(plan_id, action, topic, context)
+    |                     -> builds assumptions from context (rule-based)
+    |                     -> records a Reflection with expected_success + confidence_before
     |
     +-> executor.execute(plan)
     |
-    +-> PO execute:     meta_cognition.reflect(plan_id, success, result)
+    +-> AFTER execute:   meta_cognition.reflect(plan_id, success, result)
     |                     -> outcome_match (MATCH/PARTIAL/MISMATCH)
     |                     -> lessons: [Lesson(WRONG_ASSUMPTION, ..., HIGH), ...]
-    |                     -> aktualizuje confidence_after
+    |                     -> updates confidence_after
 
 PlannerCore._gather_context()
     |
@@ -1621,15 +1624,15 @@ ctx.meta_cognition = meta_cognition
 
 ### Backward compatible
 
-- `meta_cognition=None` -> PlannerCore dziala jak wczesniej (zero impact)
-- MetaCognition jest **advisory**: nie blokuje planowania
+- `meta_cognition=None` -> PlannerCore works as before (zero impact)
+- MetaCognition is **advisory**: it does not block planning
 
 ### Persistence
 
 - `meta_data/reflections.jsonl` - append-only, rewrite on update
 - MAX_RECORDS = 1000 (oldest trimmed)
 
-### Limity
+### Limits
 
 - Max 1000 reflections in memory
 - Pattern analysis window: 20 most recent reflected records
@@ -1638,19 +1641,19 @@ ctx.meta_cognition = meta_cognition
 
 ---
 
-## Kontrakt 10: Action Safety (K10)
+## Contract 10: Action Safety (K10)
 
 **Status:** IMPLEMENTED (2026-03-20)
 **ADR:** ADR-013 (rule-based, zero LLM), ADR-011 (data as structure)
-**Testy:** 52 (test_action_safety.py)
+**Tests:** 52 at implementation (test_action_safety.py)
 
-### Cel
+### Purpose
 
-Ujednolicony audyt i walidacja efektow dla WSZYSTKICH typow akcji. Uogolnienie K2 Sandbox na caly system. Safe-by-default dla nowych typow akcji.
+Unified audit and effect validation for ALL action types. A generalization of K2 Sandbox to the whole system. Safe-by-default for new action types.
 
-K7=CZY wolno, K9=CZY zalozenie trafne, K10=CZY stan sie zmienil jak oczekiwano.
+K7=WHETHER it is allowed, K9=WHETHER the assumption was correct, K10=WHETHER the state changed as expected.
 
-### Struktura
+### Structure
 
 ```
 agent_core/action_safety/
@@ -1663,7 +1666,7 @@ agent_core/action_safety/
 
 ### Enums
 
-| Enum | Wartosci |
+| Enum | Values |
 |------|----------|
 | SafetyMode | AUTO_COMMIT, AUDIT_ONLY, STAGED (future HITL) |
 | Reversibility | REVERSIBLE, PARTIALLY_REVERSIBLE, IRREVERSIBLE |
@@ -1682,21 +1685,21 @@ agent_core/action_safety/
 
 ### Facade API (ActionSafety)
 
-| Metoda | Kiedy | Co robi |
+| Method | When | What it does |
 |--------|-------|---------|
-| `before_action(plan_id, action_type, params, goal_id)` | Przed exec | Klasyfikacja + snapshot before. Returns SafetyMode |
-| `after_action(plan_id, success, result, duration_ms)` | Po exec | Snapshot after + walidacja + audit record |
-| `is_staged(action_type)` | Quick check | True dla nieznanych akcji (v2 HITL) |
-| `get_status()` | REPL/WebUI | Pelny status |
+| `before_action(plan_id, action_type, params, goal_id)` | Before exec | Classification + snapshot before. Returns SafetyMode |
+| `after_action(plan_id, success, result, duration_ms)` | After exec | Snapshot after + validation + audit record |
+| `is_staged(action_type)` | Quick check | True for unknown actions (v2 HITL) |
+| `get_status()` | REPL/WebUI | Full status |
 
 ### Effect Validation (v1)
 
-- **fetch:** input_file_count nie powinien spadac
-- **maintenance:** goal_count nie powinien eksplodowac (> +5)
+- **fetch:** input_file_count should not drop
+- **maintenance:** goal_count should not explode (> +5)
 - **any audited:** health_score drop > 0.3 = UNEXPECTED
-- **learn/exam/noop:** SKIPPED (K2/K4 pokrywaja)
+- **learn/exam/noop:** SKIPPED (K2/K4 cover it)
 
-### Integracja z PlannerCore
+### Integration with PlannerCore
 
 ```
 PlannerCore._finalize_plan(plan)
@@ -1724,15 +1727,15 @@ ctx.action_safety = action_safety
 
 ### Backward compatible
 
-- `action_safety=None` -> PlannerCore dziala jak wczesniej
-- v1: STAGED logowane ale nie blokujace (placeholder dla Smart Home/Code Agent)
+- `action_safety=None` -> PlannerCore works as before
+- v1: STAGED logged but not blocking (placeholder for Smart Home/Code Agent)
 
 ### Persistence
 
 - `meta_data/action_audit.jsonl` - append-only
 - MAX_RECENT = 200 in-memory cache
 
-### Limity
+### Limits
 
 - Max 200 records in memory (bounded)
 - Health drop threshold: 0.3

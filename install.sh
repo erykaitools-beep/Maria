@@ -13,7 +13,7 @@
 # What this script does:
 #   1. Checks system requirements
 #   2. Installs Ollama (if not present)
-#   3. Pulls llama3.1:8b model
+#   3. Pulls llama3.1:8b + nomic-embed-text models
 #   4. Creates Python virtual environment
 #   5. Installs dependencies
 #   6. Creates .env from template
@@ -115,14 +115,23 @@ echo ""
 
 # ── Step 3: Pull model ──
 
-echo -e "${YELLOW}[3/7] Pulling LLM model (llama3.1:8b, ~5GB)...${NC}"
+echo -e "${YELLOW}[3/7] Pulling models (llama3.1:8b ~5GB + nomic-embed-text ~275MB)...${NC}"
 
 if ollama list 2>/dev/null | grep -q "llama3.1:8b"; then
-    echo -e "  Model: ${GREEN}already downloaded${NC}"
+    echo -e "  llama3.1:8b: ${GREEN}already downloaded${NC}"
 else
     echo "  Downloading llama3.1:8b (this may take a while)..."
     ollama pull llama3.1:8b
-    echo -e "  Model: ${GREEN}downloaded${NC}"
+    echo -e "  llama3.1:8b: ${GREEN}downloaded${NC}"
+fi
+
+# Embedding model - powers semantic memory (without it, embedding calls 404)
+if ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
+    echo -e "  nomic-embed-text: ${GREEN}already downloaded${NC}"
+else
+    echo "  Downloading nomic-embed-text (embeddings, ~275MB)..."
+    ollama pull nomic-embed-text
+    echo -e "  nomic-embed-text: ${GREEN}downloaded${NC}"
 fi
 
 echo ""
@@ -164,7 +173,7 @@ else
     cp .env.example .env
     # Generate a random PIN
     RANDOM_PIN=$(python3 -c "import secrets; print(secrets.token_hex(4))")
-    sed -i "s/MARIA_PIN=zmien-mnie-123/MARIA_PIN=$RANDOM_PIN/" .env
+    sed -i "s/MARIA_PIN=change-me-123/MARIA_PIN=$RANDOM_PIN/" .env
     echo -e "  .env: ${GREEN}created from template${NC}"
     echo -e "  Web UI PIN: ${YELLOW}$RANDOM_PIN${NC} (change in .env if needed)"
 fi

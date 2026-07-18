@@ -1,219 +1,267 @@
 # M.A.R.I.A. - Security Guide
 
-## Architektura bezpieczenstwa
+M.A.R.I.A. runs locally on hardware you control. This document has two parts:
+the project's **vulnerability-disclosure policy** (immediately below), and an
+**operational hardening runbook** for self-hosting Maria on a home network
+([appendix](#appendix-self-hosting-hardening-runbook)).
+
+## Reporting a Vulnerability
+
+**Please do not open a public issue for security problems.**
+
+Instead, use one of these private channels:
+
+- GitHub's **[Report a vulnerability](https://github.com/erykaitools-beep/Maria/security/advisories/new)** flow (preferred), or
+- contact the maintainer through their GitHub profile.
+
+Please include:
+
+- a description of the issue and its impact,
+- steps to reproduce (or a proof of concept),
+- the affected component and, if known, the commit.
+
+We aim to acknowledge a report within **72 hours** and to share a fix or
+mitigation timeline after triage.
+
+## Scope
+
+M.A.R.I.A. is offline-first and runs locally on hardware you control. The most
+security-relevant areas are:
+
+- the Flask Web UI (PIN-protected) and its network binding (`MARIA_HOST` / `MARIA_PORT`);
+- secret handling — `.env` holds the PIN and any optional tokens and is never committed;
+- optional integrations that take credentials (Telegram bot token, NVIDIA NIM key).
+
+Out of scope: attacks that assume an already-compromised host, and the intended
+behavior of a self-hosted agent acting on your own machine.
+
+## Supported versions
+
+This is a single-branch project; security fixes land on `main`.
+
+---
+
+# Appendix: Self-Hosting Hardening Runbook
+
+> The sections below are operational guidance for running Maria on a home LAN
+> behind a router and VPN. They are hardening recommendations for your own
+> deployment, not part of the disclosure policy above. Example addresses such
+> as `192.168.1.x` are placeholders — substitute your own subnet.
+
+## Security architecture
 
 ```
 Internet
    |
-[Fritz!Box] ---- WireGuard VPN (zdalny dostep)
+[Fritz!Box] ---- WireGuard VPN (remote access)
    |                    |
-   |-- Siec glowna (192.168.1.x)
+   |-- Main network (192.168.1.x)
    |     |-- Mini PC (Maria)  <-- SSH + Web UI
-   |     |-- Twoj laptop
-   |     |-- Telefon
+   |     |-- Your laptop
+   |     |-- Phone
    |
-   |-- Siec gosc (izolowana)
-         |-- Goscie WiFi (brak dostepu do Mini PC)
+   |-- Guest network (isolated)
+         |-- Guest WiFi (no access to the Mini PC)
 ```
 
-**Zasada:** Mini PC nie jest widoczny z Internetu. Dostep zdalny TYLKO przez VPN.
+**Principle:** the Mini PC is not reachable from the Internet. Remote access is available ONLY over the VPN.
 
 ---
 
-## 1. Fritz!Box - Konfiguracja
+## 1. Fritz!Box configuration
 
-### 1.1 Siec gosc (izolacja gosciego WiFi)
+### 1.1 Guest network (isolating guest WiFi)
 
-Goscie laczacy sie z WiFi NIE powinni widziec mini PC.
+Guests connecting to WiFi should NOT be able to see the Mini PC.
 
-1. Zaloguj sie do Fritz!Box: `http://fritz.box`
-2. **WiFi > Siec gosc** (Gastnetz)
-3. Wlacz: "Gastzugang aktiv" / "Guest access active"
-4. Zaznacz: "Gerate durfen untereinander kommunizieren" = **NIE** (odznacz)
-5. Ustaw osobne haslo dla sieci gosc
-6. Zapisz
+1. Log in to the Fritz!Box: `http://fritz.box`
+2. **WiFi > Guest network** (Gastnetz)
+3. Enable: "Gastzugang aktiv" / "Guest access active"
+4. Set: "Gerate durfen untereinander kommunizieren" = **NO** (uncheck it)
+5. Set a separate password for the guest network
+6. Save
 
-Od teraz goscie maja Internet, ale nie widza Twoich urzadzen.
+From now on, guests have Internet access but cannot see your devices.
 
-### 1.2 WireGuard VPN (zdalny dostep)
+### 1.2 WireGuard VPN (remote access)
 
-Fritz!Box od firmware 7.39+ ma wbudowany WireGuard.
+Fritz!Box firmware 7.39+ ships with built-in WireGuard.
 
-1. Zaloguj sie do Fritz!Box: `http://fritz.box`
+1. Log in to the Fritz!Box: `http://fritz.box`
 2. **Internet > Freigaben > VPN (WireGuard)**
-3. "VPN-Verbindung hinzufugen" (dodaj polaczenie VPN)
-4. Wybierz: "Einzelgerat verbinden" (polacz pojedyncze urzadzenie)
-5. Nadaj nazwe: np. "Telefon-operator" lub "Laptop-zdalny"
-6. Fritz!Box wygeneruje konfiguracje - pobierz ja
-7. Na telefonie/laptopie:
-   - Zainstaluj WireGuard: https://www.wireguard.com/install/
-   - Zaimportuj pobrany plik konfiguracji
-8. Polacz sie z VPN -> masz dostep do calej sieci domowej
+3. "VPN-Verbindung hinzufugen" (add a VPN connection)
+4. Choose: "Einzelgerat verbinden" (connect a single device)
+5. Give it a name, e.g. "phone-operator" or "laptop-remote"
+6. The Fritz!Box generates a configuration — download it
+7. On the phone/laptop:
+   - Install WireGuard: https://www.wireguard.com/install/
+   - Import the downloaded configuration file
+8. Connect to the VPN -> you now have access to the entire home network
 
-**Weryfikacja:** Po polaczeniu VPN, otworz `http://192.168.1.X:5000` (IP mini PC).
+**Verification:** once connected to the VPN, open `http://192.168.1.X:5000` (the Mini PC's IP).
 
 ### 1.3 MyFRITZ! (Dynamic DNS)
 
-Potrzebujesz stalego adresu do VPN (Twoj IP domowy sie zmienia).
+You need a stable address for the VPN (your home IP changes over time).
 
 1. Fritz!Box > **Internet > MyFRITZ!-Konto**
-2. Zarejestruj konto MyFRITZ! (jesli jeszcze nie masz)
-3. Twoj adres VPN: `twoja-nazwa.myfritz.net`
-4. WireGuard uzywa tego adresu automatycznie w konfiguracji
+2. Register a MyFRITZ! account (if you don't have one yet)
+3. Your VPN address: `your-name.myfritz.net`
+4. WireGuard uses this address automatically in the configuration
 
-### 1.4 Co NIE robic na Fritz!Box
+### 1.4 What NOT to do on the Fritz!Box
 
-- **NIE** otwieraj port forwarding do mini PC (port 22, 5000)
-- **NIE** wlaczaj DMZ
-- **NIE** udostepniaj Ollama (port 11434) na zewnatrz
-- Caly zdalny dostep idzie TYLKO przez VPN
+- Do **NOT** open port forwarding to the Mini PC (ports 22, 5000)
+- Do **NOT** enable DMZ
+- Do **NOT** expose Ollama (port 11434) to the outside
+- All remote access goes ONLY through the VPN
 
 ---
 
-## 2. Mini PC - Hardening
+## 2. Mini PC hardening
 
-### 2.1 Automatyczny skrypt
+### 2.1 Automated script
 
 ```bash
 sudo bash /home/maria/maria/scripts/setup_security.sh
 ```
 
-Skrypt konfiguruje:
+The script configures:
 
-| Warstwa | Co robi | Szczegoly |
+| Layer | What it does | Details |
 |---------|---------|-----------|
-| **User** | `maria` bez sudo | Nie moze instalowac pakietow ani zmieniac systemu |
-| **Firewall** | ufw - deny all incoming | Tylko SSH (22) i Web UI (5000) z LAN |
-| **Fail2ban** | Blokada brute-force | 5 blednych prob SSH = ban na 1h |
-| **Auto-updates** | unattended-upgrades | Security patches codziennie, auto |
-| **SSH** | Hardened config | Root login off, timeout 5min, max 3 proby |
-| **Pliki** | .env chmod 600 | Tylko maria moze czytac konfiguracje |
+| **User** | `maria` without sudo | Cannot install packages or change the system |
+| **Firewall** | ufw — deny all incoming | Only SSH (22) and Web UI (5000) from the LAN |
+| **Fail2ban** | Brute-force protection | 5 failed SSH attempts = 1h ban |
+| **Auto-updates** | unattended-upgrades | Daily security patches, automatic |
+| **SSH** | Hardened config | Root login off, 5 min timeout, max 3 attempts |
+| **Files** | .env chmod 600 | Only maria can read the configuration |
 
-### 2.2 Klucz SSH (zamiast hasla)
+### 2.2 SSH key (instead of a password)
 
-Po uruchomieniu `setup_security.sh`, skonfiguruj logowanie kluczem:
+After running `setup_security.sh`, set up key-based login:
 
-**Na SWOIM laptopie** (nie na mini PC!):
+**On YOUR laptop** (not on the Mini PC!):
 ```bash
-# Wygeneruj klucz
+# Generate the key
 ssh-keygen -t ed25519 -C "maria-minipc"
 
-# Skopiuj na mini PC
+# Copy it to the Mini PC
 ssh-copy-id maria@192.168.1.X
 
-# Sprawdz czy dziala
+# Check that it works
 ssh maria@192.168.1.X
-# Powinno wpuscic BEZ hasla
+# Should log in WITHOUT a password
 ```
 
-**Po potwierdzeniu ze klucz dziala**, wylacz logowanie haslem:
+**Once you've confirmed the key works**, disable password login:
 ```bash
-# Na mini PC (jako root)
+# On the Mini PC (as root)
 echo "PasswordAuthentication no" | sudo tee -a /etc/ssh/sshd_config.d/maria_hardening.conf
 sudo systemctl reload sshd
 ```
 
 ### 2.3 Web UI
 
-| Zabezpieczenie | Wartosc | Gdzie zmienic |
+| Protection | Value | Where to change |
 |----------------|---------|---------------|
-| PIN | min 6 znakow | `.env` -> `MARIA_PIN` |
+| PIN | min 6 characters | `.env` -> `MARIA_PIN` |
 | Rate limit | 2 msg / 60 sec | `maria_ui/config.py` |
-| Max message | 2000 znakow | `maria_ui/config.py` |
+| Max message | 2000 characters | `maria_ui/config.py` |
 | Debug mode | false | `.env` -> `MARIA_DEBUG=false` |
 
 ---
 
 ## 3. Backup
 
-### 3.1 Reczny backup
+### 3.1 Manual backup
 ```bash
-# Na dysk lokalny
+# To local disk
 bash /home/maria/maria/scripts/backup.sh
 
-# Na USB
+# To USB
 bash /home/maria/maria/scripts/backup.sh /media/usb
 ```
 
-### 3.2 Automatyczny (cron)
+### 3.2 Automated (cron)
 ```bash
 crontab -e
-# Dodaj:
+# Add:
 0 3 * * * /home/maria/maria/scripts/backup.sh >> /home/maria/maria/logs/backup.log 2>&1
 ```
 
-Backup trzyma max 7 kopii (starsze automatycznie kasowane).
+The backup keeps a maximum of 7 copies (older ones are deleted automatically).
 
-### 3.3 Co jest backupowane
+### 3.3 What gets backed up
 
-| Dane | Plik/folder | Krytycznosc |
+| Data | File/folder | Criticality |
 |------|-------------|-------------|
-| Pamiec dlugoterminowa | `memory/` | Wysoka |
-| Wyniki egzaminow | `memory/exam_results.jsonl` | Wysoka |
-| Graf semantyczny | `semantic_graph.json` | Wysoka |
-| Nauczone koncepcje | `maria_learned_concepts.json` | Srednia |
-| Model kodu | `meta_data/code_self_model.json` | Niska (regenerowany) |
-| Logi homeostazy | `meta_data/homeostasis_events.jsonl` | Niska |
-| Pliki wejsciowe | `input/` | Srednia |
-| Konfiguracja | `.env` | Wysoka |
+| Long-term memory | `memory/` | High |
+| Exam results | `memory/exam_results.jsonl` | High |
+| Semantic graph | `semantic_graph.json` | High |
+| Learned concepts | `maria_learned_concepts.json` | Medium |
+| Code model | `meta_data/code_self_model.json` | Low (regenerated) |
+| Homeostasis logs | `meta_data/homeostasis_events.jsonl` | Low |
+| Input files | `input/` | Medium |
+| Configuration | `.env` | High |
 
 ---
 
-## 4. Checklist bezpieczenstwa
+## 4. Security checklist
 
-Przed oddaniem mini PC do pracy, sprawdz:
+Before putting the Mini PC into service, verify:
 
-- [ ] `setup_security.sh` uruchomiony
-- [ ] PIN zmieniony (nie "1234" i nie "zmien-mnie-123")
-- [ ] `MARIA_DEBUG=false` w `.env`
-- [ ] SSH klucz skonfigurowany
-- [ ] Fritz!Box: siec gosc wlaczona
-- [ ] Fritz!Box: VPN (WireGuard) skonfigurowany
-- [ ] Fritz!Box: BRAK port forwarding do mini PC
-- [ ] Backup dziala (`bash scripts/backup.sh`)
-- [ ] Cron backup ustawiony
-- [ ] `sudo ufw status` - firewall aktywny
-- [ ] `sudo fail2ban-client status sshd` - fail2ban aktywny
+- [ ] `setup_security.sh` has been run
+- [ ] PIN changed (not "1234" and not "change-me-123")
+- [ ] `MARIA_DEBUG=false` in `.env`
+- [ ] SSH key configured
+- [ ] Fritz!Box: guest network enabled
+- [ ] Fritz!Box: VPN (WireGuard) configured
+- [ ] Fritz!Box: NO port forwarding to the Mini PC
+- [ ] Backup works (`bash scripts/backup.sh`)
+- [ ] Cron backup set up
+- [ ] `sudo ufw status` — firewall active
+- [ ] `sudo fail2ban-client status sshd` — fail2ban active
 
 ---
 
-## 5. Co robic w razie problemu
+## 5. Incident response
 
-### Ktos probuje wlamac sie na SSH
+### Someone is trying to break in over SSH
 ```bash
-# Sprawdz logi fail2ban
+# Check fail2ban logs
 sudo fail2ban-client status sshd
 
-# Zbanowane IP
+# Banned IPs
 sudo fail2ban-client banned
 
-# Logi SSH
+# SSH logs
 journalctl -u sshd --since "1 hour ago"
 ```
 
-### Podejrzana aktywnosc w sieci
+### Suspicious network activity
 ```bash
-# Kto jest polaczony
+# Listening ports
 ss -tuln
 
-# Aktywne polaczenia
+# Active connections
 ss -tupn
 ```
 
-### Zapomnialem PIN do Web UI
+### I forgot the Web UI PIN
 ```bash
-# Na mini PC przez SSH:
+# On the Mini PC over SSH:
 nano /home/maria/maria/.env
-# Zmien MARIA_PIN=nowy-pin
+# Change MARIA_PIN=new-pin
 sudo systemctl restart maria-ui
 ```
 
-### Chce zmienic subnet LAN
+### I want to change the LAN subnet
 ```bash
-# Jesli Fritz!Box uzywa innego subnetu niz 192.168.1.x:
+# If the Fritz!Box uses a subnet other than 192.168.1.x:
 sudo ufw status numbered
-# Usun stare reguly i dodaj nowe:
-sudo ufw delete <numer>
-sudo ufw allow from 192.168.NOWY.0/24 to any port 22 proto tcp
-sudo ufw allow from 192.168.NOWY.0/24 to any port 5000 proto tcp
+# Remove the old rules and add new ones:
+sudo ufw delete <number>
+sudo ufw allow from 192.168.NEW.0/24 to any port 22 proto tcp
+sudo ufw allow from 192.168.NEW.0/24 to any port 5000 proto tcp
 ```

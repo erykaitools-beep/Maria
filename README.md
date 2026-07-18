@@ -9,7 +9,7 @@
   <p align="center">
     <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/tests-5700%2B-brightgreen" alt="5700+ tests">
+    <img src="https://img.shields.io/badge/tests-7100%2B-brightgreen" alt="7100+ tests">
     <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
     <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
   </p>
@@ -43,6 +43,20 @@ Maria is a **personal digital companion**, not a chatbot. She runs continuously 
 She remembers who you are, what you care about, and adapts to your preferences.
 
 **Core idea:** clone it, run it, and it keeps running on hardware you own — no cloud account or API key required to start.
+
+> **New here?** The fastest path from clone to a running Maria is **[QUICKSTART.md](QUICKSTART.md)** (~10 minutes, no accounts). Hitting unfamiliar words below — *homeostasis, tick, beliefs, K1–K13*? Keep **[GLOSSARY.md](GLOSSARY.md)** open. Something broke? **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
+
+### Try it in 5 minutes
+
+```bash
+git clone https://github.com/erykaitools-beep/Maria.git
+cd Maria
+bash install.sh          # Ollama + models + deps (the model download is the slow part)
+source venv/bin/activate
+python maria.py          # answer the name prompt in the terminal, then open http://localhost:5000
+```
+
+No Telegram, no API key, no cloud — that's the whole minimal local run. Step-by-step, with what you'll see at each stage: **[QUICKSTART.md](QUICKSTART.md)**.
 
 ### Key Features
 
@@ -101,6 +115,9 @@ She remembers who you are, what you care about, and adapts to your preferences.
 
 | Topic | Document |
 |---|---|
+| **Quick start (10-minute local run)** | [QUICKSTART.md](QUICKSTART.md) |
+| **Glossary of terms** | [GLOSSARY.md](GLOSSARY.md) |
+| **Troubleshooting & FAQ** | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Architecture & data flow | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Cognitive contracts (K1–K13) | [docs/CONTRACTS.md](docs/CONTRACTS.md) |
 | Security posture | [docs/SECURITY.md](docs/SECURITY.md) |
@@ -140,9 +157,11 @@ source venv/bin/activate
 python maria.py
 ```
 
-Open `http://localhost:5000` in your browser. Enter the PIN from `.env`.
+On the **first run**, Maria introduces herself in the terminal and asks your name — answer there, then she finishes starting up.
 
-On first run, Maria will introduce herself and ask your name.
+Open `http://localhost:5000` in your browser and enter the PIN (printed at the end of `install.sh`, and stored in `.env`).
+
+**Confirm she's alive:** on the dashboard, **Mode** reads `ACTIVE`, **Health** sits near `1.0`, and the **tick count** climbs every second. For a fast no-browser check, run `python maria.py --check`.
 
 ### Give her something to learn
 
@@ -180,10 +199,12 @@ Commands: `/status`, `/goals`, `/approve`, `/reject`, `/learn`, `/remind`, `/hel
 
 ### Optional: Systemd service
 
+`scripts/maria.service` is a template — open it and set `User=` and the absolute paths to match your clone, then:
+
 ```bash
 sudo cp scripts/maria.service /etc/systemd/system/
-sudo systemctl enable maria
-sudo systemctl start maria
+sudo systemctl daemon-reload
+sudo systemctl enable --now maria
 ```
 
 ## How Maria Works
@@ -238,7 +259,7 @@ Live counters as of 2026-04-18 (~8 weeks in):
 | Decision traces (episode-correlated) | 4,589 |
 | Test suite | 4,490 passing · 1 xfail · 104s runtime |
 
-> The counters above are a dated snapshot. For current, fully-sourced figures (tests, code size, models, hardware), see [docs/funding/CURRENT_PROJECT_STATUS.md](docs/funding/CURRENT_PROJECT_STATUS.md).
+> The counters above are a dated snapshot. For sourced current figures (tests, code size, models, hardware), see [docs/funding/CURRENT_PROJECT_STATUS.md](docs/funding/CURRENT_PROJECT_STATUS.md).
 
 Observed modes: `ACTIVE` most of the day, `REDUCED` briefly during LLM inference spikes, `SLEEP` during low-activity hours, `SURVIVAL` never triggered in production.
 
@@ -305,7 +326,7 @@ maria/
 │   ├── llm/              # LLM routing, model registry
 │   ├── reminders/        # Time-triggered notifications
 │   ├── web_source/       # Wikipedia + RSS content fetcher
-│   └── tests/            # 5700+ tests
+│   └── tests/            # 7100+ tests
 ├── maria_ui/             # Flask Web UI
 │   ├── templates/        # HTML (Jinja2)
 │   └── static/           # CSS + JS

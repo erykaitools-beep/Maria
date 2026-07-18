@@ -218,7 +218,7 @@ def detect_regressions(s):
 
 
 def format_message(s, alerts):
-    head = "⚠️ THROUGHPUT-WATCH: regresja" if alerts else "✅ throughput-watch"
+    head = "[ALERT] THROUGHPUT-WATCH: regresja" if alerts else "[OK] throughput-watch"
     lines = [
         f"{head}  ({s['berlin']})",
         f"tryb={s['mode_now']} health={s['health']} | ACTIVE-w-oknie={s['active_in_window_pct']}% ({s['window_samples']} probek)",

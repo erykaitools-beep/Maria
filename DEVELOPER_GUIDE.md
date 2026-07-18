@@ -49,7 +49,7 @@ maria/
 │   ├── critic/           # Knowledge quality gate
 │   ├── reminders/        # Time-triggered notifications
 │   ├── orchestrator/     # V3 Task orchestration
-│   └── tests/            # 5,700+ tests
+│   └── tests/            # 7,100+ tests
 ├── maria_core/           # Legacy modules (migration in progress)
 ├── models/               # OllamaBrain LLM interface
 ├── maria_ui/             # Flask Web UI
@@ -144,7 +144,7 @@ All runtime config via `.env` (see `.env.example`). Key variables:
 | `MARIA_PIN` | (required) | Web UI login PIN |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API |
 | `TELEGRAM_BOT_TOKEN` | (empty) | Optional Telegram integration |
-| `NIM_API_KEY` | (empty) | Optional NVIDIA NIM API |
+| `NVIDIA_NIM_API_KEY` | (empty) | Optional NVIDIA NIM API (stronger analysis) |
 
 ## Testing
 
@@ -173,9 +173,9 @@ Drop `.txt` files into `input/`. Maria auto-discovers and learns from them durin
 
 ### Add a Telegram command
 
-1. Add handler function in `agent_core/modules/homeostasis_module.py` (in `_register_telegram_commands`)
-2. Register with `bridge.register_command("name", handler)`
-3. Add to `/help` output
+1. Add a handler in `agent_core/modules/homeostasis_telegram_commands.py` (inside `register_telegram_commands(bridge, ctx)`)
+2. Register it with `bridge.register_command("name", handler)`, where `handler(args: str) -> str`
+3. Add it to the `/help` output
 
 ## Experimental Features
 

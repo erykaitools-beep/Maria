@@ -72,7 +72,7 @@ class Task:
     task_id: str                 # Primary key — "cdt-{uuid12}"
     project: str                 # External project, e.g. "market_agent"
     phase: str                   # Phase tag, e.g. "phase_1_data_ingest"
-    title: str                   # Short imperative ("Implement Binance OHLCV adapter")
+    title: str                   # Short imperative ("Add retry to the RSS fetcher")
     description: str             # Full instruction body for the assignee
     status: TaskStatus
     priority: float              # 0.0 - 1.0

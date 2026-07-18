@@ -16,7 +16,7 @@ Thank you for your interest in contributing to M.A.R.I.A.!
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/Maria.git
-cd maria
+cd Maria
 bash install.sh
 source venv/bin/activate
 python -m pytest agent_core/tests/ -q  # verify everything works

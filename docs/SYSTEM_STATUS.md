@@ -1,113 +1,122 @@
 # M.A.R.I.A. — System Status (source of truth)
 
-> **Po co ten plik:** jedno miejsce, które mówi prawdę o tym, **co faktycznie żyje**
-> w produkcji, a co jest tylko biblioteką/eksperymentem. Powstał po Codex deep
-> audit v2 (2026-05-29, `docs/audits/codex_deep_2026-05-29/`), który pokazał, że
-> docs opisywały kilka wersji systemu naraz.
+> **Why this file exists:** a single place that tells the truth about **what is
+> actually live** in production versus what is only a library/experiment. It was
+> created after a deep code audit (2026-05-29) that showed the docs were
+> describing several versions of the system at once.
 >
-> **Zasada (definicja DONE od 2026-05-29):** moduł nie jest "zrobiony", dopóki nie
-> osiągnie `OBSERVED` — czyli dopóki **nie zobaczyliśmy go w logach**. "Library +
-> testy + docs" to nie to samo co "działa in-vivo". To jest mechanizm na korzeń
-> dryfu: *"łatamy stare i budujemy nowe, a nie ma sprawdzania"*.
+> **Principle (the definition of DONE since 2026-05-29):** a module is not
+> "done" until it reaches `OBSERVED` — that is, until **we have seen it run in
+> the logs**. "Library + tests + docs" is not the same as "works in-vivo". This
+> is the mechanism that attacks the root cause of drift: *"we patch the old and
+> build the new, but there is no checking."*
 
-## Słownik statusów (5 poziomów)
+## Status vocabulary (5 levels)
 
-| Status | Znaczenie | Dowód |
+| Status | Meaning | Evidence |
 |---|---|---|
-| `LIBRARY` | Kod + testy istnieją | zielona suita |
-| `WIRED` | Osiągalny z daemona/REPL/UI (spine go importuje) | import graph |
-| `OBSERVED` | **Odpalił w żywych/archiwalnych logach** | wpisy w `meta_data/` lub `/mnt/storage/data/logs/` |
-| `OPERATOR_READY` | Jest flow operatora (UI/Telegram) + udokumentowany | komenda/endpoint + doc |
-| `RESEARCH_ONLY` | Świadomie NIE jest live (zamrożone/eksperyment) | decyzja kierunkowa |
+| `LIBRARY` | Code + tests exist | green suite |
+| `WIRED` | Reachable from the daemon/REPL/UI (the spine imports it) | import graph |
+| `OBSERVED` | **Has fired in live/archived logs** | entries in `meta_data/` or `/mnt/storage/data/logs/` |
+| `OPERATOR_READY` | An operator flow exists (UI/Telegram) and is documented | command/endpoint + doc |
+| `RESEARCH_ONLY` | Deliberately NOT live (frozen/experiment) | directional decision |
 
-Awans statusu wymaga dowodu z poziomu wyżej — `WIRED`→`OBSERVED` tylko gdy są wpisy w logach, nie gdy "powinno działać".
+A status promotion requires evidence from the level above — `WIRED`→`OBSERVED` only when there are log entries, not when it "should work".
 
-## Mapa modułów (stan 2026-05-30)
+## Module map (as of 2026-05-30)
 
-Źródło: import graph z `maria.py`/`main.py`/`maria_ui.app`, live `meta_data/`,
-journal `maria.service`, punktowy drill self-repair i testy regresji.
+Source: the import graph from `maria.py`/`main.py`/`maria_ui.app`, live
+`meta_data/`, the `maria.service` journal, a targeted self-repair drill, and
+regression tests.
 
-| Moduł | Status | Notatka / dowód |
+| Module | Status | Note / evidence |
 |---|---|---|
-| K1-K13 cognitive core | `OBSERVED` | bogaty runtime archive (decision_traces, action_audit, reflections) |
-| `homeostasis` (tick 1-19) | `OBSERVED` | tick loop, `homeostasis_events` 76.7k archive |
-| `planner` | `OBSERVED` | live działa, ale `no_goals` często oznacza "brak wykonalnych celów teraz", nie pustą kolejkę celów |
-| `creative` | `OBSERVED` | `creative_events` 4160 live; generator→bulletin (R1) potwierdzony 19:02 |
+| K1-K13 cognitive core | `OBSERVED` | rich runtime archive (decision_traces, action_audit, reflections) |
+| `homeostasis` (tick 1-20) | `OBSERVED` | tick loop, `homeostasis_events` 76.7k archive |
+| `planner` | `OBSERVED` | runs live, but `no_goals` often means "no executable goals right now", not an empty goal queue |
+| `creative` | `OBSERVED` | `creative_events` 4160 live; generator→bulletin (R1) confirmed at 19:02 |
 | `critic` | `OBSERVED` | `critique_reports` 5186 archive |
 | `bulletin` | `OBSERVED` | `cognitive_bulletin` 824 (open 470, resolved 354) |
 | `llm` (LLMManager + NIM + scheduler) | `OBSERVED` | 15/15 reachable; nemotron-49b EXTERNAL |
 | `self_perception` (Phase 18) | `OBSERVED` | `self_state_snapshots` 49 live |
 | `routing` (IntentRouter) | `WIRED` (flag-gated) | default false via env (`routing/intent_router.py:68`) |
-| `conductor` (Phase 17) | `WIRED` + `OBSERVED` (market) | dispatcher wired; `market_task_queue` 92 rows; obecnie idle/skipping, bo brak gotowych zadań lub dirty-worktree guard |
-| `vision` | `WIRED` (sensor optional) | LLaVA on-demand, cortex współdzielony z UI |
-| `orchestrator` (V3) | `WIRED` | init w `maria.py:477` |
-| **`self_repair` (Phase 19)** | **`WIRED`, `OBSERVED` w kontrolowanym drillu, nie naturalnie in-vivo** | `SystemFailureMonitor -> RepairTaskCreator -> maria_task_queue -> approval_required gate -> dispatcher` zweryfikowane 2026-05-30; live zdrowy/SLEEP, więc naturalny kandydat jeszcze nie powstał |
-| `skills` | `LIBRARY` (1.0-backlog) | extractor istnieje (`teacher/skill_extractor`), brak wiring do planner/tick; STATUS banner w `__init__.py` 2026-05-31; nie kasować |
-| `symbolic` (world model) | `RESEARCH_ONLY` | **Maria 2.0 — zamrożone 2026-05-29.** 0 importów ze spine; flaga nigdy nie czytana |
-| `predictive` (B0/B0.1, JEPA) | `RESEARCH_ONLY` | **Maria 2.0 — zamrożone 2026-05-29.** 0 importów ze spine |
-| `adapters` | **USUNIĘTY 2026-05-31** | most migracyjny maria_core→agent_core, 0 reachable. Usunięty: 1226 LoC + `test_adapters.py`; nie-adapterowe integ-testy zachowane w `test_homeostasis_integration.py` |
-| `metacontrol` | **USUNIĘTY 2026-05-29** | tor A3: usunięty + `test_metacontrol.py` (273 LoC, 24 testy) |
-| `agent_core/ui` | **USUNIĘTY 2026-05-29** | tor A3: usunięty (746 LoC, 0 testów); Web UI to `maria_ui/` |
-| `agent_core/executor` | `LEGACY` (document) | tylko `TYPE_CHECKING` import w `homeostasis/core.py:40` |
+| `conductor` (Phase 17) | `WIRED` + `OBSERVED` (market) | dispatcher wired; `market_task_queue` 92 rows; currently idle/skipping because there are no ready tasks or the dirty-worktree guard is active |
+| `vision` | `WIRED` (sensor optional) | LLaVA on-demand, cortex shared with the UI |
+| `orchestrator` (V3) | `WIRED` | init at `maria.py:477` |
+| **`self_repair` (Phase 19)** | **`WIRED`; `OBSERVED` in a controlled drill, not naturally in-vivo** | `SystemFailureMonitor -> RepairTaskCreator -> maria_task_queue -> approval_required gate -> dispatcher` verified 2026-05-30; live is healthy/SLEEP, so a natural candidate has not yet arisen |
+| `skills` | `LIBRARY` (1.0-backlog) | extractor exists (`teacher/skill_extractor`), no wiring to planner/tick; STATUS banner in `__init__.py` 2026-05-31; do not delete |
+| `symbolic` (world model) | `RESEARCH_ONLY` | **Maria 2.0 — frozen 2026-05-29.** 0 imports from the spine; the flag is never read |
+| `predictive` (B0/B0.1, JEPA) | `RESEARCH_ONLY` | **Maria 2.0 — frozen 2026-05-29.** 0 imports from the spine |
+| `adapters` | **REMOVED 2026-05-31** | migration bridge maria_core→agent_core, 0 reachable. Removed: 1226 LoC + `test_adapters.py`; non-adapter integration tests retained in `test_homeostasis_integration.py` |
+| `metacontrol` | **REMOVED 2026-05-29** | track A3: removed + `test_metacontrol.py` (273 LoC, 24 tests) |
+| `agent_core/ui` | **REMOVED 2026-05-29** | track A3: removed (746 LoC, 0 tests); the Web UI is `maria_ui/` |
+| `agent_core/executor` | `LEGACY` (document) | only a `TYPE_CHECKING` import in `homeostasis/core.py:40` |
 
-## Korekta po głębokim pass 2026-05-30
+## Correction after the deep pass on 2026-05-30
 
-Wnioski z audytu 2026-05-29 trzeba czytać przez pryzmat zmian z 2026-05-30:
+The conclusions from the 2026-05-29 audit must be read through the lens of the 2026-05-30 changes:
 
-- `OperatorModel` split-brain jest zasadniczo zamknięty: daemon ustawia
-  `ctx.user_profile = operator_model`, Web UI brain/chat/profile idą przez
-  `get_operator_model()`, a `UserProfile` zostaje jako legacy adapter/test target.
-- `self_repair` nie jest już tylko "może działa": punktowy drill potwierdził pełny
-  łańcuch task creation + approval gate. Brak live `maria_task_queue.jsonl` oznacza
-  brak naturalnego kandydata, nie brak wiring.
-- Polityka wykonalności (okna nauki + tryb `SLEEP`) bramkuje autonomię. **2026-05-31
-  (#5) wykryto i naprawiono ŻYWY bug:** `PROFILE_LEARNING.auto_trigger_hours` były
-  autorskie jako UTC i po przełączeniu OS TZ na Europe/Warsaw (29.05) odpalały okno
-  2h za wcześnie (07-10 + 12-15 zamiast 09-11 + 14-16). Naprawione do `(9,10,14,15)`
+- The `OperatorModel` split-brain is essentially closed: the daemon sets
+  `ctx.user_profile = operator_model`, the Web UI brain/chat/profile paths go
+  through `get_operator_model()`, and `UserProfile` remains as a legacy
+  adapter/test target.
+- `self_repair` is no longer just "might work": a targeted drill confirmed the
+  full chain of task creation + approval gate. The absence of a live
+  `maria_task_queue.jsonl` means there is no natural candidate, not a lack of
+  wiring.
+- The feasibility policy (learning windows + `SLEEP` mode) gates autonomy.
+  **On 2026-05-31 (#5) a LIVE bug was found and fixed:**
+  `PROFILE_LEARNING.auto_trigger_hours` were authored as UTC, and after the OS
+  timezone was switched to Europe/Warsaw (05-29) they fired the window 2h too
+  early (07-10 + 12-15 instead of 09-11 + 14-16). Fixed to `(9,10,14,15)`
   Berlin-pinned (`berlin_now`, ZoneInfo, DST-safe) — `9efe7cf`/`5fe75ee`/`65b1b4e`.
-  To tłumaczy `no_goals` w prawdziwym oknie (uczenie startowało nocą z budżetu
-  off-window). Off-window budżet rytmu (8b) + reconciliation/reaper celów (#3) już
-  wdrożone; weryfikacja daytime-learning w boju czeka na poniedziałek 09:00.
-- `StrategicPlanner` jest `WIRED` + podpięty do pętli taktycznej za flagą
-  `STRATEGIC_PLANNER_DRIVES` (#9, 2026-05-31, default OFF). Gdy ON: `blocked_goals`
-  filtruje cele, `next_action` ustawia fokus + domyka plan, `idle_strategy` steruje
-  idle-fallbackiem; wszystkie bramy BHP (feasibility/okno/backoff/tryb/K7) zostają
-  w rdzeniu. `OBSERVED` czeka na live drill (poniedziałek) -> potem flip default ON.
+  This explains `no_goals` during the real window (learning started at night on
+  the off-window budget). The off-window rhythm budget (8b) + goal
+  reconciliation/reaper (#3) are already deployed; in-the-field verification of
+  daytime learning is pending for Monday 09:00.
+- `StrategicPlanner` is `WIRED` and connected to the tactical loop behind the
+  `STRATEGIC_PLANNER_DRIVES` flag (#9, 2026-05-31, default OFF). When ON:
+  `blocked_goals` filters goals, `next_action` sets focus + closes out the plan,
+  `idle_strategy` drives the idle fallback; all the safety gates
+  (feasibility/window/backoff/mode/K7) stay in the core. `OBSERVED` is pending a
+  live drill (Monday) -> then the default flips to ON.
 
-### Obecne priorytety fundamentów
+### Current foundation priorities
 
-> **Kolejność budowy (SSoT): `docs/DEVELOPMENT_SEQUENCE.md`.** Poniższa lista to
-> źródło/rationale; #1 (okno, #5) i #3 (StrategicPlanner, #9) zamknięte, #2/#4
-> żyją w TIER 1/2 tego SSoT. Aktualizuj tam, stąd linkuj.
+> The list below captures the current foundation priorities and their rationale.
+> #1 (window, #5) and #3 (StrategicPlanner, #9) are closed; #2 and #4 are in progress.
 
-1. Zastąpić sztywne okna nauki budżetem rytmu: weekend/wieczór powinny dopuszczać
-   lekkie akcje autonomiczne (`goal_refresh`, `fetch`, `review`, self-repair drill),
-   bez odpalania ciężkiego `learn/exam`.
-2. Dodać `Goal Reactivation`: stare active learning/meta goals muszą przechodzić
-   `revalidate -> refresh topic -> next executable action`, zamiast zalegać.
-3. ~~Dokończyć most `StrategicPlan.action_queue -> PlannerCore`~~ — ZROBIONE
-   2026-05-31 (#9, A+B+C za flagą `STRATEGIC_PLANNER_DRIVES`, default OFF);
-   zostaje live drill + flip default po obserwacji.
-4. Zrobić jeden kontrolowany live drill self-repair w `ACTIVE/REDUCED`, żeby
-   produkcyjnie zobaczyć `meta_data/maria_task_queue.jsonl`, `/list_repairs`,
-   `/approve_repair` i dispatch.
+1. Replace the rigid learning windows with a rhythm budget: weekends/evenings
+   should allow light autonomous actions (`goal_refresh`, `fetch`, `review`,
+   self-repair drill) without triggering heavy `learn/exam`.
+2. Add `Goal Reactivation`: old active learning/meta goals must go through
+   `revalidate -> refresh topic -> next executable action` instead of piling up.
+3. ~~Finish the `StrategicPlan.action_queue -> PlannerCore` bridge~~ — DONE
+   2026-05-31 (#9, A+B+C behind the `STRATEGIC_PLANNER_DRIVES` flag, default
+   OFF); the live drill + default flip remain, pending observation.
+4. Run one controlled live self-repair drill in `ACTIVE/REDUCED` to see
+   `meta_data/maria_task_queue.jsonl`, `/list_repairs`, `/approve_repair`, and
+   dispatch in production.
 
-## Maria 2.0 — zamrożone w czasie (2026-05-29)
+## Maria 2.0 — frozen in time (2026-05-29)
 
-`symbolic` + `predictive` to nowy 4-filarowy paradygmat (symbolic world model +
-predictive/JEPA, zob. `docs/AGI_HYPOTHESES.md`, `docs/MARIA_2.0/`). Decyzja Eryka:
-**zawieszone w czasie, NIE skasowane.** Kod + testy zostają co do linijki. Fokus
-przenosi się na dojrzewanie i weryfikację Marii 1.0 (LLM+agent+memory), bo to z
-niej będą realne dane "jak to będzie działać". Wracamy do 2.0, gdy 1.0 da dane.
+`symbolic` + `predictive` are the new 4-pillar paradigm (symbolic world model +
+predictive/JEPA; see `docs/AGI_HYPOTHESES.md`). The decision: **suspended in
+time, NOT deleted.** The code + tests stay line-for-line. Focus shifts to
+maturing and verifying Maria 1.0 (LLM+agent+memory), because that is where the
+real data on "how this will actually work" will come from. We return to 2.0 once
+1.0 provides data.
 
-## Stale docs — NIE traktować jako prawdy runtime
+## Stale docs — do NOT treat as runtime truth
 
-- `docs/ARCHITECTURE.md` — kwiecień 2026, mówi 11 faz / 3352 testy. Kod robi 20 faz
-  (Phase 20 = conversation condense, 06-21), ~6759 testów. Historyczny, dopóki nie zregenerowany.
-- Web UI `_JSONL_DATA_FLOW` (`maria_ui/app.py:2469`) — ręczna mapa, pomija m.in.
-  `self_state_snapshots`, `maria_task_queue`, `creative_events`, `cognitive_bulletin`.
-  Do regeneracji ze store'ów albo zdjąć z paneli "truth".
+- `docs/ARCHITECTURE.md` — April 2026; claims 11 phases / 3352 tests. The code
+  actually runs 20 phases (Phase 20 = conversation condense, 06-21) and 7,145
+  collected tests. Historical until regenerated.
+- Web UI `_JSONL_DATA_FLOW` (`maria_ui/app.py:2469`) — a manual map that omits,
+  among others, `self_state_snapshots`, `maria_task_queue`, `creative_events`,
+  `cognitive_bulletin`. Regenerate it from the stores or drop it from the
+  "truth" panels.
 
 ---
 
-*Utworzony 2026-05-29 (tor A coherence cleanup). Ten plik jest SSoT dla statusu modułów — aktualizuj przy każdej zmianie wired/observed.*
+*Created 2026-05-29 (track A coherence cleanup). This file is the SSoT for module status — update it on every wired/observed change.*

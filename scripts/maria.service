@@ -1,27 +1,31 @@
-# M.A.R.I.A. AI Agent - V3 Unified Launcher
-# Runs daemon (homeostasis tick loop) + Web UI in one process.
-# Replaces separate maria.service + maria-ui.service.
+# M.A.R.I.A. - systemd unit (runs the daemon + Web UI in one process)
 #
-# Copy to /etc/systemd/system/maria.service
-# Then: sudo systemctl daemon-reload && sudo systemctl enable maria
-# Disable old: sudo systemctl disable maria-ui
+# This is a TEMPLATE. Before enabling, edit the User and the three absolute
+# paths below to match your system, then:
+#   sudo cp scripts/maria.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now maria
 
 [Unit]
-Description=M.A.R.I.A. AI Agent (V3)
+Description=M.A.R.I.A. AI Agent
 After=network.target ollama.service
 Wants=ollama.service
 
 [Service]
 Type=simple
-User=maria
-WorkingDirectory=/home/maria/maria
-ExecStart=/home/maria/maria/venv/bin/python maria.py
+
+# EDIT: the Linux user Maria should run as
+User=YOUR_USERNAME
+
+# EDIT: absolute path to your clone (all three lines below)
+WorkingDirectory=/absolute/path/to/Maria
+ExecStart=/absolute/path/to/Maria/venv/bin/python maria.py
+EnvironmentFile=/absolute/path/to/Maria/.env
+
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
 TimeoutStopSec=30
-
-EnvironmentFile=/home/maria/maria/.env
 
 StandardOutput=journal
 StandardError=journal

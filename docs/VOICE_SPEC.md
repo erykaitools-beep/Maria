@@ -1,56 +1,56 @@
-# M.A.R.I.A. - Specyfikacja Modulu Glosu (Usta + Uszy)
+# M.A.R.I.A. - Voice Module Specification (Mouth + Ears)
 
-> **Data utworzenia:** 2026-04-06
-> **Status:** Specyfikacja do implementacji
-> **Filozofia:** Glos jako organ - Maria mowi i slucha, nie "odtwarza audio"
-> **Podejscie:** Offline-first, graceful degradation, przyrostowa implementacja
+> **Created:** 2026-04-06
+> **Status:** Specification (pending implementation)
+> **Philosophy:** Voice as an organ - Maria speaks and listens, she does not "play back audio"
+> **Approach:** Offline-first, graceful degradation, incremental implementation
 
 ---
 
-## 1. Zasada nadrzedna: Biologiczna inspiracja
+## 1. Guiding principle: Biological inspiration
 
-### Ludzki glos vs. syntezator
+### Human voice vs. synthesizer
 
-| Aspekt | Syntezator klasyczny | Ludzki glos | M.A.R.I.A. Voice |
+| Aspect | Classic synthesizer | Human voice | M.A.R.I.A. Voice |
 |--------|---------------------|-------------|-------------------|
-| Awaria | 0 lub 1 | Chrypka, szept | Graceful degradation |
-| Emocje | Brak | Ton, tempo, akcent | Personality-aware TTS |
-| Sluch | Brak | Selektywny (koktajl party) | VAD + Whisper |
-| Adaptacja | Brak | Glosniej w halasie | Dynamiczne parametry |
-| Pamiec | Brak | Rozpoznaje glosy | Speaker ID (future) |
+| Failure | 0 or 1 | Hoarseness, whisper | Graceful degradation |
+| Emotion | None | Tone, pace, accent | Personality-aware TTS |
+| Hearing | None | Selective (cocktail party) | VAD + Whisper |
+| Adaptation | None | Louder in noise | Dynamic parameters |
+| Memory | None | Recognizes voices | Speaker ID (future) |
 
-### Graceful Degradation - glos
+### Graceful Degradation - voice
 
 ```
 FULL VOICE (100%)
     |
-    v obciazenie CPU
-SLOWER VOICE (80%) - dluzszy czas odpowiedzi TTS
+    v CPU load
+SLOWER VOICE (80%) - longer TTS response time
     |
-    v brak modelu TTS
-TEXT ONLY (60%) - tylko tekst, bez audio
+    v no TTS model
+TEXT ONLY (60%) - text only, no audio
     |
-    v brak modelu STT
-ONE-WAY VOICE (40%) - Maria mowi, ale nie slyszy
+    v no STT model
+ONE-WAY VOICE (40%) - Maria speaks but does not hear
     |
-    v brak mikrofonu/glosnika
-SILENT MODE (0%) - tylko tekst (jak teraz)
+    v no microphone/speaker
+SILENT MODE (0%) - text only (as now)
 ```
 
-Maria NIGDY nie mowi "modul glosu nie dziala" - mowi "mam chrypke" lub "slabo slyszam".
+Maria NEVER says "the voice module is broken" - she says "I'm a bit hoarse" or "I can barely hear you".
 
 ---
 
-## 2. Architektura warstwowa
+## 2. Layered architecture
 
 ```
 +-------------------------------------------------------------+
 |                    MARIA CONSCIOUSNESS                       |
-|              (Unified Perception - jedno "ja")               |
+|            (Unified Perception - a single "self")           |
 +-------------------------------------------------------------+
 |                    VOICE CORTEX                              |
-|     Koordynacja mowy i sluchu, kolejkowanie                 |
-|     Personality-aware parametry TTS                          |
+|     Speech/hearing coordination, queueing                   |
+|     Personality-aware TTS parameters                        |
 +---------------------------+---------------------------------+
 |      MOUTH (TTS)          |         EAR (STT)              |
 |  Piper gosia-medium       |   faster-whisper small         |
@@ -65,72 +65,72 @@ Maria NIGDY nie mowi "modul glosu nie dziala" - mowi "mam chrypke" lub "slabo sl
 
 ---
 
-## 3. Stos technologiczny
+## 3. Technology stack
 
-### 3.1 TTS - Piper (Usta)
+### 3.1 TTS - Piper (Mouth)
 
-| Parametr | Wartosc |
+| Parameter | Value |
 |----------|---------|
-| **Silnik** | Piper TTS (ONNX, offline) |
-| **Glos** | `pl_PL-gosia-medium` (zenski, polski) |
+| **Engine** | Piper TTS (ONNX, offline) |
+| **Voice** | `pl_PL-gosia-medium` (female, Polish) |
 | **Format** | 22050 Hz, 16-bit PCM mono |
-| **Latencja** | 20-30ms na CPU (Ryzen 5) |
+| **Latency** | 20-30ms on CPU (Ryzen 5) |
 | **RAM** | ~300 MB |
-| **Dysk** | ~80 MB (model .onnx + .json) |
+| **Disk** | ~80 MB (.onnx model + .json) |
 | **Streaming** | `synthesize_stream_raw()` - chunked PCM |
 | **Pip** | `piper-tts` |
 
-**Dlaczego Piper a nie Coqui:**
-- Coqui: ~5GB RAM, sekundy latencji na CPU, firma zamknieta
-- Piper: ~300MB RAM, 20ms latencji, aktywnie rozwijany
-- Piper ma 4 polskie glosy (gosia = naturalny zenski)
+**Why Piper and not Coqui:**
+- Coqui: ~5GB RAM, seconds of latency on CPU, closed-source company
+- Piper: ~300MB RAM, 20ms latency, actively developed
+- Piper has 4 Polish voices (gosia = natural female)
 
-### 3.2 STT - faster-whisper (Uszy)
+### 3.2 STT - faster-whisper (Ears)
 
-| Parametr | Wartosc |
+| Parameter | Value |
 |----------|---------|
-| **Silnik** | faster-whisper (CTranslate2) |
+| **Engine** | faster-whisper (CTranslate2) |
 | **Model** | `small` (INT8 quantized) |
-| **Jezyk** | Polish (`pl`) |
-| **WER** | ~10% (akceptowalne dla konwersacji) |
+| **Language** | Polish (`pl`) |
+| **WER** | ~10% (acceptable for conversation) |
 | **RAM** | ~2 GB |
-| **Dysk** | ~250 MB |
-| **Latencja** | <1s dla 5s wypowiedzi |
+| **Disk** | ~250 MB |
+| **Latency** | <1s for a 5s utterance |
 | **Pip** | `faster-whisper` |
 
-**Dlaczego `small` a nie `large-v3`:**
-- large-v3: ~10GB RAM (za duzo obok Ollamy)
-- small INT8: ~2GB RAM, 6x realtime, wystarczajaca dokladnosc
-- Mozliwosc upgrade do `medium` (5GB) jesli potrzeba
+**Why `small` and not `large-v3`:**
+- large-v3: ~10GB RAM (too much alongside Ollama)
+- small INT8: ~2GB RAM, 6x realtime, sufficient accuracy
+- Option to upgrade to `medium` (5GB) if needed
 
-### 3.3 VAD - Silero (Wykrywanie mowy)
+### 3.3 VAD - Silero (Speech detection)
 
-| Parametr | Wartosc |
+| Parameter | Value |
 |----------|---------|
-| **Silnik** | Silero VAD v6 |
+| **Engine** | Silero VAD v6 |
 | **Model** | ONNX (1-2 MB) |
-| **Latencja** | <1ms na 30ms chunk |
-| **CPU** | 0.43% (zaniedbywalny) |
+| **Latency** | <1ms per 30ms chunk |
+| **CPU** | 0.43% (negligible) |
 | **Pip** | `silero-vad` |
 
-**Rola:** Wykrywa poczatek/koniec mowy w strumieniu audio. Oszczedza CPU - Whisper transkrybuje tylko segmenty z mowa, nie cisze.
+**Role:** Detects the start/end of speech in the audio stream. Saves CPU - Whisper transcribes only segments that contain speech, not silence.
 
-### 3.4 Budzet zasobow
+### 3.4 Resource budget
 
-| Zasob | Obecne uzycie | Voice module | Lacznie | Limit |
+| Resource | Current use | Voice module | Total | Limit |
 |-------|---------------|-------------|---------|-------|
 | **RAM** | ~12 GB (Ollama) | ~2.3 GB | ~14.3 GB | 32 GB |
-| **CPU** | Zmienny | <5% idle, peak na STT | OK | 6 cores |
-| **Dysk** | ~6 GB modele | ~330 MB | ~6.3 GB | 1 TB |
+| **CPU** | Variable | <5% idle, peak on STT | OK | 6 cores |
+| **Disk** | ~6 GB models | ~330 MB | ~6.3 GB | 1 TB |
 
 ---
 
-## 4. Struktura plikow
+## 4. File structure
 
 ```
 agent_core/voice/
   __init__.py          # VoiceModule facade + run_voice_pipeline()
-  voice_cortex.py      # Koordynacja TTS/STT, kolejkowanie, personality
+  voice_cortex.py      # TTS/STT coordination, queueing, personality
   tts_engine.py        # PiperTTS wrapper (synthesize, stream, voice config)
   stt_engine.py        # WhisperSTT wrapper (transcribe, language detect)
   vad.py               # SileroVAD wrapper (detect speech segments)
@@ -148,21 +148,21 @@ agent_core/tests/
 
 ---
 
-## 5. Interfejsy (API)
+## 5. Interfaces (API)
 
-### 5.1 VoiceCortex - Glowna fasada
+### 5.1 VoiceCortex - Main facade
 
 ```python
 class VoiceCortex:
-    """Koordynacja mowy i sluchu."""
+    """Coordinate speech and hearing."""
 
     def speak(self, text: str, emotion: str = "neutral") -> bytes:
         """
-        Zamien tekst na mowe (PCM audio).
+        Convert text to speech (PCM audio).
 
         Args:
-            text: Tekst do wymowienia
-            emotion: Emocja (neutral, happy, sad, excited) - wplywa na tempo/ton
+            text: Text to speak
+            emotion: Emotion (neutral, happy, sad, excited) - affects pace/tone
 
         Returns:
             Raw PCM bytes (22050 Hz, 16-bit mono)
@@ -170,66 +170,66 @@ class VoiceCortex:
 
     def speak_stream(self, text: str) -> Iterator[bytes]:
         """
-        Streaming TTS - zwraca chunki audio w miare generowania.
-        Dla Web UI WebSocket (niska latencja).
+        Streaming TTS - returns audio chunks as they are generated.
+        For the Web UI WebSocket (low latency).
         """
 
     def listen(self, audio: bytes, sample_rate: int = 16000) -> str:
         """
-        Zamien mowe na tekst.
+        Convert speech to text.
 
         Args:
             audio: Raw PCM bytes
             sample_rate: Sample rate (default 16kHz)
 
         Returns:
-            Transkrypcja tekstu
+            Transcribed text
         """
 
     def listen_stream(self, audio_chunks: Iterator[bytes]) -> str:
         """
-        Streaming STT z VAD - buforuje chunki, transkrybuje segmenty mowy.
-        Dla Web UI WebSocket (real-time).
+        Streaming STT with VAD - buffers chunks, transcribes speech segments.
+        For the Web UI WebSocket (real-time).
         """
 
     def get_health(self) -> VoiceHealth:
-        """Stan zdrowia modulu glosu (TTS loaded, STT loaded, latency)."""
+        """Health state of the voice module (TTS loaded, STT loaded, latency)."""
 
     def is_available(self) -> bool:
-        """Czy modul glosu jest dostepny (przynajmniej TTS)."""
+        """Whether the voice module is available (at least TTS)."""
 ```
 
-### 5.2 PiperTTS - Silnik mowy
+### 5.2 PiperTTS - Speech engine
 
 ```python
 class PiperTTS:
-    """Wrapper na Piper TTS."""
+    """Wrapper around Piper TTS."""
 
     def __init__(self, voice: str = "pl_PL-gosia-medium", data_dir: str = "models/piper/"):
         """
         Args:
-            voice: Nazwa glsu Piper (z katalogu voices)
-            data_dir: Katalog z modelami .onnx
+            voice: Piper voice name (from the voices directory)
+            data_dir: Directory with .onnx models
         """
 
     def synthesize(self, text: str, speed: float = 1.0) -> bytes:
-        """Caly tekst -> caly audio (PCM)."""
+        """Whole text -> whole audio (PCM)."""
 
     def synthesize_stream(self, text: str, speed: float = 1.0) -> Iterator[bytes]:
-        """Tekst -> chunki audio (streaming, niska latencja)."""
+        """Text -> audio chunks (streaming, low latency)."""
 
     def set_voice(self, voice: str) -> None:
-        """Zmien glos (przeladuj model)."""
+        """Change voice (reload the model)."""
 
     def get_available_voices(self) -> List[str]:
-        """Lista dostepnych glosow w data_dir."""
+        """List available voices in data_dir."""
 ```
 
-### 5.3 WhisperSTT - Silnik sluchu
+### 5.3 WhisperSTT - Hearing engine
 
 ```python
 class WhisperSTT:
-    """Wrapper na faster-whisper."""
+    """Wrapper around faster-whisper."""
 
     def __init__(self, model_size: str = "small", compute_type: str = "int8"):
         """
@@ -240,17 +240,17 @@ class WhisperSTT:
 
     def transcribe(self, audio: bytes, language: str = "pl") -> TranscriptionResult:
         """
-        Transkrybuj audio.
+        Transcribe audio.
 
         Returns:
             TranscriptionResult(text, language, confidence, segments)
         """
 
     def detect_language(self, audio: bytes) -> str:
-        """Wykryj jezyk z pierwszych 30s audio."""
+        """Detect language from the first 30s of audio."""
 ```
 
-### 5.4 SileroVAD - Detekcja mowy
+### 5.4 SileroVAD - Speech detection
 
 ```python
 class SileroVAD:
@@ -259,23 +259,23 @@ class SileroVAD:
     def __init__(self, threshold: float = 0.5, min_speech_ms: int = 250):
         """
         Args:
-            threshold: Prog decyzyjny (0.0-1.0)
-            min_speech_ms: Minimalna dlugosc mowy (filtruje szumy)
+            threshold: Decision threshold (0.0-1.0)
+            min_speech_ms: Minimum speech length (filters out noise)
         """
 
     def process_chunk(self, chunk: bytes) -> bool:
-        """Czy chunk zawiera mowe? (True/False)"""
+        """Does the chunk contain speech? (True/False)"""
 
     def get_speech_segments(self, audio: bytes) -> List[Tuple[float, float]]:
-        """Zwroc segmenty mowy [(start_s, end_s), ...]"""
+        """Return speech segments [(start_s, end_s), ...]"""
 
     def reset(self) -> None:
-        """Reset stanu (nowa sesja nasluchiwania)."""
+        """Reset state (new listening session)."""
 ```
 
 ---
 
-## 6. Integracja z istniejacymi systemami
+## 6. Integration with existing systems
 
 ### 6.1 Web UI - WebSocket Audio
 
@@ -293,7 +293,7 @@ class SileroVAD:
 [Server: WhisperSTT]
      | text
      v
-[Server: brain.think(text)]  <-- istniejacy pipeline
+[Server: brain.think(text)]  <-- existing pipeline
      | response text
      v
 [Server: PiperTTS]
@@ -305,24 +305,24 @@ class SileroVAD:
 [Browser: AudioContext.play()]
 ```
 
-**Nowe SocketIO events:**
+**New SocketIO events:**
 
 ```python
 # Client -> Server
-@socketio.on('voice_start')      # Rozpocznij nasluchiwanie
-@socketio.on('voice_audio')      # Chunk audio (PCM bytes)
-@socketio.on('voice_stop')       # Zakoncz nasluchiwanie
+@socketio.on('voice_start')      # Start listening
+@socketio.on('voice_audio')      # Audio chunk (PCM bytes)
+@socketio.on('voice_stop')       # Stop listening
 
 # Server -> Client
-socketio.emit('voice_transcript') # Transkrypcja w czasie rzeczywistym
-socketio.emit('voice_response')   # Audio odpowiedzi (PCM chunks)
-socketio.emit('voice_status')     # Stan (listening, thinking, speaking)
+socketio.emit('voice_transcript') # Real-time transcription
+socketio.emit('voice_response')   # Response audio (PCM chunks)
+socketio.emit('voice_status')     # State (listening, thinking, speaking)
 ```
 
-**Web UI zmiana:**
-- Przycisk mikrofonu w chacie (obok pola tekstowego)
-- Przycisk glosnika przy odpowiedziach Marii (odtworz glosem)
-- Opcja "always speak" w ustawieniach (Maria mowi kazda odpowiedz)
+**Web UI changes:**
+- Microphone button in the chat (next to the text field)
+- Speaker button next to Maria's responses (play with voice)
+- "always speak" option in settings (Maria speaks every response)
 
 ### 6.2 Telegram - Voice Messages
 
@@ -335,7 +335,7 @@ socketio.emit('voice_status')     # Stan (listening, thinking, speaking)
 [WhisperSTT.transcribe()]
      | text
      v
-[brain.think(text)]  <-- istniejacy pipeline
+[brain.think(text)]  <-- existing pipeline
      | response text
      v
 [PiperTTS.synthesize()]
@@ -346,12 +346,12 @@ socketio.emit('voice_status')     # Stan (listening, thinking, speaking)
 [bot.send_voice(chat_id, ogg)]
 ```
 
-**Nowy handler w `agent_core/telegram/`:**
+**New handler in `agent_core/telegram/`:**
 
 ```python
-# telegram_bridge.py - nowy handler
+# telegram_bridge.py - new handler
 def handle_voice_message(update):
-    """Obsluga wiadomosci glosowych od operatora."""
+    """Handle voice messages from the operator."""
     voice = update.message.voice
     file = bot.get_file(voice.file_id)
     # download -> convert -> transcribe -> think -> TTS -> send_voice
@@ -370,55 +370,55 @@ if voice_cortex and voice_cortex.is_available():
 ### 6.4 Consciousness Integration
 
 ```python
-# Personality wplywa na parametry TTS
+# Personality affects TTS parameters
 personality = consciousness.get_traits()
-speed = 1.0 + (personality.get("curiosity", 0.5) - 0.5) * 0.2  # ciekawsza = szybsza
-# Emocja z ExperienceTracker -> emotion parameter
+speed = 1.0 + (personality.get("curiosity", 0.5) - 0.5) * 0.2  # more curious = faster
+# Emotion from ExperienceTracker -> emotion parameter
 emotion = experience_tracker.get_current_emotion()
 audio = voice_cortex.speak(text, emotion=emotion)
 ```
 
-### 6.5 K1 Perception - Nowe eventy
+### 6.5 K1 Perception - New events
 
 ```python
-# Nowe PerceptionSource i event types
+# New PerceptionSource and event types
 class PerceptionSource(Enum):
-    VOICE = "voice"           # Nowe
+    VOICE = "voice"           # New
 
 class VoiceEventType:
-    SPEECH_DETECTED = "speech_detected"     # VAD wykryl mowe
-    SPEECH_TRANSCRIBED = "speech_transcribed" # STT zakonczyl
-    SPEECH_SYNTHESIZED = "speech_synthesized" # TTS zakonczyl
-    VOICE_ERROR = "voice_error"              # Blad modulu
+    SPEECH_DETECTED = "speech_detected"     # VAD detected speech
+    SPEECH_TRANSCRIBED = "speech_transcribed" # STT finished
+    SPEECH_SYNTHESIZED = "speech_synthesized" # TTS finished
+    VOICE_ERROR = "voice_error"              # Module error
 ```
 
 ---
 
-## 7. Konfiguracja
+## 7. Configuration
 
 ### 7.1 .env
 
 ```bash
 # --- Voice Module ---
-# Wlacz modul glosu (domyslnie false)
+# Enable the voice module (default false)
 VOICE_ENABLED=false
 
-# TTS: glos Piper (pl_PL-gosia-medium, pl_PL-darkman-medium)
+# TTS: Piper voice (pl_PL-gosia-medium, pl_PL-darkman-medium)
 VOICE_TTS_MODEL=pl_PL-gosia-medium
 
-# STT: model Whisper (tiny/base/small/medium)
+# STT: Whisper model (tiny/base/small/medium)
 VOICE_STT_MODEL=small
 
-# STT: typ obliczen (int8/float16)
+# STT: compute type (int8/float16)
 VOICE_STT_COMPUTE=int8
 
-# VAD: prog detekcji mowy (0.0-1.0)
+# VAD: speech detection threshold (0.0-1.0)
 VOICE_VAD_THRESHOLD=0.5
 
-# Web UI: automatyczne odtwarzanie glosem (true/false)
+# Web UI: automatic voice playback (true/false)
 VOICE_AUTO_SPEAK=false
 
-# Telegram: odpowiadaj glosem na voice messages (true/false)
+# Telegram: reply with voice to voice messages (true/false)
 VOICE_TELEGRAM_REPLY=true
 ```
 
@@ -431,8 +431,8 @@ MODEL_07 = ModelSpec(
     name="piper-gosia",
     size_gb=0.08,
     ram_tier="S",       # <1GB
-    startup="warm",     # ladowany na starcie jesli VOICE_ENABLED
-    mutex=False,        # nie koliduje z innymi
+    startup="warm",     # loaded at startup if VOICE_ENABLED
+    mutex=False,        # does not conflict with others
     notes="Piper TTS pl_PL-gosia-medium, ONNX, CPU"
 )
 
@@ -440,8 +440,8 @@ MODEL_08 = ModelSpec(
     role=ModelRole.HEARING,
     name="whisper-small-int8",
     size_gb=0.25,
-    ram_tier="M",       # ~2GB w RAM
-    startup="cold",     # ladowany on-demand (przy pierwszym voice input)
+    ram_tier="M",       # ~2GB in RAM
+    startup="cold",     # loaded on-demand (on first voice input)
     mutex=False,
     notes="faster-whisper small INT8, CPU, Polish"
 )
@@ -449,61 +449,61 @@ MODEL_08 = ModelSpec(
 
 ---
 
-## 8. Plan implementacji (4 fazy)
+## 8. Implementation plan (4 phases)
 
-### Faza 1: TTS - Maria mowi (MVP)
-**Cel:** Maria potrafi zamieniac tekst na mowe
+### Phase 1: TTS - Maria speaks (MVP)
+**Goal:** Maria can convert text to speech
 
 - [ ] `tts_engine.py` - PiperTTS wrapper
 - [ ] `voice_model.py` - dataclasses (VoiceConfig, VoiceEvent, VoiceHealth)
-- [ ] `audio_io.py` - PCM/WAV/OGG konwersja
-- [ ] Download glsu `pl_PL-gosia-medium`
-- [ ] Web UI: przycisk glosnika przy odpowiedziach
-- [ ] Testy: 30+
-- [ ] **Szacowany czas:** 1 sesja
+- [ ] `audio_io.py` - PCM/WAV/OGG conversion
+- [ ] Download the `pl_PL-gosia-medium` voice
+- [ ] Web UI: speaker button next to responses
+- [ ] Tests: 30+
+- [ ] **Estimated time:** 1 session
 
-### Faza 2: STT - Maria slucha
-**Cel:** Maria rozumie mowe (transkrypcja)
+### Phase 2: STT - Maria listens
+**Goal:** Maria understands speech (transcription)
 
 - [ ] `stt_engine.py` - WhisperSTT wrapper
 - [ ] `vad.py` - SileroVAD wrapper
-- [ ] Web UI: przycisk mikrofonu + streaming audio
+- [ ] Web UI: microphone button + streaming audio
 - [ ] WebSocket events (voice_start, voice_audio, voice_stop)
-- [ ] Testy: 30+
-- [ ] **Szacowany czas:** 1 sesja
+- [ ] Tests: 30+
+- [ ] **Estimated time:** 1 session
 
-### Faza 3: Voice Cortex - Pelna integracja
-**Cel:** Koordynacja mowy/sluchu, integracja z systemem
+### Phase 3: Voice Cortex - Full integration
+**Goal:** Coordinate speech/hearing, integrate with the system
 
-- [ ] `voice_cortex.py` - fasada, kolejkowanie, personality-aware TTS
+- [ ] `voice_cortex.py` - facade, queueing, personality-aware TTS
 - [ ] Homeostasis integration (Phase 12, health monitoring)
 - [ ] K1 Perception events (VOICE source)
-- [ ] Consciousness -> TTS parametry (emocja, tempo)
+- [ ] Consciousness -> TTS parameters (emotion, pace)
 - [ ] REPL `/voice` command
-- [ ] Testy: 20+
-- [ ] **Szacowany czas:** 1 sesja
+- [ ] Tests: 20+
+- [ ] **Estimated time:** 1 session
 
-### Faza 4: Telegram Voice
-**Cel:** Maria slucha i mowi przez Telegram
+### Phase 4: Telegram Voice
+**Goal:** Maria listens and speaks through Telegram
 
 - [ ] Telegram voice message handler (OGA -> WAV -> STT)
 - [ ] Telegram voice reply (TTS -> WAV -> OGA -> send_voice)
 - [ ] FFmpeg integration
-- [ ] Testy: 15+
-- [ ] **Szacowany czas:** 0.5 sesji
+- [ ] Tests: 15+
+- [ ] **Estimated time:** 0.5 session
 
 ---
 
 ## 9. REPL Commands
 
 ```
-/voice              - Status modulu glosu
-/voice speak <text> - Powiedz tekst (debug: odtworz lokalnie)
-/voice listen       - Nasluchuj (debug: z mikrofonu mini PC)
-/voice voices       - Lista dostepnych glosow
-/voice model        - Aktualny model STT + TTS
-/voice health       - Zdrowie modulu
-/voice test         - Self-test (TTS -> WAV -> STT -> porownaj)
+/voice              - Voice module status
+/voice speak <text> - Speak text (debug: play locally)
+/voice listen       - Listen (debug: from the mini PC microphone)
+/voice voices       - List available voices
+/voice model        - Current STT + TTS model
+/voice health       - Module health
+/voice test         - Self-test (TTS -> WAV -> STT -> compare)
 ```
 
 ---
@@ -511,29 +511,29 @@ MODEL_08 = ModelSpec(
 ## 10. Web UI Endpoints
 
 ```
-GET  /api/voice/status          - Stan modulu (TTS/STT loaded, health)
-GET  /api/voice/voices          - Lista glosow Piper
-POST /api/voice/speak           - TTS: tekst -> audio (WAV response)
-POST /api/voice/transcribe      - STT: audio upload -> tekst
-POST /api/voice/config          - Zmien config (voice, speed, auto_speak)
+GET  /api/voice/status          - Module state (TTS/STT loaded, health)
+GET  /api/voice/voices          - List of Piper voices
+POST /api/voice/speak           - TTS: text -> audio (WAV response)
+POST /api/voice/transcribe      - STT: audio upload -> text
+POST /api/voice/config          - Change config (voice, speed, auto_speak)
 ```
 
 ---
 
-## 11. Ograniczenia i ryzyka
+## 11. Limitations and risks
 
-| Ryzyko | Prawdopodobienstwo | Wplyw | Mitygacja |
+| Risk | Likelihood | Impact | Mitigation |
 |--------|-------------------|-------|-----------|
-| Whisper slow na CPU | Niskie (small model = 6x RT) | Sredni | Upgrade do medium lub tryb async |
-| Piper glos brzmi robotycznie | Srednie | Niski | Mozliwosc zmiany glsu, fine-tuning |
-| RAM pressure z STT | Niskie (2GB/32GB) | Sredni | Lazy loading, unload po idle |
-| Browser mic permission | Niskie | Niski | Fallback na tekst, HTTPS required |
-| Halas w tle (STT) | Srednie | Sredni | VAD threshold tuning, noise gate |
-| Latencja end-to-end | Niskie | Sredni | Streaming TTS, parallel processing |
+| Whisper slow on CPU | Low (small model = 6x RT) | Medium | Upgrade to medium or async mode |
+| Piper voice sounds robotic | Medium | Low | Option to change voice, fine-tuning |
+| RAM pressure from STT | Low (2GB/32GB) | Medium | Lazy loading, unload after idle |
+| Browser mic permission | Low | Low | Fallback to text, HTTPS required |
+| Background noise (STT) | Medium | Medium | VAD threshold tuning, noise gate |
+| End-to-end latency | Low | Medium | Streaming TTS, parallel processing |
 
 ---
 
-## 12. Zaleznosci (nowe pakiety)
+## 12. Dependencies (new packages)
 
 ```
 piper-tts>=2.0.0      # TTS engine (ONNX)
@@ -542,33 +542,33 @@ silero-vad>=5.0        # Voice Activity Detection
 # ffmpeg (system package, apt install ffmpeg)
 ```
 
-**Brak nowych ciezkich deps** - wszystkie lekkie, CPU-friendly, offline.
+**No new heavy deps** - all lightweight, CPU-friendly, offline.
 
 ---
 
 ## 13. ADR (Architecture Decision Records)
 
-### ADR-029: Piper TTS zamiast Coqui
-- Piper: 300MB RAM, 20ms latencja, 4 polskie glosy, aktywnie rozwijany
-- Coqui: 5GB RAM, sekundy latencji na CPU, firma zamknieta 2025
-- Decyzja: Piper jako domyslny TTS, Coqui jako opcjonalny upgrade (voice cloning)
+### ADR-029: Piper TTS instead of Coqui
+- Piper: 300MB RAM, 20ms latency, 4 Polish voices, actively developed
+- Coqui: 5GB RAM, seconds of latency on CPU, went closed-source in 2025
+- Decision: Piper as the default TTS, Coqui as an optional upgrade (voice cloning)
 
-### ADR-030: faster-whisper small zamiast large
-- large-v3: 10GB RAM (za duzo), najlepsza dokladnosc
-- small INT8: 2GB RAM, WER ~10% dla polskiego, 6x realtime
-- Decyzja: small jako default, upgrade path do medium (5GB) jesli potrzeba
-- Whisper ladowany on-demand (cold start), nie warm (oszczednosc RAM)
+### ADR-030: faster-whisper small instead of large
+- large-v3: 10GB RAM (too much), best accuracy
+- small INT8: 2GB RAM, WER ~10% for Polish, 6x realtime
+- Decision: small as the default, upgrade path to medium (5GB) if needed
+- Whisper loaded on-demand (cold start), not warm (saves RAM)
 
-### ADR-031: VAD przed STT (Silero gate)
-- Bez VAD: Whisper transkrybuje cisze i szumy (marnowanie CPU)
-- Z VAD: tylko segmenty z mowa ida do Whisper (~90% oszczednosc CPU)
-- Silero VAD: 1MB model, <1ms, zaniedbywalny narzut
+### ADR-031: VAD before STT (Silero gate)
+- Without VAD: Whisper transcribes silence and noise (wasted CPU)
+- With VAD: only segments with speech go to Whisper (~90% CPU savings)
+- Silero VAD: 1MB model, <1ms, negligible overhead
 
-### ADR-032: WebSocket audio streaming zamiast HTTP upload
-- HTTP: caly plik audio -> upload -> transcribe (wysoka latencja)
-- WebSocket: chunki 30ms -> VAD -> incremental STT (niska latencja)
-- Maria juz uzywa Flask-SocketIO w Web UI - naturalne rozszerzenie
+### ADR-032: WebSocket audio streaming instead of HTTP upload
+- HTTP: whole audio file -> upload -> transcribe (high latency)
+- WebSocket: 30ms chunks -> VAD -> incremental STT (low latency)
+- Maria already uses Flask-SocketIO in the Web UI - a natural extension
 
 ---
 
-*Ostatnia aktualizacja: 2026-04-06*
+*Last updated: 2026-04-06*

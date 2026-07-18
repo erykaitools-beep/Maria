@@ -1,22 +1,22 @@
-# M.A.R.I.A. Web UI - Specyfikacja
+# M.A.R.I.A. Web UI - Specification
 
-> **Data utworzenia:** 2026-02-01
-> **Status:** Planowanie
+> **Created:** 2026-02-01
+> **Status:** Planning
 
-## Cel
+## Goal
 
-Jeden punkt wejścia (`run_ui.py`) który uruchamia całą M.A.R.I.A. z graficznym interfejsem webowym dostępnym przez przeglądarkę - lokalnie i mobilnie przez WiFi.
+A single entry point (`run_ui.py`) that launches the entire M.A.R.I.A. with a graphical web interface accessible through a browser - both locally and on mobile over WiFi.
 
-## Wymagania
+## Requirements
 
-1. **Jeden plik startowy** - `run_ui.py` odpala wszystko
-2. **Web UI** - działa w przeglądarce (localhost + LAN)
-3. **Czat z Marią** - rozmowa w czasie rzeczywistym
-4. **Panel statusu** - health, tryb, RAM, CPU, alerty
-5. **Proaktywność** - Maria może sama wysłać powiadomienie
-6. **Kontrola** - przyciski start/stop/learn
+1. **Single startup file** - `run_ui.py` launches everything
+2. **Web UI** - runs in the browser (localhost + LAN)
+3. **Chat with Maria** - real-time conversation
+4. **Status panel** - health, mode, RAM, CPU, alerts
+5. **Proactivity** - Maria can send a notification on her own
+6. **Control** - start/stop/learn buttons
 
-## Mockup UI
+## UI Mockup
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -24,60 +24,60 @@ Jeden punkt wejścia (`run_ui.py`) który uruchamia całą M.A.R.I.A. z graficzn
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────┐  ┌──────────────────┐ │
 │  │                                 │  │ 🫀 HOMEOSTASIS   │ │
-│  │  💬 CZAT                        │  │ Mode: ACTIVE     │ │
+│  │  💬 CHAT                        │  │ Mode: ACTIVE     │ │
 │  │                                 │  │ Health: 88%      │ │
-│  │  Maria: Cześć! Właśnie         │  │ RAM: 62%         │ │
-│  │  skończyłam uczyć się z        │  │ CPU: 12%         │ │
-│  │  3 nowych plików.              │  │ Uptime: 2h 15m   │ │
+│  │  Maria: Hi! I just              │  │ RAM: 62%         │ │
+│  │  finished learning from         │  │ CPU: 12%         │ │
+│  │  3 new files.                   │  │ Uptime: 2h 15m   │ │
 │  │                                 │  ├──────────────────┤ │
-│  │  Ty: Co się nauczyłaś?         │  │ 📚 NAUKA         │ │
-│  │                                 │  │ Węzły: 156       │ │
-│  │  Maria: Poznałam koncepcje     │  │ Epizody: 23      │ │
-│  │  meta-myślenia i...            │  │ W kolejce: 4     │ │
+│  │  You: What did you learn?       │  │ 📚 LEARNING      │ │
+│  │                                 │  │ Nodes: 156       │ │
+│  │  Maria: I learned meta-         │  │ Episodes: 23     │ │
+│  │  thinking concepts and...       │  │ Queued: 4        │ │
 │  │                                 │  ├──────────────────┤ │
-│  │  ⚠️ Maria: Uwaga - RAM         │  │ 🔔 ALERTY        │ │
-│  │  przekroczył 80%               │  │ (brak)           │ │
+│  │  ⚠️ Maria: Warning - RAM        │  │ 🔔 ALERTS        │ │
+│  │  exceeded 80%                   │  │ (none)           │ │
 │  │                                 │  │                  │ │
 │  ├─────────────────────────────────┤  └──────────────────┘ │
-│  │ [Napisz wiadomość...]    [Wyślij] │                     │
+│  │ [Type a message...]      [Send] │                       │
 │  └─────────────────────────────────┘                       │
 ├─────────────────────────────────────────────────────────────┤
 │  [▶ Start Learning] [⏸ Pause] [📊 Stats] [⚙️ Settings]    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Technologia
+## Technology
 
-| Komponent | Wybór | Uzasadnienie |
+| Component | Choice | Rationale |
 |-----------|-------|--------------|
-| **Backend** | Flask + Flask-SocketIO | Prosty, real-time WebSocket |
-| **Frontend** | HTML/CSS/JS (vanilla) | Bez kompilacji, lekkie |
-| **Komunikacja** | WebSocket | Push notifications od Marii |
-| **Port** | 5000 | Standard Flask |
+| **Backend** | Flask + Flask-SocketIO | Simple, real-time WebSocket |
+| **Frontend** | HTML/CSS/JS (vanilla) | No build step, lightweight |
+| **Communication** | WebSocket | Push notifications from Maria |
+| **Port** | 5000 | Flask default |
 
-## Dostęp
+## Access
 
-- **Lokalnie:** `http://localhost:5000`
-- **Mobilnie (WiFi):** `http://192.168.x.x:5000`
+- **Local:** `http://localhost:5000`
+- **Mobile (WiFi):** `http://192.168.x.x:5000`
 
-## Struktura plików
+## File Structure
 
 ```
 project/
 ├── maria_ui/
 │   ├── __init__.py
-│   ├── app.py              # Flask server + WebSocket + integracja z M.A.R.I.A.
+│   ├── app.py              # Flask server + WebSocket + M.A.R.I.A. integration
 │   ├── templates/
-│   │   └── index.html      # Główny UI (single page)
+│   │   └── index.html      # Main UI (single page)
 │   ├── static/
 │   │   ├── style.css       # Styling
 │   │   └── maria.js        # WebSocket client + UI logic
 │   └── api/
 │       ├── __init__.py
-│       ├── chat.py         # Endpoint czatu z Marią
-│       ├── status.py       # Endpoint statusu homeostasis
-│       └── control.py      # Start/stop/learn kontrola
-├── run_ui.py               # 🎯 JEDEN PLIK DO URUCHOMIENIA
+│       ├── chat.py         # Maria chat endpoint
+│       ├── status.py       # Homeostasis status endpoint
+│       └── control.py      # Start/stop/learn control
+├── run_ui.py               # 🎯 SINGLE FILE TO RUN
 └── ...
 ```
 
@@ -85,105 +85,105 @@ project/
 
 ### REST API
 
-| Endpoint | Metoda | Opis |
+| Endpoint | Method | Description |
 |----------|--------|------|
-| `/` | GET | Główna strona UI |
-| `/api/status` | GET | Status homeostasis, RAM, CPU |
-| `/api/chat` | POST | Wyślij wiadomość do Marii |
-| `/api/learn/start` | POST | Uruchom naukę |
-| `/api/learn/stop` | POST | Zatrzymaj naukę |
-| `/api/stats` | GET | Statystyki (węzły, epizody) |
+| `/` | GET | Main UI page |
+| `/api/status` | GET | Homeostasis status, RAM, CPU |
+| `/api/chat` | POST | Send a message to Maria |
+| `/api/learn/start` | POST | Start learning |
+| `/api/learn/stop` | POST | Stop learning |
+| `/api/stats` | GET | Statistics (nodes, episodes) |
 
 ### WebSocket Events
 
-| Event | Kierunek | Opis |
+| Event | Direction | Description |
 |-------|----------|------|
-| `connect` | Client→Server | Połączenie |
-| `chat_message` | Client→Server | Wiadomość od użytkownika |
-| `chat_response` | Server→Client | Odpowiedź Marii |
-| `status_update` | Server→Client | Aktualizacja statusu (co 1s) |
-| `alert` | Server→Client | Powiadomienie od Marii |
-| `learning_progress` | Server→Client | Postęp nauki |
+| `connect` | Client→Server | Connection |
+| `chat_message` | Client→Server | Message from the user |
+| `chat_response` | Server→Client | Maria's response |
+| `status_update` | Server→Client | Status update (every 1s) |
+| `alert` | Server→Client | Notification from Maria |
+| `learning_progress` | Server→Client | Learning progress |
 
-## Proaktywność Marii
+## Maria's Proactivity
 
-Maria może sama wysłać wiadomość gdy:
+Maria can send a message on her own when:
 
-1. **Alerty homeostasis** - "Mój RAM przekroczył 80%"
-2. **Zakończenie nauki** - "Skończyłam uczyć się z 3 plików"
-3. **Zmiana trybu** - "Przechodzę w tryb SLEEP"
-4. **Błędy** - "Wystąpił problem z Ollama"
-5. **Ciekawe odkrycia** - "Nauczyłam się czegoś nowego o X"
+1. **Homeostasis alerts** - "My RAM exceeded 80%"
+2. **Learning completed** - "I finished learning from 3 files"
+3. **Mode change** - "I'm switching to SLEEP mode"
+4. **Errors** - "A problem occurred with Ollama"
+5. **Interesting discoveries** - "I learned something new about X"
 
-## Integracja z istniejącym kodem
+## Integration with Existing Code
 
 ```python
-# run_ui.py - szkic
+# run_ui.py - sketch
 from maria_ui.app import create_app
 from agent_core.homeostasis.core import HomeostasisCore
 from maria_core.memory_engine.brain_memory_integration import BrainMemoryLoop
 
 def main():
-    # 1. Inicjalizacja M.A.R.I.A. (jak w main.py)
+    # 1. Initialize M.A.R.I.A. (as in main.py)
     # 2. Start homeostasis loop
     # 3. Start Flask server
-    # 4. Otwórz przeglądarkę automatycznie
+    # 4. Open the browser automatically
     pass
 
 if __name__ == "__main__":
     main()
 ```
 
-## Fazy implementacji
+## Implementation Phases
 
-### Faza 1: Podstawowy UI
-- [ ] Struktura `maria_ui/`
-- [ ] Flask app z jedną stroną
-- [ ] Endpoint `/api/status`
-- [ ] Wyświetlanie statusu homeostasis
+### Phase 1: Basic UI
+- [ ] `maria_ui/` structure
+- [ ] Flask app with a single page
+- [ ] `/api/status` endpoint
+- [ ] Display homeostasis status
 
-### Faza 2: Czat
+### Phase 2: Chat
 - [ ] WebSocket connection
-- [ ] Endpoint czatu
-- [ ] Integracja z `brain_memory_integration`
-- [ ] Historia rozmowy
+- [ ] Chat endpoint
+- [ ] Integration with `brain_memory_integration`
+- [ ] Conversation history
 
-### Faza 3: Kontrola
-- [ ] Przyciski start/stop
-- [ ] Uruchamianie `/learn`
-- [ ] Panel statystyk
+### Phase 3: Control
+- [ ] Start/stop buttons
+- [ ] Running `/learn`
+- [ ] Statistics panel
 
-### Faza 4: Proaktywność
-- [ ] Event listener na homeostasis
-- [ ] Push notifications przez WebSocket
-- [ ] Alerty w UI
+### Phase 4: Proactivity
+- [ ] Event listener on homeostasis
+- [ ] Push notifications over WebSocket
+- [ ] Alerts in the UI
 
-### Faza 5: Polish
-- [ ] Responsywny design (mobile)
+### Phase 5: Polish
+- [ ] Responsive design (mobile)
 - [ ] Dark mode
 - [ ] Auto-open browser
-- [ ] Ikona w tray (opcjonalnie)
+- [ ] Tray icon (optional)
 
-## Zależności (do dodania)
+## Dependencies (to add)
 
 ```
 flask>=2.0
 flask-socketio>=5.0
 python-socketio>=5.0
-eventlet>=0.30  # lub gevent
+eventlet>=0.30  # or gevent
 ```
 
-## Uruchomienie (docelowe)
+## Running (target)
 
 ```bash
-# Jeden plik - uruchamia wszystko
+# Single file - launches everything
 python run_ui.py
 
-# Otwiera się przeglądarka na http://localhost:5000
-# Maria działa w tle
-# Możesz rozmawiać przez UI
+# The browser opens at http://localhost:5000
+# Maria runs in the background
+# You can chat through the UI
 ```
 
 ---
 
-*Dokument roboczy - będzie rozwijany podczas implementacji*
+*Working document - will be expanded during implementation*

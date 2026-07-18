@@ -29,22 +29,21 @@ single mini PC since **2026-02-22**.
 
 | Metric | Value | How to verify |
 |---|---|---|
-| Application Python | **~109,000 lines** | `find . -name '*.py' -not -path '*/venv/*' -not -path '*/__pycache__/*' -not -path '*/tests/*' \| xargs wc -l` |
-| `agent_core/` application Python | ~95,000 lines | same, scoped to `agent_core/` |
-| Test Python | **~77,000 lines** | `find agent_core/tests -name '*.py' \| xargs wc -l` |
-| Test files | **184** | `find agent_core/tests -name 'test_*.py' \| wc -l` |
-| Automated tests passing | **5,799** | clean checkout, commit `59b1ce2`; latest CI run on `main` green |
+| Application Python | **~127,000 lines** | `find . -name '*.py' -not -path '*/venv/*' -not -path '*/__pycache__/*' -not -path '*/tests/*' \| xargs wc -l` |
+| `agent_core/` application Python | ~109,000 lines | same, scoped to `agent_core/` |
+| Test Python | **~95,000 lines** | `find agent_core/tests -name '*.py' \| xargs wc -l` |
+| Test files | **236** | `find agent_core/tests -name 'test_*.py' \| wc -l` |
+| Automated tests | **7,145 collected** | `pytest agent_core/tests/ --collect-only -q`; latest CI run on `main` is green (all pass under `-x`) |
 | Continuous integration | **green on Python 3.10, 3.11, 3.12** | [`.github/workflows/test.yml`](../../.github/workflows/test.yml) |
 
 The CI workflow runs `pytest agent_core/tests/ -q --tb=short -x --timeout=60`
 across a three-version Python matrix. The `-x` flag stops on the first failure,
 so a green run means the **entire** collected suite passed on every supported
-Python version. The latest run on `main` (for commit `59b1ce2`) is green on all
-three versions. All tests are mocked — no network, no live LLM calls — so the
+Python version. The latest run on `main` is green on all three versions. All tests are mocked — no network, no live LLM calls — so the
 suite is reproducible by anyone who clones the repository.
 
-The README badge reads `tests-5700+` as a conservative public figure; the exact
-count reported from the last clean checkout was 5,799.
+The README badge reads `tests-7100+` as a conservative public figure; the exact
+number collected on the current public `main` is 7,145.
 
 ---
 
@@ -256,6 +255,6 @@ Three of these are summarised in the public
 
 ---
 
-*Numbers in §2 were measured on the public `main` branch (commit `59b1ce2`).
+*Numbers in §2 were measured on the public `main` branch.
 Hardware and runtime figures in §4–§5, §9 come from the production host and are
 labelled as such.*
