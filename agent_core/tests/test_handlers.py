@@ -223,6 +223,76 @@ class TestExpertResponseGuard:
         reason = _classify_expert_response(body)
         assert reason is not None and "repeated_char" in reason
 
+    def test_separator_runs_are_formatting_not_garbage(self):
+        """A rule of "=" between sections must not read as a repeated-char run.
+
+        Measured over the live corpus 2026-07-26: the ONLY two files this rule
+        rejected were a genuine educational document using "=" section rules and
+        an RSS article padded with spaces. Both legitimate; after exempting
+        whitespace and separator punctuation the corpus rejects 0 of 1178.
+        """
+        body = (
+            "Rozdzial pierwszy.\n" + ("=" * 64) + "\n"
+            + "Tresc merytoryczna o fizyce kwantowej i jej zastosowaniach. " * 4
+        )
+        assert _classify_expert_response(body) is None
+
+        padded = (
+            "Artykul o robotach." + (" " * 80)
+            + "Dalsza tresc o gospodarce i automatyzacji pracy w dekadzie. " * 4
+        )
+        assert _classify_expert_response(padded) is None
+
+    def test_repeated_letter_run_still_rejected_after_separator_exemption(self):
+        """The exemption must not blunt the rule it lives in."""
+        reason = _classify_expert_response("Wstep. " + ("y" * 200) + " koniec.")
+        assert reason is not None and "repeated_char" in reason
+
+    def test_repeated_phrase_rejected(self):
+        """One sentence twenty times clears every OTHER check.
+
+        It is long, character-varied and not a known placeholder, so the four
+        rules above all pass it -- and this is the shape that actually grew
+        input/expert_fizyka.txt to 103 KB / 226 appends. Unique-word ratio here
+        is 0.082.
+        """
+        body = "Fizyka to nauka o..." * 20
+        reason = _classify_expert_response(body)
+        assert reason is not None and "repeated_phrase" in reason
+
+    def test_most_repetitive_real_corpus_shape_still_passes(self):
+        """Guard the threshold against the most repetitive GENUINE material.
+
+        Calibrated on the live corpus 2026-07-26: across 1168 files with >=30
+        words the lowest real unique-word ratio was 0.353 (a bare source list),
+        against 0.082 for the degenerate payload. This pins that a legitimately
+        repetitive text -- an enumeration, a source list -- is NOT rejected, so
+        a future tightening of MIN_UNIQUE_WORD_RATIO has to face this case.
+        """
+        # Ratio ~0.35: heavy repetition of structural words, real content.
+        body = " ".join(
+            "Zrodlo numer %d: publikacja naukowa dotyczaca zagadnienia %d." % (i, i)
+            for i in range(12)
+        )
+        words = body.split()
+        ratio = len({w.lower() for w in words}) / len(words)
+        assert ratio < 0.60, "fixture must actually be repetitive (got %.3f)" % ratio
+        assert _classify_expert_response(body) is None
+
+    def test_short_repetitive_body_is_not_judged_on_ratio(self):
+        """Below MIN_WORDS_FOR_RATIO the ratio is noise, so it must not decide.
+
+        A 10-word answer has a low unique-word ratio by arithmetic alone; such
+        a body is already caught (or not) by the length rule, and letting the
+        ratio fire here would reject short legitimate answers.
+        """
+        from agent_core.routing.handlers import MIN_WORDS_FOR_RATIO
+
+        body = "tak tak tak " * 5  # 15 words, ratio 0.067
+        assert len(body.split()) < MIN_WORDS_FOR_RATIO
+        reason = _classify_expert_response(body)
+        assert reason is not None and "repeated_phrase" not in reason
+
     def test_low_variety_rejected(self):
         body = "aaaaaaabbbbbbb " * 20  # 2 unique chars + space
         reason = _classify_expert_response(body)
@@ -233,6 +303,73 @@ class TestExpertResponseGuard:
     def test_save_raises_valueerror_on_garbage(self, tmp_path):
         with pytest.raises(ValueError, match="garbage_response"):
             save_expert_response("test", "test question", "Expert answer")
+
+    def test_save_appends_it_does_not_overwrite(self, tmp_path, monkeypatch):
+        """Two answers for one topic must BOTH survive.
+
+        Pinning the 2026-07-26 decision. Overwrite-latest-wins is not a
+        cosmetic alternative: it is how a test run replaced five real corpus
+        files with placeholder payloads, and the corpus holds two genuine
+        multi-block files where the SECOND ask produced far better material
+        (~2.4 KB from the bare gap prompt, then ~11 KB from the educational
+        one) -- latest-wins would have gambled on arrival order.
+
+        Nothing pinned this before: flipping "a" back to "w" left the whole
+        suite green, which is exactly how the two copies of this save drifted
+        apart in the first place.
+        """
+        from agent_core.routing import handlers
+
+        monkeypatch.setattr(handlers, "EXPERT_INPUT_DIR", tmp_path)
+        first = (
+            "Konflikt to sytuacja sporna miedzy stronami o rozbieznych celach "
+            "lub wartosciach. Wyroznia sie konflikty interesow, wartosci oraz "
+            "relacji miedzy uczestnikami. Eskalacja przebiega etapami, od "
+            "napiecia po otwarta konfrontacje, a mediacja pozostaje jedna "
+            "z podstawowych metod rozwiazywania sporow."
+        )
+        second = (
+            "Teoria konfliktu opisuje takze fazy deeskalacji oraz role "
+            "mediatora jako bezstronnej strony trzeciej. Kluczowe pojecia to "
+            "BATNA, ustepstwo wzajemne i rozroznienie deklarowanych stanowisk "
+            "od rzeczywistych interesow lezacych pod nimi, co otwiera pole "
+            "do porozumienia."
+        )
+        save_expert_response("konflikty", "pytanie 1", first)
+        save_expert_response("konflikty", "pytanie 2", second)
+
+        written = (tmp_path / "expert_konflikty.txt").read_text(encoding="utf-8")
+        assert written.count("# Zrodlo:") == 2
+        assert "BATNA" in written, "second answer must survive"
+        assert "Eskalacja" in written, "FIRST answer must survive too"
+
+    def test_save_skips_once_the_file_is_already_substantial(
+        self, tmp_path, monkeypatch
+    ):
+        """The brake that keeps append bounded -- and it is NOT an error.
+
+        input/expert_fizyka.txt took 44 byte-identical appends past 100 KB
+        because nothing stopped a re-ask. Skipping must not raise: the material
+        IS present, and a caller that gates its bulletin resolution on "did the
+        save raise" should still see success.
+        """
+        from agent_core.routing import handlers
+
+        monkeypatch.setattr(handlers, "EXPERT_INPUT_DIR", tmp_path)
+        target = tmp_path / "expert_fizyka.txt"
+        target.write_text("x" * (handlers.MAX_EXPERT_FILE_BYTES + 1), encoding="utf-8")
+        before = target.stat().st_size
+
+        body = (
+            "Fizyka to nauka o materii i energii oraz o ich wzajemnych "
+            "oddzialywaniach. Obejmuje mechanike klasyczna, termodynamike, "
+            "elektromagnetyzm oraz teorie kwantowa, laczac obserwacje "
+            "eksperymentalna z modelem matematycznym i wymogiem "
+            "falsyfikowalnosci przewidywan."
+        )
+        save_expert_response("fizyka", "pytanie", body)  # must NOT raise
+
+        assert target.stat().st_size == before, "nothing may be appended"
 
     def test_save_raises_on_repeated_char(self, tmp_path):
         with pytest.raises(ValueError, match="garbage_response"):
@@ -884,8 +1021,16 @@ class TestFetchHandler:
             )
             r = h(_plan(ActionType.FETCH, goal_id="goal-meta"))
 
-        # The outcome still reports the error for telemetry...
-        assert r["success"] is False
+        # A session that came back carrying material is a SUCCESS, even though a
+        # sibling topic errored (2026-07-26). This assertion used to read
+        # `success is False` -- the comment above it said "still reports the error
+        # for telemetry", conflating "surfaces the error count" with "is a
+        # failure". `errors == 1` is what actually pins the telemetry; the verdict
+        # is a separate question, and pinning it False codified the defect: an
+        # upstream pl.wikipedia 429 on one of ~6 topics audited a productive fetch
+        # as a hard failure, which fed the action_failure_storm rule and K12's
+        # phantom "fetch strategy has a problem" bulletin.
+        assert r["success"] is True
         assert r["errors"] == 1
         # ...but the obligation to learn the file we DID write was bound anyway.
         assert r["learn_handoff_files"] == ["web_rss_orphan.txt"]
@@ -902,6 +1047,13 @@ class TestFetchHandler:
     @patch("agent_core.environment.environment_model.is_learning_window",
            return_value=True)
     def test_fetch_with_errors(self, _window):
+        """Material arrived -> success; the error count rides along, not the verdict.
+
+        Pre-2026-07-26 this asserted `success is False`, which is how the defect
+        survived: partial upstream failures on a multi-topic batch were treated as
+        a verdict on the whole action. errors stays visible so a caller that cares
+        can still see the upstream trouble.
+        """
         analyzer = specced(KnowledgeAnalyzer)
         with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
             mock_fetch.return_value = {
@@ -909,8 +1061,37 @@ class TestFetchHandler:
             }
             h = make_fetch_handler(knowledge_analyzer=analyzer)
             r = h(_plan(ActionType.FETCH))
-            assert r["success"] is False
+            assert r["success"] is True
+            assert r["skipped"] is False
             assert r["errors"] == 2
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_fetch_zero_articles_with_errors_stays_failure(self, _window):
+        """The other half of the contract: tried, errored, brought nothing back."""
+        analyzer = specced(KnowledgeAnalyzer)
+        with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
+            mock_fetch.return_value = {
+                "articles_fetched": 0, "topics_searched": 3, "errors": 2,
+            }
+            h = make_fetch_handler(knowledge_analyzer=analyzer)
+            r = h(_plan(ActionType.FETCH))
+            assert r["success"] is False
+            assert r["skipped"] is False
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=True)
+    def test_fetch_dry_run_is_skipped_not_failure(self, _window):
+        """0 articles + 0 errors = dry corpus frontier -> idle rest, not failure."""
+        analyzer = specced(KnowledgeAnalyzer)
+        with patch("agent_core.web_source.run_fetch_session") as mock_fetch:
+            mock_fetch.return_value = {
+                "articles_fetched": 0, "topics_searched": 3, "errors": 0,
+            }
+            h = make_fetch_handler(knowledge_analyzer=analyzer)
+            r = h(_plan(ActionType.FETCH))
+            assert r["success"] is False
+            assert r["skipped"] is True
 
     @patch("agent_core.environment.environment_model.is_learning_window",
            return_value=True)
@@ -1867,3 +2048,41 @@ class TestProvenanceGate:
             {"exams_passed": 1}, store, analyzer, None,
         )
         store.update_progress.assert_called_once_with("gm", 1.0)
+
+
+class TestCappedFileIds:
+    """The handoff file list grew without a ceiling: 280 entries on 14.07,
+    651 on 27.07 -- about 30 a day, because dict.fromkeys() dedupes but never
+    drops. It cost 17 MB in goals.jsonl and, duplicated as `fetched_file_ids`,
+    50 KB in every decision frame.
+    """
+
+    def test_below_cap_unchanged(self):
+        from agent_core.routing.handlers import _capped_file_ids
+        assert _capped_file_ids(["a.txt", "b.txt"]) == ["a.txt", "b.txt"]
+
+    def test_dedup_preserves_order(self):
+        from agent_core.routing.handlers import _capped_file_ids
+        assert _capped_file_ids(["a", "b", "a", "c"]) == ["a", "b", "c"]
+
+    def test_keeps_newest_not_oldest(self):
+        """Measured on the live list: all 13 pending files sat at positions
+        630-650, and the first 260 entries held not a single one. Truncating
+        from the front drops finished work, not the queue."""
+        from agent_core.routing.handlers import (
+            _capped_file_ids, _MAX_HANDOFF_FILE_IDS,
+        )
+        names = [f"f{i}.txt" for i in range(_MAX_HANDOFF_FILE_IDS + 351)]
+        out = _capped_file_ids(names)
+        assert len(out) == _MAX_HANDOFF_FILE_IDS
+        assert out[-1] == names[-1], "newest entry must survive"
+        assert names[0] not in out, "oldest entry must be dropped"
+
+    def test_no_duplicate_key_written_on_create(self):
+        """`fetched_file_ids` was a byte-identical copy of `file_ids`; every
+        reader tries `file_ids` first, so we stop writing the second copy."""
+        import inspect
+        from agent_core.routing import handlers
+        src = inspect.getsource(handlers._register_fetch_handoff_goal)
+        assert 'metadata["fetched_file_ids"] =' not in src
+        assert '"fetched_file_ids": fetched_files' not in src

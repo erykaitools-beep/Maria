@@ -17,6 +17,7 @@ import requests
 from typing import Dict, Any, Optional, List, Callable
 
 from maria_core.sys.config import DEFAULT_NIM_MODEL
+from agent_core.llm.nim_health import get_nim_health
 
 # NIM output cap. 2048 chronically truncated nemotron-49b reasoning/planner
 # responses (finish_reason=length, ~4x/day) -> forced fallback to local Ollama
@@ -117,7 +118,16 @@ class NIMClient:
         force_json: bool = False,
     ) -> str:
         """
-        Raw API call to NIM (OpenAI-compatible format).
+        Raw API call to NIM, recording the outcome to the shared health tracker.
+
+        This is the single chokepoint every NIM caller shares -- including the
+        ones that build their own NIMClient and bypass LLMRouter entirely
+        (teacher_module's exam author/grader, cross_validator). Recording here
+        rather than in the router is what makes the health signal cover 100% of
+        NIM traffic instead of the ~78% the router sees (audit 2026-07-28).
+
+        One call == one outcome: internal retries (429 backoff, timeout retry)
+        are part of a single attempt and must not inflate the counts.
 
         Args:
             messages: Chat messages [{"role": "...", "content": "..."}]
@@ -131,6 +141,39 @@ class NIMClient:
         Raises:
             NIMAPIError: On API failure after retries
         """
+        health = get_nim_health()
+        try:
+            content = self._chat_impl(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                force_json=force_json,
+            )
+        except NIMAPIError as exc:
+            health.record_failure(str(exc))
+            raise
+        except Exception as exc:
+            health.record_failure(f"{type(exc).__name__}: {exc}")
+            raise
+
+        if content:
+            health.record_success()
+        else:
+            # HTTP 200 with no usable content (no choices, or content=None).
+            # The caller falls back to Ollama exactly as it would on an error,
+            # so counting it as success would overstate NIM's usefulness.
+            health.record_failure("empty response (HTTP 200, no content)")
+        return content
+
+    def _chat_impl(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        force_json: bool = False,
+    ) -> str:
+        """Transport for _chat: the actual request/retry loop. Do not call
+        directly -- go through _chat so the outcome is recorded."""
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -482,10 +525,23 @@ class NIMClient:
 
     def is_available(self) -> bool:
         """
-        Quick check if NIM API is reachable.
+        Quick check whether THIS client's model is reachable.
+
+        Not merely "does the catalogue answer". On 2026-07-27 dracarys reached
+        end-of-life: GET /models kept returning 200 with 101 entries while
+        every single generation came back 410 Gone. The old version only read
+        the status code, so it reported NIM healthy straight through a total
+        outage -- and self_model_facade repeated that lie into Maria's own
+        self-model all day.
+
+        Catalogue membership is necessary but NOT sufficient: listed models can
+        still 404 with no deployment behind them (moonshotai/kimi-k2.6 did,
+        same day). For an authoritative answer use health_check(), which
+        issues a real request.
 
         Returns:
-            True if API key is set and we can connect
+            True if the API key is set, the catalogue answers, and our model
+            is in it.
         """
         if not self.api_key:
             return False
@@ -493,7 +549,17 @@ class NIMClient:
             url = f"{self.base_url}/models"
             headers = {"Authorization": f"Bearer {self.api_key}"}
             response = requests.get(url, headers=headers, timeout=10)
-            return response.status_code == 200
+            if response.status_code != 200:
+                return False
+
+            entries = (response.json() or {}).get("data") or []
+            model_ids = {e.get("id") for e in entries if isinstance(e, dict)}
+            if not model_ids:
+                # Unreadable catalogue is ignorance, not evidence of absence --
+                # do not turn a parsing hiccup into a false "NIM is down".
+                logger.debug("[NIM] /models returned no parseable ids")
+                return True
+            return self.model in model_ids
         except Exception:
             return False
 

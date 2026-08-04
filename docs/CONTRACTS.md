@@ -487,6 +487,24 @@ Goal(
 )
 ```
 
+**progress (implemented 2026-07-22, `routing.handlers.update_mission_progress`)**
+— independently exam-verified files / total files in `knowledge_index.jsonl`,
+written after every LEARN/EXAM cycle the mission runs. Deliberately NOT the
+self-graded `completed` status, which reads 0.963 where verification reads
+0.606: the mission is held to the same bar as a learning goal ("read" is not
+"known", audit 2026-06-01).
+
+The clause sat unimplemented from the start: `update_learning_goal` returns
+early for anything that is not LEARNING, so nothing ever wrote to the mission
+and it carried `progress=0.0` plus a frozen `updated_at` (29 days) through 143
+days of work. Consumers read that gap as stagnation.
+
+The value FALLS when the supply pump fetches new material — the mission has
+more to do than it had a minute ago. That is intended for a mission that never
+finishes, and safe: META is exempt from auto-ACHIEVE (`_NEVER_AUTO_ACHIEVE`),
+from the LEARNING-only stall and wedged reapers, and from the non-productive
+loop detector.
+
 #### LEARNING (generated from Teacher P1-P6)
 
 | Teacher Priority | Goal description | Priority | Metadata |
@@ -1189,7 +1207,7 @@ Implementation milestones (test counts below are historical — the cumulative s
 *Layer 4 (K7 Autonomy Policy): Implemented (~1239 tests)*
 *Layer 5 (K8 Deliberation): Implemented (~1288 tests)*
 
-*Current test suite: 7,145 collected (`pytest agent_core/tests/ --collect-only -q`), CI green on `main`.*
+*Current test suite: 7,267 collected (`pytest agent_core/tests/ --collect-only -q`), CI green on `main`.*
 
 ---
 
@@ -1405,6 +1423,19 @@ code and this document). The invariants that make OBSERVE sufficient:
 
 (Historically the level was set manually to BOUNDED on 2026-05-14 during a 24h test and was not
 touched for 24 days -- dormant, because there was no autonomous effector trigger.)
+
+**ToolBudgetManager CUT (2026-07-19, phantom hunt r2).** The per-tool budget layer
+(rate limits, consecutive-failure lock with backoff, duplicate-request dedup; born `076a39e`)
+was constructed on every boot but never handed to any exec path in its lifetime -- lifetime
+runtime record: 13 effector invocations ever, zero K7 effector rate-limit hits, and the one
+real repeated-failure incident (2026-06-24 gateway errors) was fully handled by live layers
+(coordinator 3-attempt retry + INCIDENT bulletin, K7 consecutive-failure breaker,
+per-invocation human approval). **Resurrection point:** per-tool budgeting is a
+*precondition to BUILD* for a future autonomous-BOUNDED rung (alongside raising authority,
+above). Recover the class + tests from git history (`git show 076a39e`); the wire point is
+`EffectorCoordinator.execute_task` (check before the attempt loop, record per attempt), and
+the regression test must go through a REAL coordinator + the ctx-held instance, not a fresh
+in-vitro object.
 
 ---
 

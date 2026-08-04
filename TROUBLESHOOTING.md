@@ -83,12 +83,12 @@ hash, so re-dropping identical text won't trigger re-learning.
 
 ### Semantic (meaning-based) search returns nothing
 
-Meaning-based search needs the `nomic-embed-text` model. `install.sh` pulls it
+Meaning-based search needs the `bge-m3` model. `install.sh` pulls it
 automatically — but if you set Ollama up by hand, confirm it's present with
-`ollama list | grep nomic-embed-text`. If missing, add it and restart:
+`ollama list | grep bge-m3`. If missing, add it and restart:
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```
 
 Semantic results appear as Maria re-indexes existing knowledge.

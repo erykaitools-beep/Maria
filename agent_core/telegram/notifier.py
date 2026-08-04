@@ -41,6 +41,8 @@ ALERT_COOLDOWNS: Dict[str, float] = {
     "stuck_planner": 7200,        # 2h - stuck loop detection
     "learning_progress": 1800,    # 30min - CDL progress updates
     "learning_complete": 0,       # always send - operator requested this
+    "goal_complete": 0,           # always send - discrete goal closure (rare, event-driven)
+    "feed_rot": 3600,             # 1h - deduped at source (goal.metadata["feed_rot_alerted"])
     "startup": 0,                 # always send
     # Effector approval/result/incident: no time cooldown (each is a distinct
     # operator decision), but they DO honor quiet hours -- the request survives
@@ -84,6 +86,11 @@ class TelegramNotifier:
         # window. Injected during wiring; None means quiet hours are not enforced
         # (fail-open -- an un-wired notifier still sends).
         self._quiet_hours_check: Optional[Callable[[], bool]] = None
+        # Health-drop edge state: True once an ongoing (non-CPU) drop has been
+        # announced, so it is announced ONCE per episode instead of re-firing
+        # every cooldown while the same condition sits stuck. The tick calls
+        # reset_health_drop_edge() on recovery (health >= 0.7) to re-arm it.
+        self._health_drop_active = False
 
     @property
     def configured(self) -> bool:
@@ -135,6 +142,33 @@ class TelegramNotifier:
 
     def _mark_sent(self, category: str) -> None:
         self._last_sent[category] = time.time()
+
+    def notify(self, category: str, text: str,
+               parse_mode: Optional[str] = "Markdown") -> bool:
+        """Generic categorized alert: gate on _can_send(category), then send.
+
+        The typed notify_* methods are the preferred API; this facade serves
+        call-sites that already hold their own formatted text and only need a
+        category's quiet-hours + cooldown gating (learning_complete /
+        learning_progress / goal_complete / feed_rot). Routing through
+        _can_send -- NOT send_raw -- is the whole point: send_raw bypasses quiet
+        hours by design (it is the /restart reply channel), so a naive facade
+        would ping the operator at night. Categories absent from
+        QUIET_HOURS_CRITICAL (all four above) are dropped overnight, not queued.
+
+        Historical: five call-sites (handlers close/progress, planner harvest +
+        feed_rot) called this method before it existed. The AttributeError was
+        swallowed by their `except`, so every one of those alerts was silently
+        dead. Restored 2026-07-17.
+        """
+        if not text:
+            return False
+        if not self._can_send(category):
+            return False
+        ok = self._bot.send_message(text, parse_mode=parse_mode)
+        if ok:
+            self._mark_sent(category)
+        return ok
 
     # -- Public notification methods (called by subsystems) --
 
@@ -291,7 +325,27 @@ class TelegramNotifier:
     def notify_health_drop(
         self, health_score: float, mode: str, alerts: List[str]
     ) -> bool:
-        """Send health drop alert."""
+        """Send health drop alert -- once per episode, and never for self-load.
+
+        Two guards keep a chronically-loaded mini-PC from spamming the operator
+        (a 07-18 audit found 21 of a day's gated alerts were this -- all CPU):
+
+        1. CPU-only drops are self-inflicted. Maria's own local inference
+           (ollama / LLaVA / exams) pegs this CPU-only box, dragging health below
+           0.7 with nothing for the operator to act on. Mirror the identical
+           filter in notify_mode_change and skip. A drop carrying ANY non-CPU
+           alert (RAM, temp, disk, coherence) still goes out.
+        2. Edge-trigger: announce a (non-CPU) drop ONCE on entry, then stay quiet
+           while it persists. reset_health_drop_edge() re-arms it when the tick
+           sees health recover to >= 0.7, so the next genuine drop alarms again
+           instead of re-firing every cooldown on a stuck condition.
+        """
+        # 1. Self-inflicted CPU load -> nothing to act on (see notify_mode_change).
+        if alerts and all("CPU" in a for a in alerts):
+            return False
+        # 2. Already announced this ongoing drop -- wait for recovery to re-arm.
+        if self._health_drop_active:
+            return False
         if not self._can_send("health_drop"):
             return False
 
@@ -308,7 +362,17 @@ class TelegramNotifier:
         ok = self._bot.send_message(text)
         if ok:
             self._mark_sent("health_drop")
+            self._health_drop_active = True
         return ok
+
+    def reset_health_drop_edge(self) -> None:
+        """Re-arm the health-drop edge once the system recovers (health >= 0.7).
+
+        Called by the homeostasis tick when health climbs back above the alert
+        threshold. Without it, edge-triggering would announce the first drop and
+        then never again. Idempotent -- safe to call every recovered tick.
+        """
+        self._health_drop_active = False
 
     def notify_mode_change(
         self,

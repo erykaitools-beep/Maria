@@ -42,6 +42,23 @@ from .model_registry import (
 
 logger = logging.getLogger(__name__)
 
+# How long a heavy_lease() caller waits for the mutex before giving up.
+#
+# INVARIANT: this MUST be >= the longest possible HOLD of _heavy_lock, or the
+# lease degrades into its fail-open branch and lets a second heavy local model
+# onto this GPU-less CPU -- precisely the 447s contention storm the mutex exists
+# to prevent. The old default of 120s violated that invariant on day one: the
+# synthesis faithfulness judge holds the lease for its own 540s budget PLUS an
+# in-lease warm-up of up to 120s, so every competitor timed out and proceeded
+# UNGUARDED. The failure was invisible: fail-open only logs a WARNING.
+#
+# Waiting is safe here -- all five call sites (learning fallback, exam answer,
+# exam grader, synthesis answer, synthesis faithfulness) run on transient
+# threads (teacher, planner, telegram poll), never on the tick thread, so a
+# long wait cannot starve the tick or trip TickWatchdog.
+_LONGEST_HEAVY_HOLD_S = 540.0 + 120.0   # faithfulness judge budget + in-lease warm-up
+HEAVY_LEASE_ACQUIRE_S = _LONGEST_HEAVY_HOLD_S + 60.0
+
 
 def _mutex_enforced() -> bool:
     """Whether heavy_lease() actively serializes (env flag, default OFF).
@@ -94,6 +111,17 @@ class ModelScheduler:
         self._loaded: Dict[ModelRole, LoadedModel] = {}
         self._lock = threading.Lock()
         self._heavy_lock = threading.Lock()
+        # Thread that currently holds _heavy_lock, or None.
+        #
+        # threading.Lock has NO owner: release() from a thread that never
+        # acquired it SUCCEEDS. release() and force_unload() released the heavy
+        # mutex unconditionally for HEAVY roles, so the tick thread's idle
+        # sweep, or any router finally-block, could free a lock held by the
+        # learning/exam thread mid-inference. The invariant "at most one heavy
+        # local model at a time" therefore never actually held -- and because
+        # nobody ever waited, the fail-open warning never fired either. Observed
+        # 2026-07-26: three runners at once, 388% + 233% + 99% CPU, 15.3 GB RSS.
+        self._heavy_owner: Optional[int] = None
         # Per-thread reentrancy flag for heavy_lease(): _heavy_lock is a plain
         # (non-reentrant) Lock, so a lease nested inside another lease on the
         # SAME thread must skip re-acquiring instead of self-deadlocking.
@@ -184,13 +212,14 @@ class ModelScheduler:
                 return self._try_fallback(
                     spec, start, "Heavy mutex timeout"
                 )
+            self._claim_heavy()
             try:
                 result = self._do_load(spec, start)
             finally:
                 # Release mutex only if load failed
                 # On success, mutex stays held until release() is called
                 if not result.success:
-                    self._heavy_lock.release()
+                    self._release_heavy_if_owner("ensure_ready")
             return result
         else:
             return self._do_load(spec, start)
@@ -208,13 +237,38 @@ class ModelScheduler:
 
         spec = get_model(role)
         if spec and spec.concurrency_class == ConcurrencyClass.HEAVY:
-            try:
-                self._heavy_lock.release()
-            except RuntimeError:
-                pass  # Already released
+            self._release_heavy_if_owner("release")
+
+    def _claim_heavy(self) -> None:
+        """Record this thread as the heavy-mutex owner. Call right AFTER acquire."""
+        self._heavy_owner = threading.get_ident()
+
+    def _release_heavy_if_owner(self, who: str) -> bool:
+        """Release the heavy mutex only if THIS thread holds it.
+
+        Returns True if released. A foreign-thread attempt is refused and logged
+        instead of silently stealing the lock from an in-flight inference.
+        """
+        me = threading.get_ident()
+        if self._heavy_owner != me:
+            if self._heavy_owner is not None:
+                logger.warning(
+                    "[ModelScheduler] %s tried to release the heavy mutex held "
+                    "by another thread (owner=%s, caller=%s) -- refused",
+                    who, self._heavy_owner, me,
+                )
+            return False
+        # Clear ownership BEFORE unlocking: once the lock is free another thread
+        # may claim it immediately, and clearing afterwards would erase its mark.
+        self._heavy_owner = None
+        try:
+            self._heavy_lock.release()
+        except RuntimeError:
+            pass  # already released
+        return True
 
     @contextmanager
-    def heavy_lease(self, label: str = "", timeout_s: float = 120.0):
+    def heavy_lease(self, label: str = "", timeout_s: float = HEAVY_LEASE_ACQUIRE_S):
         """Serialize a heavy LOCAL inference that calls Ollama OUTSIDE ask_as_role().
 
         ensure_ready()/ask_as_role() hold _heavy_lock across inference so two heavy
@@ -260,6 +314,7 @@ class ModelScheduler:
 
         waited = time.time() - t0
         self._lease_local.held = True
+        self._claim_heavy()
         if waited > 0.5:
             # The OBSERVED signal: this heavy local waited for another to finish
             # instead of thrashing the CPU -- proof the mutex prevented an overlap.
@@ -272,10 +327,7 @@ class ModelScheduler:
             yield
         finally:
             self._lease_local.held = False
-            try:
-                self._heavy_lock.release()
-            except RuntimeError:
-                pass  # already released elsewhere -- never crash the caller
+            self._release_heavy_if_owner("heavy_lease")
 
     def force_unload(self, role: ModelRole) -> bool:
         """
@@ -297,13 +349,12 @@ class ModelScheduler:
         if success:
             logger.info(f"[ModelScheduler] Unloaded {role.value} ({loaded.ollama_tag})")
 
-        # Release heavy mutex if needed
+        # Release heavy mutex if needed. force_unload() is called from the TICK
+        # thread's idle sweep, so this is the main place the lock used to be
+        # stolen from an in-flight learning/exam inference.
         spec = get_model(role)
         if spec and spec.concurrency_class == ConcurrencyClass.HEAVY:
-            try:
-                self._heavy_lock.release()
-            except RuntimeError:
-                pass
+            self._release_heavy_if_owner("force_unload")
 
         return success
 

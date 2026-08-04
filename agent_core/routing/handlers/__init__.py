@@ -92,6 +92,39 @@ def _path_attr(obj, attr: str) -> Optional[Path]:
     return None
 
 
+_MAX_HANDOFF_FILE_IDS = 300  # najnowsze N nazw plikow trzymanych w metadata celu handoffu
+
+
+def _capped_file_ids(names: List[str]) -> List[str]:
+    """Dedup zachowujacy kolejnosc + ucinanie do najnowszych N.
+
+    Lista rosla BEZ GRANICY: 280 pozycji 14.07 -> 651 dzis, okolo 30 dziennie,
+    bo `dict.fromkeys(existing + fetched)` odsiewa powtorki, ale nigdy nic nie
+    usuwa. Kosztowalo to 17 MB w `goals.jsonl` i -- razem z duplikatem
+    `fetched_file_ids` -- 50 KB w KAZDEJ ramce decyzyjnej, az tap trafil w swoj
+    budzet 200 MB i zamilkl.
+
+    Ucinamy od POCZATKU, bo tam jest robota juz zrobiona. Zmierzone na zywej
+    liscie (651 pozycji, statusy z knowledge_index): 582 `completed`, a
+    wszystkie 13 plikow oczekujacych siedzialo na pozycjach 630-650. Pierwsze
+    260 pozycji nie mialo ANI JEDNEGO oczekujacego. Przy N=300 zostaje okolo
+    10 dni historii -- wszystkie oczekujace i wiekszosc `exam_failed`.
+
+    Nazwy nie gina bezpowrotnie: pliki maja wlasny wpis w knowledge_index,
+    ktory jest zrodlem prawdy o tym, czego Maria sie nauczyla. Ta lista jest
+    tylko kolejka handoffu.
+    """
+    deduped = list(dict.fromkeys(names))
+    if len(deduped) <= _MAX_HANDOFF_FILE_IDS:
+        return deduped
+    dropped = len(deduped) - _MAX_HANDOFF_FILE_IDS
+    logger.info(
+        "fetch handoff: lista plikow przycieta %d -> %d (odrzucono %d najstarszych)",
+        len(deduped), _MAX_HANDOFF_FILE_IDS, dropped,
+    )
+    return deduped[-_MAX_HANDOFF_FILE_IDS:]
+
+
 def _register_fetch_handoff_goal(
     plan,
     result: Dict[str, Any],
@@ -141,11 +174,14 @@ def _register_fetch_handoff_goal(
         if active_handoffs:
             goal = active_handoffs[0]
             existing = list(goal.metadata.get("file_ids", []))
-            merged = list(dict.fromkeys(existing + fetched_files))
+            merged = _capped_file_ids(existing + fetched_files)
             if merged != existing:
                 now = _time.time()
                 goal.metadata["file_ids"] = merged
-                goal.metadata["fetched_file_ids"] = merged
+                # `fetched_file_ids` nie jest juz zapisywane: bylo bajt-w-bajt
+                # kopia `file_ids` (zmierzone 2026-07-27 na 606 pozycjach), a
+                # kazdy czytelnik i tak probuje najpierw `file_ids`. Odczyt
+                # starej nazwy zostaje dla celow zapisanych wczesniej.
                 goal.metadata["updated_by_fetch_at"] = now
                 goal.updated_at = now
                 goal.audit_trail.append(AuditEntry(
@@ -172,8 +208,7 @@ def _register_fetch_handoff_goal(
             created_by="system",
             metadata={
                 "source": "fetch_handoff",
-                "file_ids": fetched_files,
-                "fetched_file_ids": fetched_files,
+                "file_ids": _capped_file_ids(fetched_files),
                 "trigger_goal_id": getattr(plan, "goal_id", None),
                 "created_by_action": "fetch_backfill" if backfill else "fetch",
                 "backfill": backfill,
@@ -211,6 +246,30 @@ def incremental_index(semantic_search) -> None:
 MIN_EXPERT_RESPONSE_LEN = 200          # chars after strip
 MAX_REPEATED_CHAR_RUN = 49             # flag runs of 50+ same char
 MIN_CHAR_VARIETY = 5                   # unique chars in body
+# Repeated PHRASE, not repeated character. The four checks above catch
+# "yyyy...", "Expert answer" and "Legacy answer", but a body that repeats one
+# sentence twenty times clears every one of them: it is long, character-varied
+# and not a known placeholder. That is exactly the shape that grew
+# input/expert_fizyka.txt to 103 KB.
+# Threshold calibrated on the live corpus 2026-07-26, not guessed: over 1168
+# files with >=30 words the LOWEST real ratio is 0.353 (web_wiki_zrodla.txt, a
+# bare source list -- repetitive by nature), while the degenerate payload sits
+# at 0.082. 0.15 leaves 2.4x headroom under the most repetitive genuine file.
+MIN_UNIQUE_WORD_RATIO = 0.15
+MIN_WORDS_FOR_RATIO = 30               # below this the ratio is noise
+# Stop appending once a topic's file already carries a full answer. The write
+# APPENDS on purpose (2026-07-26 decision): overwriting is what let a test run
+# replace real corpus files, and the two genuine multi-block files in the corpus
+# show a re-ask producing BETTER material (~2.4 KB first answer, then ~11 KB
+# from the richer educational prompt) that overwrite-latest-wins would gamble on
+# ordering. Append never destroys; this is the brake that keeps it bounded.
+# 5000 matches ExpertBridge._expert_file_exists, which gates the ASK. This one
+# gates the WRITE -- needed because the legacy ask_encyclopedia fallback reaches
+# the save without going through the bridge at all.
+# Validated against the corpus: both real enrichments happened at 2.4/2.8 KB
+# (allowed), while expert_fizyka.txt passed 5 KB early and still took 44
+# byte-identical appends (would have been blocked).
+MAX_EXPERT_FILE_BYTES = 5000
 PLACEHOLDER_RESPONSES = {
     "",
     "expert answer",
@@ -229,19 +288,37 @@ def _classify_expert_response(response: str) -> Optional[str]:
         return f"placeholder: {body[:40]!r}"
     if len(body) < MIN_EXPERT_RESPONSE_LEN:
         return f"too_short: {len(body)} < {MIN_EXPERT_RESPONSE_LEN} chars"
-    if re.search(rf"(.)\1{{{MAX_REPEATED_CHAR_RUN},}}", body):
+    # Runs of whitespace or separator punctuation are FORMATTING, not garbage.
+    # Measured over the live corpus 2026-07-26: the only two files this rule
+    # rejected were a real educational document with "=" rules between sections
+    # and an RSS article padded with spaces -- both legitimate. A run of letters
+    # ("yyyy...") is still caught, which is the shape this rule exists for.
+    if re.search(rf"([^\s=\-_*.~#])\1{{{MAX_REPEATED_CHAR_RUN},}}", body):
         return f"repeated_char_run: >{MAX_REPEATED_CHAR_RUN} consecutive"
     if len(set(body.lower())) < MIN_CHAR_VARIETY:
         return f"low_variety: {len(set(body.lower()))} unique chars"
+    words = body.split()
+    if len(words) >= MIN_WORDS_FOR_RATIO:
+        ratio = len({w.lower() for w in words}) / len(words)
+        if ratio < MIN_UNIQUE_WORD_RATIO:
+            return f"repeated_phrase: {ratio:.3f} < {MIN_UNIQUE_WORD_RATIO} unique-word ratio"
     return None
 
 
 def save_expert_response(topic: str, question: str, response: str) -> None:
-    """Save expert response as learning material in input/.
+    """Save expert response as learning material in input/. THE only copy.
 
-    Rejects garbage responses (placeholder strings, repeated-char runs,
-    too-short bodies) with ValueError so callers can mark the save as
-    failed without polluting the learning corpus.
+    Appends -- a re-ask can produce genuinely better material (the corpus has
+    two such files: a ~2.4 KB first answer followed by ~11 KB from the richer
+    educational prompt), and overwrite-latest-wins would bet on which arrived
+    last. It is also what let a test run replace five real corpus files with
+    placeholder payloads.
+
+    Rejects garbage responses (placeholder strings, repeated-char runs, repeated
+    phrases, too-short bodies) with ValueError so callers can mark the save as
+    failed without polluting the learning corpus. Silently SKIPS (no exception)
+    when the topic's file already carries a full answer -- the material is
+    present, which is what the caller actually cares about.
     """
     reject_reason = _classify_expert_response(response)
     if reject_reason:
@@ -253,8 +330,19 @@ def save_expert_response(topic: str, question: str, response: str) -> None:
 
     slug = re.sub(r'[^a-z0-9]+', '_', topic.lower().strip())[:60].strip('_')
     filename = f"expert_{slug}.txt"
-    input_dir = _project_root() / "input"
-    filepath = input_dir / filename
+    filepath = EXPERT_INPUT_DIR / filename
+
+    # Bounded append. NOT an error: the topic has material, so a caller gating
+    # its bulletin resolution on "did the save raise" still sees success.
+    try:
+        if filepath.exists() and filepath.stat().st_size > MAX_EXPERT_FILE_BYTES:
+            logger.info(
+                f"[ASK_EXPERT] Skip save: {filename} already has "
+                f"{filepath.stat().st_size} bytes of content"
+            )
+            return
+    except OSError:
+        pass
 
     header = (
         f"# Zrodlo: ChatGPT (Codex CLI)\n"
@@ -274,6 +362,16 @@ def _project_root() -> Path:
     if path.parent.name == "handlers":
         return path.parents[3]
     return path.parents[2]
+
+
+# Where expert answers land as learning material. A module-level constant rather
+# than a value computed inside save_expert_response(): built from this file's own
+# location, it had NO injection point at all, so every test exercising the
+# ask_expert path appended real bytes to the live corpus. input/expert_fizyka.txt
+# reached 226 appends / 103 KB that way, ~40% of its blocks test payloads, while
+# 214 of the other 217 expert files have exactly one. Patchable here, redirected
+# for the whole suite in agent_core/tests/conftest.py.
+EXPERT_INPUT_DIR = _project_root() / "input"
 
 
 def _resolve_notifier(telegram_notifier):
@@ -598,6 +696,54 @@ def heldout_verified_completed_ids(knowledge_snapshot, *, verified_ids=None) -> 
     return _completed_intersect_verified(knowledge_snapshot, verified_ids)
 
 
+def update_mission_progress(goal, goal_store, knowledge_analyzer) -> bool:
+    """Give the always-on mission the progress number its contract promised.
+
+    CONTRACTS.md:484 specified progress=<computed from knowledge_coverage> for
+    goal-meta-learn; the clause was never implemented, so the mission carried a
+    frozen 0.0 through 143 days of work (485 planner cycles in the last week
+    alone). Worse than a cosmetic zero: nothing wrote to the goal AT ALL, so
+    updated_at froze too -- 29 days at the time of writing -- and every consumer
+    asking "when did this goal last move" was reading the gap, not the mission.
+
+    Coverage is the INDEPENDENTLY VERIFIED fraction: files an external examiner
+    graded as passed, the same bar a learning goal must clear to close. Not the
+    self-graded 'completed' flag, which reads 0.963 where verification reads
+    0.606 -- "read" is not "known" (audit 2026-06-01).
+
+    The number legitimately goes DOWN when the supply pump fetches new
+    material: the mission has more to do than it had a minute ago. That is the
+    honest shape of a mission that is never finished, and nothing downstream
+    reaps on it -- META is exempt from auto-ACHIEVE (_NEVER_AUTO_ACHIEVE), from
+    the LEARNING-only stall and wedged reapers, and from the non-productive
+    loop detector. Returns True when a value was written.
+    """
+    if knowledge_analyzer is None or goal_store is None:
+        return False
+    try:
+        snapshot = knowledge_analyzer.get_knowledge_snapshot()
+        total = int(snapshot.get("total_files") or 0)
+        if total <= 0:
+            return False
+        verified = len(independently_verified_completed_ids(snapshot))
+        coverage = round(min(1.0, verified / total), 4)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"Mission progress skipped: {exc}")
+        return False
+
+    goal_store.update_progress(goal.id, coverage)
+    # Flush now: the mission never crosses the achieved-save path below, so
+    # without this the record stays dirty-in-memory until some unrelated
+    # handler saves -- external readers (check scripts, warm recovery) see a
+    # stale 0.0 for the whole gap (26+ min observed on 2026-07-23 morning).
+    goal_store.save()
+    logger.info(
+        "[Mission] goal-meta-learn coverage %.3f (%d/%d zweryfikowanych)",
+        coverage, verified, total,
+    )
+    return True
+
+
 def update_learning_goal(
     plan, result: dict, goal_store, knowledge_analyzer, telegram_notifier,
 ) -> None:
@@ -615,6 +761,11 @@ def update_learning_goal(
     try:
         goal = goal_store.get(plan.goal_id)
         if not goal:
+            return
+        # The always-on mission owns no file list -- its scope is the whole
+        # index -- so it earns progress by coverage, not by scoped files.
+        if goal.type.value == "meta":
+            update_mission_progress(goal, goal_store, knowledge_analyzer)
             return
         # Learning goals + project sub-goals (USER children of a /project
         # parent): a sub-goal is learning-shaped (topic + deadline) and the
@@ -940,6 +1091,13 @@ def make_learn_handler(
             "chunks_learned": chunks,
             "strategies_executed": strategies_executed,
         }
+        # Which material this cycle actually consumed. Without it a decision
+        # record says a `learn` ran under a goal but not on what, so cycles
+        # spent under the always-on META mission cannot be compared against
+        # what a parallel LEARNING goal would have claimed.
+        touched = stats.get("files_touched")
+        if touched:
+            result["files_touched"] = touched
         if idle_reason:
             result["idle_reason"] = idle_reason
             result["filtered_out_count"] = stats.get("filtered_out_count", 0)
@@ -1321,7 +1479,16 @@ def make_fetch_handler(
                 # a win. 0 articles + no error = nothing NEW to fetch -> skipped (idle
                 # rest), so the saturation fetch pump stops being falsely reinforced
                 # AND fetch-confidence isn't tanked. Same idle!=failed contract.
-                "success": articles > 0 and errors == 0,
+                #
+                # 2026-07-26: success no longer requires errors==0 -- see the long
+                # note in action_executor._exec_fetch. THIS is the copy that runs in
+                # production: action_executor dispatches to the CapabilityRouter
+                # whenever one is wired (it always is -- "CapabilityRouter wired (16
+                # capabilities)" at boot), so _exec_fetch is the no-router fallback
+                # and fixing only that one would have changed nothing live. One
+                # sibling topic hitting an upstream 429 must not condemn a batch
+                # that came back carrying material.
+                "success": articles > 0,
                 "skipped": articles == 0 and errors == 0,
                 "articles_fetched": articles,
                 "fetched_files": result.get("fetched_files", []),

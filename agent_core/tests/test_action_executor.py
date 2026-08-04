@@ -3,6 +3,8 @@
 import logging
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent_core.autonomy.incident_memory import IncidentMemory
 from agent_core.planner.action_executor import ActionExecutor
 from agent_core.planner.planner_model import ActionType, create_plan
@@ -115,3 +117,90 @@ def test_fetch_zero_articles_with_errors_is_failure_not_skipped():
         result = executor._exec_fetch(create_plan("g1", "fetch", ActionType.FETCH))
     assert result["success"] is False
     assert result.get("skipped") is not True
+
+
+class TestExpertSaveGuardOnFallbackPath:
+    """The no-router fallback save must refuse garbage like the router copy.
+
+    It had NO content check at all. That is how "yyyy..." and "Expert answer"
+    reached input/ -- tests drive this copy directly, and it OVERWRITES
+    (mode "w"), so each run replaced a corpus file. Measured 2026-07-26: 5 files
+    with 29-40 exam attempts each carried nothing but such payloads, and 281 of
+    1726 exams (16.3%) ran against them, scoring 0.851 vs 0.794 for the rest --
+    metadata questions are easier than real material.
+
+    Dead in production only while a CapabilityRouter is wired. An unguarded
+    write path into the learning corpus is a landmine, not a non-issue.
+    """
+
+    def _executor(self, tmp_path, monkeypatch):
+        from agent_core.routing import handlers
+
+        monkeypatch.setattr(handlers, "EXPERT_INPUT_DIR", tmp_path)
+        return ActionExecutor()
+
+    @pytest.mark.parametrize("payload,marker", [
+        ("y" * 300, "repeated_char"),
+        ("Expert answer", "placeholder"),
+        ("Legacy answer", "placeholder"),
+        ("Fizyka to nauka o..." * 20, "repeated_phrase"),
+    ])
+    def test_garbage_is_refused_and_writes_nothing(
+        self, tmp_path, monkeypatch, payload, marker
+    ):
+        executor = self._executor(tmp_path, monkeypatch)
+        with pytest.raises(ValueError) as excinfo:
+            executor._save_expert_response("fizyka", "pytanie", payload)
+        assert marker in str(excinfo.value)
+        assert list(tmp_path.glob("expert_*.txt")) == []
+
+    def test_real_answer_is_still_saved(self, tmp_path, monkeypatch):
+        executor = self._executor(tmp_path, monkeypatch)
+        body = (
+            "Fizyka to nauka o materii, energii i ich oddzialywaniach. "
+            "Bada zjawiska od mikroskali kwantowej po skale kosmiczne. "
+            "Kluczowe galezie to mechanika, termodynamika, elektromagnetyzm "
+            "i fizyka kwantowa. Metoda laczy eksperyment z modelem "
+            "matematycznym, a teorie sa falsyfikowalne."
+        )
+        executor._save_expert_response("fizyka", "pytanie", body)
+        written = list(tmp_path.glob("expert_fizyka.txt"))
+        assert len(written) == 1
+        assert "materii" in written[0].read_text(encoding="utf-8")
+
+
+def test_partial_fetch_with_upstream_errors_is_success(tmp_path):
+    """Material arrived -> success, even if a sibling topic hit an upstream 429.
+
+    The uncovered case that let the bug live: the three tests above pin 0+0,
+    N+0 and 0+N, but nothing pinned N articles WITH errors. A session asks
+    about ~6 topics and pl.wikipedia rate-limits one of them; the old
+    `fetched > 0 and errors == 0` condemned the whole batch, auditing a
+    productive fetch as a HARD failure (success=False, skipped=False).
+    Measured on the live daemon 2026-07-26 (test-written rows excluded): 13
+    fetch sessions, 7 audited as hard failures, 4 of those 7 carrying material.
+    Session success rate 0.46 -> 0.77. That fed _is_real_failure() -> the
+    action_failure_storm self-repair rule, and K12 filed bulletin
+    cbb-6435c7bfccbc telling Maria her fetch STRATEGY was broken.
+    """
+    executor = _fetch_executor()
+    executor._transition_bulletin_to_ready = lambda gid: None
+    # Real temp paths, not bare MagicMock attributes: _register_fetch_handoff_goal
+    # guards with isinstance(value, (str, os.PathLike)) -- and a MagicMock SATISFIES
+    # os.PathLike (auto __fspath__), so an unset mock silently sends the knowledge
+    # index to a literal "MagicMock/mock.index_path" directory in the repo root
+    # instead of being rejected by the guard. Pinning real paths keeps the handoff
+    # scan on a genuine (throwaway) index and keeps the repo clean.
+    executor._knowledge_analyzer.input_dir = tmp_path / "input"
+    executor._knowledge_analyzer.index_path = tmp_path / "knowledge_index.jsonl"
+    (tmp_path / "input").mkdir()
+    with patch("agent_core.web_source.run_fetch_session") as m:
+        m.return_value = {"articles_fetched": 1, "errors": 1,
+                          "fetched_files": ["web_wiki_finanse.txt"],
+                          "topics_searched": 6}
+        result = executor._exec_fetch(create_plan("g1", "fetch", ActionType.FETCH))
+    assert result["success"] is True
+    assert result.get("skipped") is not True
+    # The error count must stay visible to callers that care -- the fix
+    # reclassifies the verdict, it does not hide the upstream failure.
+    assert result["errors"] == 1

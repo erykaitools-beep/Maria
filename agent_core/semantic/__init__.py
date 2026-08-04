@@ -1,10 +1,10 @@
 """Semantic Memory module for M.A.R.I.A.
 
-Provides embedding-based similarity search using nomic-embed-text via Ollama.
+Provides embedding-based similarity search using the configured embedding model via Ollama.
 Replaces keyword-based retrieval with vector similarity.
 
 Components:
-    EmbeddingModel - Ollama wrapper for nomic-embed-text
+    EmbeddingModel - Ollama wrapper for the embedding model (bge-m3)
     VectorStore    - In-memory vector store with JSONL persistence
     SemanticMemory - Facade combining model + store + namespaces
 

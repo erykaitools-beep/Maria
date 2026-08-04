@@ -81,12 +81,6 @@ class StateInterpreter:
         # Thermal stress (0-1 scale, 60°C = 0, 95°C = 1)
         thermal_stress = max(0, min(1, (smoothed_resource.temp_c - 60) / 35))
 
-        # Cognitive interpretation
-        coherence_ok = cognitive.context_coherence > 0.85
-        errors_high = cognitive.error_count_1h > 20
-        goal_stack_runaway = cognitive.goal_stack_depth > 25
-        attention_dispersed = cognitive.attention_fragmentation > 0.7
-
         return {
             "timestamp": resource.timestamp,
 
@@ -99,13 +93,11 @@ class StateInterpreter:
             "disk_used_pct": smoothed_resource.disk_used_pct,
             "temp_c": smoothed_resource.temp_c,
 
-            # Cognitive state (boolean flags)
-            "coherence_ok": coherence_ok,
-            "errors_high": errors_high,
-            "goal_stack_runaway": goal_stack_runaway,
-            "attention_dispersed": attention_dispersed,
-
-            # Numeric cognitive values
+            # Numeric cognitive values (telemetry only; the boolean gate flags
+            # coherence_ok/errors_high/goal_stack_runaway/attention_dispersed and
+            # the constraints/correctives that consumed them were removed
+            # 2026-07-18 -- see constraints.py NB. goal_stack_depth is now real
+            # (pull-model); the rest are neutral until a real source exists.)
             "context_coherence": cognitive.context_coherence,
             "error_count_1h": cognitive.error_count_1h,
             "goal_stack_depth": cognitive.goal_stack_depth,

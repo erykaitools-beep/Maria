@@ -955,3 +955,149 @@ class TestVisionAdvisorPhase:
         self._wire_vision(core, advisor=None)
         core._perceive_vision()  # no advisor wired -> must not raise
         assert core._perception_buffer.pushed is not None
+
+
+class TestWorkflowPhaseOffTick:
+    """Phase 14 must not hold the pulse while a workflow step runs.
+
+    First live run (2026-07-21, health_check): step `self_analyze` took 43.4s,
+    40.7s of it waiting on NIM, and the tick froze for the whole of it
+    (`Tick overrun: 43.65s`). Nothing was computed locally -- the tick just
+    stood in the doorway holding a phone call. Worse, TickWatchdog restarts the
+    daemon after WATCHDOG_STALL_SEC (300s) and a step falling through to the
+    Claude CLI branch carries its own 300s budget, so one unlucky step could
+    have tripped a restart that read as an unexplained freeze.
+    """
+
+    @pytest.fixture
+    def core(self):
+        memory_manager = specced(MemoryManager)
+        memory_manager.get_semantic_coherence.return_value = 0.95
+        memory_manager.get_total_entries.return_value = 100
+        memory_manager.get_contradiction_count.return_value = 0
+        memory_manager.get_episodic_freshness.return_value = 60.0
+        memory_manager.get_recent_errors_count.return_value = 0
+        llm_manager = specced(LLMManager)
+        llm_manager.get_last_latency_ms.return_value = 150.0
+        llm_manager.get_context_tokens.return_value = 1000
+        return HomeostasisCore(
+            memory_manager=memory_manager, llm_manager=llm_manager,
+        )
+
+    def test_slow_step_does_not_block_the_caller(self, core):
+        """The whole point: a slow step must not be paid for by the tick."""
+        import threading
+        import time as _t
+
+        released = threading.Event()
+        entered = threading.Event()
+
+        class SlowEngine:
+            def advance_next_active(self):
+                entered.set()
+                released.wait(timeout=5)
+
+        core._workflow_engine = SlowEngine()
+
+        started = _t.monotonic()
+        core._advance_workflow_async()
+        elapsed = _t.monotonic() - started
+
+        assert entered.wait(timeout=2), "step never started"
+        assert elapsed < 0.5, (
+            f"caller blocked {elapsed:.2f}s -- the step is still on the tick thread")
+        released.set()
+        core._workflow_thread.join(timeout=5)
+
+    def test_second_step_does_not_stack_on_a_running_one(self, core):
+        """Phase 14 fires every ~60 ticks; a slower step must not double up.
+
+        Without the guard two threads would advance the same workflow and race
+        on the same store file.
+        """
+        import threading
+
+        released = threading.Event()
+        calls = []
+
+        class SlowEngine:
+            def advance_next_active(self):
+                calls.append(1)
+                released.wait(timeout=5)
+
+        core._workflow_engine = SlowEngine()
+
+        core._advance_workflow_async()
+        first = core._workflow_thread
+        core._advance_workflow_async()   # cadence fires again, step still running
+
+        assert core._workflow_thread is first, "a second step stacked on a running one"
+        released.set()
+        first.join(timeout=5)
+        assert len(calls) == 1
+
+    def test_finished_step_frees_the_slot(self, core):
+        """Guard must not latch: once a step ends the next cadence may run."""
+        calls = []
+
+        class FastEngine:
+            def advance_next_active(self):
+                calls.append(1)
+
+        core._workflow_engine = FastEngine()
+
+        core._advance_workflow_async()
+        core._workflow_thread.join(timeout=5)
+        core._advance_workflow_async()
+        core._workflow_thread.join(timeout=5)
+
+        assert len(calls) == 2, "guard latched -- workflow would advance once, ever"
+
+    def test_exception_in_step_is_logged_not_raised(self, core, caplog):
+        """A workflow fault must stay a phase error, never reach the loop."""
+        class BrokenEngine:
+            def advance_next_active(self):
+                raise RuntimeError("step exploded")
+
+        core._workflow_engine = BrokenEngine()
+
+        with caplog.at_level("WARNING", logger="agent_core.homeostasis.core"):
+            core._advance_workflow_async()
+            core._workflow_thread.join(timeout=5)
+
+        assert any("14 workflow" in r.getMessage() for r in caplog.records)
+        assert any("step exploded" in r.getMessage() for r in caplog.records)
+
+    def test_tick_phase_14_itself_does_not_block(self, core):
+        """Regression through the REAL tick path, not just the helper.
+
+        The previous four tests exercise _advance_workflow_async directly, so
+        they would all pass even if Phase 14 still called the engine inline --
+        proving the new door works says nothing about which door the tick uses.
+        This one drives _execute_tick with the cadence hit and a step that
+        hangs, and fails against the pre-2026-07-21 code.
+        """
+        import threading
+        import time as _t
+
+        released = threading.Event()
+        entered = threading.Event()
+
+        class SlowEngine:
+            def advance_next_active(self):
+                entered.set()
+                released.wait(timeout=5)
+
+        core._workflow_engine = SlowEngine()
+        core._tick_count = 30  # Phase 14 fires on _tick_count % 60 == 30
+
+        started = _t.monotonic()
+        core._execute_tick()
+        elapsed = _t.monotonic() - started
+
+        assert entered.wait(timeout=2), "Phase 14 never reached the engine"
+        assert elapsed < 1.0, (
+            f"tick blocked {elapsed:.2f}s on a workflow step -- Phase 14 is "
+            "still advancing inline (this is the 43.65s freeze)")
+        released.set()
+        core._workflow_thread.join(timeout=5)

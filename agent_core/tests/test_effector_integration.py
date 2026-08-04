@@ -18,7 +18,6 @@ import pytest
 
 from agent_core.autonomy.authority_level import AuthorityLevel, AuthorityManager
 from agent_core.autonomy.approval_queue import ApprovalQueue
-from agent_core.autonomy.tool_budget import ToolBudgetManager
 from agent_core.autonomy import AutonomyPolicy
 from agent_core.autonomy.escalation import EscalationHandler
 from agent_core.planner.planner_model import (
@@ -228,38 +227,6 @@ class TestAuthorityTransitions:
         # Simulate restart
         mgr2 = AuthorityManager(config_path=config_path)
         assert mgr2.get_level() == AuthorityLevel.BOUNDED
-
-
-class TestToolBudgetIntegration:
-
-    def test_rate_limit_blocks_after_budget(self):
-        budget = ToolBudgetManager(tool_rate_limits={"exec": 2})
-        budget.record_invocation("exec", success=True)
-        budget.record_invocation("exec", success=True)
-        ok, reason = budget.check_budget("exec")
-        assert not ok
-        assert "rate_limited" in reason
-
-    def test_failure_lock_blocks(self):
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=60.0,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        ok, reason = budget.check_budget("exec")
-        assert not ok
-        assert "tool_locked" in reason
-
-    def test_different_tools_independent_budgets(self):
-        budget = ToolBudgetManager(
-            tool_rate_limits={"exec": 1, "read": 10},
-        )
-        budget.record_invocation("exec", success=True)
-        ok_exec, _ = budget.check_budget("exec")
-        ok_read, _ = budget.check_budget("read")
-        assert not ok_exec
-        assert ok_read
 
 
 class TestNonEffectorUnchanged:

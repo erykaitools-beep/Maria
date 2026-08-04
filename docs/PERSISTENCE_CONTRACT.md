@@ -1,32 +1,32 @@
 # M.A.R.I.A. - Persistence Contract v1.0
 
-> Jeden plik prawdy: jak zapisujemy dane, jaki format, jakie sciezki, kto co czyta i pisze.
-> Data: 2026-04-14. Autor: Eryk (decyzja) + Claude (audit).
+> One file of truth: how we persist data, in what format, under what paths, who reads and writes what.
+> Date: 2026-04-14. Author: Eryk (decision) + Claude (audit).
 
-## A. Zasady nadrzedne
+## A. Governing principles
 
-1. **JSONL jako source of truth** (ADR-001). Kazdy rekord to jedna linia JSON.
-2. **Lokalne pliki** - zero chmury, zero remote sync w runtime.
-3. **Append-first** - domyslnie dopisujemy, nie nadpisujemy.
-4. **Explicit save** - jesli store ma `save()`, MUSISZ go zawolac po mutacji. Inaczej dane zyja tylko w RAM.
-5. **Thread-safe** - kazdy store uzywa `threading.Lock` lub `threading.RLock`.
-6. **Graceful degradation** - brak pliku = pusty store, nie crash.
+1. **JSONL as source of truth** (ADR-001). Every record is a single JSON line.
+2. **Local files** - no cloud, no remote sync at runtime.
+3. **Append-first** - by default we append, we do not overwrite.
+4. **Explicit save** - if a store has `save()`, you MUST call it after a mutation. Otherwise the data lives in RAM only.
+5. **Thread-safe** - every store uses `threading.Lock` or `threading.RLock`.
+6. **Graceful degradation** - a missing file means an empty store, not a crash.
 
-## B. Cztery wzorce zapisu
+## B. Four write patterns
 
 ### B1. APPEND_ONLY
-Plik tylko rosnie. Nowe rekordy dopisywane na koniec. Stare archiwizowane przez LogArchiver.
+The file only grows. New records are appended at the end. Old ones are archived by LogArchiver.
 
 ```python
-# Wzorzec:
+# Pattern:
 with open(path, "a") as f:
     f.write(json.dumps(record) + "\n")
 ```
 
-**Uzywa:** homeostasis_events, action_audit, decision_traces, llm_tape, critique_reports, self_analysis_reports, exam_results
+**Used by:** homeostasis_events, action_audit, decision_traces, llm_tape, critique_reports, self_analysis_reports, exam_results
 
 ### B2. MERGE (last-wins-by-key)
-Append-only na dysku, ale na LOAD ostatni rekord per klucz wygrywa. Plik rosnie z kazdym updatem.
+Append-only on disk, but on LOAD the last record per key wins. The file grows with every update.
 
 ```python
 # WRITE: append
@@ -37,18 +37,18 @@ with open(path, "a") as f:
 records = {}
 for line in open(path):
     r = json.loads(line)
-    records[r[KEY_FIELD]] = r  # nadpisuje starsze
+    records[r[KEY_FIELD]] = r  # overwrites older ones
 ```
 
-**Compaction:** przepisz plik z unikalnymi rekordami gdy plik > 2x pamiec.
+**Compaction:** rewrite the file with unique records once the file exceeds 2x the in-memory set.
 
-**Uzywa:** goals (key=id), beliefs (key=belief_id), knowledge_index (key=id), reminders (key=reminder_id), todos (key=todo_id), workflows (key=workflow_id), web_fetch_registry (key=url), creative_meta_goals (key=goal_id), cognitive_bulletin (key=entry_id)
+**Used by:** goals (key=id), beliefs (key=belief_id), knowledge_index (key=id), reminders (key=reminder_id), todos (key=todo_id), workflows (key=workflow_id), web_fetch_registry (key=url), creative_meta_goals (key=goal_id), cognitive_bulletin (key=entry_id)
 
 ### B3. OVERWRITE (atomic JSON)
-Caly plik nadpisywany atomowo (temp + rename). Dla singletonu stanu.
+The whole file is overwritten atomically (temp + rename). For a state singleton.
 
 ```python
-# Wzorzec:
+# Pattern:
 import tempfile, os
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
@@ -56,26 +56,26 @@ with open(tmp, "w") as f:
 os.replace(tmp, path)  # atomic on same filesystem
 ```
 
-**Uzywa:** planner_state.json, user_profile.json, operator_model.json, consciousness_identity.json, environment_state.json, model_health.json, nim_token_usage.json, authority_config.json, code_self_model.json
+**Used by:** planner_state.json, user_profile.json, operator_model.json, consciousness_identity.json, environment_state.json, model_health.json, nim_token_usage.json, authority_config.json, code_self_model.json
 
 ### B4. BUFFERED
-Akumuluje w pamiec, flush co N sekund lub N rekordow.
+Accumulates in memory, flushes every N seconds or every N records.
 
 ```python
-# Wzorzec:
+# Pattern:
 self._buffer.append(record)
 if len(self._buffer) >= FLUSH_SIZE or time.time() - self._last_flush > FLUSH_INTERVAL:
     self._flush()
 ```
 
-**Uzywa:** homeostasis_events (10s/50 events), personality_experiences (session flush)
+**Used by:** homeostasis_events (10s/50 events), personality_experiences (session flush)
 
-## C. Katalog plikow
+## C. File catalog
 
-### C1. meta_data/ - dane runtime
+### C1. meta_data/ - runtime data
 
-| Plik | Wzorzec | Klucz | Writer | Readers | Max/Rotacja |
-|------|---------|-------|--------|---------|-------------|
+| File | Pattern | Key | Writer | Readers | Max/Rotation |
+|------|---------|-----|--------|---------|--------------|
 | `goals.jsonl` | MERGE | `id` | GoalStore.save() | Planner, K7, K12, Telegram | 20 active (pruned) |
 | `beliefs.jsonl` | MERGE | `belief_id` | BeliefStore.save() | K6, MemoryQuery, Critic | 2000 (smart prune) |
 | `planner_decisions.jsonl` | APPEND | - | PlannerCore._log_decision() | K12, Web UI | Archival (LogArchiver) |
@@ -118,63 +118,63 @@ if len(self._buffer) >= FLUSH_SIZE or time.time() - self._last_flush > FLUSH_INT
 | `authority_config.json` | OVERWRITE | - | AuthorityManager | K7, Telegram | 1 file |
 | `code_self_model.json` | OVERWRITE | - | CodeAnalyzer | Introspection | 1 file |
 
-### C2. memory/ - dane wiedzy (legacy)
+### C2. memory/ - knowledge data (legacy)
 
-| Plik | Wzorzec | Klucz | Writer | Readers |
-|------|---------|-------|--------|---------|
+| File | Pattern | Key | Writer | Readers |
+|------|---------|-----|--------|---------|
 | `knowledge_index.jsonl` | MERGE | `id` | LearningAgent | Teacher, Planner, MemoryQuery |
 | `exam_results.jsonl` | APPEND | - | ExamAgent | Teacher, Evaluation |
 | `maria_knowledge_base.jsonl` | APPEND | - | LearningAgent (compressed) | MemoryQuery |
 | `maria_longterm_memory.jsonl` | APPEND | - | Legacy episodic | MemoryQuery |
 
-### C3. /mnt/storage/data/ - archiwum (6TB)
+### C3. /mnt/storage/data/ - archive (6TB)
 
-| Sciezka | Zawartosc | Writer |
-|---------|-----------|--------|
-| `logs/` | Stare rekordy JSONL (rotacja) | LogArchiver |
-| `summaries/` | Dzienne podsumowania (compacted) | DailySummary |
-| `backups/` | Codzienne kopie meta_data/ | cron backup.sh |
+| Path | Contents | Writer |
+|------|----------|--------|
+| `logs/` | Old JSONL records (rotation) | LogArchiver |
+| `summaries/` | Daily summaries (compacted) | DailySummary |
+| `backups/` | Daily copies of meta_data/ | cron backup.sh |
 
-## D. Reguly dla nowych modulow
+## D. Rules for new modules
 
-### D1. Tworzysz nowy store? Wybierz wzorzec:
-- Dane tylko rosna (logi, eventy) -> **APPEND_ONLY**
-- Dane maja ID i moga sie zmieniac -> **MERGE** z explicit `save()`
-- Jeden obiekt stanu -> **OVERWRITE** z atomic rename
+### D1. Adding a new store? Pick a pattern:
+- Data only grows (logs, events) -> **APPEND_ONLY**
+- Data has an ID and can change -> **MERGE** with an explicit `save()`
+- A single state object -> **OVERWRITE** with atomic rename
 
 ### D2. MERGE store checklist:
-- [ ] Klasa dziedziczy logike load/save/compact
-- [ ] KEY_FIELD zdefiniowany jako stala
-- [ ] `save()` wolane po KAZDEJ mutacji (propose, update, delete)
-- [ ] Compaction triggerowana gdy lines > 2x records
-- [ ] Max records w pamieci (smart prune jesli przekroczony)
+- [ ] The class inherits the load/save/compact logic
+- [ ] KEY_FIELD defined as a constant
+- [ ] `save()` called after EVERY mutation (propose, update, delete)
+- [ ] Compaction triggered when lines > 2x records
+- [ ] Max records held in memory (smart prune if exceeded)
 
 ### D3. Naming convention:
-- JSONL: `meta_data/{module_name}_{data_type}.jsonl` (np. `creative_events.jsonl`)
-- JSON state: `meta_data/{module_name}_state.json` (np. `planner_state.json`)
-- Klucz ID: `{prefix}-{uuid_hex[:8]}` (np. `goal-k12-2b5fdcdc`, `belief-9ad96f67e297`)
+- JSONL: `meta_data/{module_name}_{data_type}.jsonl` (e.g. `creative_events.jsonl`)
+- JSON state: `meta_data/{module_name}_state.json` (e.g. `planner_state.json`)
+- ID key: `{prefix}-{uuid_hex[:8]}` (e.g. `goal-k12-2b5fdcdc`, `belief-9ad96f67e297`)
 
 ### D4. Thread safety:
-- Kazdy write path chroniony `threading.Lock()`
-- Jeden lock per store (nie per method)
-- `with self._lock:` opakowuje caly write + flush
+- Every write path guarded by `threading.Lock()`
+- One lock per store (not per method)
+- `with self._lock:` wraps the whole write + flush
 
 ### D5. Error handling:
-- Brak pliku = pusty store, log warning, kontynuuj
-- Uszkodzona linia JSONL = skip + log warning
-- Brak katalogu = `mkdir(parents=True)` przy pierwszym uzyciu
+- Missing file = empty store, log a warning, continue
+- Corrupted JSONL line = skip + log a warning
+- Missing directory = `mkdir(parents=True)` on first use
 
-## E. Znane problemy (do naprawienia)
+## E. Known issues (to be fixed)
 
-| Problem | Status | Priorytet |
-|---------|--------|-----------|
-| Brak wspolnej klasy bazowej dla store'ow | OPEN | Sredni |
-| creative_store ma 6 plikow w jednej klasie | OPEN | Niski |
-| web_fetch_registry rosnie bez limitu | OPEN | Niski |
-| topic_hints rosnie bez limitu | OPEN | Niski |
-| Brak compaction dla goals.jsonl | OPEN | Sredni |
-| deliberation_intents uzywa REWRITE (powolne) | OPEN | Niski |
+| Issue | Status | Priority |
+|-------|--------|----------|
+| No shared base class for stores | OPEN | Medium |
+| creative_store holds 6 files in one class | OPEN | Low |
+| web_fetch_registry grows without a limit | OPEN | Low |
+| topic_hints grows without a limit | OPEN | Low |
+| No compaction for goals.jsonl | OPEN | Medium |
+| deliberation_intents uses REWRITE (slow) | OPEN | Low |
 
 ---
 
-*Wersja 1.0 - 2026-04-14*
+*Version 1.0 - 2026-04-14*

@@ -461,13 +461,26 @@ class TopicSuggester:
             reranked = []
             for s in suggestions:
                 topic = s["topic"]
-                # Search existing knowledge for similar topics
-                results = sm.search(topic, namespace="knowledge", top_k=3, threshold=0.5)
+                # Search existing knowledge for similar topics.
+                #
+                # threshold=chance floor, not a hardcoded 0.5: raw cosine means
+                # different things per embedder (unrelated text sits at ~0.75 for
+                # nomic, ~0.40 for bge-m3), so a fixed cutoff silently decides
+                # whether ANY topic looks familiar. With a too-high cutoff every
+                # topic falls into the "Unknown territory" branch and Maria keeps
+                # proposing subjects she already studied.
+                from agent_core.semantic.embedding_model import (
+                    chance_similarity, relevance_from_cosine,
+                )
+                results = sm.search(topic, namespace="knowledge", top_k=3,
+                                    threshold=chance_similarity())
 
                 if results:
                     # High similarity = Maria already knows this area
                     # -> lower novelty score (but still useful for EXPAND)
-                    avg_sim = sum(r.score for r in results) / len(results)
+                    # Calibrated relevance, so novelty stays on one scale across
+                    # embedders instead of shifting with the raw cosine.
+                    avg_sim = sum(relevance_from_cosine(r.score) for r in results) / len(results)
                     novelty = 1.0 - avg_sim  # 0 = exact match, 1 = totally new
                 else:
                     novelty = 1.0  # Unknown territory

@@ -49,7 +49,7 @@ maria/
 │   ├── critic/           # Knowledge quality gate
 │   ├── reminders/        # Time-triggered notifications
 │   ├── orchestrator/     # V3 Task orchestration
-│   └── tests/            # 7,100+ tests
+│   └── tests/            # 7,200+ tests
 ├── maria_core/           # Legacy modules (migration in progress)
 ├── models/               # OllamaBrain LLM interface
 ├── maria_ui/             # Flask Web UI
@@ -120,7 +120,7 @@ Maria uses multiple LLM models for different roles:
 | Planner (MODEL-01) | qwen3:8b | Strategic planning, cold start |
 | Coder (MODEL-03) | qwen2.5-coder:7b | Code tasks, cold start |
 | Triage (MODEL-04) | Rule-based | Request classification (no LLM) |
-| Memory (MODEL-05) | nomic-embed-text | Embeddings, cold start |
+| Memory (MODEL-05) | bge-m3 | Embeddings, cold start |
 | External (MODEL-06) | NIM API | Optional cloud LLM for analysis |
 
 Golden rule: MODEL-02 stays warm, others load on-demand. Heavy model mutex prevents MODEL-01 and MODEL-03 from running simultaneously.

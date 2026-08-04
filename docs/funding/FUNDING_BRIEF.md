@@ -1,7 +1,7 @@
 # M.A.R.I.A. — Funding & Hardware-Partnership Brief
 
 **Meta Analysis Recalibration Intelligence Architecture**
-One-page brief · 2026-06-14 · AGPL-3.0 · <https://github.com/erykaitools-beep/Maria>
+One-page brief · 2026-08-04 · AGPL-3.0 · <https://github.com/erykaitools-beep/Maria>
 
 ---
 
@@ -25,10 +25,10 @@ level the operator has granted).
 
 ### Current state (verifiable)
 
-- **~109k lines** of application Python and **~77k lines** of test code;
-  **5,799 tests passing** in a clean checkout, with CI green across
+- **~127k lines** of application Python and **~98k lines** of test code;
+  **7,262 tests passing** in a clean checkout, with CI green across
   Python 3.10/3.11/3.12.
-- **K1–K13 cognitive contracts** plus a 19-phase, 1 Hz homeostasis loop, observed
+- **K1–K13 cognitive contracts** plus a 21-phase, 1 Hz homeostasis loop, observed
   in live logs.
 - Sandbox-first learning, append-only action audit trails, operator-gated
   effectors, alert-based (not autonomous) self-repair.
@@ -36,7 +36,7 @@ level the operator has granted).
 
 ### Evidence of maturity
 
-Nearly four months of continuous production operation; a public history of
+Over five months of continuous production operation; a public history of
 **real incidents with root-cause analysis, fixes and regression tests** (memory leaks,
 deadlocks, OOM loops, an OS-level suspend masquerading as a freeze). This is an
 operated system, not a demo.

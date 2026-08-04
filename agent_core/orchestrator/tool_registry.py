@@ -68,19 +68,40 @@ class ToolCapabilityRegistry:
         """
         services = []
 
-        # NIM API
+        # NIM API -- status comes from REAL CALL OUTCOMES, not from the budget
+        # counter. The counter (`nim_status`) only ever says OK/LOW/DEPLETED, so
+        # the word `model_unavailable` waits for was unreachable; worse, usage is
+        # recorded only on success, making the counter anti-correlated with an
+        # outage. During the 2026-07-27 dracarys EOL (254x HTTP 410) every
+        # snapshot still read "available". See llm/nim_health.py.
         try:
-            from agent_core.orchestrator.cost_estimator import CostEstimator
-            budget = CostEstimator(self._ctx).get_budget_status()
-            services.append({
-                "name": "NVIDIA NIM API",
-                "type": "llm_api",
-                "status": "available" if budget.nim_status != "DEPLETED" else "depleted",
-                "details": {
+            from agent_core.llm.nim_health import get_nim_health
+            health = get_nim_health().snapshot()
+            status = health.status
+            details = health.as_details()
+
+            # Budget back-pressure is orthogonal to reachability: NIM can be
+            # answering fine and still be rate/budget-limited. It may only
+            # downgrade a healthy verdict -- never mask an outage.
+            try:
+                from agent_core.orchestrator.cost_estimator import CostEstimator
+                budget = CostEstimator(self._ctx).get_budget_status()
+                details.update({
                     "remaining_today": budget.nim_remaining_today,
                     "budget_status": budget.nim_status,
                     "rpm_available": budget.nim_rpm_available,
-                },
+                })
+                if (budget.nim_status == "DEPLETED"
+                        and status in ("available", "unknown")):
+                    status = "depleted"
+            except Exception:
+                details["budget_status"] = "unknown"
+
+            services.append({
+                "name": "NVIDIA NIM API",
+                "type": "llm_api",
+                "status": status,
+                "details": details,
             })
         except Exception:
             services.append({

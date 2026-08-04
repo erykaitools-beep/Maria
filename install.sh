@@ -13,7 +13,7 @@
 # What this script does:
 #   1. Checks system requirements
 #   2. Installs Ollama (if not present)
-#   3. Pulls llama3.1:8b + nomic-embed-text models
+#   3. Pulls llama3.1:8b + bge-m3 models
 #   4. Creates Python virtual environment
 #   5. Installs dependencies
 #   6. Creates .env from template
@@ -115,7 +115,7 @@ echo ""
 
 # ── Step 3: Pull model ──
 
-echo -e "${YELLOW}[3/7] Pulling models (llama3.1:8b ~5GB + nomic-embed-text ~275MB)...${NC}"
+echo -e "${YELLOW}[3/7] Pulling models (llama3.1:8b ~5GB + bge-m3 ~1.2GB)...${NC}"
 
 if ollama list 2>/dev/null | grep -q "llama3.1:8b"; then
     echo -e "  llama3.1:8b: ${GREEN}already downloaded${NC}"
@@ -125,13 +125,16 @@ else
     echo -e "  llama3.1:8b: ${GREEN}downloaded${NC}"
 fi
 
-# Embedding model - powers semantic memory (without it, embedding calls 404)
-if ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
-    echo -e "  nomic-embed-text: ${GREEN}already downloaded${NC}"
+# Embedding model - powers semantic memory (without it, embedding calls 404).
+# bge-m3 since 2026-07-25: measured on this project's Polish corpus it finds the
+# right memory in the top 5 for 100% of probe questions vs 42.9% for
+# nomic-embed-text. Override with SEMANTIC_EMBED_MODEL in .env.
+if ollama list 2>/dev/null | grep -q "bge-m3"; then
+    echo -e "  bge-m3: ${GREEN}already downloaded${NC}"
 else
-    echo "  Downloading nomic-embed-text (embeddings, ~275MB)..."
-    ollama pull nomic-embed-text
-    echo -e "  nomic-embed-text: ${GREEN}downloaded${NC}"
+    echo "  Downloading bge-m3 (embeddings, ~1.2GB)..."
+    ollama pull bge-m3
+    echo -e "  bge-m3: ${GREEN}downloaded${NC}"
 fi
 
 echo ""

@@ -19,7 +19,7 @@ ADR-026: Effector Safety Envelope.
 import json
 import logging
 import threading
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional
@@ -54,24 +54,6 @@ def level_index(level: AuthorityLevel) -> int:
     return _LEVEL_ORDER.index(level)
 
 
-# Default per-tool rate limits (invocations per hour)
-DEFAULT_TOOL_RATE_LIMITS: Dict[str, int] = {
-    # Non-dangerous (safe)
-    "web_fetch": 20,
-    "web_search": 20,
-    "read": 30,
-    "cron": 2,
-    # Dangerous
-    "exec": 5,
-    "write": 5,
-    "message": 5,
-}
-
-# Default failure management
-DEFAULT_FAILURE_COOLDOWN_SEC = 300.0    # 5 minutes
-DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
-
-
 @dataclass
 class AuthorityConfig:
     """
@@ -79,13 +61,13 @@ class AuthorityConfig:
 
     Persisted to meta_data/authority_config.json.
     Thread-safe access via AuthorityManager.
+
+    Per-tool budget fields (tool_rate_limits / failure_cooldown_sec /
+    max_consecutive_failures) were CUT 2026-07-19 with ToolBudgetManager
+    (ADR-026): config-without-consumer. Stale keys in the persisted JSON
+    are ignored by from_dict. Resurrection point: CONTRACTS ADR-026.
     """
     level: str = AuthorityLevel.OBSERVE.value
-    tool_rate_limits: Dict[str, int] = field(
-        default_factory=lambda: dict(DEFAULT_TOOL_RATE_LIMITS)
-    )
-    failure_cooldown_sec: float = DEFAULT_FAILURE_COOLDOWN_SEC
-    max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES
     updated_at: float = 0.0
 
     def get_level(self) -> AuthorityLevel:
@@ -102,12 +84,9 @@ class AuthorityConfig:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "AuthorityConfig":
-        """Deserialize from dict."""
+        """Deserialize from dict (unknown/stale keys ignored)."""
         return cls(
             level=data.get("level", AuthorityLevel.OBSERVE.value),
-            tool_rate_limits=data.get("tool_rate_limits", dict(DEFAULT_TOOL_RATE_LIMITS)),
-            failure_cooldown_sec=data.get("failure_cooldown_sec", DEFAULT_FAILURE_COOLDOWN_SEC),
-            max_consecutive_failures=data.get("max_consecutive_failures", DEFAULT_MAX_CONSECUTIVE_FAILURES),
             updated_at=data.get("updated_at", 0.0),
         )
 
@@ -209,18 +188,10 @@ class AuthorityManager:
 
         return True
 
-    def get_tool_rate_limit(self, tool_name: str) -> int:
-        """Get rate limit for a specific tool."""
-        with self._lock:
-            return self._config.tool_rate_limits.get(tool_name, 5)
-
     def get_status(self) -> Dict:
         """Get status dict for REPL/Telegram/Web UI."""
         with self._lock:
             return {
                 "authority_level": self._config.level,
-                "tool_rate_limits": dict(self._config.tool_rate_limits),
-                "failure_cooldown_sec": self._config.failure_cooldown_sec,
-                "max_consecutive_failures": self._config.max_consecutive_failures,
                 "updated_at": self._config.updated_at,
             }

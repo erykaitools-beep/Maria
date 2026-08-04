@@ -162,3 +162,21 @@ class TestSources:
         ]
         resp = builder.build(ResponseMode.GROUNDED_STATUS, evidence)
         assert resp.sources.count("planner_decisions.jsonl") == 1
+
+
+class TestConfidenceAssessmentWithFloatWriters:
+    """Float-confidence evidence must count toward 'Pewnosc: wysoka'.
+
+    Regression: before Evidence.__post_init__ normalization, the
+    `e.confidence == "high"` check at the diagnostic builder never matched
+    float-writing collectors, so the assessment was stuck at 'srednia'.
+    """
+
+    def test_float_high_evidence_yields_wysoka(self, builder):
+        evidence = [
+            _ev("planner.last_action", "EXAM", confidence=0.95),
+            _ev("homeostasis.mode", "ACTIVE", confidence=0.9),
+            _ev("learning.total_files", "5", confidence=0.5),
+        ]
+        resp = builder.build(ResponseMode.GROUNDED_ERROR, evidence)
+        assert "Pewnosc: wysoka." in resp.text

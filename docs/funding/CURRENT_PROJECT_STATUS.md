@@ -1,7 +1,7 @@
 # M.A.R.I.A. — Current Project Status
 
 **Meta Analysis Recalibration Intelligence Architecture**
-Status report — **2026-06-14**
+Status report — **2026-08-04**
 
 > This is a factual snapshot intended for funding, hardware-partnership and
 > research evaluation. Every number below is either present in the public
@@ -31,9 +31,9 @@ single mini PC since **2026-02-22**.
 |---|---|---|
 | Application Python | **~127,000 lines** | `find . -name '*.py' -not -path '*/venv/*' -not -path '*/__pycache__/*' -not -path '*/tests/*' \| xargs wc -l` |
 | `agent_core/` application Python | ~109,000 lines | same, scoped to `agent_core/` |
-| Test Python | **~95,000 lines** | `find agent_core/tests -name '*.py' \| xargs wc -l` |
-| Test files | **236** | `find agent_core/tests -name 'test_*.py' \| wc -l` |
-| Automated tests | **7,145 collected** | `pytest agent_core/tests/ --collect-only -q`; latest CI run on `main` is green (all pass under `-x`) |
+| Test Python | **~98,100 lines** | `find agent_core/tests -name '*.py' \| xargs wc -l` |
+| Test files | **239** | `find agent_core/tests -name 'test_*.py' \| wc -l` |
+| Automated tests | **7,267 collected · 7,262 passing** (4 skipped) | `pytest agent_core/tests/ --collect-only -q`; latest CI run on `main` is green (all pass under `-x`) |
 | Continuous integration | **green on Python 3.10, 3.11, 3.12** | [`.github/workflows/test.yml`](../../.github/workflows/test.yml) |
 
 The CI workflow runs `pytest agent_core/tests/ -q --tb=short -x --timeout=60`
@@ -42,8 +42,8 @@ so a green run means the **entire** collected suite passed on every supported
 Python version. The latest run on `main` is green on all three versions. All tests are mocked — no network, no live LLM calls — so the
 suite is reproducible by anyone who clones the repository.
 
-The README badge reads `tests-7100+` as a conservative public figure; the exact
-number collected on the current public `main` is 7,145.
+The README badge reads `tests-7200+` as a conservative public figure; the exact
+number collected on the current public `main` is 7,267.
 
 ---
 
@@ -70,9 +70,10 @@ detail is in [`docs/CONTRACTS.md`](../CONTRACTS.md) and
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 **Wired but not yet routinely exercised:** capability/intent routing
-(flag-gated), the multi-project conductor, vision (LLaVA on demand; camera
-hardware pending), the V3 orchestrator, and operator-gated self-repair (verified
-via a controlled drill, not yet observed firing in normal operation).
+(flag-gated), the multi-project conductor, vision (`gemma3:4b` on demand behind
+a scene-change gate; USB camera attached), the V3 orchestrator, and
+operator-gated self-repair (verified via a controlled drill, not yet observed
+firing in normal operation).
 
 **RESEARCH_ONLY (frozen, not wired into the daemon):** the "Maria 2.0" tracks —
 a symbolic property-graph world model and a predictive (JEPA-style) layer. These
@@ -81,7 +82,7 @@ enough data to train them — and, in practice, until there is hardware headroom
 to run them alongside the 1.0 loop. They are **not** presented as working
 features.
 
-The homeostasis loop runs **19 phases at 1 Hz**; the loop is described in
+The homeostasis loop runs **21 phases at 1 Hz**; the loop is described in
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ---
@@ -93,7 +94,7 @@ The homeostasis loop runs **19 phases at 1 Hz**; the loop is described in
 | Process model | single `maria.py` daemon (cognitive loop + Flask/SocketIO Web UI) | one systemd service |
 | Service | `maria.service` under systemd, `Restart=on-failure` | [`scripts/maria.service`](../../scripts/maria.service) |
 | Running since | **2026-02-22** | production host; systemd journal |
-| Continuity | nearly four months of operation with automatic restart on failure; beliefs, logs and knowledge carried across restarts | *live host, not repo-derivable* |
+| Continuity | over five months of operation with automatic restart on failure; beliefs, logs and knowledge carried across restarts | *live host, not repo-derivable* |
 | Memory governance | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` | systemd drop-in (added after the 2026-04-17 incident) |
 
 "Continuity" here means continuous **operation of the service**, not zero
@@ -136,7 +137,7 @@ and documented in [`docs/MODEL_REGISTRY.md`](../MODEL_REGISTRY.md).
 | Executor (main) | `llama3.1:8b` (Q4_K_M) | ~5.0 GB | kept warm |
 | Planner | `qwen3:8b` (Q4_K_M) | ~5.5 GB | loaded on demand |
 | Coder | `qwen2.5-coder:7b` (Q4_K_M) | ~5.0 GB | loaded on demand |
-| Embeddings | `nomic-embed-text` (768-dim, 274 MB) | ~0.5 GB | semantic memory |
+| Embeddings | `bge-m3` (1024-dim) | ~1.2 GB | semantic memory; replaced `nomic-embed-text` on 2026-07-25 |
 | Triage | rule-based classifier | 0 GB | no LLM |
 
 A **heavy-model mutex** guarantees the two heaviest models never run
@@ -161,7 +162,7 @@ service is required to run the system. API keys live only in a git-ignored
 |---|---|
 | Web UI (Flask + SocketIO) | production |
 | Telegram bridge (commands, notifications, approvals) | production |
-| Semantic memory (nomic-embed-text, 768-dim) | production |
+| Semantic memory (bge-m3, 1024-dim) | production |
 | Web sources (Wikipedia + RSS fetcher, no API keys) | production |
 | OpenClaw effector (subprocess tool invocation, rate-limited) | production, RESTRICTED |
 | Vision (LLaVA on demand) | wired; camera hardware pending |

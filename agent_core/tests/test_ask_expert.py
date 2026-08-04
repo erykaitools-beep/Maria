@@ -17,6 +17,20 @@ from agent_core.world_model import WorldModel
 from agent_core.world_model.query import WorldModelQuery
 from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
 
+# A response shaped like a REAL expert answer. These tests used to pass
+# "x" * 200 / "y" * 200 / "z" * 200 as a stand-in for "the bridge succeeded",
+# which is not merely unrealistic -- it is the exact payload the content guard
+# exists to reject, and it is how input/expert_optyka.txt came to hold 200 'y'
+# characters in the live learning corpus (2026-07-26 audit). A fixture standing
+# for SUCCESS must be something the pipeline would actually accept.
+REALISTIC_EXPERT_RESPONSE = (
+    "Fizyka to nauka o materii, energii i ich wzajemnych oddzialywaniach. "
+    "Bada zjawiska od skali kwantowej po kosmologiczna, laczac obserwacje "
+    "z modelem matematycznym. Glowne dzialy to mechanika klasyczna, "
+    "termodynamika, elektromagnetyzm oraz mechanika kwantowa. Teorie fizyczne "
+    "musza byc falsyfikowalne, a ich przewidywania sprawdzalne eksperymentalnie."
+)
+
 
 class TestActionTypeAskExpert:
     """Verify ASK_EXPERT exists in ActionType enum."""
@@ -229,7 +243,7 @@ class TestExecAskExpertWithBridge:
         # Mock the full pipeline to return success
         resp = ExpertResponse(
             success=True, topic="fizyka",
-            response="x" * 200,
+            response=REALISTIC_EXPERT_RESPONSE,
             context_prompt="Maria wie o mechanice",
             gap_action="ask_expert",
             reason="knowledge_gaps_detected",
@@ -251,7 +265,7 @@ class TestExecAskExpertWithBridge:
         bridge = ExpertBridge()
         resp = ExpertResponse(
             success=True, topic="optyka",
-            response="y" * 200,
+            response=REALISTIC_EXPERT_RESPONSE,
             context_prompt="Maria potrzebuje optyki",
             gap_action="ask_expert",
         )
@@ -312,7 +326,7 @@ class TestExecAskExpertWithBridge:
         bridge = ExpertBridge()
         resp = ExpertResponse(
             success=True, topic="fizyka",
-            response="z" * 200,
+            response=REALISTIC_EXPERT_RESPONSE,
             context_prompt="test",
             gap_action="ask_expert",
         )
@@ -339,6 +353,45 @@ class TestExecAskExpertWithBridge:
         # Bulletin entry should be resolved
         updated = store._entries[entry.entry_id]
         assert updated.status == EntryStatus.RESOLVED
+
+    def test_bulletin_stays_open_when_response_was_garbage(self):
+        """A refused save must NOT close the NEED_MATERIAL request.
+
+        Resolving it would tell the gap planner the material had arrived when
+        nothing was written -- the bulletin would go quiet on a gap that is
+        still open. The executor already gates resolution on `saved`; this pins
+        that, now that the fallback save actually rejects garbage (before
+        2026-07-26 it had no content check, so nothing could reach this branch).
+        """
+        from agent_core.bulletin.expert_bridge import ExpertBridge, ExpertResponse
+        from agent_core.bulletin.bulletin_store import BulletinStore
+        from agent_core.bulletin.bulletin_model import EntryType, EntryStatus, create_entry
+
+        bridge = ExpertBridge()
+        bridge.ask_about_topic = MagicMock(return_value=ExpertResponse(
+            success=True, topic="fizyka",
+            response="y" * 200,          # the shape that reached the live corpus
+            context_prompt="test",
+            gap_action="ask_expert",
+        ))
+
+        store = BulletinStore()
+        entry = create_entry(
+            entry_type=EntryType.NEED_MATERIAL,
+            topic="fizyka",
+            reason_code="no_knowledge_exists",
+            summary="Brak materialow",
+            requested_by="gap_planner",
+        )
+        store._entries = {entry.entry_id: entry}
+
+        executor = ActionExecutor()
+        executor.set_expert_bridge(bridge)
+        executor.set_bulletin_store(store)
+        result = executor.execute(self._make_plan(topic="fizyka"))
+
+        assert result["saved_to_input"] is False
+        assert store._entries[entry.entry_id].status == EntryStatus.OPEN
 
     def test_no_bridge_no_topic_still_works_legacy(self):
         """Without bridge, falls through to legacy path."""

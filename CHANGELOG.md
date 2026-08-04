@@ -2,6 +2,68 @@
 
 All notable changes to M.A.R.I.A. are documented here.
 
+Older, session-by-session development notes from before 1.0.0 are archived in
+[docs/CHANGELOG.md](docs/CHANGELOG.md) (Polish, kept as written at the time).
+
+## [1.1.0] - 2026-08-04
+
+Roughly four months of continuous production running since 1.0.0. Everything
+below is in the code and covered by the test suite — these are things that
+survived contact with a machine that runs unattended, not plans.
+
+### Added
+- **Self-awareness loop** — tick Phase 18 records periodic self-state snapshots
+  (capabilities, limitations, available tools); Phase 19 scans for systemic
+  failure (model unavailable / stuck dispatcher / action-failure storm) and
+  files a repair task that stays blocked behind an operator approval
+  (ADR-030, amended by ADR-031: approval *closes* the alert, it does not
+  dispatch an autonomous fix).
+- **Conductor** — a task queue and dispatcher for delegated build work, one
+  dispatcher per project, round-robin so a burn loop on one project cannot
+  starve another.
+- **Vision change gate** (`agent_core/vision/change_gate.py`) — decides whether
+  the scene actually changed before a heavy vision model is allowed to run, and
+  says *why* when it refuses.
+- **NIM health probe** (`agent_core/llm/nim_health.py`) — checks the remote API
+  with a real workload. The catalogue endpoint and `is_available` both report
+  healthy for a model that is gone.
+- **Workflow engine runs off the tick thread.** A workflow step is an ordinary
+  planner action, so it can be a 70B call; the first live run froze the pulse
+  for 43s. It now runs in a transient thread with an is-alive guard.
+
+### Changed
+- **Embeddings: `nomic-embed-text` → `bge-m3`** (768 → 1024 dimensions).
+  Measured on this project's Polish corpus: bge-m3 reached top-5 on 100% of
+  probe questions, nomic-embed-text on 43%. Cost: roughly 2.6x slower per text
+  on this CPU. Override with `SEMANTIC_EMBED_MODEL`.
+- **Vision model: `llava` → `gemma3:4b`.** llava reported a person in frames
+  that contained no people.
+- Local learning runs on `qwen3:8b` with thinking disabled, and no longer
+  re-introduces itself to the model on every call — a cached prefix took the
+  prefill from 117s to 0.2s on a hit.
+
+### Fixed
+- **Semantic memory was a 5-day window, not an archive.** Eviction sorted purely
+  by age and was blind to namespace, so it pushed out beliefs to make room for
+  bulk-indexed knowledge. It now protects namespaces whose eviction means the
+  cap itself is too small.
+- **Belief confidence measured survival, not truth** — a belief that merely
+  persisted gained confidence, and a second writer raised it nightly without
+  ever checking correctness.
+- **The heavy-model mutex was stolen between threads.** `threading.Lock` has no
+  owner, so a release from the wrong thread let a second heavy model load while
+  the first was still resident. The invariant it was supposed to enforce had
+  never actually held.
+- **Tests wrote into live project data** — 23 production files, including 40% of
+  the fetch-decision audit log over 46 days, which had in turn fed a false
+  "fetch success rate 0.56" bulletin. Now zero.
+- **The auth test wrote to `meta_data/` on a fresh clone.** Invisible locally
+  because the file already existed; it would have failed CI and every first run
+  after `git clone`.
+- The RSS feed was silent for six days because ten blank lines preceded `<?xml>`;
+  the Wikipedia client kept asking every 2s after a `429`; a log throttle carried
+  a ticking counter in its own key, so it never throttled anything.
+
 ## [1.0.0] - 2026-04-11
 
 First public release. M.A.R.I.A. has been running in production since February 2026.

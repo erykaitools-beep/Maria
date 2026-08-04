@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from agent_core.web_source.fetch_registry import FetchRegistry
-from agent_core.web_source.wiki_client import WikiClient
+from agent_core.web_source.wiki_client import WikiClient, WikiRateLimited
 from agent_core.web_source.rss_client import RSSClient, MARKET_FEEDS
 from agent_core.web_source.article_fetcher import ArticleFetcher
 from agent_core.web_source.content_writer import ContentWriter
@@ -116,9 +116,18 @@ def _is_rss_relevant(title: str, summary: str, keywords: Set[str]) -> bool:
     if not keywords:
         return True
     prefixes = tuple(keywords)  # str.startswith accepts a tuple of options
+    # summary is the raw RSS <description> = HTML markup (schema.org/Drupal
+    # feeds). Strip it before tokenizing, else _WORD_RE matches words inside
+    # tags/attributes/URLs (e.g. stem "article" hitting class="schema-Article")
+    # -- the "measure the markup, not the prose" class the 2026-07-16/17 RSS
+    # fixes targeted downstream. strip_html is a no-op on tag-free text, so plain
+    # titles/summaries are byte-identical.
+    from agent_core.web_source.content_writer import strip_html
     # NFC first: a decomposed diacritic (a + U+0328) is not a \w char and would
     # split the word mid-stem, so the stems (also NFC) would never prefix-match.
-    text = unicodedata.normalize("NFC", f"{title} {summary}").lower()
+    text = unicodedata.normalize(
+        "NFC", f"{title} {strip_html(summary)}"
+    ).lower()
     for token in _WORD_RE.findall(text):
         if token.startswith(prefixes):
             return True
@@ -360,6 +369,19 @@ def run_fetch_session(
                     else:
                         stats["skipped"] += 1
                         stats["skipped_write_none"] += 1
+
+        except WikiRateLimited as e:
+            # Wikipedia is refusing us; asking about the REMAINING topics would
+            # just collect one 429 apiece (measured 2026-07-26: 21 refusals in an
+            # afternoon, the loop grinding topic after topic while throttled).
+            # Count it once, stop the Wikipedia phase, and let RSS still run --
+            # a rate-limited session that comes back with RSS material is a
+            # partial win, not a dead one.
+            stats["errors"] += 1
+            had_error = True
+            stats["wiki_rate_limited"] = True
+            logger.warning(f"[WEB_SOURCE] Wikipedia rate-limited, skipping remaining topics: {e}")
+            break
 
         except Exception as e:
             stats["errors"] += 1

@@ -112,7 +112,13 @@ NVIDIA_NIM_BASE_URL = os.environ.get(
 # import it, so a model switch is a one-line change here instead of N scattered
 # strings drifting onto dead models. 2026-06-08: dracarys-llama-3.1-70b
 # (nemotron-super-49b-v1.5 degraded server-side, 70b-nemotron decommissioned 404).
-DEFAULT_NIM_MODEL = "abacusai/dracarys-llama-3.1-70b-instruct"
+# 2026-07-27: dracarys hit end-of-life too (HTTP 410 Gone). Third model retired
+# under us -- treat this constant as perishable and re-probe before trusting it.
+# Successor picked by measurement, not by parameter count: 5/5 answers, 5/5 valid
+# JSON, 5/5 correct fact, median 3.3s. The catalogue at /v1/models is NOT a list
+# of working models -- half the heavyweight names there return 404 with no
+# deployment behind them, so verify a replacement with a real request.
+DEFAULT_NIM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 NVIDIA_NIM_MODEL = os.environ.get("NVIDIA_NIM_MODEL", DEFAULT_NIM_MODEL)
 NIM_DAILY_TOKEN_LIMIT = int(os.environ.get("NIM_DAILY_TOKEN_LIMIT", "100000"))
 NIM_MONTHLY_TOKEN_LIMIT = int(os.environ.get("NIM_MONTHLY_TOKEN_LIMIT", "2000000"))

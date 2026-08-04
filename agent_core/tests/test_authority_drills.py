@@ -18,7 +18,6 @@ import pytest
 
 from agent_core.autonomy.authority_level import AuthorityLevel, AuthorityManager
 from agent_core.autonomy.approval_queue import ApprovalQueue
-from agent_core.autonomy.tool_budget import ToolBudgetManager
 from agent_core.autonomy import AutonomyPolicy
 from agent_core.autonomy.escalation import EscalationHandler
 from agent_core.effector.tool_specs import validate_args, is_tool_allowed
@@ -199,14 +198,6 @@ class TestConflictingRequests:
         assert req1.request_id != req2.request_id
         assert len(queue.get_pending()) == 2
 
-    def test_budget_handles_concurrent_same_tool(self):
-        budget = ToolBudgetManager(tool_rate_limits={"exec": 5})
-        budget.record_invocation("exec", success=True)
-        budget.record_invocation("exec", success=True)
-        ok, _ = budget.check_budget("exec")
-        assert ok  # Still under limit
-
-
 class TestAuthorityDowngradeDuringPending:
 
     def test_downgrade_rejects_all(self, tmp_path):
@@ -232,74 +223,8 @@ class TestAuthorityDowngradeDuringPending:
         assert ready is not None
 
 
-class TestCascadeFailure:
-
-    def test_three_failures_lock_tool(self):
-        budget = ToolBudgetManager(
-            max_consecutive_failures=3,
-            failure_cooldown_sec=60.0,
-        )
-        for _ in range(3):
-            budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-        ok, reason = budget.check_budget("exec")
-        assert not ok
-        assert "tool_locked" in reason
-
-    def test_lock_expires_allows_probe(self):
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=0.01,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-        time.sleep(0.02)
-        ok, _ = budget.check_budget("exec")
-        assert ok  # Probe allowed
-
-    def test_probe_success_resets(self):
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=0.01,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        time.sleep(0.02)
-        # Probe succeeds
-        budget.record_invocation("exec", success=True)
-        state = budget._states["exec"]
-        assert state.consecutive_failures == 0
-        assert state.backoff_multiplier == 1
-
-    def test_probe_failure_re_locks_with_backoff(self):
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=100.0,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)  # locked
-        state = budget._states["exec"]
-        assert state.backoff_multiplier == 2
-
-        # Simulate lock expiry
-        state.locked_until = time.time() - 1
-        # Probe fails
-        budget.record_invocation("exec", success=False)  # re-locked
-        assert state.backoff_multiplier == 4
-
-    def test_duplicate_request_blocked(self):
-        budget = ToolBudgetManager()
-        args = {"command": "rm -rf /"}
-        budget.record_request("exec", args)
-        ok, reason = budget.check_budget("exec", tool_args=args)
-        assert not ok
-        assert "duplicate_request" in reason
-
-    def test_different_tools_not_cascade(self):
-        """Failure in one tool doesn't lock another."""
-        budget = ToolBudgetManager(max_consecutive_failures=2)
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-        assert not budget.is_locked("read")
+# TestCascadeFailure (ToolBudgetManager drills) removed with the class
+# (ADR-026 CUT 2026-07-19): in-vitro drills of an object no exec path
+# consulted. Live cascade protection: coordinator 3-attempt retry with
+# backoff + INCIDENT bulletin, K7 consecutive-failure breaker, planner
+# failure memory (1h TTL), self_repair action_failure_storm rule.

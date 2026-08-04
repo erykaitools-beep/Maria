@@ -3,7 +3,8 @@ SleepProcessor - Memory consolidation during SLEEP mode.
 
 When Maria enters SLEEP mode, this processor runs through 5 phases:
 - NREM1: Gather stats about knowledge and beliefs (observation)
-- NREM2: Strengthen evidence-backed beliefs (+0.02 confidence, capped 0.95)
+- NREM2: Corroboration boost for beliefs with NO exam record, toward a
+         level set by source count (rewritten 2026-08-01; see constants)
 - NREM3: Compact the belief file, prune over-cap beliefs (FORGETTING)
 - Archival: Compress old JSONL logs to /mnt/storage
 - REM: Generate dreams from beliefs (creative connections)
@@ -36,6 +37,46 @@ BELIEF_STALE_DAYS = 30          # Observations older than this get extra decay
 BELIEF_PRUNE_FLOOR = 0.05       # Below this confidence = candidate for removal
 KNOWLEDGE_STALE_DAYS = 60       # Knowledge not reviewed in this many days
 MAX_DREAMS_PER_CYCLE = 3
+
+# --- Corroboration boost (rewritten 2026-08-01) ------------------------------
+#
+# The previous rule gave every belief with two or more evidence entries a flat
+# +0.02 on EVERY sleep cycle, capped at 0.95. Corroboration is a one-time
+# property of the evidence -- a belief either has two sources or it does not --
+# but it was being paid out again every night, so given enough nights every
+# qualifying belief reached the cap regardless of whether it was true.
+#
+# Measured before this change: 43.4% of 2000 beliefs sat at exactly 0.95, the
+# literal value of the old min() cap. Replaying the exam ratchet alone over the
+# true exam history produces a median of 0.600, so the gap up to 0.95 was this
+# function's doing, not the exams'. 156 beliefs that had never passed a single
+# exam held a median confidence of 0.95: they did not need to be right, only to
+# survive two dozen nights.
+#
+# Two rules now:
+#   1. The boost targets a LEVEL derived from how many sources corroborate the
+#      belief, and stops on arrival. It cannot accumulate with time.
+#   2. It applies only to beliefs with NO direct exam evidence. Corroboration is
+#      weak indirect evidence; where direct evidence exists the exam record
+#      governs, and a source count must never lift a belief that keeps failing.
+CORROBORATION_CEILING = 0.85    # never as high as the old 0.95 cap
+CORROBORATION_BASE = 0.70       # target with the minimum two sources
+CORROBORATION_PER_SOURCE = 0.03
+CORROBORATION_STEP = 0.02       # per-cycle approach rate toward the target
+
+def _has_exam_evidence(evidence) -> bool:
+    """True if this belief carries direct evidence from an exam.
+
+    Matches on the evidence source field, which BeliefStore writes as the
+    first element of each (source, ref, score) triple.
+    """
+    for ev in evidence or []:
+        if not isinstance(ev, (list, tuple)) or not ev:
+            continue
+        if str(ev[0]).lower() == "exam":
+            return True
+    return False
+
 
 # Dream templates (Polish)
 CONNECTION_TEMPLATES = [
@@ -208,19 +249,35 @@ class SleepProcessor:
         """NREM2 - Boost confidence of well-evidenced beliefs (mutating phase)."""
         boosted = 0
 
+        skipped_examined = 0
         if self._belief_store and self._mutate_beliefs:
             beliefs = self._belief_store.get_current()
             for belief in beliefs:
-                # Beliefs with evidence from multiple sources get a small boost
                 evidence = getattr(belief, 'evidence', []) or []
-                if len(evidence) >= 2 and belief.confidence < 0.95:
-                    new_conf = min(0.95, belief.confidence + 0.02)
-                    self._belief_store.revise(belief.belief_id, new_conf)
-                    boosted += 1
+                if len(evidence) < 2:
+                    continue
+                # Direct evidence wins. A belief that has sat exams is scored by
+                # those exams; corroboration must not lift one that keeps failing.
+                if _has_exam_evidence(evidence):
+                    skipped_examined += 1
+                    continue
+                # Corroboration sets a level, it does not pay out per cycle.
+                target = min(
+                    CORROBORATION_CEILING,
+                    CORROBORATION_BASE + CORROBORATION_PER_SOURCE * (len(evidence) - 2),
+                )
+                if belief.confidence >= target:
+                    continue
+                new_conf = min(target, belief.confidence + CORROBORATION_STEP)
+                self._belief_store.revise(belief.belief_id, new_conf)
+                boosted += 1
 
         result = {
             "phase": "nrem2",
             "beliefs_boosted": boosted,
+            # Recorded rather than silent: this is the population that used to
+            # be lifted to 0.95 without regard to its exam record.
+            "beliefs_left_to_exams": skipped_examined,
         }
         if not self._mutate_beliefs:
             result["skipped"] = "throttled"

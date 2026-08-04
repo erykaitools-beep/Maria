@@ -270,10 +270,18 @@ class OllamaBrain:
         self._llm_tape = tape
 
     def _record_tape(self, role: str, prompt: str, response: str,
-                     start_time: float, success: bool = True) -> None:
-        """Record interaction to tape if attached."""
+                     start_time: float, success: bool = True,
+                     model: Optional[str] = None) -> None:
+        """Record interaction to tape if attached.
+
+        `model` overrides the instance default for calls that ran on a different
+        local model (_ask_once(model=...)). Without it the tape would name the
+        instance's model while another one did the work -- the tape is what every
+        later measurement reads, so a wrong name there is worse than no entry.
+        """
         import time as _time
         latency_ms = (_time.time() - start_time) * 1000
+        used_model = model or self.model
 
         # Update current episode trace with LLM call stats
         try:
@@ -282,8 +290,8 @@ class OllamaBrain:
             if trace is not None:
                 trace.total_llm_calls += 1
                 trace.total_llm_latency_ms += latency_ms
-                if self.model and self.model not in trace.models_used:
-                    trace.models_used.append(self.model)
+                if used_model and used_model not in trace.models_used:
+                    trace.models_used.append(used_model)
         except (ImportError, AttributeError):
             pass
 
@@ -292,7 +300,7 @@ class OllamaBrain:
         try:
             from agent_core.llm.llm_tape import make_tape_entry
             entry = make_tape_entry(
-                model=self.model,
+                model=used_model,
                 role=role,
                 prompt=prompt or "",
                 response=response or "",
@@ -634,8 +642,17 @@ class OllamaBrain:
     # === NISKI POZIOM – SUROWE WYWOŁANIA ===
 
     def _chat(self, messages: List[Dict[str, str]], temperature: float = 0.3,
-              force_json: bool = False, **kwargs) -> str:
-        """Surowe wywołanie ollama.chat z listą wiadomości."""
+              force_json: bool = False, think: Optional[bool] = None,
+              model: Optional[str] = None, **kwargs) -> str:
+        """Surowe wywołanie ollama.chat z listą wiadomości.
+
+        `think` and `model` are named on purpose: everything left in **kwargs
+        goes into `options`, and both of these are TOP-LEVEL chat arguments --
+        passed through kwargs they would land in `options` and be silently
+        ignored by the server. `think=False` disables reasoning-model thinking
+        (measured on qwen3:8b with the production learning prompt: 208s -> 64s,
+        JSON still valid); leave it None for models that have no thinking mode.
+        """
         options = {"temperature": temperature, "num_ctx": 4096}
         options.update(kwargs)
 
@@ -644,13 +661,15 @@ class OllamaBrain:
         # next call cold-starts on CPU (~240s) and can hit the HTTP read-timeout
         # -> a spurious empty result. keep_alive keeps cold-starts rare.
         chat_kwargs = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": messages,
             "options": options,
             "keep_alive": _OLLAMA_KEEP_ALIVE,
         }
         if force_json:
             chat_kwargs["format"] = "json"
+        if think is not None:
+            chat_kwargs["think"] = think
 
         # Use the timeout-aware client (see __init__). On a stall, httpx raises a
         # TimeoutException here instead of hanging forever; it propagates like any
@@ -660,21 +679,38 @@ class OllamaBrain:
         return content.strip()
 
     def _ask_once(self, prompt: str, temperature: float = 0.3,
-                  force_json: bool = False, **kwargs) -> str:
+                  force_json: bool = False, think: Optional[bool] = None,
+                  model: Optional[str] = None, system: Optional[str] = None,
+                  **kwargs) -> str:
         """
         Jednorazowe pytanie: system + user (bez historii).
         Idealne do zadań typu: 'zwróć mi JSON wg schematu'.
-        Caller may set force_json=True to enable Ollama native JSON mode.
+        Caller may set force_json=True to enable Ollama native JSON mode,
+        think=False to switch off a reasoning model's thinking, model= to run
+        this one call on a different local model than the instance default, and
+        system= to replace the persona prefix for this call.
+
+        `system` matters for structured work. self.system_prompt is the full
+        persona -- identity, operator profile, conversation memory, operational
+        state -- plus a LIVE CLOCK ("godzina 11:17"), refreshed by
+        refresh_time_context() on every chat turn. Two costs on a CPU box:
+        it is ~1000 tokens of prefill that a "return JSON from this fragment"
+        task does not use, and because the clock moves the prefix is never
+        byte-stable, so Ollama's KV cache misses every single time (measured
+        2026-07-26: prefill 117.3s on a miss vs 0.2s on a hit). Callers doing
+        structured extraction should pass a short CONSTANT system string.
         """
         import time as _time
         start = _time.time()
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system",
+             "content": self.system_prompt if system is None else system},
             {"role": "user", "content": prompt},
         ]
         result = self._chat(messages, temperature=temperature,
-                            force_json=force_json, **kwargs)
-        self._record_tape("learning", prompt, result, start)
+                            force_json=force_json, think=think, model=model,
+                            **kwargs)
+        self._record_tape("learning", prompt, result, start, model=model)
         return result
 
     # === GŁÓWNE API – THINK Z HISTORIĄ ===

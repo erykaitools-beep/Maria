@@ -245,3 +245,264 @@ class TestMetaNeverAutoAchieves:
                                        status=GoalStatus.ACTIVE))
         store.update_progress(gid, 1.0)
         assert store.get(gid).status == GoalStatus.ACHIEVED
+
+
+class TestOneShotCompletionRespectsPerpetualGoals:
+    """The second door into ACHIEVED, which the progress guard does not cover.
+
+    `update_progress` refuses to auto-achieve META/MAINTENANCE at 1.0, but
+    `_complete_oneshot_goal` (critique / self_analyze / creative) calls
+    `update_status(ACHIEVED)` EXPLICITLY -- walking straight past that guard.
+    It does not fire on the live daemon today, because a wired CapabilityRouter
+    takes those actions and action_executor is the no-router fallback; under
+    goal-meta-learn alone 5 such actions ran in a single week, so the day the
+    router is absent this path would ACHIEVE the always-on mission and repeat
+    the 2026-06-09 outage (no active META -> FETCH pump stalls -> no_goals).
+    """
+
+    def _executor(self, store):
+        from agent_core.planner.action_executor import ActionExecutor
+        ex = ActionExecutor()
+        ex._goal_store = store
+        return ex
+
+    def _plan(self, goal_id):
+        from agent_core.planner.planner_model import create_plan, ActionType
+        return create_plan(
+            goal_id=goal_id,
+            goal_description="x",
+            action_type=ActionType.CREATIVE,
+            action_params={},
+        )
+
+    def test_oneshot_does_not_achieve_the_meta_mission(self, tmp_path):
+        store = _store(tmp_path)
+        store.seed_if_empty()
+        ex = self._executor(store)
+
+        ex._complete_oneshot_goal(self._plan("goal-meta-learn"), {"ok": True})
+
+        goal = store.get("goal-meta-learn")
+        assert goal.status == GoalStatus.ACTIVE, (
+            "one-shot completion closed the always-on mission -- this is the "
+            "2026-06-09 outage")
+        assert goal.progress == 0.0, "mission progress was forced to 1.0"
+
+    def test_oneshot_does_not_achieve_maintenance(self, tmp_path):
+        store = _store(tmp_path)
+        store.seed_if_empty()
+        ex = self._executor(store)
+
+        ex._complete_oneshot_goal(self._plan("goal-maint-health"), {"ok": True})
+
+        assert store.get("goal-maint-health").status == GoalStatus.ACTIVE
+
+    def test_oneshot_still_closes_an_ordinary_goal(self, tmp_path):
+        """The guard must not break what this method exists for.
+
+        Without a one-shot close an analytical goal stays PENDING forever and
+        the selector keeps re-picking it -- the loop this method was added to
+        stop. Only perpetual missions are exempt.
+        """
+        store = _store(tmp_path)
+        gid = store.create(create_goal(GoalType.USER, "jednorazowy", 0.5,
+                                       status=GoalStatus.ACTIVE))
+        ex = self._executor(store)
+
+        ex._complete_oneshot_goal(self._plan(gid), {"ok": True})
+
+        assert store.get(gid).status == GoalStatus.ACHIEVED
+        assert store.get(gid).progress == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Mission progress counter (CONTRACTS.md:484, implemented 2026-07-22)
+# --------------------------------------------------------------------------- #
+
+class _Analyzer:
+    """Minimal knowledge analyzer: only what the mission counter reads."""
+
+    def __init__(self, completed_ids, total):
+        self._completed = list(completed_ids)
+        self._total = total
+
+    def get_knowledge_snapshot(self):
+        return {
+            "total_files": self._total,
+            "files_by_status": {
+                "completed": [{"id": fid} for fid in self._completed],
+            },
+        }
+
+
+def _verified(monkeypatch, ids):
+    """Pin the independent-examiner verdicts (else the live file is read)."""
+    import agent_core.goals.success_criteria as sc
+    monkeypatch.setattr(
+        sc, "independently_verified_file_ids", lambda *a, **k: set(ids),
+    )
+
+
+class TestMissionProgressCounter:
+    """The mission earns a real number instead of a frozen 0.0.
+
+    Contract CONTRACTS.md:484 promised progress=<computed from
+    knowledge_coverage> and nothing ever implemented it, so the mission showed
+    0.0 through 143 days of work while nothing wrote to the goal at all -- its
+    updated_at froze for 29 days and every "when did this last move" consumer
+    read the gap instead of the mission.
+    """
+
+    def test_progress_is_verified_fraction_not_self_graded(
+        self, tmp_path, monkeypatch,
+    ):
+        """Four files marked completed, two actually verified -> 0.5, not 1.0.
+
+        The self-graded 'completed' flag reads 0.963 in production where
+        independent verification reads 0.606. "Read" is not "known".
+        """
+        from agent_core.routing.handlers import update_mission_progress
+        _verified(monkeypatch, {"a.txt", "b.txt"})
+        store = _store(tmp_path)
+        store.seed_if_empty()
+        analyzer = _Analyzer(["a.txt", "b.txt", "c.txt", "d.txt"], total=4)
+
+        assert update_mission_progress(
+            store.get("goal-meta-learn"), store, analyzer) is True
+        assert store.get("goal-meta-learn").progress == 0.5
+
+    def test_full_coverage_does_not_close_the_mission(
+        self, tmp_path, monkeypatch,
+    ):
+        """1.0 must not trip auto-ACHIEVED -- that is the 2026-06-09 outage."""
+        from agent_core.routing.handlers import update_mission_progress
+        _verified(monkeypatch, {"a.txt", "b.txt"})
+        store = _store(tmp_path)
+        store.seed_if_empty()
+
+        update_mission_progress(
+            store.get("goal-meta-learn"), store,
+            _Analyzer(["a.txt", "b.txt"], total=2))
+
+        goal = store.get("goal-meta-learn")
+        assert goal.progress == 1.0
+        assert goal.status == GoalStatus.ACTIVE, (
+            "coverage 1.0 closed the eternal mission")
+
+    def test_progress_may_fall_when_the_pump_fetches_material(
+        self, tmp_path, monkeypatch,
+    ):
+        """New material means MORE to do, so the counter legitimately drops.
+
+        Documented here because a counter that goes backwards looks like a bug
+        to the next reader -- it is the honest shape of a mission that is never
+        finished. Nothing reaps the mission on a falling number.
+        """
+        from agent_core.routing.handlers import update_mission_progress
+        _verified(monkeypatch, {"a.txt", "b.txt"})
+        store = _store(tmp_path)
+        store.seed_if_empty()
+
+        update_mission_progress(
+            store.get("goal-meta-learn"), store,
+            _Analyzer(["a.txt", "b.txt"], total=2))
+        assert store.get("goal-meta-learn").progress == 1.0
+
+        # Pump fetched two fresh files: same verified set, bigger denominator.
+        update_mission_progress(
+            store.get("goal-meta-learn"), store,
+            _Analyzer(["a.txt", "b.txt"], total=4))
+
+        goal = store.get("goal-meta-learn")
+        assert goal.progress == 0.5
+        assert goal.status == GoalStatus.ACTIVE
+
+    def test_write_bumps_updated_at_heartbeat(self, tmp_path, monkeypatch):
+        """The write IS the heartbeat -- staleness readers ask updated_at."""
+        from agent_core.routing.handlers import update_mission_progress
+        _verified(monkeypatch, {"a.txt"})
+        store = _store(tmp_path)
+        store.seed_if_empty()
+        store.get("goal-meta-learn").updated_at = time.time() - 29 * 86400
+        # Pre-assert, else this test passes even if the mutation never stuck
+        # and the goal was simply fresh from seeding.
+        assert (time.time() - store.get("goal-meta-learn").updated_at) > 28 * 86400
+
+        update_mission_progress(
+            store.get("goal-meta-learn"), store,
+            _Analyzer(["a.txt"], total=2))
+
+        idle_days = (time.time() - store.get("goal-meta-learn").updated_at) / 86400
+        assert idle_days < 0.01, f"mission still looks {idle_days:.0f} days idle"
+
+    def test_write_is_flushed_to_disk_not_left_dirty(
+        self, tmp_path, monkeypatch,
+    ):
+        """A fresh store reading the same file must see the new progress.
+
+        The mission never crosses the achieved-save path in
+        update_learning_goal, so without an explicit save() the record stayed
+        dirty-in-memory until some unrelated handler flushed it. On 2026-07-23
+        the on-disk file showed 0.0 for 26+ minutes after the counter logged
+        0.606, and the external check script called a working counter
+        PODEJRZANE.
+        """
+        from agent_core.routing.handlers import update_mission_progress
+        _verified(monkeypatch, {"a.txt"})
+        path = tmp_path / "goals.jsonl"
+        store = GoalStore(path)
+        store.seed_if_empty()
+        # Flush the seed and empty the dirty-set FIRST: live daemons run with
+        # a long-settled store, and a leftover dirty flag from seeding lets
+        # save() write the record even if update_progress forgot _mark_dirty
+        # (mutation run 2026-07-23 proved this masked exactly that bug).
+        store.save()
+
+        update_mission_progress(
+            store.get("goal-meta-learn"), store, _Analyzer(["a.txt"], total=2))
+
+        reloaded = GoalStore(path)
+        reloaded.load()
+        assert reloaded.get("goal-meta-learn").progress == 0.5, (
+            "counter value never reached disk -- external readers see 0.0")
+
+    def test_learning_goal_path_routes_meta_to_the_counter(
+        self, tmp_path, monkeypatch,
+    ):
+        """The META branch actually fires on the path the planner calls.
+
+        Both executor paths funnel into update_learning_goal, which used to
+        return early for anything that is not LEARNING -- that early return is
+        why the contract clause stayed unimplemented in practice.
+        """
+        from agent_core.routing.handlers import update_learning_goal
+        _verified(monkeypatch, {"a.txt"})
+        store = _store(tmp_path)
+        store.seed_if_empty()
+
+        update_learning_goal(
+            _MissionPlan("goal-meta-learn"), {"success": True}, store,
+            _Analyzer(["a.txt", "b.txt"], total=2), None,
+        )
+
+        assert store.get("goal-meta-learn").progress == 0.5
+
+    def test_no_analyzer_leaves_progress_untouched(self, tmp_path):
+        """No measurement -> no write. A missing analyzer must not zero it."""
+        from agent_core.routing.handlers import update_mission_progress
+        store = _store(tmp_path)
+        store.seed_if_empty()
+        store.update_progress("goal-meta-learn", 0.61)
+
+        assert update_mission_progress(
+            store.get("goal-meta-learn"), store, None) is False
+        assert store.get("goal-meta-learn").progress == 0.61
+
+
+class _MissionPlan:
+    """Plan shaped like the planner's, for the routing entry point."""
+
+    def __init__(self, goal_id):
+        self.goal_id = goal_id
+        self.action_params = {}
+        self.action_type = "learn"

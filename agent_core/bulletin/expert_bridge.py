@@ -225,6 +225,20 @@ class ExpertBridge:
                 success=False, topic=topic, reason="no_llm_fn",
             )
 
+        # Same Step 0 dedup as ask_about_topic. This entry point was missing it,
+        # and make_ask_expert_handler PREFERS it whenever a context_prompt is
+        # present -- so the guarded door was the one production rarely used.
+        # Measured 2026-07-26: input/expert_fizyka.txt held 44 byte-identical
+        # answers, and every one of them carried a '# Pytanie: Maria
+        # potrzebuje...' header, i.e. the context_prompt shape. Nothing stopped
+        # re-asking a topic whose file was already 100 KB.
+        if self._expert_file_exists(topic):
+            return ExpertResponse(
+                success=False, topic=topic,
+                reason="expert_material_already_exists",
+                context_prompt=context_prompt,
+            )
+
         prompt = self._enhance_prompt(context_prompt, topic)
 
         start = time.time()
@@ -267,10 +281,15 @@ class ExpertBridge:
     def _expert_file_exists(topic: str) -> bool:
         """Check if input/expert_{topic}.txt already has substantial content."""
         import re
-        from pathlib import Path
+
+        # Share the ONE notion of where the corpus lives with the two save
+        # paths instead of recomputing it from this file's location -- that was
+        # a third hardcoded root, and it meant this check read the LIVE corpus
+        # even under pytest.
+        from agent_core.routing.handlers import EXPERT_INPUT_DIR
 
         slug = re.sub(r'[^a-z0-9]+', '_', topic.lower().strip())[:60].strip('_')
-        filepath = Path(__file__).resolve().parents[2] / "input" / f"expert_{slug}.txt"
+        filepath = EXPERT_INPUT_DIR / f"expert_{slug}.txt"
         try:
             if filepath.exists() and filepath.stat().st_size > 5000:
                 logger.info(

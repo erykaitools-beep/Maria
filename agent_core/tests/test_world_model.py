@@ -1111,8 +1111,67 @@ class TestBeliefBuilder:
         current = store.get_current()
         file_beliefs = [b for b in current if b.entity == "f1.txt"]
         assert len(file_beliefs) == 1
-        assert file_beliefs[0].confidence == 0.6  # 0.5 + 0.1
+        # Confidence moves halfway toward the outcome: 0.5 + 0.5*(1.0-0.5).
+        assert file_beliefs[0].confidence == pytest.approx(0.75, abs=1e-3)
+        assert file_beliefs[0].confidence > 0.5, "zdany egzamin ma podnosic pewnosc"
         assert file_beliefs[0].belief_type == BeliefType.FACT
+
+    def test_repeated_passes_do_not_ratchet_to_ceiling(self, tmp_path):
+        """Confidence must converge to the belief's pass rate, not to 1.0.
+
+        Regression guard for the defect this replaced: +0.10 per pass and
+        -0.15 per fail drifted +0.04 per exam at the measured 76.3% pass
+        rate, so anything examined often enough reached the ceiling whether
+        or not it was true. Measured before the fix: 98.5% of beliefs at
+        0.9+, and 156 beliefs that had never passed an exam sitting at a
+        median 0.95.
+        """
+        builder = self._make_builder(tmp_path)
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        store.add(create_belief(
+            entity="f3.txt",
+            entity_type=EntityType.FILE,
+            belief_type=BeliefType.OBSERVATION,
+            content="File f3.txt",
+            confidence=0.5,
+            source=BeliefSource.LEARNING,
+            source_id="file:f3.txt",
+        ))
+
+        # Three passes then one fail: a 75% pass rate.
+        for score in (0.85, 0.85, 0.85, 0.3):
+            builder.update_from_exam(store, {"file": "f3.txt", "score": score})
+
+        conf = [b for b in store.get_current() if b.entity == "f3.txt"][0].confidence
+        assert conf < 0.9, (
+            f"pewnosc {conf} dobila do sufitu mimo oblanego egzaminu -- "
+            "zapatka wrocila"
+        )
+        # 0.5 -> 0.75 -> 0.875 -> 0.9375, then the fail halves it to 0.469.
+        assert conf == pytest.approx(0.469, abs=1e-3)
+        assert conf < 0.5, "jeden oblany egzamin musi realnie zabolec"
+
+    def test_beliefs_that_never_pass_stay_low(self, tmp_path):
+        """A belief that fails every exam must not look confident."""
+        builder = self._make_builder(tmp_path)
+        store = BeliefStore(tmp_path / "beliefs.jsonl")
+        store.add(create_belief(
+            entity="f4.txt",
+            entity_type=EntityType.FILE,
+            belief_type=BeliefType.OBSERVATION,
+            content="File f4.txt",
+            confidence=0.5,
+            source=BeliefSource.LEARNING,
+            source_id="file:f4.txt",
+        ))
+
+        for _ in range(3):
+            builder.update_from_exam(store, {"file": "f4.txt", "score": 0.2})
+
+        conf = [b for b in store.get_current() if b.entity == "f4.txt"][0].confidence
+        assert conf < 0.3, (
+            f"przekonanie oblalo 3 egzaminy i ma pewnosc {conf}"
+        )
 
     def test_update_from_exam_fail(self, tmp_path):
         builder = self._make_builder(tmp_path)
@@ -1135,7 +1194,9 @@ class TestBeliefBuilder:
         current = store.get_current()
         file_beliefs = [b for b in current if b.entity == "f2.txt"]
         assert len(file_beliefs) == 1
-        assert file_beliefs[0].confidence == 0.35  # 0.5 - 0.15
+        # Halfway toward 0.0: 0.5 + 0.5*(0.0-0.5).
+        assert file_beliefs[0].confidence == pytest.approx(0.25, abs=1e-3)
+        assert file_beliefs[0].confidence < 0.5, "oblany egzamin ma obnizac pewnosc"
         assert file_beliefs[0].belief_type == BeliefType.OBSERVATION  # Not upgraded
 
     def test_update_from_exam_no_file(self, tmp_path):
@@ -1805,6 +1866,39 @@ class TestSmartPruning:
         assert score_good > score_bad
         assert score_good > 0.3
         assert score_bad < 0.3
+
+    def test_conf_first_flag_fixes_revision_paradox(self, monkeypatch):
+        """BELIEF_SCORE_CONF_FIRST: a fresh high-confidence FACT must not be
+        pruned before an aged, churned belief.
+
+        Measured on the live 2000-belief store (2026-07-17): under the default
+        revision-based scoring the three weakest -- first-pruned -- beliefs were
+        fresh conf 0.90-0.95 rev1 FACTs, while beliefs whose revision the
+        maintenance churn had ratcheted to 20-840 sat protected. Maria forgot
+        freshly-learned knowledge first. Both beliefs below are fresh by
+        updated_at (revise() bumps it), so they differ only in confidence and
+        revision -- isolating the churn ratchet. OFF pins the paradox, ON the fix.
+        """
+        import agent_core.world_model.belief_maintenance as bm
+        now = time.time()
+        fresh = create_belief(
+            entity="fresh_topic", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT, content="freshly learned",
+            confidence=0.95, source=BeliefSource.EXAM,
+            belief_id="b-fresh", revision=1,
+        )
+        aged = create_belief(
+            entity="aged_topic", entity_type=EntityType.TOPIC,
+            belief_type=BeliefType.FACT, content="churned incumbent",
+            confidence=0.79, source=BeliefSource.EXAM,
+            belief_id="b-aged", revision=37,
+        )
+        # Default (revision ratchet ON): the paradox -- lower-confidence aged wins.
+        monkeypatch.setattr(bm, "_CONF_FIRST", False)
+        assert bm.compute_belief_score(fresh, now, {}) < bm.compute_belief_score(aged, now, {})
+        # Confidence-first: the truthier, freshly-learned FACT is kept.
+        monkeypatch.setattr(bm, "_CONF_FIRST", True)
+        assert bm.compute_belief_score(fresh, now, {}) > bm.compute_belief_score(aged, now, {})
 
     def test_smart_prune_keeps_high_scored(self, tmp_path):
         from agent_core.world_model.belief_maintenance import smart_prune

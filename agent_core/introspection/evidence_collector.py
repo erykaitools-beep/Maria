@@ -27,14 +27,28 @@ logger = logging.getLogger(__name__)
 _TAIL_LIMIT = 10
 
 
+def _confidence_label(value: float) -> str:
+    """Map numeric confidence to the canonical label (same thresholds as
+    the knowledge-query writers always used)."""
+    return "high" if value >= 0.7 else ("medium" if value >= 0.4 else "low")
+
+
 @dataclass
 class Evidence:
     """Single fact from operational data."""
     key: str               # e.g. "planner.last_action"
     value: str             # e.g. "EXAM"
     source: str            # e.g. "planner_decisions.jsonl"
-    confidence: str        # "high" | "medium" | "low"
+    confidence: str        # "high" | "medium" | "low" (canonical)
     timestamp: float = 0.0  # when this fact was recorded
+
+    def __post_init__(self):
+        # Writers historically passed a mix of floats (0.95) and labels
+        # ("high"); response_builder compares against labels, so the float
+        # ones silently never counted as high-confidence. Normalize here so
+        # ANY writer -- present or future -- yields the canonical label.
+        if isinstance(self.confidence, (int, float)):
+            self.confidence = _confidence_label(float(self.confidence))
 
 
 class EvidenceCollector:
@@ -222,7 +236,7 @@ class EvidenceCollector:
                 return evidence
 
             avg_conf = summary.get("avg_confidence", 0)
-            conf_str = "high" if avg_conf >= 0.7 else ("medium" if avg_conf >= 0.4 else "low")
+            conf_str = _confidence_label(avg_conf)
             evidence.append(Evidence(
                 key="knowledge.topic_summary",
                 value=(
@@ -237,7 +251,7 @@ class EvidenceCollector:
             ))
 
             for r in results[:5]:
-                conf_str = "high" if r.confidence >= 0.7 else ("medium" if r.confidence >= 0.4 else "low")
+                conf_str = _confidence_label(r.confidence)
                 evidence.append(Evidence(
                     key=f"knowledge.{r.source.value}",
                     value=r.content,
@@ -342,7 +356,7 @@ class EvidenceCollector:
                 "Homeostasis (zarzadzanie zasobami, tryby ACTIVE/REDUCED/SLEEP), "
                 "K1-K13 cognitive core (percepcja, cele, planner, swiat, autonomia, deliberacja, meta-kognicja, bezpieczenstwo, eksperymenty, samoanaliza, kreatywnosc), "
                 "Vision (kamera USB + LLaVA), "
-                "Semantic Memory (nomic-embed-text, wektory 768-dim), "
+                "Semantic Memory (bge-m3, wektory 1024-dim), "
                 "Code Agent (autonomiczne kodowanie przez Claude/Codex + OpenClaw), "
                 "Telegram Bridge (komunikacja z operatorem), "
                 "Web UI (panel zarzadzania)."
@@ -1032,7 +1046,7 @@ class EvidenceCollector:
                 for g in active[:5]:
                     evidence.append(Evidence(
                         key=f"goal.{g.id}",
-                        value=f"[{g.goal_type.value}] {g.title}",
+                        value=f"[{g.type.value}] {g.description}",
                         source="goal_store (runtime)",
                         confidence="high", timestamp=time.time(),
                     ))
@@ -1045,8 +1059,8 @@ class EvidenceCollector:
         active = [g for g in goals_data.values() if g.get("status") == "active"]
         for g in active[:5]:
             evidence.append(Evidence(
-                key=f"goal.{g.get('goal_id', '?')}",
-                value=f"[{g.get('goal_type', '?')}] {g.get('title', '?')}",
+                key=f"goal.{g.get('id', '?')}",
+                value=f"[{g.get('type', '?')}] {g.get('description', '?')}",
                 source="goals.jsonl",
                 confidence="medium", timestamp=time.time(),
             ))

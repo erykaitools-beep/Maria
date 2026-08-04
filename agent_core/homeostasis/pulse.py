@@ -7,7 +7,11 @@ Wakes main loop if immediate action needed.
 Monitors:
 - OOM imminent (< 100 MB free)
 - Thermal shutdown imminent (> 98°C)
-- LLM hang (> 60s latency)
+
+LLM-hang detection deliberately absent: ResourceSensor never carries a
+real latency measurement here, and on a CPU-only box a 60s inference is
+normal operation, not a hang (call_with_timeout + TickWatchdog own that
+concern).
 
 Spec reference: homeostasis_spec.md lines 1498-1560
 """
@@ -52,7 +56,6 @@ class HomeostasisPulseThread(threading.Thread):
     # Critical thresholds (must act immediately)
     RAM_CRITICAL_PCT = 3      # < 3% free → OOM imminent
     TEMP_CRITICAL_C = 98      # > 98°C → shutdown imminent
-    LATENCY_CRITICAL_MS = 60000  # > 60s → LLM hung
 
     def __init__(
         self,
@@ -134,15 +137,6 @@ class HomeostasisPulseThread(threading.Thread):
                 message=f"Thermal shutdown imminent ({thermal.cpu_temp_c:.1f}°C)",
                 timestamp=time.time(),
                 metric_value=thermal.cpu_temp_c,
-            ))
-
-        # Check LLM hang (if latency available)
-        if resource.inference_latency_ms > self.LATENCY_CRITICAL_MS:
-            self._send_alert(PulseAlert(
-                alert_type="CRITICAL",
-                message=f"LLM hung ({resource.inference_latency_ms/1000:.1f}s latency)",
-                timestamp=time.time(),
-                metric_value=resource.inference_latency_ms,
             ))
 
     def _send_alert(self, alert: PulseAlert) -> None:

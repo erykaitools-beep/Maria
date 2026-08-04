@@ -17,9 +17,14 @@ from agent_core.web_source.fetch_registry import (
     DEAD_TOPIC_TTL_SEC,
     EXHAUSTED_TOPIC_TTL_SEC,
 )
-from agent_core.web_source.wiki_client import WikiClient, WikiTransientError
+from agent_core.web_source.wiki_client import (
+    MAX_CONSECUTIVE_429,
+    WikiClient,
+    WikiRateLimited,
+    WikiTransientError,
+)
 from agent_core.web_source.rss_client import RSSClient
-from agent_core.web_source.content_writer import ContentWriter
+from agent_core.web_source.content_writer import ContentWriter, strip_html
 from agent_core.web_source.topic_suggester import TopicSuggester
 from agent_core.web_source import (
     run_fetch_session, _build_topic_keywords, _is_rss_relevant,
@@ -437,6 +442,183 @@ ATOM_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
 </feed>"""
 
 
+class _WikiStubResponse:
+    """requests.Response surface that WikiClient touches, incl. status/headers."""
+
+    def __init__(self, status_code=200, payload=None, headers=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._payload = payload if payload is not None else []
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests as _requests
+
+            raise _requests.HTTPError(
+                "%d Client Error" % self.status_code, response=self
+            )
+
+    def json(self):
+        return self._payload
+
+
+class _WikiStubSession:
+    """Serves a scripted sequence of responses; repeats the last one forever."""
+
+    def __init__(self, responses):
+        self.headers = {}
+        self._responses = list(responses)
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        index = min(self.calls - 1, len(self._responses) - 1)
+        return self._responses[index]
+
+
+def _wiki_client_serving(responses, monkeypatch):
+    """WikiClient wired to scripted responses, with real sleeping disabled."""
+    from agent_core.web_source import wiki_client as wiki_module
+
+    monkeypatch.setattr(wiki_module.time, "sleep", lambda _s: None)
+    client = WikiClient()
+    client._session = _WikiStubSession(responses)
+    return client
+
+
+_OPENSEARCH_OK = ["fizyka", ["Fizyka"], [""], ["https://pl.wikipedia.org/wiki/Fizyka"]]
+
+
+class TestWikiRateLimitBackoff:
+    """429 handling: back off, and stop asking once refusal is the pattern.
+
+    Before 2026-07-26 the client kept its flat 2s cadence through a refusal --
+    which is exactly what keeps a caller throttled. Measured that afternoon:
+    21 refusals, in bursts of 2-3 spaced 2s apart, the session grinding through
+    topic after topic. The three weeks before it: zero errors, so this path had
+    never once been exercised under refusal.
+    """
+
+    def test_429_arms_a_cooldown(self, monkeypatch):
+        client = _wiki_client_serving([_WikiStubResponse(429)], monkeypatch)
+        before = client._cooldown_until
+        with pytest.raises(WikiTransientError):
+            client.search("fizyka")
+        assert client._cooldown_until > before
+        assert client._consecutive_429 == 1
+
+    def test_429_honours_retry_after_header(self, monkeypatch):
+        client = _wiki_client_serving(
+            [_WikiStubResponse(429, headers={"Retry-After": "17"})], monkeypatch
+        )
+        with pytest.raises(WikiTransientError):
+            client.search("fizyka")
+        owed = client._cooldown_until - time.time()
+        assert 15 < owed <= 17, owed
+
+    def test_third_consecutive_429_stops_the_session(self, monkeypatch):
+        client = _wiki_client_serving([_WikiStubResponse(429)], monkeypatch)
+        for _ in range(2):
+            with pytest.raises(WikiTransientError):
+                client.search("fizyka")
+        # The third refusal is no longer "try the next topic" -- it is "stop".
+        with pytest.raises(WikiRateLimited):
+            client.search("fizyka")
+
+    def test_rate_limited_is_never_mistaken_for_no_such_article(self, monkeypatch):
+        """The whole point of WikiTransientError: empty list is a PERMANENT verdict.
+
+        WikiRateLimited must stay a subclass, or a caller catching the old type
+        would let a rate limit fall through to mark_topic_dead and erase a live
+        topic forever.
+        """
+        assert issubclass(WikiRateLimited, WikiTransientError)
+        client = _wiki_client_serving([_WikiStubResponse(429)], monkeypatch)
+        # Drive it past the stop threshold so the raised type is WikiRateLimited,
+        # then check that type is still catchable as the old one.
+        for _ in range(MAX_CONSECUTIVE_429 - 1):
+            with pytest.raises(WikiTransientError):
+                client.search("fizyka")
+        with pytest.raises(WikiTransientError) as excinfo:
+            client.search("fizyka")
+        assert isinstance(excinfo.value, WikiRateLimited)
+
+    def test_success_resets_the_streak(self, monkeypatch):
+        client = _wiki_client_serving(
+            [
+                _WikiStubResponse(429),
+                _WikiStubResponse(429),
+                _WikiStubResponse(200, payload=_OPENSEARCH_OK),
+                _WikiStubResponse(429),
+            ],
+            monkeypatch,
+        )
+        for _ in range(2):
+            with pytest.raises(WikiTransientError):
+                client.search("fizyka")
+        assert client._consecutive_429 == 2, "streak must actually have built up"
+        assert client.search("fizyka") == ["Fizyka"]
+        assert client._consecutive_429 == 0
+        # A later refusal starts counting from one again, so an occasional 429
+        # in a long healthy session never accumulates into a false stop.
+        with pytest.raises(WikiTransientError) as excinfo:
+            client.search("fizyka")
+        assert not isinstance(excinfo.value, WikiRateLimited)
+
+    def test_cooldown_is_capped(self, monkeypatch):
+        from agent_core.web_source.wiki_client import BACKOFF_MAX_SEC
+
+        client = _wiki_client_serving(
+            [_WikiStubResponse(429, headers={"Retry-After": "99999"})], monkeypatch
+        )
+        with pytest.raises(WikiTransientError):
+            client.search("fizyka")
+        owed = client._cooldown_until - time.time()
+        # Both halves matter: a cooldown that was never armed is also "<= max",
+        # so assert it is genuinely armed AND capped.
+        assert owed > 0, "cooldown was never armed"
+        assert owed <= BACKOFF_MAX_SEC
+
+
+class _StubResponse:
+    """Exactly the surface RSSClient touches on a requests.Response."""
+
+    def __init__(self, text):
+        self.text = text
+
+    def raise_for_status(self):
+        return None
+
+
+class _StubSession:
+    """Exactly the surface RSSClient touches on a requests.Session.
+
+    A real (tiny) object rather than MagicMock on purpose: a bare mock answers
+    calls to methods that do not exist and swallows wrong kwargs, which is the
+    failure mode agent_core/tests/test_mock_hygiene_audit.py exists to ratchet
+    down. If RSSClient ever starts calling something else on its session, these
+    tests should break loudly instead of quietly agreeing.
+    """
+
+    def __init__(self, text):
+        self.headers = {}
+        self._response = _StubResponse(text)
+        self.requested = []
+
+    def get(self, url, timeout=None):
+        self.requested.append((url, timeout))
+        return self._response
+
+
+def _entries_for_payload(text, url="https://test.com/rss"):
+    """Run RSSClient.fetch_entries against a fixed response body."""
+    with patch("agent_core.web_source.rss_client.requests.Session",
+               lambda: _StubSession(text)):
+        client = RSSClient(feed_urls=[url])
+        client._last_request_ts = time.time()
+        return client.fetch_entries(url)
+
+
 class TestRSSClient:
     """RSSClient unit tests with mocked requests."""
 
@@ -501,6 +683,57 @@ class TestRSSClient:
         client = RSSClient(feed_urls=["https://test.com/bad"])
         client._last_request_ts = time.time()
         assert client.fetch_entries("https://test.com/bad") == []
+
+    def test_fetch_entries_leading_blank_lines(self):
+        """Blank lines before <?xml> must not kill the whole feed.
+
+        Live shape (niebezpiecznik.pl, dead 2026-07-20..26): the feed
+        302-redirects to feedburner, which prepends ten CRLFs. ET.fromstring()
+        requires the declaration at offset 0 and rejects the ENTIRE document
+        ("XML or text declaration not at start of entity: line 11, column 0"),
+        so 168 KB of well-formed Atom read as an unparseable feed for six days.
+        """
+        entries = _entries_for_payload("\r\n" * 10 + RSS20_SAMPLE)
+
+        assert len(entries) == 2
+        assert entries[0]["title"] == "Article One"
+
+    def test_fetch_entries_leading_bom_then_whitespace(self):
+        """BOM followed by blank lines -- the combined real-world shape.
+
+        Deliberately NOT a BOM-only case: ElementTree already skips a lone
+        leading BOM in a str, so a BOM-only test passes with or without the
+        lstrip and would pin nothing. Once ANY whitespace follows the BOM the
+        document is rejected, so this is the smallest payload that fails
+        without the fix while still exercising the BOM half of the strip set.
+        """
+        entries = _entries_for_payload("\ufeff" + "\r\n" * 3 + RSS20_SAMPLE)
+
+        assert len(entries) == 2
+
+    def test_leading_whitespace_strip_does_not_rescue_real_garbage(self):
+        """Guard the fix's blast radius: only LEADING whitespace is forgiven.
+
+        Without this, a future 'be more lenient' edit could start swallowing
+        genuinely broken payloads (an HTML error page, a truncated body) as
+        empty-but-fine instead of surfacing them.
+        """
+        garbage = "\r\n" * 10 + "<html><body>503 Service Unavailable"
+        assert _entries_for_payload(garbage) == []
+
+    def test_no_feed_is_dead_by_construction(self):
+        """Every configured feed must be able to clear the content floor.
+
+        kosmonauta.net sat in DEFAULT_FEEDS for months with ~90-char summaries
+        against MIN_CONTENT_CHARS=200 -- fetched every session, ZERO articles
+        ever written (registry, full history). Same criterion already used to
+        reject kwantowo.pl. This pins the list against re-adding a feed that
+        cannot possibly deliver on the ArticleFetcher-less profile.
+        """
+        from agent_core.web_source.rss_client import DEFAULT_FEEDS
+
+        assert not any("kosmonauta.net" in u for u in DEFAULT_FEEDS)
+        assert not any("kwantowo.pl" in u for u in DEFAULT_FEEDS)
 
     @patch("agent_core.web_source.rss_client.requests.Session")
     def test_fetch_all_deduplicates(self, mock_session_cls):
@@ -622,6 +855,59 @@ class TestContentWriter:
         )
         assert filename is not None
         assert filename.startswith("web_rss_")
+
+    # -- strip_html: RSS <description> HTML cleanup (2026-07-17) --
+
+    # Shape of the naukawpolsce.pl/scienceinpoland.pl schema.org teaser: ~700
+    # raw chars of Drupal markup, ~15 real words. Passed the 200-char gate as raw
+    # markup; must now be rejected because real text is what gets measured.
+    _MARKUP_TEASER = (
+        '<div class="field field--name-body field--type-text-with-summary">'
+        '<span property="schema:name">Teleskop Webba zbadal galaktyke</span>'
+        '<div class="field"><div class="rss-time">2 minuty</div>'
+        '<span property="schema:author">PAP</span></div>'
+        "<p>Astronomowie&#8230;</p></div>"
+    )
+
+    def test_strip_html_rejects_markup_only_teaser(self, tmp_path):
+        """Content-free schema.org teaser: >200 raw chars, <200 real -> None."""
+        writer = ContentWriter(input_dir=tmp_path)
+        assert len(self._MARKUP_TEASER) > 200  # would have passed pre-fix
+        result = writer.write_article(
+            title="Teleskop Webba", content=self._MARKUP_TEASER,
+            url="https://naukawpolsce.pl/a1", source_type="rss",
+        )
+        assert result is None
+
+    def test_strip_html_keeps_real_article_clean(self, tmp_path):
+        """A real HTML body survives, and what lands on disk is plain text."""
+        writer = ContentWriter(input_dir=tmp_path)
+        html_body = "<p>" + ("Wypalenie zawodowe to stan wyczerpania. " * 20) + "</p>"
+        filename = writer.write_article(
+            title="Wypalenie", content=html_body,
+            url="https://focus.pl/a1", source_type="rss",
+        )
+        assert filename is not None
+        body = (tmp_path / filename).read_text(encoding="utf-8").split("# ---", 1)[-1]
+        assert "<p>" not in body and "<" not in body  # tags gone
+        assert "Wypalenie zawodowe" in body
+
+    def test_strip_html_noop_on_plain_text(self, tmp_path):
+        """Tag-free content (Wikipedia extracts) passes through byte-identical."""
+        writer = ContentWriter(input_dir=tmp_path)
+        clean = "Logika matematyczna to dzial.\n\nDrugi akapit tekstu. " * 10
+        filename = writer.write_article(
+            title="Logika", content=clean,
+            url="https://pl.wikipedia.org/wiki/Logika", source_type="wikipedia",
+        )
+        body = (tmp_path / filename).read_text(encoding="utf-8").split("# ---", 1)[-1].lstrip("\n")
+        assert body.rstrip("\n") == clean.strip()
+
+    def test_strip_html_unit(self):
+        assert strip_html("<p>Hej &amp; ho</p>") == "Hej & ho"
+        assert strip_html("plain, no tags") == "plain, no tags"  # untouched
+        assert strip_html("") == ""
+        assert strip_html("a<br/>b &#8230;") == "a b …"
 
     def test_slugify_basic(self):
         assert ContentWriter._slugify("Logika matematyczna") == "logika_matematyczna"
@@ -1152,6 +1438,51 @@ class TestRunFetchSession:
         files = list(tmp_path.glob("web_wiki_*.txt"))
         assert len(files) >= 1
 
+    @patch("agent_core.web_source.RSSClient")
+    @patch("agent_core.web_source.WikiClient")
+    def test_rate_limited_wiki_stops_the_phase_but_rss_still_runs(
+        self, mock_wiki_cls, mock_rss_cls, tmp_path
+    ):
+        """One refusal ends the Wikipedia phase; it does not cost one error per topic.
+
+        The old loop caught every exception per topic and moved to the next one,
+        so a rate limit was paid for again and again -- measured 2026-07-26:
+        21 refusals in an afternoon, the session grinding on while throttled.
+        RSS is a separate upstream and must still get its turn: a rate-limited
+        session that comes back with RSS material is a partial win, not a dead
+        one.
+        """
+        mock_wiki = specced(WikiClient)
+        mock_wiki_cls.return_value = mock_wiki
+        mock_wiki.search.side_effect = WikiRateLimited("refused 3 in a row")
+
+        mock_rss = specced(RSSClient)
+        mock_rss_cls.return_value = mock_rss
+        mock_rss.fetch_all.return_value = []
+
+        analyzer = _make_mock_analyzer(
+            topic_map={
+                "logika": ["f1", "f2", "f3"],
+                "fizyka": ["f4", "f5"],
+                "biologia": ["f6"],
+                "chemia": ["f7"],
+            },
+        )
+
+        result = run_fetch_session(
+            knowledge_analyzer=analyzer,
+            input_dir=tmp_path,
+            registry_path=tmp_path / "reg.jsonl",
+            max_articles=3,
+        )
+
+        assert mock_wiki.search.call_count == 1, "must stop after the first refusal"
+        assert result["topics_searched"] == 1
+        assert result["errors"] == 1, "counted once, not once per remaining topic"
+        assert result["wiki_rate_limited"] is True
+        # RSS is a different upstream -- the refusal must not cancel it.
+        assert mock_rss.fetch_all.called
+
     @patch("agent_core.web_source.WikiClient")
     def test_session_empty_knowledge(self, mock_wiki_cls, tmp_path):
         mock_wiki = specced(WikiClient)
@@ -1407,6 +1738,25 @@ class TestRSSRelevanceFilter:
             "FIZYKA Jadrowa",
             "",
             {"fizyk"},
+        ) is True
+
+    def test_markup_in_summary_does_not_false_match(self):
+        # Regression 2026-07-18: summary is the raw RSS <description> = HTML
+        # markup (schema.org/Drupal). Tokenizing it let a stem prefix-match a
+        # word inside a tag/attribute -- e.g. "article" hitting
+        # class="schema-Article" -- the "measure the markup, not the prose"
+        # class. strip_html now runs before matching. Teeth: drop the strip_html
+        # call and the first assert flips to True.
+        assert _is_rss_relevant(
+            "",
+            "<div class='schema-Article'>Krotki news bez tematu</div>",
+            {"article"},
+        ) is False
+        # real prose wrapped in tags still matches after stripping
+        assert _is_rss_relevant(
+            "",
+            "<p>Nowa metoda uczenia maszynowego</p>",
+            {"uczen"},
         ) is True
 
     def test_single_hit_from_rich_set_passes(self):

@@ -76,6 +76,52 @@ _CONCEPT_FACT_THRESHOLD = 0.7
 # claim. This is independent of CONCEPT_TRUST_GATE.
 _SYNTHESIS_BELIEF_CEIL = 0.6
 
+# --- Confidence as an estimate, not a ratchet (2026-08-01) -------------------
+#
+# The previous rule nudged confidence by +0.10 on a passed exam and -0.15 on a
+# failed one. With the measured 76.3% pass rate the expected step is
+#     0.763 * (+0.10) + 0.237 * (-0.15) = +0.04
+# Positive drift, every time, with nothing pulling back. Anything examined
+# often enough reached the ceiling regardless of whether it was true, so the
+# number recorded how many exams a belief SURVIVED, not how likely it was to
+# be RIGHT. Measured consequence before this change: 98.5% of 2000 beliefs sat
+# at 0.9 or above, none below 0.7, and 156 beliefs that had never passed a
+# single exam held a median confidence of 0.95.
+#
+# Confidence now moves toward the outcome of each exam instead of being
+# nudged by a fixed amount, so it converges to the belief's own pass rate and
+# stops there. See _confidence_after_exam for why this is an average rather
+# than a tally.
+#
+# The rate was chosen against the real thresholds, not by taste -- a dry-run
+# replay over the full real exam history, not a guess. At
+# 0.5 a single pass lands at 0.75, clearing the 0.70 promotion line, and a
+# single fail lands at 0.25, low enough that a belief which fails its only
+# exam is visibly weak. Slower rates left nothing below the 0.50 weak-topic
+# line at all, which is the failure this change exists to end.
+_CONF_LEARNING_RATE = 0.5
+
+
+def _confidence_after_exam(current: float, passed: bool) -> float:
+    """Move confidence toward this exam's outcome.
+
+    An exponential moving average, not a counter, and deliberately so. The
+    obvious implementation counts passes and fails off the belief's evidence
+    trail -- but BeliefStore.revise deduplicates that trail by source_ref,
+    because it records WHICH SOURCES back a belief rather than how many times
+    one was consulted. Three exams of the same file at the same score leave a
+    single entry, and 18% of beliefs were measured to have histories
+    undercounted that way, one of them by 70 exams. A count inferred from a
+    provenance set is not a count.
+
+    This form needs no history at all. Its fixed point is
+        E[delta] = lr * (p - conf) = 0  =>  conf = p
+    the belief's own pass rate, which is exactly the quantity the old
+    +0.10 / -0.15 ratchet failed to converge to.
+    """
+    outcome = 1.0 if passed else 0.0
+    return round(current + _CONF_LEARNING_RATE * (outcome - current), 4)
+
 
 def _is_synthetic_source(rec: Dict[str, Any]) -> bool:
     """True if an index/memory record originates from a SYNTHESIS.
@@ -636,8 +682,12 @@ class BeliefBuilder:
         exam_evidence = [(BeliefSource.EXAM.value, f"exam:{file_id}", score)]
 
         for belief in candidates:
+            # Confidence is recomputed from the belief's whole exam record,
+            # not nudged from its previous value. See _confidence_from_exams
+            # for why the old +0.10 / -0.15 ratchet had to go.
+            new_conf = _confidence_after_exam(belief.confidence, passed)
+
             if passed:
-                new_conf = min(1.0, belief.confidence + 0.1)
                 if is_synth:
                     # Closed-loop exam: never promote to FACT, never lift past
                     # the synthesis confidence ceiling.
@@ -648,7 +698,6 @@ class BeliefBuilder:
                 else:
                     new_type = BeliefType.FACT
             else:
-                new_conf = max(0.1, belief.confidence - 0.15)
                 new_type = None  # Keep current type
 
             result = store.revise(

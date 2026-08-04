@@ -884,6 +884,57 @@ class TestTeacherExecution:
         assert status["stats"]["strategies_executed"] >= 1
         assert learn_count[0] >= 1
 
+    def test_session_records_which_files_it_touched(self, tmp_path):
+        """A cycle must leave a trace of WHAT it consumed, not just that it ran.
+
+        The planner calls run_session with filter_file_ids=None for the META
+        mission, so the file is chosen inside the loop. Without this record a
+        decision log says "a learn ran under goal X" and nothing more, which is
+        why "is the always-on mission eating the planner's cycles, or is it the
+        throughput ceiling?" could not be answered from the logs -- there was no
+        way to see whether a parallel LEARNING goal would have claimed the same
+        material.
+        """
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("f1.txt", status="new", priority=80),
+        ])
+        agent.set_learn_fn(lambda fid, simple: {"success": True})
+
+        status = agent.run_session(max_iterations=1)
+
+        touched = status["stats"]["files_touched"]
+        assert touched, "session consumed material but recorded nothing"
+        assert touched[0]["file_id"] == "f1.txt"
+        assert "strategy" in touched[0]
+        assert touched[0]["ok"] is True
+
+    def test_touch_log_is_capped(self, tmp_path):
+        """The record rides inside every planner decision -- it must stay bounded."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record(f"f{i}.txt", status="new", priority=90 - i)
+            for i in range(TeacherAgent.MAX_TOUCH_LOG + 5)
+        ])
+        agent.set_learn_fn(lambda fid, simple: {"success": True})
+
+        status = agent.run_session(max_iterations=TeacherAgent.MAX_TOUCH_LOG + 5)
+
+        assert len(status["stats"]["files_touched"]) <= TeacherAgent.MAX_TOUCH_LOG
+
+    def test_touch_log_does_not_leak_between_sessions(self, tmp_path):
+        """Stats reset per session; a stale list would misattribute material."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("f1.txt", status="new", priority=80),
+        ])
+        agent.set_learn_fn(lambda fid, simple: {"success": True})
+
+        agent.run_session(max_iterations=1)
+        first = list(agent._stats["files_touched"])
+        status = agent.run_session(max_iterations=1)
+
+        assert first, "first session recorded nothing -- test proves nothing"
+        assert len(status["stats"]["files_touched"]) <= len(first), \
+            "touch log accumulated across sessions"
+
     def test_run_session_stops_when_nothing_to_do(self, tmp_path):
         """Session stops early when no work."""
         agent = _make_teacher(tmp_path)  # Empty index

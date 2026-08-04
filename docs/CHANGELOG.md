@@ -1,4 +1,14 @@
-# M.A.R.I.A. - Changelog
+# M.A.R.I.A. — Development log (archive, pre-1.0)
+
+> **This is a historical archive, not the current changelog.** It is the
+> session-by-session development log kept while the system was being built,
+> ending 2026-04-10, and it is written in Polish — the language it was written
+> in at the time. It is preserved unedited because it records *why* decisions
+> were made, in order.
+>
+> For the current, English release changelog see
+> [../CHANGELOG.md](../CHANGELOG.md).
+
 > Format: [YYYY-MM-DD] Kategoria: Opis
 
 ---

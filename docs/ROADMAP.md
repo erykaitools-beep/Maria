@@ -131,7 +131,7 @@ Extend with consciousness, personality, time perception, and autonomous learning
 - [x] **Phase 2: Memory Consistency** - MemoryQuery API, staleness fixes, grounding (ADR-023)
 - [x] **Phase 3: Scheduler Hardening** - call_with_timeout(), EpisodeBudget, degradation routing (ADR-024)
 - [x] **Phase 4: Autonomy Governance** - cross-metric validation, guard metrics, promotion audit (ADR-025)
-- [x] **Phase 5: Effector Safety Envelope** - 5-level authority, ApprovalQueue, ToolBudgetManager (ADR-026)
+- [x] **Phase 5: Effector Safety Envelope** - 5-level authority, ApprovalQueue (ADR-026; ToolBudgetManager CUT 2026-07-19 - built but never consulted by any exec path, see CONTRACTS ADR-026)
 - [x] **Phase 6: Readiness Review** - 100-cycle marathon, authority drills, 15-point checklist
 
 All gates passed: Gate A (tracing), Gate B (memory), Gate C (budgets), Gate D (governance), Gate E (readiness).
@@ -502,7 +502,7 @@ Awaiting IoT hardware (Shelly/Tasmota). Details: `docs/SMART_HOME_SPEC.md`
 | **Confidence feedback loop (floor at 0.01)** | Low (fixed) | Medium | **Signal separation (commit e1f753d)** |
 | No IoT hardware/camera | Certain | Low | D/E deferred (ADR-014), the brain is ready |
 | Guard metric degradation | Low | Medium | Cross-metric validation (Phase 4, ADR-025) |
-| Effector cascade failure | Low | High | Anti-cascade breaker, approval queue (Phase 5, ADR-026) |
+| Effector cascade failure | Low | High | Per-invocation human approval + K7 consecutive-failure breaker + coordinator retry/incident (Phase 5, ADR-026) |
 | **Claude CLI subscription ban** | Low (fixed) | High | **CLAUDE_CLI_AUTONOMOUS=false default, operator-triggered only (d8bbf30)** |
 | Second-system syndrome (rewrite) | Low (avoided) | High | **Ship of Theseus instead of a rewrite - Phase K** |
 

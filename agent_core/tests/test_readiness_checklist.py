@@ -18,7 +18,6 @@ from agent_core.autonomy.authority_level import (
     AuthorityManager,
 )
 from agent_core.autonomy.approval_queue import ApprovalQueue, ApprovalRequest
-from agent_core.autonomy.tool_budget import ToolBudgetManager
 from agent_core.autonomy import AutonomyPolicy
 from agent_core.autonomy.escalation import EscalationHandler
 from agent_core.autonomy.policy_rules import PolicyContext, rule_effector_authority
@@ -63,40 +62,11 @@ class TestReadinessChecklist:
         assert not mgr.set_level(AuthorityLevel.UNRESTRICTED)
         assert mgr.get_level() == AuthorityLevel.OBSERVE
 
-    def test_failure_bounded(self):
-        """R4: After max_consecutive_failures, tool is locked (no runaway)."""
-        budget = ToolBudgetManager(
-            max_consecutive_failures=3,
-            failure_cooldown_sec=300.0,
-        )
-        for _ in range(3):
-            budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-        ok, _ = budget.check_budget("exec")
-        assert not ok
-
-    def test_failure_explainable(self):
-        """R5: Failure records include tool_name, reason."""
-        budget = ToolBudgetManager(max_consecutive_failures=2)
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        ok, reason = budget.check_budget("exec")
-        assert not ok
-        assert "exec" in reason
-        assert "locked" in reason
-
-    def test_failure_recoverable(self):
-        """R6: After cooldown expiry, locked tool can be retried."""
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=0.01,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-        time.sleep(0.02)
-        ok, _ = budget.check_budget("exec")
-        assert ok  # probe allowed
+    # R4-R6 (ToolBudgetManager lock/explain/recover) removed with the class
+    # (ADR-026 CUT 2026-07-19): they exercised an object no exec path ever
+    # consulted, presenting in-vitro budget checks as system readiness.
+    # Live failure bounding = coordinator retry+incident, K7 consecutive-
+    # failure breaker, per-invocation human approval.
 
     def test_scheduler_non_blocking(self, tmp_path):
         """R7: Planner handles AWAITING_APPROVAL without blocking."""

@@ -250,6 +250,20 @@ class HomeostasisCore:
         self._self_dev_bridge: Optional[Any] = None
         self._dev_thread: Optional[threading.Thread] = None
 
+        # Workflow engine (Phase 14 - advance one step per cadence).
+        # A step is an ordinary planner action, so it can be a 70B call: the
+        # first ever live run (2026-07-21, health_check) spent 40.7s of its
+        # 43.4s waiting on NIM and froze the pulse for exactly that long --
+        # nothing was computed here, the tick simply stood in the doorway
+        # holding a phone call. Same class as Phase 11 / 20 / 21, same cure:
+        # a transient thread. It also removes a sharper hazard -- the
+        # liveness watchdog restarts the daemon after WATCHDOG_STALL_SEC
+        # (300s), and a step falling through to the Claude CLI branch has a
+        # 300s budget of its own, so a single unlucky step could have
+        # triggered a restart that would have read as an unexplained freeze.
+        self._workflow_thread: Optional[threading.Thread] = None
+        self._workflow_thread_started: Optional[float] = None  # monotonic, 7b wedge age
+
         # Self-Repair (Phase 19 - systemic failure detection + gate)
         self._system_failure_monitor: Optional[Any] = None
         self._maria_conductor: Optional[Any] = None
@@ -661,6 +675,7 @@ class HomeostasisCore:
         cognitive_metrics = self.cognitive_sensor.read_metrics(
             memory_manager=self.memory,
             llm_manager=self.llm,
+            ctx=getattr(self, "_shared_context", None),
         )
         _t_now = time.perf_counter()
         self._phase_ms["01d_cognitive"] = round((_t_now - _t_sub) * 1000, 1)
@@ -735,6 +750,14 @@ class HomeostasisCore:
                     "(health=%.2f mode=%s): %s",
                     self.state.health_score, self.state.mode.value, e,
                 )
+        elif self._telegram_bridge:
+            # Recovered above the alert threshold -> re-arm the health-drop edge
+            # so the NEXT genuine drop is announced (notifier guard #2). Without
+            # this, a drop is announced once and then never again.
+            try:
+                self._telegram_bridge.notifier.reset_health_drop_edge()
+            except Exception:
+                pass
 
         # ──────────────────────────────────────
         # PHASE 8: PERCEIVE (Tick Aggregator, ADR-009)
@@ -862,7 +885,7 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         if self._workflow_engine and self._tick_count % 60 == 30:
             try:
-                self._workflow_engine.advance_next_active()
+                self._advance_workflow_async()
             except Exception as e:
                 self._log_phase_error("14 workflow", e)
 
@@ -1797,6 +1820,46 @@ class HomeostasisCore:
             target=_run, daemon=True, name="ConversationCondense"
         )
         self._condense_thread.start()
+
+    def _advance_workflow_async(self) -> None:
+        """Advance one workflow step off the tick thread.
+
+        A workflow step is an ordinary planner action, so it can be a 70B call.
+        The first live run (2026-07-21, health_check) proved the cost: step
+        ``self_analyze`` took 43.4s, of which 40.7s was waiting on NIM, and the
+        pulse froze for the whole of it (``Tick overrun: 43.65s``). Nothing was
+        computed on this box during those 40 seconds -- the tick was simply
+        standing in the doorway holding a phone call.
+
+        Two hazards, one cure. The obvious one is the frozen pulse: no sensing,
+        no planning, no Telegram while a step runs. The sharper one is that
+        TickWatchdog restarts the daemon after WATCHDOG_STALL_SEC (300s) and a
+        self_analyze that falls through NIM to the Claude CLI branch carries a
+        300s budget of its own -- a single unlucky step could have tripped a
+        restart that would have looked like an unexplained freeze. Off the tick
+        thread, neither applies, so no external_op_lease is needed: the
+        heartbeat keeps beating while the step runs.
+
+        The is_alive guard is what keeps the cadence honest. Phase 14 fires
+        every ~60 ticks; without it a step slower than the cadence would have a
+        second one stacked on top, and both would race on the same store file.
+        """
+        if self._workflow_thread is not None and self._workflow_thread.is_alive():
+            return
+
+        def _run():
+            try:
+                self._workflow_engine.advance_next_active()
+            except Exception as e:
+                # Mirrors the inline handler this replaced: a workflow fault
+                # is logged as a phase error and never reaches the tick loop.
+                self._log_phase_error("14 workflow", e)
+
+        self._workflow_thread = threading.Thread(
+            target=_run, daemon=True, name="WorkflowAdvance"
+        )
+        self._workflow_thread_started = time.monotonic()
+        self._workflow_thread.start()
 
     def _start_dev_cycle(self) -> None:
         """Regenerate the self-development board in a background thread.

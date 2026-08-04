@@ -1,8 +1,13 @@
 """
-Environment Manager - facade for environment adaptation.
+Environment Manager - thin mode-of-record for environment modes.
 
-Manages active mode, applies profiles to system behavior,
-provides context for master prompt injection.
+Manages the active mode (manual /env switching + auto-detection) and
+persists it. Consumers today: the /env status displays and the teacher
+gate's manual LEARNING override (core._check_teacher_trigger).
+
+Payload accessors (is_action_blocked / get_action_priority_boost /
+prompt-injection context) were CUT 2026-07-19: nothing ever consumed
+them (see environment_model docstring for the full story).
 """
 
 import json
@@ -26,13 +31,12 @@ STATE_PATH = os.path.join("meta_data", "environment_state.json")
 
 class EnvironmentManager:
     """
-    Manages environment mode switching and profile application.
+    Manages environment mode switching and persistence.
 
     Provides:
     - Manual mode switching (operator command)
     - Auto-detection (time/context-based)
-    - Profile context for master prompt injection
-    - Action priority/block information for planner
+    - Mode/status queries for displays and the teacher gate
     """
 
     def __init__(
@@ -132,22 +136,6 @@ class EnvironmentManager:
             ENVIRONMENT_PROFILES[EnvironmentMode.DEFAULT],
         )
 
-    def get_context(self) -> Dict[str, Any]:
-        """
-        Get environment context for master prompt injection.
-        Called by master_prompt.py to enrich LLM context.
-        """
-        profile = self.get_active_profile()
-        return {
-            "mode": self._state.active_mode.value,
-            "description": profile.description,
-            "prompt_addition": profile.prompt_addition,
-            "notification_level": profile.notification_level,
-            "switched_at": self._state.switched_at,
-            "switched_by": self._state.switched_by,
-            "auto_detect": self._state.auto_detect_enabled,
-        }
-
     def get_status(self) -> Dict[str, Any]:
         """Full status for REPL/Telegram."""
         profile = self.get_active_profile()
@@ -158,28 +146,7 @@ class EnvironmentManager:
             "switched_by": self._state.switched_by,
             "auto_detect_enabled": self._state.auto_detect_enabled,
             "override_until": self._state.override_until,
-            "notification_level": profile.notification_level,
-            "llm_budget_multiplier": profile.llm_budget_multiplier,
-            "priority_actions": list(profile.priority_actions),
-            "blocked_actions": list(profile.blocked_actions),
         }
-
-    def is_action_blocked(self, action: str) -> bool:
-        """Check if an action is blocked in current environment."""
-        profile = self.get_active_profile()
-        return action in profile.blocked_actions
-
-    def get_action_priority_boost(self, action: str) -> float:
-        """
-        Get priority adjustment for an action in current environment.
-        Returns: >0 for priority boost, <0 for deprioritization, 0 for neutral.
-        """
-        profile = self.get_active_profile()
-        if action in profile.priority_actions:
-            return 0.15
-        if action in profile.deprioritized_actions:
-            return -0.1
-        return 0.0
 
     def list_modes(self) -> List[Dict[str, Any]]:
         """List all available modes with descriptions."""

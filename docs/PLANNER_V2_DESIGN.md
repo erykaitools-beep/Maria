@@ -1,27 +1,32 @@
 # Planner v2 - Adaptive Planning with Strategic LLM
 
-> Design doc. Status: DRAFT. Wymaga review Eryka przed implementacja.
+> Design doc, written before implementation. **It has since been built**:
+> `agent_core/planner/strategic_planner.py` and `strategic_plan.py` exist and are
+> wired from `agent_core/modules/homeostasis_module.py`. Read this as the original
+> reasoning, not as a description of the shipped code — the implementation differs
+> in places (constant names, the replan interval, and how the time context is
+> derived). The code is the truth.
 
 ## Problem
 
-Planner v1 (ADR-013) jest rule-based i deterministyczny - dobry na start, ale:
+Planner v1 (ADR-013) is rule-based and deterministic - a good starting point, but:
 
-1. **Retry spam** - prubuje review co minute poza learning window (zablokowany, prubuje znowu)
-2. **Brak backoff na failed goals** - ten sam cel wybierany po kazdym NOOP
-3. **Brak time-awareness** - nie wie ze wieczorem lepiej robic creative niz learn
-4. **Brak priorytyzacji dynamicznej** - aging factor to za malo
-5. **Brak "swiadomego idle"** - NOOP to petla, nie decyzja
+1. **Retry spam** - tries review every minute outside the learning window (blocked, tries again)
+2. **No backoff on failed goals** - the same goal is picked after every NOOP
+3. **No time-awareness** - does not know that creative work fits the evening better than learn
+4. **No dynamic prioritization** - the aging factor alone is not enough
+5. **No "deliberate idle"** - NOOP is a loop, not a decision
 
-## Architektura: Dual-Loop Planner
+## Architecture: Dual-Loop Planner
 
 ```
                     +--------------------------+
                     |   STRATEGIC LOOP (LLM)   |
-                    |   qwen3:8b / co 30 min   |
+                    |  qwen3:8b / every 30 min |
                     |                          |
-                    |   "Co robic nastepne?"   |
-                    |   -> Plan dnia/godziny   |
-                    |   -> Priorytety celow    |
+                    |   "What to do next?"     |
+                    |   -> Day/hour plan       |
+                    |   -> Goal priorities     |
                     |   -> Backoff decisions   |
                     +-----------+--------------+
                                 |
@@ -29,19 +34,19 @@ Planner v1 (ADR-013) jest rule-based i deterministyczny - dobry na start, ale:
                                 |
                     +-----------v--------------+
                     |   TACTICAL LOOP (rules)  |
-                    |   per-tick / 60s          |
+                    |   per-tick / 60s         |
                     |                          |
-                    |   Wykonuje plan LLM      |
+                    |   Executes the LLM plan  |
                     |   Quick checks + guards  |
-                    |   Fallback na reguly     |
+                    |   Fallback to rules      |
                     +--------------------------+
 ```
 
-### Strategic Loop (nowy, LLM-powered)
+### Strategic Loop (new, LLM-powered)
 
 **Model:** qwen3:8b (MODEL-01, local, cold-start ~3s, 5.5GB)
-**Czestotliwosc:** Co 30 min w ACTIVE, na event (nowy material, failure pattern), przy wake-up
-**Fallback:** NIM API jesli local fail, rule-based jesli oba fail
+**Frequency:** Every 30 min in ACTIVE, on event (new material, failure pattern), on wake-up
+**Fallback:** NIM API if the local model fails, rule-based if both fail
 
 **Input (prompt context):**
 ```json
@@ -84,23 +89,23 @@ Planner v1 (ADR-013) jest rule-based i deterministyczny - dobry na start, ale:
 }
 ```
 
-### Tactical Loop (ulepszony v1)
+### Tactical Loop (improved v1)
 
-Per-tick, rule-based, zero LLM. Zmiany vs v1:
+Per-tick, rule-based, zero LLM. Changes vs v1:
 
-1. **Czyta strategic_plan** zamiast samodzielnie wybierac cele
-2. **Backoff z pamiecia** - jesli akcja failowala 3x, skip do zmiany warunkow (nie timer)
-3. **Time-slot awareness** - wie ze 10:45 to "ostatnie 15min window, nie zaczynaj dlugiego learn"
-4. **Swiadomy idle** - "strategic plan mowi: idle, czekaj na window" zamiast NOOP spam
-5. **Event-driven re-plan** - nowy material / goal achieved -> trigger strategic loop
+1. **Reads strategic_plan** instead of selecting goals on its own
+2. **Backoff with memory** - if an action failed 3x, skip it until conditions change (not on a timer)
+3. **Time-slot awareness** - knows that 10:45 means "last 15 min of the window, do not start a long learn"
+4. **Deliberate idle** - "the strategic plan says: idle, wait for the window" instead of NOOP spam
+5. **Event-driven re-plan** - new material / goal achieved -> trigger the strategic loop
 
-## Przeplywy
+## Flows
 
-### Flow 1: Normalna praca (learning window)
+### Flow 1: Normal operation (learning window)
 
 ```
-09:00 Wake-up (auto-wake z ModeRegulator)
-09:00 Strategic Loop: "Window otwarte. Plan: learn logika -> exam -> review python"
+09:00 Wake-up (auto-wake from ModeRegulator)
+09:00 Strategic Loop: "Window open. Plan: learn logika -> exam -> review python"
 09:01 Tactical: learn logika (chunk 1)
 09:02 Tactical: learn logika (chunk 2)
 09:05 Tactical: exam logika -> FAIL
@@ -108,22 +113,22 @@ Per-tick, rule-based, zero LLM. Zmiany vs v1:
 09:10 Tactical: exam logika -> PASS
 09:15 Tactical: learn python (new topic)
 ...
-10:55 Tactical: "5 min do zamkniecia window, skip heavy learn"
+10:55 Tactical: "5 min to window close, skip heavy learn"
 10:55 Tactical: evaluate (quick)
-11:00 Window zamkniete
-11:00 Strategic Loop: "Window zamkniete. Plan: creative -> evaluate -> idle"
+11:00 Window closed
+11:00 Strategic Loop: "Window closed. Plan: creative -> evaluate -> idle"
 11:01 Tactical: creative reflection
-11:10 Tactical: idle (swiadomy, nie NOOP spam)
+11:10 Tactical: idle (deliberate, not NOOP spam)
 ```
 
-### Flow 2: Wieczor (poza window)
+### Flow 2: Evening (outside the window)
 
 ```
-18:00 Strategic Loop: "Wieczor. Plan: creative, evaluate, light review only"
+18:00 Strategic Loop: "Evening. Plan: creative, evaluate, light review only"
 18:01 Tactical: creative (NIM-powered)
 18:10 Tactical: evaluate
-18:20 Tactical: idle (poczekaj 30 min)
-18:50 Strategic Loop: "Nic nowego. Plan: idle until sleep"
+18:20 Tactical: idle (wait 30 min)
+18:50 Strategic Loop: "Nothing new. Plan: idle until sleep"
 19:30 ModeRegulator: SLEEP (idle > 30min)
 19:30 SleepProcessor: NREM1-3 + REM
 ```
@@ -131,7 +136,7 @@ Per-tick, rule-based, zero LLM. Zmiany vs v1:
 ### Flow 3: Failure recovery
 
 ```
-14:00 Strategic Loop: "learn fizyka" 
+14:00 Strategic Loop: "learn fizyka"
 14:01 Tactical: learn fizyka -> FAIL (LLM timeout)
 14:02 Tactical: learn fizyka -> FAIL (LLM timeout again)
 14:03 Tactical: (2 failures) strategic plan says: "skip fizyka, try python"
@@ -139,26 +144,26 @@ Per-tick, rule-based, zero LLM. Zmiany vs v1:
 14:30 Strategic Loop: "fizyka failed 2x, possible LLM issue. Plan: skip fizyka today, retry tomorrow"
 ```
 
-## Implementacja
+## Implementation
 
-### Nowe pliki
+### New files
 
 ```
 agent_core/planner/
   strategic_planner.py    # StrategicPlanner - LLM-powered planning
   strategic_plan.py       # StrategicPlan model (dataclass)
-  time_context.py         # TimeContext - pora dnia, window status, time-to-close
+  time_context.py         # TimeContext - time of day, window status, time-to-close
 ```
 
-### Zmiany w istniejacych
+### Changes to existing files
 
 ```
-planner_core.py           # Tactical loop czyta strategic_plan zamiast samodzielnego goal selection
+planner_core.py           # Tactical loop reads strategic_plan instead of selecting goals itself
 planner_model.py          # PlannerState += last_strategic_ts, strategic_plan reference
-goal_selector.py          # Respektuje strategic_plan ordering (jesli dostepny)
+goal_selector.py          # Respects strategic_plan ordering (when available)
 ```
 
-### StrategicPlanner - glowna klasa
+### StrategicPlanner - main class
 
 ```python
 class StrategicPlanner:
@@ -218,7 +223,7 @@ class PlannedAction:
     skip_if_blocked: bool = True
 ```
 
-### TimeContext - swiadomosc czasu
+### TimeContext - time awareness
 
 ```python
 class TimeContext:
@@ -280,41 +285,41 @@ Odpowiedz WYLACZNIE w JSON:
 }
 ```
 
-## Wdrozenie - fazy
+## Rollout - phases
 
-### Faza A: TimeContext + Backoff (bez LLM)
-1. `time_context.py` - pora dnia, window status
-2. Backoff w tactical loop - pamiec failed actions (nie timer, warunek)
-3. Swiadomy idle - nie NOOP spam, "czekam na X"
-4. **Testy:** 20-30
+### Phase A: TimeContext + Backoff (no LLM)
+1. `time_context.py` - time of day, window status
+2. Backoff in the tactical loop - memory of failed actions (a condition, not a timer)
+3. Deliberate idle - not NOOP spam, but "waiting for X"
+4. **Tests:** 20-30
 
-### Faza B: StrategicPlanner (z LLM)
+### Phase B: StrategicPlanner (with LLM)
 1. `strategic_planner.py` - prompt, parse, plan model
 2. `strategic_plan.py` - dataclass
 3. Wiring: homeostasis tick -> should_replan() -> plan()
-4. Tactical loop czyta plan (z fallback na reguly jesli brak planu)
-5. **Testy:** 30-40
+4. Tactical loop reads the plan (falls back to rules when no plan is available)
+5. **Tests:** 30-40
 
-### Faza C: Integration + Tuning
-1. Trace integration (strategic decisions w episode traces)
-2. Telegram /plan command (pokaz aktualny strategic plan)
+### Phase C: Integration + Tuning
+1. Trace integration (strategic decisions in episode traces)
+2. Telegram /plan command (show the current strategic plan)
 3. Web UI strategic plan view
-4. Prompt tuning na prawdziwych danych
-5. **Testy:** 10-15
+4. Prompt tuning on real data
+5. **Tests:** 10-15
 
-## Ryzyka
+## Risks
 
-| Ryzyko | Mitygacja |
+| Risk | Mitigation |
 |--------|-----------|
-| qwen3:8b daje zly JSON | Robust parser + fallback na reguly |
-| LLM halucynuje goal_id | Walidacja: goal musi istniec w store |
-| Strategic plan nieaktualny | 30min expiry + event-driven replan |
-| Cold start 3s blokuje tick | Strategic loop w osobnym uatku (nie w tick) |
-| RAM: qwen3:8b + llama3.1:8b | Heavy mutex (juz istnieje w ModelScheduler) |
+| qwen3:8b returns bad JSON | Robust parser + fallback to rules |
+| LLM hallucinates a goal_id | Validation: the goal must exist in the store |
+| Strategic plan goes stale | 30min expiry + event-driven replan |
+| 3s cold start blocks the tick | Strategic loop in a separate thread (not in the tick) |
+| RAM: qwen3:8b + llama3.1:8b | Heavy mutex (already exists in ModelScheduler) |
 
-## Metryki sukcesu
+## Success metrics
 
-1. **Zero NOOP spam** w logach (teraz: ~6 NOOP/h w SLEEP)
-2. **100% wykorzystanie learning window** (teraz: przegapila caly dzien)
-3. **Failure recovery < 3 proby** (teraz: retry w nieskonczonosc)
-4. **Strategic plan czytelny dla operatora** (Telegram /plan)
+1. **Zero NOOP spam** in the logs (currently: ~6 NOOP/h in SLEEP)
+2. **100% learning window utilization** (currently: a whole day was missed)
+3. **Failure recovery < 3 attempts** (currently: retries indefinitely)
+4. **Strategic plan readable by the operator** (Telegram /plan)

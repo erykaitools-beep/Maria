@@ -109,7 +109,8 @@ class StrategicContext:
         """Get learning coverage and velocity."""
         index_path = self._memory / "knowledge_index.jsonl"
         if not index_path.exists():
-            return {"total_files": 0, "completed": 0, "coverage": 0.0}
+            return {"total_files": 0, "completed": 0, "coverage": 0.0,
+                    "learning_velocity": None, "chunks_last_24h": None}
 
         statuses: Counter = Counter()
         try:
@@ -131,7 +132,11 @@ class StrategicContext:
 
         # Also check latest evaluation report for retention
         retention = self._get_latest_metric("retention_rate")
-        velocity = self._get_latest_metric("learning_velocity")
+        # Velocity is a 1h point-sample; pull chunks_last_24h from the SAME
+        # report so the stagnation rule can judge a full day, not one quiet
+        # hour (zmierzone 2026-07-18: 112/112 zerowych probek 1h bylo falszywych
+        # -- nauka w 24h byla za kazdym razem).
+        velocity, velocity_details = self._get_latest_metric_with_details("learning_velocity")
 
         return {
             "total_files": total,
@@ -140,6 +145,7 @@ class StrategicContext:
             "statuses": dict(statuses),
             "retention_rate": retention,
             "learning_velocity": velocity,
+            "chunks_last_24h": velocity_details.get("chunks_last_24h"),
         }
 
     def _collect_goal_state(self, now: float) -> Dict[str, Any]:
@@ -242,11 +248,22 @@ class StrategicContext:
 
     def _get_latest_metric(self, metric_name: str) -> Optional[float]:
         """Get latest metric value from evaluation reports."""
+        value, _ = self._get_latest_metric_with_details(metric_name)
+        return value
+
+    def _get_latest_metric_with_details(self, metric_name: str) -> tuple:
+        """Latest metric value AND its per-metric details, from the SAME report.
+
+        Returns (value, details_dict); details is {} when the report carries
+        none. Reading both from one record keeps them consistent -- value from
+        one report and details from another could disagree about the same hour.
+        """
         path = self._meta / "evaluation_reports.jsonl"
         if not path.exists():
-            return None
+            return None, {}
 
         latest_value = None
+        latest_details: Dict[str, Any] = {}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -258,8 +275,10 @@ class StrategicContext:
                         metrics = record.get("metrics", {})
                         if metric_name in metrics:
                             latest_value = metrics[metric_name]
+                            details = record.get("details", {}).get(metric_name)
+                            latest_details = details if isinstance(details, dict) else {}
                     except json.JSONDecodeError:
                         continue
         except OSError:
             pass
-        return latest_value
+        return latest_value, latest_details

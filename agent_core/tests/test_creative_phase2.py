@@ -215,6 +215,10 @@ class TestIdentityProfile:
         assert result.growth_trajectory in ("accelerating", "stable", "slowing", "stalled")
         assert len(result.dominant_traits) <= 3
         assert "ciekawska" in result.dominant_traits  # highest score
+        # Full magnitudes flow through, not just top-3 names
+        assert result.trait_scores["ciekawska"] == pytest.approx(0.72)
+        assert result.trait_scores["cierpliwa"] == pytest.approx(0.45)
+        assert len(result.trait_scores) == 7
         assert result.total_files == 5
         assert result.completed_files == 4  # completed + learned
         assert result.coverage > 0
@@ -324,11 +328,13 @@ class TestPersonalityPolicy:
             domain_strengths={}, domain_weaknesses={},
             capability_map={}, meta_goal_acceptance_rate=0.5,
             total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"ciekawska": 0.72, "systematyczna": 0.55,
+                          "refleksyjna": 0.5},
         )
         policy = PersonalityPolicy()
         signals = policy.evaluate(profile, [])
 
-        # ciekawska is dominant (0.7) -> exploration signal
+        # ciekawska measured 0.72 > 0.6 -> exploration signal
         dims = [s.dimension for s in signals]
         assert PersonalityDimension.EXPLORATION_VS_ORDER in dims
 
@@ -341,6 +347,7 @@ class TestPersonalityPolicy:
             domain_strengths={}, domain_weaknesses={},
             capability_map={}, meta_goal_acceptance_rate=0.5,
             total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"wytrwala": 0.5, "ciekawska": 0.4, "pomocna": 0.3},
         )
         policy = PersonalityPolicy()
         signals = policy.evaluate(profile, [])
@@ -357,6 +364,7 @@ class TestPersonalityPolicy:
             domain_strengths={}, domain_weaknesses={},
             capability_map={}, meta_goal_acceptance_rate=0.5,
             total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"cierpliwa": 0.45, "pomocna": 0.4, "spoleczna": 0.35},
         )
         tension = DetectedTension.create(
             category=TensionCategory.STAGNATION,
@@ -368,6 +376,76 @@ class TestPersonalityPolicy:
 
         caution = [s for s in signals if s.direction == "caution"]
         assert len(caution) >= 1
+
+    def test_magnitude_not_rank_rank2_trait_fires(self):
+        """Trait measured 0.9 at list position #2 must fire its >0.6 gate.
+
+        Regression: the old heuristic derived scores from list position
+        (0.7 - i*0.1), so position #2 got 0.6 and never passed >0.6
+        regardless of the real magnitude.
+        """
+        from agent_core.creative.personality_policy import PersonalityPolicy
+        from agent_core.creative.identity_profile import CognitiveProfile
+        profile = CognitiveProfile(
+            growth_trajectory="stable",
+            dominant_traits=["pomocna", "systematyczna", "ciekawska"],
+            domain_strengths={}, domain_weaknesses={},
+            capability_map={}, meta_goal_acceptance_rate=0.5,
+            total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"pomocna": 0.95, "systematyczna": 0.9,
+                          "ciekawska": 0.2},
+        )
+        policy = PersonalityPolicy()
+        signals = policy.evaluate(profile, [])
+
+        dims = [s.dimension for s in signals]
+        assert PersonalityDimension.DEPTH_VS_BREADTH in dims  # systematyczna 0.9
+        assert PersonalityDimension.EXPLORATION_VS_ORDER not in dims  # ciekawska 0.2
+
+    def test_weak_top_trait_does_not_fire(self):
+        """Top-of-list trait with a weak real score must NOT fire.
+
+        Regression: the old heuristic gave position #1 a fixed 0.7,
+        firing >0.6 gates for traits that measured far below threshold.
+        """
+        from agent_core.creative.personality_policy import PersonalityPolicy
+        from agent_core.creative.identity_profile import CognitiveProfile
+        profile = CognitiveProfile(
+            growth_trajectory="stable",
+            dominant_traits=["ciekawska"],
+            domain_strengths={}, domain_weaknesses={},
+            capability_map={}, meta_goal_acceptance_rate=0.5,
+            total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"ciekawska": 0.3},
+        )
+        policy = PersonalityPolicy()
+        signals = policy.evaluate(profile, [])
+
+        assert signals == []
+
+    def test_trait_beyond_top3_fires_low_threshold(self):
+        """A >0.4 gate must see traits outside the dominant top-3.
+
+        Regression: the old heuristic only knew dominant_traits (top-3),
+        so rank-4+ traits were dropped entirely even above threshold.
+        """
+        from agent_core.creative.personality_policy import PersonalityPolicy
+        from agent_core.creative.identity_profile import CognitiveProfile
+        profile = CognitiveProfile(
+            growth_trajectory="stable",
+            dominant_traits=["ciekawska", "systematyczna", "refleksyjna"],
+            domain_strengths={}, domain_weaknesses={},
+            capability_map={}, meta_goal_acceptance_rate=0.5,
+            total_files=10, completed_files=5, coverage=0.5,
+            trait_scores={"ciekawska": 0.72, "systematyczna": 0.65,
+                          "refleksyjna": 0.5, "wytrwala": 0.45},
+        )
+        policy = PersonalityPolicy()
+        signals = policy.evaluate(profile, [])
+
+        bold = [s for s in signals
+                if s.dimension == PersonalityDimension.CAUTION_VS_BOLDNESS]
+        assert any(s.direction == "boldness" for s in bold)  # wytrwala 0.45
 
     def test_adjust_weights_normalizes(self):
         from agent_core.creative.personality_policy import PersonalityPolicy

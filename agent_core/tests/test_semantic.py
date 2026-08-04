@@ -29,9 +29,16 @@ from agent_core.tests.spec_helpers import specced
 # Test helpers
 # =========================================================================
 
-def _fake_vector(dim=768, seed=1.0):
-    """Generate a deterministic fake vector."""
+def _fake_vector(dim=None, seed=1.0):
+    """Generate a deterministic fake vector at the CURRENT embedder's width.
+
+    Hardcoding a width here pins whichever model happened to be wired when the
+    test was written; VectorStore.load() drops stale-width vectors, so a frozen
+    number turns every persistence test red the day the model changes.
+    """
     import math
+    from agent_core.semantic.embedding_model import expected_dim
+    dim = dim or expected_dim() or 768
     return [math.sin(i * seed) for i in range(dim)]
 
 
@@ -106,6 +113,57 @@ class TestEmbeddingModel:
         assert model.embed("") == []
         assert model.embed("   ") == []
 
+    def test_embed_does_not_cache_failure(self):
+        """A timeout must not poison the cache for that text.
+
+        _call_ollama returns [[]] on error, and [[]] is truthy with len 1, so a
+        naive `self._cache[key] = result[0]` stores [] permanently: every later
+        caller gets [] straight from cache and never retries Ollama.
+        """
+        model = EmbeddingModel()
+        vec = _fake_vector(seed=1.0)
+
+        with patch.object(model, '_call_ollama') as mock_call:
+            mock_call.return_value = [[]]           # timeout / HTTP error
+            assert model.embed("test text") == []
+            assert len(model._cache) == 0           # nothing cached
+
+            mock_call.return_value = [vec]          # Ollama healthy again
+            assert model.embed("test text") == vec  # retried, not served junk
+            assert mock_call.call_count == 2
+
+    def test_embed_batch_does_not_cache_failure(self):
+        model = EmbeddingModel()
+        v1 = _fake_vector(seed=1.0)
+
+        with patch.object(model, '_call_ollama') as mock_call:
+            mock_call.return_value = [[], []]
+            assert model.embed_batch(["t1", "t2"]) == [[], []]
+            assert len(model._cache) == 0
+
+            mock_call.return_value = [v1, v1]
+            assert model.embed_batch(["t1", "t2"]) == [v1, v1]
+            assert mock_call.call_count == 2
+
+    def test_embed_does_not_cache_wrong_width(self):
+        """Vectors from a previous embedder must not survive in the cache."""
+        model = EmbeddingModel()
+        with patch.object(model, '_call_ollama', return_value=[[0.1, 0.2, 0.3]]):
+            model.embed("test text")
+        assert len(model._cache) == 0
+
+    def test_batch_size_fits_read_timeout(self):
+        """Batch size and read timeout must be sized against each other.
+
+        Pins the pairing that made indexing silently produce zero vectors:
+        batch 50 x ~2.1 s/text for bge-m3 needs ~105s, against a 30s read budget.
+        """
+        from agent_core.semantic.embedding_model import (
+            MAX_BATCH_SIZE, REQUEST_TIMEOUT,
+        )
+        slowest_seconds_per_text = 2.2  # bge-m3 measured on this CPU
+        assert MAX_BATCH_SIZE * slowest_seconds_per_text < REQUEST_TIMEOUT[1]
+
     def test_embed_batch_uses_cache(self):
         model = EmbeddingModel()
         v1 = _fake_vector(seed=1.0)
@@ -133,7 +191,10 @@ class TestEmbeddingModel:
     def test_get_stats(self):
         model = EmbeddingModel()
         stats = model.get_stats()
-        assert stats["model"] == "nomic-embed-text"
+        # Assert it reports the WIRED model, not a frozen name -- the point is
+        # that stats reflect configuration, not which embedder we shipped with.
+        from agent_core.semantic.embedding_model import DEFAULT_MODEL
+        assert stats["model"] == DEFAULT_MODEL
         assert stats["cached_vectors"] == 0
         assert stats["total_requests"] == 0
 
@@ -166,7 +227,11 @@ class TestVectorStore:
         store.add("id2", "text2", v2)
         store.add("id3", "text3", v3)
 
-        results = store.search(v1, top_k=3, threshold=0.0)
+        # threshold=-1.0, not 0.0: the point is "a permissive threshold returns
+        # everything, ranked". v3 sits at cosine ~0.002 at 768 dims but ~-0.002
+        # at 1024 -- both are noise around zero, so a 0.0 cut made this test a
+        # coin flip on vector width rather than a check of search behaviour.
+        results = store.search(v1, top_k=3, threshold=-1.0)
         assert len(results) == 3
         # id1 should be most similar (exact match)
         assert results[0].entry.entry_id == "id1"
@@ -223,9 +288,9 @@ class TestVectorStore:
     def test_persistence_merge_semantics(self, tmp_path):
         path = str(tmp_path / "vectors.jsonl")
         store = VectorStore(path)
-        store.add("id1", "v1", [1.0])
+        store.add("id1", "v1", _fake_vector(seed=1.0))
         store.save()
-        store.add("id1", "v1_updated", [2.0])  # Update same ID
+        store.add("id1", "v1_updated", _fake_vector(seed=2.0))  # Update same ID
         store.save()
 
         store2 = VectorStore(path)
@@ -326,11 +391,12 @@ class TestVectorStore:
         try:
             store = VectorStore(path)
             for i in range(3):
-                store.add(f"id{i}", f"text{i}", [float(i)])
+                # seed i+1: seed 0 would give an all-zero vector (sin(0)==0)
+                store.add(f"id{i}", f"text{i}", _fake_vector(seed=float(i) + 1))
                 time.sleep(0.01)
             store.save()
             # Fourth add triggers eviction of oldest (id0)
-            store.add("id3", "text3", [3.0])
+            store.add("id3", "text3", _fake_vector(seed=4.0))
             store.save()
 
             store2 = VectorStore(path)
@@ -352,7 +418,7 @@ class TestVectorStore:
                 f.write(json.dumps({
                     "id": "x",
                     "text": f"rev{i}",
-                    "vector": [float(i)],
+                    "vector": _fake_vector(seed=float(i) + 1),
                     "metadata": {},
                     "created_ts": float(i),
                 }) + "\n")

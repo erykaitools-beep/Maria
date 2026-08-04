@@ -79,8 +79,8 @@ class CorrectiveActionGenerator:
     # Thresholds for action generation
     MEMORY_PRESSURE_CONSOLIDATE = 75  # % → suggest consolidation
     CPU_PAUSE_LEARNING = 75           # % → pause background learning
-    LATENCY_REDUCE_BATCH = 2000       # ms → reduce inference batch
-    GOAL_DEPTH_INTERRUPT = 25         # depth → interrupt refinement
+    # (LATENCY_REDUCE_BATCH / GOAL_DEPTH_INTERRUPT removed 2026-07-18 with the
+    #  dead cognitive correctives.)
 
     def __init__(self):
         """Initialize action generator."""
@@ -146,38 +146,12 @@ class CorrectiveActionGenerator:
                 ))
                 self._last_cpu_pause_request = now
 
-        # Action 3: Reduce inference batch size
-        inference_latency = state.get("inference_latency_ms", 0)
-        if inference_latency > self.LATENCY_REDUCE_BATCH:
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="llm",
-                action="reduce_batch_size",
-                urgency=Urgency.IMMEDIATE,
-                reason=f"Inference latency at {inference_latency:.0f}ms",
-                parameters={"factor": 0.5},
-            ))
-
-        # Action 4: Goal stack interrupt
-        if state.get("goal_stack_runaway", False):
-            goal_depth = state.get("goal_stack_depth", 0)
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="metacontroller",
-                action="interrupt_goal_refinement",
-                urgency=Urgency.IMMEDIATE,
-                reason=f"Goal stack depth at {goal_depth}",
-            ))
-
-        # Action 5: Semantic consistency check
-        if not state.get("coherence_ok", True) and memory_pressure > 50:
-            actions.append(CorrectiveAction(
-                action_type=ActionType.SIGNAL_MODULE,
-                target="memory",
-                action="semantic_consistency_check",
-                urgency=Urgency.BACKGROUND,
-                reason="Coherence degraded with memory pressure",
-            ))
+        # (Actions 3-5 removed 2026-07-18 with their dead cognitive gates:
+        #  reduce_batch_size on inference latency, interrupt_goal_refinement on
+        #  goal-stack runaway, semantic_consistency_check on coherence. All were
+        #  driven by a numb CognitiveSensor (frozen constants) -- see
+        #  constraints.py NB. Real load/thermal correctives remain: CPU pause
+        #  above, thermal reduce_batch_size below.)
 
         # Action 6: Snapshot before risky operations
         if any("ALERT" in a for a in alerts):

@@ -44,6 +44,11 @@ class TeacherAgent:
     6. NIM gap analysis (max N calls/session)
     """
 
+    # Cap on the per-session files_touched log. The planner runs
+    # max_iterations=1, so this only bounds long REPL sessions -- the record
+    # travels inside every planner decision and must not grow unbounded there.
+    MAX_TOUCH_LOG = 10
+
     def __init__(
         self,
         router,
@@ -83,6 +88,16 @@ class TeacherAgent:
             "strategies_executed": 0,
             "nim_planning_calls": 0,
             "errors": 0,
+            # Which material this session actually touched (2026-07-21).
+            # The planner calls with filter_file_ids=None for the META mission,
+            # so the file is chosen INSIDE this loop and left no trace anywhere:
+            # planner_decisions.jsonl records THAT a learn ran under a goal,
+            # never on what. That gap is why "is the META mission eating 2/3 of
+            # the planner's decisions, or is it simply the throughput ceiling?"
+            # cannot be answered from the logs -- nothing says whether a
+            # parallel LEARNING goal would have claimed the same file. Capped
+            # (MAX_TOUCH_LOG) because this rides along in every decision record.
+            "files_touched": [],
         }
 
         # Callbacks
@@ -159,6 +174,16 @@ class TeacherAgent:
             "strategies_executed": 0,
             "nim_planning_calls": 0,
             "errors": 0,
+            # Which material this session actually touched (2026-07-21).
+            # The planner calls with filter_file_ids=None for the META mission,
+            # so the file is chosen INSIDE this loop and left no trace anywhere:
+            # planner_decisions.jsonl records THAT a learn ran under a goal,
+            # never on what. That gap is why "is the META mission eating 2/3 of
+            # the planner's decisions, or is it simply the throughput ceiling?"
+            # cannot be answered from the logs -- nothing says whether a
+            # parallel LEARNING goal would have claimed the same file. Capped
+            # (MAX_TOUCH_LOG) because this rides along in every decision record.
+            "files_touched": [],
         }
 
         logger.info(f"[TEACHER] Starting session (max {max_iterations} iterations)")
@@ -184,6 +209,16 @@ class TeacherAgent:
 
             # 3. Execute
             result = self._execute_strategy(strategy)
+
+            # 3b. Record WHAT was touched, so a decision record can later be
+            # attributed to actual material (see files_touched in _stats).
+            touched = self._stats["files_touched"]
+            if strategy.target_file_id and len(touched) < self.MAX_TOUCH_LOG:
+                touched.append({
+                    "file_id": strategy.target_file_id,
+                    "strategy": strategy.strategy_type,
+                    "ok": bool((result or {}).get("success")),
+                })
 
             # 4. Log
             self._log_plan(strategy, result)

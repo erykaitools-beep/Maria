@@ -15,9 +15,16 @@ _TOKEN = "TESTTOKEN_abc123"
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_app, "UI_PIN", "123456")
     monkeypatch.setattr(ui_app, "get_api_token", lambda: _TOKEN)
+    # PROJECT_ROOT is absolute (derived from the module's own location), so
+    # sandbox_cwd cannot reach it. Reaching a protected endpoint lazily builds
+    # the identity store under PROJECT_ROOT/meta_data and, on a tree where that
+    # file does not exist yet, WRITES it -- which is every fresh clone and every
+    # CI run. Invisible locally only because the live tree already has the file.
+    monkeypatch.setattr(ui_app, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(ui_app, "_identity_store", None)
     ui_app.app.config["TESTING"] = True
     with ui_app._login_lock:
         ui_app._login_failures.clear()

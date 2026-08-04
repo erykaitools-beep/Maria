@@ -15,6 +15,7 @@ from agent_core.environment.environment_model import (
     EnvironmentMode,
     EnvironmentProfile,
     ENVIRONMENT_PROFILES,
+    berlin_now,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class ModeDetector:
 
     Priority order:
     1. Operator manual override (always wins)
-    2. Homeostasis degradation (REDUCED/SLEEP -> QUIET)
+    2. Homeostasis degradation (SLEEP/SURVIVAL -> QUIET)
     3. Time-based auto-trigger (from profile.auto_trigger_hours/days)
     4. Current mode (stability - don't switch without reason)
     """
@@ -57,7 +58,10 @@ class ModeDetector:
         clear reason to switch.
         """
         if now is None:
-            now = datetime.now()
+            # berlin_now(): all auto_trigger windows are authored in Berlin
+            # wall-clock; a naive datetime.now() follows the OS timezone
+            # (the 2026-05-29 TZ-drift incident class).
+            now = berlin_now()
 
         # Anti-flap guard
         if time.time() - self._last_switch_ts < MIN_SWITCH_INTERVAL_SEC:
@@ -86,7 +90,16 @@ class ModeDetector:
         self._last_switch_ts = time.time()
 
     def _check_homeostasis_degradation(self) -> Optional[EnvironmentMode]:
-        """If homeostasis is in REDUCED/SLEEP/SURVIVAL, switch to QUIET."""
+        """If homeostasis is in SLEEP/SURVIVAL, switch to QUIET.
+
+        REDUCED is deliberately NOT degradation here: on a CPU-only box the
+        regulator oscillates active<->reduced every few minutes from normal
+        LLM-inference bursts, and this check samples that oscillation once
+        per 30-min anti-flap window -- with REDUCED in the set, daytime mode
+        was a coin flip (243 learning<->quiet switches 07-01..07-19, QUIET
+        active ~half the learning window precisely BECAUSE learning was
+        running hard).
+        """
         if self._homeostasis_core is None:
             return None
         try:
@@ -98,7 +111,7 @@ class ModeDetector:
                 return None
             # Mode.value is lowercase; compare on uppercase name to match the set below.
             mode_name = (mode if isinstance(mode, str) else mode.name).upper()
-            if mode_name in ("REDUCED", "SLEEP", "SURVIVAL"):
+            if mode_name in ("SLEEP", "SURVIVAL"):
                 return EnvironmentMode.QUIET
         except Exception:
             pass

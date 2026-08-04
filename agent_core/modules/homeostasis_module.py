@@ -20,6 +20,10 @@ from agent_core.modules.homeostasis_telegram_commands import (
 logger = logging.getLogger(__name__)
 
 
+class _WorkflowRoomClosed(Exception):
+    """WORKFLOW_ENABLED is off -- skip mounting the engine. Not an error."""
+
+
 def _operator_quiet_now() -> bool:
     """True when the local clock is inside the operator's quiet window.
 
@@ -224,7 +228,7 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"ModelScheduler not initialized: {e}")
 
-        # Initialize SemanticMemory (nomic-embed-text vector store)
+        # Initialize SemanticMemory (bge-m3 vector store)
         if core:
             try:
                 from agent_core.semantic import SemanticMemory
@@ -234,7 +238,7 @@ class HomeostasisModule(MariaModule):
                 sem = SemanticMemory(data_dir=_data_dir)
                 if sem.initialize():
                     ctx.semantic_search = sem
-                    logger.info("[Homeostasis] SemanticMemory initialized (nomic-embed-text)")
+                    logger.info("[Homeostasis] SemanticMemory initialized (bge-m3)")
 
                     # Start background indexing (knowledge, beliefs, hints)
                     from agent_core.semantic.indexer import start_background_indexing
@@ -550,7 +554,6 @@ class HomeostasisModule(MariaModule):
                 try:
                     from agent_core.autonomy import AutonomyPolicy, AuthorityManager
                     from agent_core.autonomy.approval_queue import ApprovalQueue
-                    from agent_core.autonomy.tool_budget import ToolBudgetManager
 
                     # Phase 5: Authority Manager (persisted level)
                     authority_manager = AuthorityManager()
@@ -567,13 +570,11 @@ class HomeostasisModule(MariaModule):
                     planner.set_approval_queue(approval_queue)
                     ctx.approval_queue = approval_queue
 
-                    # Phase 5: Per-tool budget manager
-                    tool_budget = ToolBudgetManager(
-                        tool_rate_limits=authority_manager.get_config().tool_rate_limits,
-                        failure_cooldown_sec=authority_manager.get_config().failure_cooldown_sec,
-                        max_consecutive_failures=authority_manager.get_config().max_consecutive_failures,
-                    )
-                    ctx.tool_budget = tool_budget
+                    # ToolBudgetManager (ADR-026) CUT 2026-07-19: never handed
+                    # to any exec path in its lifetime; effector risk is covered
+                    # by per-invocation human approval + K7 rate limit +
+                    # coordinator retry/incident. Resurrection point documented
+                    # in CONTRACTS ADR-026 (precondition for autonomous rungs).
 
                     auth_level = authority_manager.get_level().value
                     print(f"[Homeostasis] [OK] AutonomyPolicy wired (K7, authority={auth_level})")
@@ -1270,6 +1271,10 @@ class HomeostasisModule(MariaModule):
                             from agent_core.operator.honesty_protocol import HonestyProtocol
                             honesty = HonestyProtocol()
                             honesty.set_capability_manifest(manifest)
+                            # Reverse direction: /capabilities summary shows raw
+                            # execution counts (get_action_stats only -- no
+                            # recursion, see set_honesty_protocol docstring).
+                            manifest.set_honesty_protocol(honesty)
                             ctx.honesty_protocol = honesty
                             # Let the chat brain reach honest limits for its tail
                             # (K15.2 in chat); the tail line is flag-gated OFF.
@@ -1285,23 +1290,9 @@ class HomeostasisModule(MariaModule):
                         except Exception as e:
                             logger.warning(f"HonestyProtocol not initialized: {e}")
 
-                        # Wire StateReporter (K15.1) - structured self-status
-                        try:
-                            from agent_core.operator.state_reporter import StateReporter
-                            state_reporter = StateReporter()
-                            state_reporter.set_capability_manifest(manifest)
-                            if core:
-                                state_reporter.set_homeostasis_core(core)
-                            if ctx.goal_store:
-                                state_reporter.set_goal_store(ctx.goal_store)
-                            if ctx.knowledge_analyzer:
-                                state_reporter.set_knowledge_analyzer(ctx.knowledge_analyzer)
-                            if hasattr(ctx, 'identity_store') and ctx.identity_store:
-                                state_reporter.set_identity_store(ctx.identity_store)
-                            ctx.state_reporter = state_reporter
-                            print("[Homeostasis] [OK] StateReporter (K15.1) wired")
-                        except Exception as e:
-                            logger.warning(f"StateReporter not initialized: {e}")
+                        # K15.1 StateReporter CUT 2026-07-19: strict subset of
+                        # SelfPerception + SelfContext + /status; no output
+                        # method was ever called in prod (phantom hunt r2).
 
                         # Wire GrowthAwareness (K15.3) - limitations as targets
                         try:
@@ -1436,25 +1427,34 @@ class HomeostasisModule(MariaModule):
                 preprocessor = VisionPreprocessor(target_resolution=(640, 480))
                 vision_cortex = VisionCortex(preprocessor=preprocessor)
 
-                # LLaVA function for scene descriptions
+                # Vision-LLM function for scene descriptions.
+                # Model tag is env-swappable; "llava" elsewhere in the vision
+                # package (analyzer.backend, cortex) is a BACKEND SENTINEL
+                # meaning "a VLM answered, not the statistics fallback" -- it
+                # gates confidence 0.8 vs 0.3 and is NOT this model tag.
+                vision_model = os.environ.get("VISION_SCENE_MODEL", "gemma3:4b")
+
                 def _llava_describe(prompt: str, image_b64: str):
-                    """Call LLaVA via Ollama /api/generate."""
+                    """Call the scene vision model via Ollama /api/generate."""
                     import requests
                     try:
                         resp = requests.post(
                             "http://localhost:11434/api/generate",
                             json={
-                                "model": "llava",
+                                "model": vision_model,
                                 "prompt": prompt,
                                 "images": [image_b64],
                                 "stream": False,
                             },
-                            # LLaVA image inference is ~57s on this CPU under
-                            # model contention (qwen3+llama3.1+llava loaded); 30s
-                            # cut it off mid-flight -> describe returned None ->
-                            # no vision ping. Generous headroom; the advisor runs
-                            # in a thread so it never blocks the tick.
-                            timeout=120,
+                            # Measured 2026-07-25 on this CPU (num_predict=200):
+                            #   llava      image 75s + gen 40s (5.0 tok/s)
+                            #   gemma3:4b  image 20s + gen 20s (8.3 tok/s)
+                            # Warm inference fits easily, but a COLD load costs
+                            # ~175s on top -- the old 120s killed the first call
+                            # after ModelScheduler unloaded the model. The
+                            # advisor runs in a thread and never blocks the tick,
+                            # so a generous ceiling is free.
+                            timeout=300,
                         )
                         if resp.status_code == 200:
                             return resp.json().get("response", "")
@@ -1793,12 +1793,41 @@ class HomeostasisModule(MariaModule):
                 logger.warning(f"Digital Hands not initialized: {e}")
 
             # Wire Workflow Orchestration (Faza 5)
+            #
+            # WORKFLOW_ENABLED (2026-07-21, workshop room #1): the room had no
+            # valve at all -- no flag anywhere in agent_core/workflow/, mounting
+            # unconditional, tick Phase 14 unconditional. Nothing to arm, and
+            # worse, nothing to shut off if a first run misbehaved. Default OFF
+            # so the engine is absent unless someone opened the room on purpose;
+            # with it off ctx.workflow_engine stays None, Phase 14 is a no-op and
+            # /wf reports the room closed.
+            _wf_enabled = os.getenv("WORKFLOW_ENABLED", "").strip().lower() in (
+                "1", "true", "yes", "on")
             try:
+                if not _wf_enabled:
+                    raise _WorkflowRoomClosed()
                 from agent_core.workflow import WorkflowStore, WorkflowEngine, DelegationManager, ProgressReporter
                 from agent_core.planner.planner_model import Plan, PlanStatus, ActionType, create_plan
 
                 _wf_store = WorkflowStore()
                 _delegation = DelegationManager()
+
+                # K7 parity: the workflow path used to reach fs_write / effector
+                # / fetch below the gate the planner honours. Wire it here, at
+                # mount time, so the room cannot be opened ungated. The gate is
+                # fail-closed, so an unwired policy refuses every step rather
+                # than waving it through.
+                if ctx.autonomy_policy:
+                    _delegation.set_autonomy_policy(ctx.autonomy_policy)
+                else:
+                    logger.warning(
+                        "Workflow: autonomy_policy missing -- K7 gate will "
+                        "refuse every step (fail-closed)")
+                if ctx.homeostasis_core:
+                    def _wf_state():
+                        st = ctx.homeostasis_core.get_state()
+                        return st.health_score, st.mode.value
+                    _delegation.set_state_provider(_wf_state)
 
                 # Wire delegation to capability router and task executor
                 if ctx.capability_router:
@@ -1839,6 +1868,10 @@ class HomeostasisModule(MariaModule):
                 _wf_count = _wf_store.count()
                 _int_info = f", {len(_interrupted)} recovered" if _interrupted else ""
                 print(f"[Homeostasis] [OK] Workflow Engine (Faza 5, {_wf_count} workflows{_int_info})")
+            except _WorkflowRoomClosed:
+                # Not a failure -- the valve is shut. Distinct from the except
+                # below so a closed room never reads as a broken one.
+                print("[Homeostasis] [--] Workflow Engine OFF (WORKFLOW_ENABLED)")
             except Exception as e:
                 logger.warning(f"Workflow Engine not initialized: {e}")
 
@@ -2606,12 +2639,6 @@ class HomeostasisModule(MariaModule):
         print(f"  Description:   {status['description']}")
         print(f"  Switched at:   {switched} (by: {status['switched_by']})")
         print(f"  Auto-detect:   {'ON' if status['auto_detect_enabled'] else 'OFF'}")
-        print(f"  Notifications: {status['notification_level']}")
-        print(f"  LLM budget:    {status['llm_budget_multiplier']:.1f}x")
-        if status['priority_actions']:
-            print(f"  Priority:      {', '.join(status['priority_actions'])}")
-        if status['blocked_actions']:
-            print(f"  Blocked:       {', '.join(status['blocked_actions'])}")
         print()
 
     def _env_list_modes(self, mgr):

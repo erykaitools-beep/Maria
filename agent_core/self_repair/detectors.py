@@ -68,7 +68,16 @@ def detect_model_unavailable(
         first_status = _service_status(first, service_name)
         second_status = _service_status(second, service_name)
         third_status = _service_status(third, service_name)
-        if first_status != "available":
+        # Require the oldest of the three to NOT be down -- we alarm on the
+        # transition into an outage, not on every scan while it lasts.
+        #
+        # This used to demand `first_status == "available"` exactly. That was
+        # safe only while the producer emitted nothing but "available", and it
+        # breaks the moment there is an intermediate state: a ramping outage
+        # reads [degraded, unavailable, unavailable] -> skipped, then
+        # [unavailable, unavailable, unavailable] -> skipped forever, so a real
+        # outage that did not flip in one step would never be reported.
+        if _is_unavailable(service_name, first_status):
             continue
         if not (
             _is_unavailable(service_name, second_status)
@@ -338,17 +347,29 @@ def _is_unavailable(service_name: str, status: str) -> bool:
     """Whether a snapshot status string means the service is DOWN.
 
     Vocabulary must match what tool_registry actually emits per service (audit
-    2026-06-16):
-    - NIM: emits "available" / "depleted" / "unknown". "depleted" is RPM/budget
-      back-pressure (normal -- NIM is reachable, just rate/budget-limited), NOT an
-      outage, so it must NOT trip model_unavailable (was a false positive). Only a
-      genuine "unavailable" counts.
+    2026-06-16, revised 2026-07-28):
+    - NIM: emits "available" / "degraded" / "unavailable" / "depleted" /
+      "unknown", derived from real call outcomes (llm/nim_health.py).
+      "depleted" is RPM/budget back-pressure (normal -- NIM is reachable, just
+      rate/budget-limited), NOT an outage, so it must NOT trip
+      model_unavailable (was a false positive).
+      "degraded" means calls ARE getting through but a large share fail --
+      typically congestion on the shared public endpoint. Deliberately does NOT
+      trip either: Maria cannot repair someone else's queue, and an alarm she
+      can only ignore trains her to ignore alarms.
+      Only "unavailable" (enough attempts in the window, not one success)
+      counts as down.
+      NOTE: until 2026-07-28 this branch was structurally dead -- tool_registry
+      derived NIM status from the token-budget counter, which can only emit
+      OK/LOW/DEPLETED, so "unavailable" never appeared. Through the whole
+      dracarys EOL outage (254x HTTP 410) every snapshot read "available".
+      If you change the producer's vocabulary, change it here in the same move.
     - OpenClaw emits "disconnected", Codex "not_configured" -- the old check only
       matched "unavailable", so an actually-down effector NEVER tripped (false
       negative). Treat both as down.
-    Ollama is hardcoded "available" in tool_registry (no cheap reliable probe;
-    a fake one would lie -- see ADR note), so its liveness is covered by
-    detect_thread_unhealthy (PlannerCycle/TeacherAutoSession wedge), not here.
+    Ollama is still hardcoded "available" in tool_registry (no outcome tracker
+    on that path yet), so its liveness is covered by detect_thread_unhealthy
+    (PlannerCycle/TeacherAutoSession wedge), not here.
     """
     if service_name == "NVIDIA NIM API":
         return status == "unavailable"

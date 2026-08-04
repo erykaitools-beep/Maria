@@ -184,3 +184,93 @@ class TestCapabilityManifest:
         # First should be available, last should be unavailable
         assert caps[0].available is True
         assert caps[-1].available is False
+
+
+class TestSummaryExecutionCounts:
+    """get_summary shows raw execution counts from real planner history.
+
+    Uses a REAL HonestyProtocol over a tmp decisions file (repo lesson:
+    mocks swallow phantom integrations). Wiring is two-way like prod
+    (honesty<->manifest), so any future edit that routes the summary
+    through check_capability_claim explodes here with RecursionError.
+    """
+
+    @staticmethod
+    def _rec(action, success):
+        import json as _json  # noqa: F401  (kept local pattern explicit)
+        return {
+            "action_type": action,
+            "status": "completed" if success else "failed",
+            "result": {"success": success},
+            "timestamp": 1700000000,
+        }
+
+    def _manifest_with_history(self, tmp_path, records, caps=None):
+        import json
+        from agent_core.operator.honesty_protocol import HonestyProtocol
+
+        decisions = tmp_path / "planner_decisions.jsonl"
+        with open(decisions, "w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+        m = CapabilityManifest()
+        router = _make_router(caps or {"learn": True, "exam": True})
+        ctx = MagicMock()
+        ctx.test_sub = MagicMock()
+        m.set_capability_router(router)
+        m.set_context(ctx)
+        m.set_mode_fn(lambda: "ACTIVE")
+
+        honesty = HonestyProtocol(decisions_path=decisions)
+        honesty.set_capability_manifest(m)  # prod-shaped two-way wiring
+        m.set_honesty_protocol(honesty)
+        return m
+
+    def test_counts_shown_for_evidenced_capability(self, tmp_path):
+        records = [self._rec("learn", True)] * 3 + [self._rec("learn", False)]
+        m = self._manifest_with_history(tmp_path, records)
+        summary = m.get_summary()
+        assert "(3/4 ok)" in summary
+        # The static confidence percent fiction is gone from this view.
+        assert "%" not in summary
+
+    def test_no_history_no_number(self, tmp_path):
+        records = [self._rec("learn", True)] * 3
+        m = self._manifest_with_history(tmp_path, records)
+        summary = m.get_summary()
+        exam_line = next(l for l in summary.splitlines() if "Test exam" in l)
+        assert "(" not in exam_line  # honest blank, no fabricated prior
+
+    def test_below_min_attempts_no_number(self, tmp_path):
+        records = [self._rec("learn", True)] * 2  # < MIN_EVIDENCE_ATTEMPTS
+        m = self._manifest_with_history(tmp_path, records)
+        learn_line = next(
+            l for l in m.get_summary().splitlines() if "Test learn" in l
+        )
+        assert "ok)" not in learn_line
+
+    def test_degradation_rest_not_counted(self, tmp_path):
+        degr = {
+            "action_type": "learn",
+            "status": "skipped",
+            "result": {"success": False, "skipped": True,
+                       "blocked_by": "degradation",
+                       "reason": "mode=reduced: heavy LLM actions blocked"},
+            "timestamp": 1700000000,
+        }
+        records = [self._rec("learn", True)] * 3 + [degr] * 12
+        m = self._manifest_with_history(tmp_path, records)
+        assert "(3/3 ok)" in m.get_summary()  # 12 blocked rests invisible
+
+    def test_no_honesty_wired_summary_still_works(self):
+        m = CapabilityManifest()
+        router = _make_router({"learn": True})
+        ctx = MagicMock()
+        ctx.test_sub = MagicMock()
+        m.set_capability_router(router)
+        m.set_context(ctx)
+        m.set_mode_fn(lambda: "ACTIVE")
+        summary = m.get_summary()
+        assert "mozliwosci" in summary.lower()
+        assert "ok)" not in summary

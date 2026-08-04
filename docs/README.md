@@ -56,4 +56,5 @@ then come back here for the deeper material.
 | [funding/FUNDING_BRIEF.md](funding/FUNDING_BRIEF.md) | Funding brief |
 | [funding/HARDWARE_BENCHMARK_PLAN.md](funding/HARDWARE_BENCHMARK_PLAN.md) | Hardware benchmark plan |
 | [funding/PUBLIC_DELIVERABLES.md](funding/PUBLIC_DELIVERABLES.md) | Public deliverables |
-| [CHANGELOG.md](CHANGELOG.md) | Change history |
+| [../CHANGELOG.md](../CHANGELOG.md) | Release changelog (current) |
+| [CHANGELOG.md](CHANGELOG.md) | Pre-1.0 development log — archive, Polish |

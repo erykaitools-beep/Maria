@@ -131,26 +131,9 @@ class TestHonestyProtocol:
         stats2 = protocol.get_action_stats()
         assert stats1 is stats2  # same object from cache
 
-    # -- get_evidence_based_confidence --
-
-    def test_evidence_based_confidence(self, protocol, tmp_decisions):
-        manifest = specced(CapabilityManifest)
-        manifest.can_do.return_value = True
-        protocol.set_capability_manifest(manifest)
-
-        records = [_make_decision("learn", True) for _ in range(15)]
-        _write_decisions(tmp_decisions, records)
-
-        conf = protocol.get_evidence_based_confidence("learn")
-        assert conf >= 0.9
-
-    def test_evidence_based_confidence_no_handler(self, protocol):
-        manifest = specced(CapabilityManifest)
-        manifest.can_do.return_value = False
-        protocol.set_capability_manifest(manifest)
-
-        conf = protocol.get_evidence_based_confidence("nonexistent")
-        assert conf == 0.0
+    # get_evidence_based_confidence tests removed with the method
+    # (CUT 2026-07-19): zero prod callers, and the claimed manifest
+    # integration would recurse infinitely (see module docstring).
 
     # -- qualify_statement --
 
@@ -228,3 +211,52 @@ class TestHonestyProtocol:
 
     def test_qualifier_none(self):
         assert HonestyProtocol._qualifier_for_confidence(0.0) == "nie wiem"
+
+
+def _make_degradation_block(action_type: str):
+    """Exact result shape written by planner_core's Phase-3 degradation
+    check when REDUCED mode blocks a heavy action (see planner_core.run,
+    'Degradation check' block). Must carry skipped=True so evidence
+    consumers treat rest as a non-event, not a failed attempt."""
+    return {
+        "action_type": action_type,
+        "status": "skipped",
+        "result": {
+            "success": False,
+            "skipped": True,
+            "blocked_by": "degradation",
+            "reason": "mode=reduced: heavy LLM actions blocked",
+        },
+        "timestamp": 1700000000,
+    }
+
+
+class TestDegradationRecordsAreNotAttempts:
+    """REDUCED-mode rest must not pollute capability evidence.
+
+    Regression for the poisoned-stats bug: the degradation-block writer
+    emitted success=False WITHOUT skipped=True, so every evidence consumer
+    (GrowthAwareness reliability targets, K12 action distribution,
+    HonestyProtocol stats) counted rest as capability failure -- /growth
+    showed a false 'Niska skutecznosc: exam (33%)' target.
+    """
+
+    def test_degradation_records_excluded_from_stats(self, tmp_path):
+        decisions = tmp_path / "planner_decisions.jsonl"
+        records = (
+            [_make_decision("exam", success=True)] * 2
+            + [_make_decision("exam", success=False)]
+            + [_make_degradation_block("exam")] * 12
+        )
+        _write_decisions(decisions, records)
+
+        protocol = HonestyProtocol(decisions_path=decisions)
+        stats = protocol.get_action_stats()
+
+        assert stats["exam"]["count"] == 3      # 12 blocked rests invisible
+        assert stats["exam"]["success"] == 2    # real rate 67%, not 13%
+
+    def test_degradation_record_is_not_real_action(self):
+        from agent_core.planner.decision_filters import is_real_action
+        assert is_real_action(_make_degradation_block("learn")) is False
+        assert is_real_action(_make_decision("learn", success=False)) is True

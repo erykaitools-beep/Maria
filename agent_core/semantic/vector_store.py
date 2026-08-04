@@ -23,6 +23,54 @@ logger = logging.getLogger(__name__)
 # Caps
 MAX_VECTORS = 10000  # Max stored vectors (cap to prevent OOM)
 
+# Eviction priority per namespace: LOWEST number is evicted FIRST.
+#
+# Before 2026-07-31 eviction was blind -- purely globally-oldest by
+# created_ts -- and the store had been sitting exactly at MAX_VECTORS.
+# Measured on live data that day: 1150 new `summaries` vectors per day
+# (chunk-level text of everything Maria reads) against 130 `beliefs` and
+# 15 `knowledge`. Every summary chunk threw out whatever happened to be
+# oldest, so 413 of 2000 current belief entities had no vector at all --
+# invisible to semantic search -- and the whole store spanned just 4.9
+# days. The boot indexer re-embedded the missing beliefs, the next day's
+# reading evicted them again: a ping-pong. This is the same failure the
+# 2026-06-10 audit found (see cleanup_stale_belief_vectors in indexer.py);
+# back then the cap was eaten by ghost vectors, this time by the bulk
+# recall corpus. Cleaning the filler does not fix it -- the eviction
+# policy has to know what it is throwing away.
+#
+# `summaries` is a rolling corpus by design (working recall over what she
+# has read) and is the one namespace that should absorb the pressure.
+# Beliefs and knowledge are rebuilt only on boot, so losing them silently
+# costs recall until the next restart.
+EVICTION_PRIORITY: Dict[str, int] = {
+    "summaries": 0,   # bulk recall corpus, rolling by design -- evict first
+    "hints": 1,
+    "beliefs": 3,
+    "knowledge": 4,   # primary knowledge truth -- evict last
+}
+# Namespaces not listed above (legacy entries, namespaces added later)
+# sit between the two groups: cheaper than beliefs/knowledge, but never
+# evicted before the summaries that are meant to be recycled.
+DEFAULT_EVICTION_PRIORITY = 2
+
+# Namespaces whose eviction means the cap itself is too small, not that
+# the recycling is working. Logged at INFO so it is visible in journalctl.
+_PROTECTED_NAMESPACES = ("beliefs", "knowledge")
+
+
+def _eviction_priority(entry: "VectorEntry") -> int:
+    """Eviction rank of an entry; lower goes first.
+
+    Entries without a namespace (legacy rows, ad-hoc adds) get
+    DEFAULT_EVICTION_PRIORITY rather than being treated as the cheapest --
+    an unlabelled vector is unknown, not worthless.
+    """
+    ns = entry.metadata.get("namespace")
+    if ns is None:
+        return DEFAULT_EVICTION_PRIORITY
+    return EVICTION_PRIORITY.get(ns, DEFAULT_EVICTION_PRIORITY)
+
 
 class VectorEntry:
     """Single entry in the vector store."""
@@ -94,6 +142,10 @@ class VectorStore:
         # whole file instead. Prevents unbounded JSONL growth where
         # ghost entries linger on disk after being evicted from memory.
         self._needs_compaction: bool = False
+        # Per-namespace eviction tally since process start. Surfaced in
+        # stats() so the eviction policy can be verified on the live
+        # store instead of inferred from what happens to be missing.
+        self._evicted_by_namespace: Dict[str, int] = {}
 
     def load(self) -> int:
         """Load vectors from JSONL. Returns count loaded."""
@@ -102,6 +154,14 @@ class VectorStore:
 
         line_count = 0
         count = 0
+        # Vectors written by a PREVIOUS embedder have a different width. They do
+        # not raise -- cosine_similarity returns 0.0 on a length mismatch -- so
+        # without this guard they would linger forever as unfindable dead weight
+        # and quietly eat the MAX_VECTORS budget. Dropping them here lets the
+        # indexer re-add them with the current model.
+        from agent_core.semantic.embedding_model import expected_dim
+        want_dim = expected_dim()
+        wrong_dim = 0
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -112,13 +172,24 @@ class VectorStore:
                     try:
                         d = json.loads(line)
                         entry = VectorEntry.from_dict(d)
-                        if entry.vector:  # Skip entries without vectors
-                            self._entries[entry.entry_id] = entry
-                            count += 1
+                        if not entry.vector:  # Skip entries without vectors
+                            continue
+                        if want_dim and len(entry.vector) != want_dim:
+                            wrong_dim += 1
+                            continue
+                        self._entries[entry.entry_id] = entry
+                        count += 1
                     except (json.JSONDecodeError, KeyError):
                         continue
         except OSError as e:
             logger.warning(f"[SEMANTIC] Failed to load vectors: {e}")
+
+        if wrong_dim:
+            logger.warning(
+                f"[SEMANTIC] Dropped {wrong_dim} vectors with stale width "
+                f"(expected {want_dim}-dim) — left over from a previous "
+                f"embedding model; re-index to restore them"
+            )
 
         # Cap
         if len(self._entries) > MAX_VECTORS:
@@ -363,12 +434,24 @@ class VectorStore:
             "total_vectors": len(self._entries),
             "dirty_count": len(self._dirty_ids),
             "namespaces": namespaces,
+            "evicted_by_namespace": dict(self._evicted_by_namespace),
         }
 
     # --- Internal ---
 
     def _evict_oldest(self, count: int) -> None:
-        """Remove oldest entries to make room.
+        """Remove entries to make room, cheapest namespace first.
+
+        Order is (EVICTION_PRIORITY[namespace], created_ts): the oldest
+        entry of the cheapest non-empty namespace goes first, so the
+        high-volume summaries corpus recycles itself instead of crowding
+        out beliefs and knowledge (see EVICTION_PRIORITY for the
+        measurement that motivated this).
+
+        Always frees exactly `count` slots: when only protected
+        namespaces remain there is nothing cheaper to take, and their
+        oldest entries are evicted as before -- but that case is logged
+        at INFO, because it means the cap itself is too small.
 
         Marks the store for compaction — next save() will rewrite the
         file so evicted entries actually disappear from disk.
@@ -376,10 +459,24 @@ class VectorStore:
         if count <= 0:
             return
         sorted_entries = sorted(
-            self._entries.values(), key=lambda e: e.created_ts
+            self._entries.values(),
+            key=lambda e: (_eviction_priority(e), e.created_ts),
         )
+        protected_hit: Dict[str, int] = {}
         for entry in sorted_entries[:count]:
             del self._entries[entry.entry_id]
             self._dirty_ids.discard(entry.entry_id)
-            logger.debug(f"[SEMANTIC] Evicted oldest vector: {entry.entry_id}")
+            ns = entry.metadata.get("namespace", "default")
+            self._evicted_by_namespace[ns] = (
+                self._evicted_by_namespace.get(ns, 0) + 1
+            )
+            if ns in _PROTECTED_NAMESPACES:
+                protected_hit[ns] = protected_hit.get(ns, 0) + 1
+            logger.debug(f"[SEMANTIC] Evicted vector: {entry.entry_id} (ns={ns})")
+        if protected_hit:
+            logger.info(
+                f"[SEMANTIC] Cap pressure: evicted protected vectors "
+                f"{protected_hit} — nothing cheaper left at MAX_VECTORS="
+                f"{MAX_VECTORS}; raise the cap or index less"
+            )
         self._needs_compaction = True

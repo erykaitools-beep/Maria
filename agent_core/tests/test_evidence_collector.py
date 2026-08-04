@@ -232,15 +232,45 @@ class TestCollectAutonomy:
 
 class TestCollectGoals:
     def test_goals_from_jsonl(self, collector, meta_dir):
+        """JSONL-fallback path (no runtime store). Regression 2026-07-18: the
+        fallback read phantom dict keys goal_id/goal_type/title, but goals.jsonl
+        is Goal.to_dict() output -> keys id/type/description. This fixture used
+        the phantom shape and asserted only count==2, so it stayed green while
+        every value rendered '[?] ?'. Use the REAL shape and assert values."""
         _write_jsonl(meta_dir / "goals.jsonl", [
-            {"goal_id": "goal-meta-learn", "status": "active",
-             "goal_type": "meta", "title": "Autonomiczna nauka"},
-            {"goal_id": "goal-maint", "status": "active",
-             "goal_type": "maintenance", "title": "Utrzymaj health"},
+            {"id": "goal-meta-learn", "status": "active",
+             "type": "meta", "description": "Autonomiczna nauka"},
+            {"id": "goal-maint", "status": "active",
+             "type": "maintenance", "description": "Utrzymaj health"},
         ])
         evidence = collector.collect_planner()
         goals = [e for e in evidence if e.key.startswith("goal.")]
         assert len(goals) == 2
+        by_key = {e.key: e.value for e in goals}
+        assert by_key["goal.goal-meta-learn"] == "[meta] Autonomiczna nauka"
+        assert by_key["goal.goal-maint"] == "[maintenance] Utrzymaj health"
+        assert all("?" not in v for v in by_key.values())
+
+    def test_goals_from_runtime_store(self, collector, tmp_path):
+        """Runtime-store path with a REAL Goal, not the JSONL fallback.
+
+        Regression 2026-07-17: _collect_goals read phantom g.goal_type / g.title
+        on the real Goal (fields are g.type / g.description). The AttributeError
+        was swallowed by `except: pass`, so any active goal made this silently
+        return []. The JSONL-fallback test above only exercised the dict path and
+        stayed green while the Goal-object path was dead.
+        """
+        from agent_core.goals.store import GoalStore
+        from agent_core.goals.goal_model import create_goal, GoalType, GoalStatus
+        store = GoalStore(tmp_path / "rt_goals.jsonl")
+        store.create(create_goal(GoalType.META, "Zmiana mechanizmu uczenia",
+                                 0.8, status=GoalStatus.ACTIVE))
+        collector.set_goal_store(store)
+        evidence = collector.collect_planner()
+        goals = [e for e in evidence if e.key.startswith("goal.")]
+        assert len(goals) == 1
+        assert goals[0].value == "[meta] Zmiana mechanizmu uczenia"
+        assert goals[0].source == "goal_store (runtime)"
 
 
 # -- Compact summary --
@@ -269,3 +299,37 @@ class TestCompactSummary:
     def test_empty_when_no_data(self, collector):
         summary = collector.build_compact_summary()
         assert summary == ""  # no data = empty
+
+
+class TestConfidenceNormalization:
+    """Evidence normalizes numeric confidence to the canonical label.
+
+    Regression (phantom hunt r2 side-find): writers passed a mix of floats
+    (0.95) and labels ("high"); response_builder compares against labels,
+    so float evidence silently never counted as high-confidence.
+    """
+
+    def test_float_high(self):
+        from agent_core.introspection.evidence_collector import Evidence
+        e = Evidence(key="k", value="v", source="s", confidence=0.95)
+        assert e.confidence == "high"
+
+    def test_float_boundary_high(self):
+        from agent_core.introspection.evidence_collector import Evidence
+        assert Evidence(key="k", value="v", source="s",
+                        confidence=0.7).confidence == "high"
+
+    def test_float_medium(self):
+        from agent_core.introspection.evidence_collector import Evidence
+        assert Evidence(key="k", value="v", source="s",
+                        confidence=0.5).confidence == "medium"
+
+    def test_float_low(self):
+        from agent_core.introspection.evidence_collector import Evidence
+        assert Evidence(key="k", value="v", source="s",
+                        confidence=0.2).confidence == "low"
+
+    def test_label_passthrough(self):
+        from agent_core.introspection.evidence_collector import Evidence
+        assert Evidence(key="k", value="v", source="s",
+                        confidence="high").confidence == "high"

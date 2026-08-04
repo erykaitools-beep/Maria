@@ -298,7 +298,23 @@ class StateCollector:
         return result
 
     def _collect_stale_goals(self, now: float) -> List[Dict[str, Any]]:
-        """Find goals that are ACTIVE but old (stale)."""
+        """Find goals that are ACTIVE but have not MOVED for days.
+
+        Staleness is measured from updated_at (the last time anything wrote to
+        the goal), not from created_at. The age rule that used to live here
+        called every goal older than two days "stale" regardless of what it was
+        doing: a goal that had worked ninety minutes earlier was reported as
+        "28.1 days stale", and the always-on mission -- the rail the entire
+        learner runs on -- was reported as stagnant for its whole 143-day life
+        and got worse by one day every day. That reading reached K12, the
+        MISALIGNMENT tension rule, and the K12->K11 heuristic that raises
+        AGING_FACTOR_PER_HOUR off a "N dni" count parsed out of it (2026-05-12
+        proposal, left at draft). Age is not stagnation; it is age -- and for a
+        mission that is never meant to finish, age is not even a defect.
+
+        days_old is kept alongside so nothing loses the age signal -- it just
+        stops being mistaken for the verdict.
+        """
         goals = self._read_jsonl_all(self._meta / "goals.jsonl")
 
         # MERGE semantics
@@ -313,12 +329,16 @@ class StateCollector:
             status = (g.get("status") or "").upper()
             if status in ("ACTIVE", "PENDING"):
                 created = g.get("created_at", now)
-                age_days = (now - created) / 86400
-                if age_days > 2:  # Stale if active > 2 days
+                # No updated_at at all -> fall back to creation, so a goal that
+                # was never touched still counts from a real timestamp.
+                touched = g.get("updated_at") or created
+                idle_days = (now - touched) / 86400
+                if idle_days > 2:  # Stale if untouched > 2 days
                     stale.append({
                         "id": g.get("id") or g.get("goal_id", ""),
                         "description": (g.get("description", ""))[:80],
-                        "days_stale": round(age_days, 1),
+                        "days_stale": round(idle_days, 1),
+                        "days_old": round((now - created) / 86400, 1),
                     })
 
         stale.sort(key=lambda s: s["days_stale"], reverse=True)

@@ -1,8 +1,14 @@
 # M.A.R.I.A. Smart Home Integration Specification
 
-> Maria jako centralny mozg inteligentnego domu
+> Maria as the central brain of a smart home
 
-## 1. Architektura
+> **[DEFERRED - NOT IMPLEMENTED]** This document is a design specification, not a description
+> of running code. There is no `agent_core/smart_home/` package in the repository, no device
+> clients, and none of the REPL commands listed below are registered. Phase E is DEFERRED
+> pending IoT hardware (see `docs/ROADMAP.md`). All code in this file is proposed design,
+> written in the indicative mood for brevity; treat it as a plan, not as runtime truth.
+
+## 1. Architecture
 
 ```
                     +------------------+
@@ -14,75 +20,75 @@
               |              |              |
         +-----v----+   +-----v----+   +-----v----+
         |  Vision  |   |   IoT    |   |  Mobile  |
-        | (kamery) |   | (Shelly) |   | (Android)|
+        |(cameras) |   | (Shelly) |   | (Android)|
         +----------+   +----------+   +----------+
               |              |              |
         [USB/WiFi]    [REST API]     [ADB/Tasker]
 ```
 
-## 2. Warstwa IoT - Urzadzenia
+## 2. IoT Layer - Devices
 
-### 2.1 Wspierane protokoly
+### 2.1 Supported protocols
 
-| Protokol | Priorytet | Urzadzenia |
+| Protocol | Priority | Devices |
 |----------|-----------|------------|
-| **REST API (HTTP)** | Wysoki | Shelly, Tasmota, ESPHome |
-| MQTT | Sredni | Wszystkie IoT |
-| WebSocket | Niski | Real-time updates |
+| **REST API (HTTP)** | High | Shelly, Tasmota, ESPHome |
+| MQTT | Medium | All IoT |
+| WebSocket | Low | Real-time updates |
 
-### 2.2 Rekomendowane urzadzenia
+### 2.2 Recommended devices
 
-**Gniazdka smart:**
-- Shelly Plug S / Plus (~60-80 zl) - lokalne API, bez chmury
-- Sonoff S26 z Tasmota (~50 zl) - wymaga flashowania
-- Tuya z Tasmota (~40 zl) - wymaga flashowania
+**Smart plugs:**
+- Shelly Plug S / Plus (~60-80 PLN) - local API, no cloud
+- Sonoff S26 with Tasmota (~50 PLN) - requires flashing
+- Tuya with Tasmota (~40 PLN) - requires flashing
 
-**Czujniki:**
-- Shelly Door/Window - kontaktrony
-- Shelly Motion - ruch
-- Shelly H&T - temperatura/wilgotnosc
+**Sensors:**
+- Shelly Door/Window - reed switches
+- Shelly Motion - motion
+- Shelly H&T - temperature/humidity
 
-**Oswietlenie:**
-- Shelly Dimmer - sciemniacz
-- Shelly RGBW2 - LED RGB
-- Tasmota bulbs - zarowki WiFi
+**Lighting:**
+- Shelly Dimmer - dimmer
+- Shelly RGBW2 - RGB LED
+- Tasmota bulbs - WiFi bulbs
 
-### 2.3 Konfiguracja sieci
+### 2.3 Network configuration
 
 ```
-[Router glowny]
+[Main router]
     |
-    +--- VLAN 1: Siec domowa (laptop, telefon)
+    +--- VLAN 1: Home network (laptop, phone)
     |       IP: 192.168.1.0/24
     |
-    +--- VLAN 2: Siec IoT (Shelly, kamery)
+    +--- VLAN 2: IoT network (Shelly, cameras)
     |       IP: 192.168.2.0/24
     |
-    +--- VLAN 3: Siec Maria (serwer Maria)
+    +--- VLAN 3: Maria network (Maria server)
             IP: 192.168.3.0/24
-            Ma dostep do VLAN 1 i 2
+            Has access to VLAN 1 and 2
 ```
 
-**Prostsza opcja (Guest Network):**
-- Siec glowna: urzadzenia osobiste
-- Guest Network: urzadzenia IoT
-- Maria na sieci glownej z dostepem do Guest
+**Simpler option (Guest Network):**
+- Main network: personal devices
+- Guest Network: IoT devices
+- Maria on the main network with access to Guest
 
-## 3. API Urzadzen
+## 3. Device APIs
 
 ### 3.1 Shelly REST API
 
 ```python
-# Wlacz urzadzenie
+# Turn the device on
 GET http://192.168.2.10/relay/0?turn=on
 
-# Wylacz urzadzenie
+# Turn the device off
 GET http://192.168.2.10/relay/0?turn=off
 
 # Status
 GET http://192.168.2.10/status
 
-# Przyklad odpowiedzi status:
+# Example status response:
 {
     "relays": [{"ison": true, "power": 45.2}],
     "meters": [{"power": 45.2, "total": 12345}]
@@ -92,32 +98,32 @@ GET http://192.168.2.10/status
 ### 3.2 Tasmota REST API
 
 ```python
-# Wlacz
+# Turn on
 GET http://192.168.2.20/cm?cmnd=Power%20On
 
-# Wylacz
+# Turn off
 GET http://192.168.2.20/cm?cmnd=Power%20Off
 
 # Status
 GET http://192.168.2.20/cm?cmnd=Status%200
 ```
 
-## 4. Modul smart_home/
+## 4. The smart_home/ module
 
-### 4.1 Struktura
+### 4.1 Structure
 
 ```
 agent_core/
     smart_home/
         __init__.py
-        device_registry.py    # Rejestr urzadzen
-        shelly_client.py      # Klient Shelly API
-        tasmota_client.py     # Klient Tasmota API
-        automation_engine.py  # Silnik automatyzacji
-        rules.py              # Reguly (trigger -> action)
+        device_registry.py    # Device registry
+        shelly_client.py      # Shelly API client
+        tasmota_client.py     # Tasmota API client
+        automation_engine.py  # Automation engine
+        rules.py              # Rules (trigger -> action)
 ```
 
-### 4.2 Interfejs bazowy
+### 4.2 Base interface
 
 ```python
 from abc import ABC, abstractmethod
@@ -150,26 +156,26 @@ class DeviceInfo:
 
 
 class SmartDevice(ABC):
-    """Bazowy interfejs dla urzadzen smart home."""
+    """Base interface for smart home devices."""
 
     @abstractmethod
     def get_state(self) -> DeviceState:
-        """Pobierz aktualny stan."""
+        """Return the current state."""
         pass
 
     @abstractmethod
     def set_state(self, state: DeviceState) -> bool:
-        """Ustaw stan. Zwraca True jesli sukces."""
+        """Set the state. Returns True on success."""
         pass
 
     @abstractmethod
     def get_info(self) -> DeviceInfo:
-        """Pobierz informacje o urzadzeniu."""
+        """Return device information."""
         pass
 
     @abstractmethod
     def is_available(self) -> bool:
-        """Sprawdz czy urzadzenie jest dostepne."""
+        """Check whether the device is reachable."""
         pass
 ```
 
@@ -181,7 +187,7 @@ from typing import Optional
 
 
 class ShellyDevice(SmartDevice):
-    """Klient dla urzadzen Shelly."""
+    """Client for Shelly devices."""
 
     def __init__(self, ip: str, name: str, device_id: str, room: str = None):
         self.ip = ip
@@ -224,7 +230,7 @@ class ShellyDevice(SmartDevice):
         return self.set_state(new_state)
 
     def get_power(self) -> Optional[float]:
-        """Pobierz aktualne zuzycie energii (W)."""
+        """Return the current power draw (W)."""
         try:
             resp = requests.get(
                 f"http://{self.ip}/status",
@@ -266,40 +272,40 @@ from typing import Dict, List, Optional
 
 
 class DeviceRegistry:
-    """Rejestr wszystkich urzadzen smart home."""
+    """Registry of all smart home devices."""
 
     def __init__(self):
         self._devices: Dict[str, SmartDevice] = {}
 
     def register(self, device: SmartDevice) -> None:
-        """Zarejestruj urzadzenie."""
+        """Register a device."""
         info = device.get_info()
         self._devices[info.id] = device
 
     def get(self, device_id: str) -> Optional[SmartDevice]:
-        """Pobierz urzadzenie po ID."""
+        """Return a device by ID."""
         return self._devices.get(device_id)
 
     def get_by_name(self, name: str) -> Optional[SmartDevice]:
-        """Pobierz urzadzenie po nazwie."""
+        """Return a device by name."""
         for device in self._devices.values():
             if device.get_info().name.lower() == name.lower():
                 return device
         return None
 
     def get_by_room(self, room: str) -> List[SmartDevice]:
-        """Pobierz wszystkie urzadzenia w pokoju."""
+        """Return all devices in a room."""
         return [
             d for d in self._devices.values()
             if d.get_info().room and d.get_info().room.lower() == room.lower()
         ]
 
     def list_all(self) -> List[DeviceInfo]:
-        """Lista wszystkich urzadzen."""
+        """List all devices."""
         return [d.get_info() for d in self._devices.values()]
 
     def scan_network(self, subnet: str = "192.168.2") -> List[str]:
-        """Skanuj siec w poszukiwaniu urzadzen Shelly."""
+        """Scan the network for Shelly devices."""
         found = []
         for i in range(1, 255):
             ip = f"{subnet}.{i}"
@@ -322,10 +328,10 @@ import time
 
 
 class TriggerType(Enum):
-    TIME = "time"           # O konkretnej godzinie
-    EVENT = "event"         # Na zdarzenie (ruch, drzwi)
-    STATE = "state"         # Zmiana stanu urzadzenia
-    CONDITION = "condition" # Warunek (np. moc > 100W)
+    TIME = "time"           # At a specific time of day
+    EVENT = "event"         # On an event (motion, door)
+    STATE = "state"         # Device state change
+    CONDITION = "condition" # Condition (e.g. power > 100W)
 
 
 @dataclass
@@ -339,7 +345,7 @@ class AutomationRule:
 
 
 class AutomationEngine:
-    """Silnik automatyzacji - reaguje na zdarzenia."""
+    """Automation engine - reacts to events."""
 
     def __init__(self, registry: DeviceRegistry):
         self.registry = registry
@@ -347,11 +353,11 @@ class AutomationEngine:
         self._running = False
 
     def add_rule(self, rule: AutomationRule) -> None:
-        """Dodaj regule automatyzacji."""
+        """Add an automation rule."""
         self._rules.append(rule)
 
     def remove_rule(self, rule_id: str) -> bool:
-        """Usun regule."""
+        """Remove a rule."""
         for i, rule in enumerate(self._rules):
             if rule.id == rule_id:
                 del self._rules[i]
@@ -359,7 +365,7 @@ class AutomationEngine:
         return False
 
     def process_event(self, event_type: str, event_data: dict) -> None:
-        """Przetworz zdarzenie i wykonaj pasujace reguly."""
+        """Process an event and run the matching rules."""
         for rule in self._rules:
             if not rule.enabled:
                 continue
@@ -369,7 +375,7 @@ class AutomationEngine:
                     self._execute_rule(rule, event_data)
 
     def _execute_rule(self, rule: AutomationRule, context: dict) -> None:
-        """Wykonaj akcje reguly."""
+        """Execute a rule action."""
         try:
             rule.action()
             print(f"[Automation] Executed: {rule.name}")
@@ -377,42 +383,42 @@ class AutomationEngine:
             print(f"[Automation] Error in {rule.name}: {e}")
 
 
-# Przyklad uzycia:
+# Example usage:
 #
 # registry = DeviceRegistry()
-# registry.register(ShellyDevice("192.168.2.10", "Czajnik", "kettle", "Kuchnia"))
+# registry.register(ShellyDevice("192.168.2.10", "Kettle", "kettle", "Kitchen"))
 #
 # engine = AutomationEngine(registry)
 #
-# # Regula: gdy wykryto auto na kamerze -> wlacz czajnik
+# # Rule: when a car is detected on camera -> turn the kettle on
 # engine.add_rule(AutomationRule(
 #     id="auto_kettle",
-#     name="Wlacz czajnik gdy przyjezdzam",
+#     name="Turn the kettle on when I arrive",
 #     trigger_type=TriggerType.EVENT,
 #     trigger_config={"event": "car_detected"},
 #     action=lambda: registry.get("kettle").turn_on()
 # ))
 ```
 
-## 5. Integracja z Maria
+## 5. Integration with Maria
 
 ### 5.1 REPL Commands
 
 ```
-/devices              - lista urzadzen
-/device <id> on       - wlacz urzadzenie
-/device <id> off      - wylacz urzadzenie
-/device <id> status   - status urzadzenia
-/rooms                - lista pokojow
-/room <name> off      - wylacz wszystko w pokoju
-/scan                 - skanuj siec
-/rules                - lista regul automatyzacji
+/devices              - list devices
+/device <id> on       - turn a device on
+/device <id> off      - turn a device off
+/device <id> status   - device status
+/rooms                - list rooms
+/room <name> off      - turn everything off in a room
+/scan                 - scan the network
+/rules                - list automation rules
 ```
 
-### 5.2 Integracja z Vision
+### 5.2 Integration with Vision
 
 ```python
-# W module vision - po wykryciu obiektu:
+# In the vision module - after an object is detected:
 def on_object_detected(object_type: str, confidence: float):
     if object_type == "car" and confidence > 0.8:
         automation_engine.process_event("car_detected", {
@@ -421,74 +427,74 @@ def on_object_detected(object_type: str, confidence: float):
         })
 ```
 
-### 5.3 Integracja z Homeostasis
+### 5.3 Integration with Homeostasis
 
 ```python
-# W SURVIVAL mode - wylacz wszystkie urzadzenia nie-krytyczne
+# In SURVIVAL mode - turn off all non-critical devices
 def on_mode_change(old_mode: Mode, new_mode: Mode):
     if new_mode == Mode.SURVIVAL:
         for device in registry.list_all():
-            if device.room != "Server":  # Nie wylaczaj serwera
+            if device.room != "Server":  # Do not turn off the server
                 registry.get(device.id).turn_off()
 ```
 
-## 6. Bezpieczenstwo
+## 6. Security
 
-### 6.1 Zasady
+### 6.1 Principles
 
-1. **Lokalne API tylko** - zadnej chmury (Tuya cloud, etc.)
-2. **Izolacja sieci** - IoT na osobnym VLAN/Guest
-3. **Firewall** - IoT nie ma dostepu do internetu
-4. **Autoryzacja** - PIN/haslo dla krytycznych akcji
-5. **Audit log** - logowanie wszystkich akcji
+1. **Local API only** - no cloud (Tuya cloud, etc.)
+2. **Network isolation** - IoT on a separate VLAN/Guest
+3. **Firewall** - IoT has no internet access
+4. **Authorization** - PIN/password for critical actions
+5. **Audit log** - log every action
 
-### 6.2 Krytyczne urzadzenia
+### 6.2 Critical devices
 
-Urzadzenia wymagajace potwierdzenia:
-- Zamki do drzwi
-- Alarmy
-- Ogrzewanie/klimatyzacja
-- Brama garazowa
+Devices that require confirmation:
+- Door locks
+- Alarms
+- Heating/air conditioning
+- Garage door
 
 ```python
 CRITICAL_DEVICES = ["door_lock", "alarm", "garage"]
 
 def safe_action(device_id: str, action: str) -> bool:
     if device_id in CRITICAL_DEVICES:
-        # Wymagaj potwierdzenia przez Web UI lub glos
+        # Require confirmation via the Web UI or voice
         return request_confirmation(device_id, action)
     return True
 ```
 
 ## 7. Mobile Body (Android)
 
-### 7.1 Rola
+### 7.1 Role
 
-Android jako "cialo mobilne" Marii:
-- Kamera mobilna (IP Webcam)
-- Mikrofon (rozpoznawanie glosu)
-- Glosnik (TTS - Maria mowi)
-- GPS (lokalizacja)
-- Sensory (akcelerometr, zyroskop)
+Android as Maria's "mobile body":
+- Mobile camera (IP Webcam)
+- Microphone (speech recognition)
+- Speaker (TTS - Maria speaks)
+- GPS (location)
+- Sensors (accelerometer, gyroscope)
 
-### 7.2 Aplikacje
+### 7.2 Applications
 
-| Aplikacja | Funkcja | API |
+| Application | Function | API |
 |-----------|---------|-----|
-| IP Webcam | Kamera przez WiFi | HTTP stream |
+| IP Webcam | Camera over WiFi | HTTP stream |
 | Termux | Python/Linux | SSH/ADB |
-| Tasker | Automatyzacja | Intent/HTTP |
-| AutoVoice | Komendy glosowe | Tasker plugin |
-| MacroDroid | Prostsze Tasker | HTTP webhook |
+| Tasker | Automation | Intent/HTTP |
+| AutoVoice | Voice commands | Tasker plugin |
+| MacroDroid | Simpler Tasker | HTTP webhook |
 
-### 7.3 Konfiguracja IP Webcam
+### 7.3 IP Webcam configuration
 
 ```
-URL streamu: http://192.168.1.100:8080/video
-URL zdjecia: http://192.168.1.100:8080/shot.jpg
-URL audio:   http://192.168.1.100:8080/audio.wav
+Stream URL:   http://192.168.1.100:8080/video
+Snapshot URL: http://192.168.1.100:8080/shot.jpg
+Audio URL:    http://192.168.1.100:8080/audio.wav
 
-# W Python:
+# In Python:
 import cv2
 cap = cv2.VideoCapture("http://192.168.1.100:8080/video")
 ```
@@ -496,11 +502,11 @@ cap = cv2.VideoCapture("http://192.168.1.100:8080/video")
 ### 7.4 Termux + Maria
 
 ```bash
-# Na Android w Termux:
+# On Android, in Termux:
 pkg install python
 pip install flask requests
 
-# Prosty agent:
+# Simple agent:
 python maria_mobile_agent.py
 ```
 
@@ -513,7 +519,7 @@ app = Flask(__name__)
 
 @app.route("/speak/<text>")
 def speak(text):
-    # TTS przez Termux:API
+    # TTS via Termux:API
     subprocess.run(["termux-tts-speak", text])
     return jsonify({"status": "ok"})
 
@@ -539,51 +545,51 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 ```
 
-## 8. Lista zakupow
+## 8. Shopping list
 
-### Faza 1 - Podstawy (~500 zl)
-- [ ] Kamera USB Logitech C270 (~100 zl)
-- [ ] Shelly Plug S x3 (~200 zl)
-- [ ] Android uzywany (Samsung S8/Xiaomi) (~200 zl)
+### Phase 1 - Basics (~500 PLN)
+- [ ] Logitech C270 USB camera (~100 PLN)
+- [ ] Shelly Plug S x3 (~200 PLN)
+- [ ] Used Android phone (Samsung S8/Xiaomi) (~200 PLN)
 
-### Faza 2 - Rozszerzenie (~400 zl)
-- [ ] Shelly Door/Window x2 (~100 zl)
-- [ ] Shelly Motion (~80 zl)
-- [ ] Shelly H&T (temp/wilgotnosc) (~80 zl)
-- [ ] Router z VLAN (Mikrotik hAP) (~150 zl)
+### Phase 2 - Expansion (~400 PLN)
+- [ ] Shelly Door/Window x2 (~100 PLN)
+- [ ] Shelly Motion (~80 PLN)
+- [ ] Shelly H&T (temp/humidity) (~80 PLN)
+- [ ] Router with VLAN support (Mikrotik hAP) (~150 PLN)
 
-### Faza 3 - Zaawansowane (~500 zl)
-- [ ] Druga kamera (zewnetrzna IP) (~200 zl)
-- [ ] Shelly Dimmer x2 (~150 zl)
-- [ ] ESP32 + czujniki DIY (~100 zl)
-- [ ] Mikrofon USB (~50 zl)
+### Phase 3 - Advanced (~500 PLN)
+- [ ] Second camera (external IP) (~200 PLN)
+- [ ] Shelly Dimmer x2 (~150 PLN)
+- [ ] ESP32 + DIY sensors (~100 PLN)
+- [ ] USB microphone (~50 PLN)
 
-## 9. Harmonogram implementacji
+## 9. Implementation schedule
 
 ### Sprint 1: Device Registry (4h)
-- [ ] Interfejs SmartDevice
+- [ ] SmartDevice interface
 - [ ] ShellyDevice implementation
 - [ ] DeviceRegistry
-- [ ] Testy jednostkowe
+- [ ] Unit tests
 
 ### Sprint 2: REPL Integration (2h)
-- [ ] Komendy /device, /devices
-- [ ] Komendy /room, /rooms
-- [ ] Komenda /scan
+- [ ] /device, /devices commands
+- [ ] /room, /rooms commands
+- [ ] /scan command
 
 ### Sprint 3: Automation Engine (4h)
 - [ ] AutomationRule dataclass
 - [ ] AutomationEngine
-- [ ] Podstawowe triggery
-- [ ] Integracja z Vision (event dispatch)
+- [ ] Basic triggers
+- [ ] Vision integration (event dispatch)
 
 ### Sprint 4: Mobile Body (4h)
 - [ ] IP Webcam integration
 - [ ] Termux agent script
-- [ ] TTS (Maria mowi)
-- [ ] Lokalizacja GPS
+- [ ] TTS (Maria speaks)
+- [ ] GPS location
 
 ---
 
-*Specyfikacja: 2026-02-02*
-*Wersja: 1.0*
+*Specification: 2026-02-02*
+*Version: 1.0*

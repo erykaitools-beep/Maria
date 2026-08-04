@@ -114,3 +114,91 @@ class TestBuildFrame:
         for k in ("episode_id", "candidates", "snapshot_digest", "hidden", "ext", "exit_path"):
             assert k in frame
         assert frame["candidates"][0]["description"] == "d"
+
+
+class TestCandidateDigest:
+    """Regression: 2026-07-27, tap silent since 26.07 01:24.
+
+    One fetch-handoff goal carried `file_ids` (651 filenames, ~27 KB) plus a
+    byte-identical `fetched_file_ids`. It is a candidate in EVERY decision, so
+    every frame weighed 52 KB against a 16 KB warning threshold. 12237 frames
+    = 201 MB, the tap hit its own budget and stopped collecting -- and the
+    over-budget warning is one-shot per process, so nobody noticed for a day
+    and a half.
+    """
+
+    @staticmethod
+    def _fat_goal():
+        names = [f"web_wiki_temat_{i}.txt" for i in range(651)]
+        return {
+            "id": "goal-fat", "type": "learning", "priority": 1.0,
+            "metadata": {
+                "source": "fetch_handoff",
+                "file_ids": names,
+                "fetched_file_ids": list(names),
+                "risk_level": "low",
+            },
+        }
+
+    def test_bulk_metadata_replaced_by_count(self):
+        frame = build_frame(
+            episode_id="ep", tick_count=1, now=1.0, mode="ACTIVE",
+            health_score=1.0, exit_path="goal_loop",
+            ranked_goals=[self._fat_goal()], snapshot=None, metrics={},
+            is_learning_window=True, off_window_exec_allowed=False,
+            hidden={}, ext={}, strategic=None,
+        )
+        meta = frame["candidates"][0]["metadata"]
+        assert meta["file_ids"] == {"__len": 651, "__bytes": meta["file_ids"]["__bytes"]}
+        assert isinstance(meta["file_ids"]["__bytes"], int)
+
+    def test_frame_stays_small(self):
+        frame = build_frame(
+            episode_id="ep", tick_count=1, now=1.0, mode="ACTIVE",
+            health_score=1.0, exit_path="goal_loop",
+            ranked_goals=[self._fat_goal()], snapshot=None, metrics={},
+            is_learning_window=True, off_window_exec_allowed=False,
+            hidden={}, ext={}, strategic=None,
+        )
+        size = len(json.dumps(frame, ensure_ascii=False, default=str))
+        # The raw candidate alone was >50 KB; the warning threshold is 16 KB.
+        assert size < 4096, f"frame is {size} B -- bulk metadata leaked back in"
+
+    def test_presence_is_still_recoverable(self):
+        """is_fetch_handoff_goal() only needs bool(file_ids) -- keep that derivable."""
+        frame = build_frame(
+            episode_id="ep", tick_count=1, now=1.0, mode="ACTIVE",
+            health_score=1.0, exit_path="goal_loop",
+            ranked_goals=[self._fat_goal()], snapshot=None, metrics={},
+            is_learning_window=True, off_window_exec_allowed=False,
+            hidden={}, ext={}, strategic=None,
+        )
+        meta = frame["candidates"][0]["metadata"]
+        assert meta["file_ids"]["__len"] > 0
+        assert meta["source"] == "fetch_handoff"
+
+    def test_small_metadata_survives_verbatim(self):
+        """Only oversized values are summarised -- the rest must pass through."""
+        frame = build_frame(
+            episode_id="ep", tick_count=1, now=1.0, mode="ACTIVE",
+            health_score=1.0, exit_path="goal_loop",
+            ranked_goals=[self._fat_goal()], snapshot=None, metrics={},
+            is_learning_window=True, off_window_exec_allowed=False,
+            hidden={}, ext={}, strategic=None,
+        )
+        assert frame["candidates"][0]["metadata"]["risk_level"] == "low"
+
+    def test_non_metadata_fields_untouched(self):
+        """backed_off_learn / project_child_material_count feed the replay pivot."""
+        goal = self._fat_goal()
+        goal["backed_off_learn"] = True
+        goal["project_child_material_count"] = 7
+        frame = build_frame(
+            episode_id="ep", tick_count=1, now=1.0, mode="ACTIVE",
+            health_score=1.0, exit_path="goal_loop",
+            ranked_goals=[goal], snapshot=None, metrics={},
+            is_learning_window=True, off_window_exec_allowed=False,
+            hidden={}, ext={}, strategic=None,
+        )
+        assert frame["candidates"][0]["backed_off_learn"] is True
+        assert frame["candidates"][0]["project_child_material_count"] == 7

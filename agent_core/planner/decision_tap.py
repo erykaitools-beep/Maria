@@ -57,6 +57,52 @@ def _snapshot_digest(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+_META_VALUE_BUDGET_BYTES = 512   # pojedyncza wartosc w metadata; wyzej -> zastapiona podsumowaniem
+
+
+def _candidate_digest(goal: Dict[str, Any]) -> Dict[str, Any]:
+    """Kandydat BEZ hurtu w metadata -- ta sama dyscyplina co _snapshot_digest.
+
+    Powod (zmierzony 2026-07-27): jeden cel handoffu niosl w metadata `file_ids`
+    (651 nazw plikow, ~25 KB) I jego bajt-w-bajt duplikat `fetched_file_ids` --
+    razem 50 KB. Ten cel jest kandydatem w KAZDEJ decyzji, wiec kazda ramka
+    wazyla 52 KB przy ostrzezeniu ustawionym na 16 KB. 12 237 ramek = 201 MB,
+    tap trafil w swoj wlasny budzet i zamilkl 26.07 o 01:24 -- pol tora dnia
+    ciszy, ktorej nikt nie zauwazyl (ostrzezenie jest jednorazowe, per start).
+
+    Wielkie wartosci sa zastepowane podsumowaniem `{"__len": n}`. Prog jest
+    ROZMIAROWY, nie po nazwach pol: lista dozwolonych kluczy rozjechalaby sie
+    przy pierwszym nowym polu, a ten sam wyciek wrocilby pod inna nazwa.
+
+    Zachowana jest OBECNOSC (`__len` > 0 odtwarza `bool(file_ids)`, ktorego
+    potrzebuje is_fetch_handoff_goal) i licznosc -- czyli wszystko, co lancuch
+    decyzji z tych pol czyta. Same nazwy plikow sa odtwarzalne z GoalStore po
+    `id`, wiec ramka ich nie dubluje: ma niesc to, czego nie da sie odzyskac.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in (goal or {}).items():
+        if key != "metadata":
+            out[key] = value
+            continue
+        meta = value or {}
+        if not isinstance(meta, dict):
+            out[key] = meta
+            continue
+        slim: Dict[str, Any] = {}
+        for mk, mv in meta.items():
+            try:
+                size = len(json.dumps(mv, ensure_ascii=False, default=str))
+            except (TypeError, ValueError):
+                size = 0
+            if size > _META_VALUE_BUDGET_BYTES:
+                slim[mk] = {"__len": len(mv) if hasattr(mv, "__len__") else None,
+                            "__bytes": size}
+            else:
+                slim[mk] = mv
+        out[key] = slim
+    return out
+
+
 def build_frame(
     *,
     episode_id: str,
@@ -82,6 +128,11 @@ def build_frame(
     Uwaga: pojedyncza ramka niesie CALY ranked_goals (pivot jest po stronie replayu). Dla per-goal
     decyzji replay iteruje kandydatow. Etykieta ground-truth (goal_id+action wybrany przez 1.0) =
     z DecisionTrace po episode_id, NIE dublujemy jej tutaj.
+
+    Kandydaci przechodza przez _candidate_digest: wielkie wartosci w metadata sa
+    zastepowane licznikiem (patrz tam -- 50 KB nazw plikow w KAZDEJ ramce zabilo
+    zbieranie po 17 dniach). Replay czytajacy `metadata.file_ids` jako LISTE musi
+    siegnac po nazwy do GoalStore po `id`; obecnosc i licznosc ma w `__len`.
     """
     return {
         "episode_id": episode_id,
@@ -90,7 +141,7 @@ def build_frame(
         "mode": mode,
         "health_score": health_score,
         "exit_path": exit_path,
-        "candidates": ranked_goals,
+        "candidates": [_candidate_digest(g) for g in (ranked_goals or [])],
         "snapshot_digest": _snapshot_digest(snapshot),
         "metrics": {"retention_rate": (metrics or {}).get("retention_rate", 1.0)},
         "is_learning_window": bool(is_learning_window),

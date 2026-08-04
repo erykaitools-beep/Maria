@@ -147,6 +147,26 @@ class TestTimeoutSizing:
             # restore for any later reloader
             importlib.reload(cfg)
 
+    def test_learning_budget_stays_under_the_socket_ceiling(self):
+        """The local learning fallback may be slow, but not slower than the socket.
+
+        Measured 2026-07-25 (30 real fragments, llama3.1:8b, production learning
+        prompt): median 116s, p90 191s. The 120s budget returned an EMPTY string
+        for 13/30 -- learning got nothing rather than something worse. 230s
+        covers 30/30. It must stay strictly below OLLAMA_HTTP_TIMEOUT so
+        call_with_timeout degrades gracefully instead of the socket dying
+        mid-call, and the HTTP timeout must stay below WATCHDOG_STALL_SEC --
+        ModelScheduler load/unload runs on the tick thread, so inverting that
+        order turns a slow call into os._exit(1) plus a systemd restart.
+        """
+        learning = get_timeout_for_role("learning")
+        assert learning > get_timeout_for_role("executor"), (
+            "learning needs its own, larger budget -- reusing 'executor' is what "
+            "silently emptied 13/30 learning results"
+        )
+        assert learning < OLLAMA_HTTP_TIMEOUT
+        assert OLLAMA_HTTP_TIMEOUT < float(os.environ.get("WATCHDOG_STALL_SEC", "300"))
+
     def test_above_execution_budgets_so_graceful_degrade_fires_first(self):
         # If the HTTP timeout fired before call_with_timeout, the router could not
         # degrade gracefully -- the socket would die mid-call. It must be larger.

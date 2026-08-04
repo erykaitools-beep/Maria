@@ -27,8 +27,12 @@ ATOM_NS = "{http://www.w3.org/2005/Atom}"
 # feeds after two of the original three started 404'ing in 2026-03.
 # This profile runs WITHOUT ArticleFetcher (see web_source.run_fetch_session),
 # so the RSS <description> IS the content: a feed whose summaries fall under
-# ContentWriter.MIN_CONTENT_CHARS(200) is dead by construction. Probed
-# 2026-07-14: all 5 science feeds -> HTTP 200 with descriptions over that floor.
+# ContentWriter.MIN_CONTENT_CHARS(200) is dead by construction.
+# 2026-07-17: that floor now measures REAL text (ContentWriter.strip_html runs
+# first). naukawpolsce.pl + scienceinpoland.pl <description> is pure schema.org
+# Drupal markup -- ~700 raw chars but ~15 real words -> rejected post-strip. Their
+# raw length cleared 200 only because of tags (the 2026-07-14 "over that floor"
+# probe counted markup). focus.pl / crazynauka carry real bodies and survive.
 #
 # 2026-07-16 (RSS staw): the 5 science feeds serve nauka/astronomia/biologia,
 # but Maria's live topics are dominated by CS/AI/math (uczenie maszynowe,
@@ -42,7 +46,6 @@ ATOM_NS = "{http://www.w3.org/2005/Atom}"
 DEFAULT_FEEDS = [
     "https://naukawpolsce.pl/rss.xml",   # PAP — nauka, ogólnonaukowy
     "https://www.crazynauka.pl/feed/",   # CrazyNauka — popularnonaukowy
-    "https://kosmonauta.net/feed/",      # Kosmonauta — astronomia/kosmos
     "https://www.focus.pl/feed",         # Focus — popularnonaukowy
     "https://zdrowie.pap.pl/rss.xml",    # PAP Zdrowie — biologia/medycyna
     "https://itwiz.pl/feed/",            # ITwiz — IT/AI/dane/ML (biznesowy, med 690)
@@ -57,6 +60,12 @@ DEFAULT_FEEDS = [
     # urania.edu.pl/rss            — 404 (removed 2026-04-25)
     # kwantowo.pl/feed             — math/physics, ale opisy ~90 znaków (< 200):
     #   martwy z definicji na profilu bez ArticleFetchera (odrzucony 2026-07-16).
+    # kosmonauta.net/feed          — astronomia/kosmos, usunięty 2026-07-26 tym
+    #   SAMYM kryterium co kwantowo: mediana opisu 90 znaków (< 200), więc każdy
+    #   wpis odpada w ContentWriter. Kartoteka potwierdza: ZERO artykułów za całą
+    #   historię, przy 11 innych źródłach z dorobkiem 1-28. Kosztował request +
+    #   1s rate-limitu w każdej sesji i nie dał nigdy nic. Astronomię — jak
+    #   matematykę — obsługuje Wikipedia.
     # dobreprogramy/bulldogjob/computerworld/deltami/forsal/obserwatorfinansowy
     #   — 0 wpisów w sondażu 2026-07-16 (zły path / blokada), pominięte.
 ]
@@ -133,7 +142,13 @@ class RSSClient:
         try:
             resp = self._session.get(feed_url, timeout=self._timeout)
             resp.raise_for_status()
-            xml_text = resp.text
+            # Some feeds emit blank lines or a BOM before the XML declaration
+            # (niebezpiecznik.pl 302-redirects to feedburner, which prepends ten
+            # CRLFs). ET.fromstring() requires the declaration at offset 0 and
+            # rejects the ENTIRE document with "XML or text declaration not at
+            # start of entity", so a live, well-formed feed reads as permanently
+            # unparseable. Leading whitespace is never significant here.
+            xml_text = resp.text.lstrip("\ufeff \t\r\n")
         except requests.RequestException as e:
             logger.warning(f"RSS fetch failed for {feed_url}: {e}")
             return []

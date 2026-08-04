@@ -41,8 +41,8 @@ one subsystem, so parts can evolve without stepping on each other. Full detail i
 the always-on process (`maria.py`) that ticks once a second, whether or not you
 have the Web UI open.
 
-**Embeddings** — Numeric "fingerprints" of text (a list of 768 numbers) produced
-by the `nomic-embed-text` model. They let Maria find related knowledge by
+**Embeddings** — Numeric "fingerprints" of text (a list of 1024 numbers) produced
+by the `bge-m3` model. They let Maria find related knowledge by
 *meaning* rather than by matching keywords. See **Semantic memory**.
 
 **Health score** — A 0-to-1 measure of how well the system is doing, computed
@@ -98,7 +98,7 @@ without touching production knowledge. Results cross over only via
 
 **Semantic memory** — Memory you can search by *meaning*. Using **embeddings**,
 Maria retrieves related facts even when the wording differs from your query.
-Requires the `nomic-embed-text` model (`ollama pull nomic-embed-text`).
+Requires the `bge-m3` model (`ollama pull bge-m3`).
 
 **Spaced repetition** — A study schedule that re-tests material at growing
 intervals so it sticks. Maria exams her own learned knowledge this way, revisiting

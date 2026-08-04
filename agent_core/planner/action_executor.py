@@ -493,7 +493,26 @@ class ActionExecutor:
                 # -> idle rest, marked skipped so the saturation fetch pump stops being
                 # falsely reinforced AND fetch-confidence isn't tanked (same idle!=failed
                 # contract as the learn fix). 0 articles WITH errors stays a failure.
-                "success": fetched > 0 and errors == 0,
+                #
+                # 2026-07-26: success no longer requires errors==0. A session asks
+                # about ~6 topics; ONE of them hitting an upstream pl.wikipedia 429
+                # used to condemn the whole batch, so a session that fetched an
+                # article, wrote the file, registered the learn-handoff and moved the
+                # bulletin to READY_TO_LEARN still audited as a HARD failure
+                # (success=False, skipped=False). Measured 2026-07-26 on the live
+                # daemon, test-written rows excluded: 13 fetch sessions, 7 audited as
+                # hard failures -- and 4 of those 7 came back CARRYING MATERIAL. (The
+                # other 3 brought nothing and stay failures, correctly.) Session
+                # success rate 0.46 -> 0.77. Downstream that is
+                # not cosmetic: _is_real_failure() feeds the action_failure_storm
+                # self-repair rule (30% over 1h), and K12 self_analysis turned the
+                # dented rate into bulletin cbb-6435c7bfccbc, "fetch action has a low
+                # success rate of 0.56, indicating a potential issue with the fetch
+                # strategy" -- advice that then rode along in every later fetch. The
+                # strategy was fine; the scoreboard was not. Partial upstream errors
+                # are the WEATHER on a 6-topic batch, not a verdict on the action.
+                # errors stays in the payload so a caller that cares can still see it.
+                "success": fetched > 0,
                 "skipped": fetched == 0 and errors == 0,
                 "articles_fetched": fetched,
                 "fetched_files": result.get("fetched_files", []),
@@ -803,41 +822,24 @@ class ActionExecutor:
     def _save_expert_response(
         self, topic: str, question: str, response: str
     ) -> None:
-        """Save expert response as learning material in input/."""
-        from pathlib import Path
-        import re
-        import time as _time
+        """Save expert response as learning material -- delegates, does not copy.
 
-        # Slugify topic
-        slug = re.sub(r'[^a-z0-9]+', '_', topic.lower().strip())[:60].strip('_')
-        filename = f"expert_{slug}.txt"
-        input_dir = Path(__file__).resolve().parents[2] / "input"
-        filepath = input_dir / filename
+        This used to be a SECOND implementation of the same save, and the two
+        drifted: this one overwrote with a "one good response is enough" comment
+        and a 5 KB dedup, the CapabilityRouter one appended with a garbage guard
+        and no dedup. Only the router copy actually runs in production
+        (action_executor dispatches to the router whenever one is wired, and one
+        always is), so every deliberate decision recorded here was recorded in
+        dead code -- while the live path grew input/expert_fizyka.txt to 226
+        appends. Three separate bugs on 2026-07-26 traced back to a pair of
+        hand-synced copies; this pair is now one.
 
-        # Skip if file already has substantial content (dedup)
-        if filepath.exists():
-            try:
-                size = filepath.stat().st_size
-                if size > 5000:
-                    logger.info(
-                        f"[ASK_EXPERT] Skip save: {filename} already has "
-                        f"{size} bytes of content"
-                    )
-                    return
-            except OSError:
-                pass
+        Raises:
+            ValueError: the response is garbage.
+        """
+        from agent_core.routing.handlers import save_expert_response
 
-        header = (
-            f"# Zrodlo: ChatGPT (Codex CLI)\n"
-            f"# Temat: {topic}\n"
-            f"# Data: {_time.strftime('%Y-%m-%d %H:%M')}\n"
-            f"# Pytanie: {question[:200]}\n\n"
-        )
-        content = header + response + "\n"
-
-        # Write (not append) - one good response is enough
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
+        save_expert_response(topic, question, response)
 
     def _resolve_bulletin_need(self, topic: str) -> None:
         """Mark NEED_MATERIAL bulletin entries as resolved after expert response."""
@@ -1040,6 +1042,24 @@ class ActionExecutor:
                 from agent_core.routing.handlers import _provenance_gate_mode
                 if _provenance_gate_mode() == "cutover":
                     return
+            # A perpetual mission (META / MAINTENANCE) must never be closed by
+            # a one-shot action. GoalStore.update_progress refuses to
+            # auto-achieve these at 1.0, but the explicit update_status below
+            # walks straight past that guard -- so this path could ACHIEVE the
+            # always-on learning mission after a single `creative` / `critique`
+            # / `self_analyze`. It does not fire today only because a wired
+            # CapabilityRouter takes these actions instead (action_executor is
+            # the no-router fallback); under this goal alone, 5 such actions ran
+            # in one week. Closing META here is how the learner died on
+            # 2026-06-09: no active META -> saturation->FETCH pump stalled ->
+            # idle on `no_goals` once the backlog drained.
+            if goal and goal.is_perpetual:
+                logger.debug(
+                    "One-shot completion skipped for perpetual goal %s (%s)",
+                    plan.goal_id, goal.type.value,
+                )
+                return
+
             mutated = False
             if goal and goal.status.value in ("pending", "active"):
                 self._goal_store.update_progress(plan.goal_id, 1.0)

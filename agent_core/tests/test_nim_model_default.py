@@ -9,6 +9,12 @@ They are now all sourced from maria_core.sys.config.DEFAULT_NIM_MODEL.
 These tests pin DEFAULT_NIM_MODEL to the live model (so a switch is a one-line
 change here + .env) and assert every fallback site resolves to that one constant,
 so future drift onto a dead model fails loudly instead of lurking as a footgun.
+
+2026-07-27: dracarys became the third model retired under us (HTTP 410 Gone,
+223 failed calls before anyone noticed). Treat this constant as perishable --
+and note that NIM's /v1/models catalogue is NOT a list of working models: half
+the heavyweight names there answer 404 with no deployment behind them, so
+verify any replacement with a real request before pinning it.
 """
 
 import inspect
@@ -18,15 +24,29 @@ from maria_core.sys.config import DEFAULT_NIM_MODEL
 
 def test_default_nim_model_pinned_to_live():
     # Tripwire: when the live NIM model changes, update THIS constant (and
-    # .env NVIDIA_NIM_MODEL) -- not a scattered string. dracarys-llama-3.1-70b
-    # is live as of 2026-06-08.
-    assert DEFAULT_NIM_MODEL == "abacusai/dracarys-llama-3.1-70b-instruct"
+    # .env NVIDIA_NIM_MODEL) -- not a scattered string.
+    # 2026-07-27: dracarys hit end-of-life (410 Gone). Successor picked by
+    # measurement on Maria's own analyze_task path, not by parameter count.
+    assert DEFAULT_NIM_MODEL == "nvidia/nemotron-3-ultra-550b-a55b"
 
 
-def test_default_not_a_dead_nemotron():
-    # The whole reason this constant exists: the nemotron-* shelf went dead.
-    # Guard against accidentally re-pinning the default onto that family.
-    assert "nemotron" not in DEFAULT_NIM_MODEL
+# Named corpses, not a banned family. The original guard was
+# `"nemotron" not in DEFAULT_NIM_MODEL`, written in June when two nemotron
+# models died within days of each other. That was a heuristic standing in for
+# "these specific ids are dead", and it expired: nemotron-3 is a later
+# generation and was verified live on 2026-07-27 (5/5 screening answers, 3/3
+# real content through analyze_task). A family-wide ban would now block a
+# measured-working model, so list the actual dead ids instead.
+RETIRED_MODELS = {
+    "abacusai/dracarys-llama-3.1-70b-instruct",   # 410 Gone, 2026-07-27
+    "nvidia/llama-3.1-70b-nemotron-instruct",     # 404, 2026-06-08
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5",   # degraded server-side
+    "moonshotai/kimi-k2.6",                       # listed but 404, no deployment
+}
+
+
+def test_default_not_a_retired_model():
+    assert DEFAULT_NIM_MODEL not in RETIRED_MODELS
 
 
 def test_config_nim_model_falls_back_to_constant():

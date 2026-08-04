@@ -40,7 +40,7 @@ The baseline is the reference every other platform is compared against.
 | Acceleration | none (no NPU; integrated Radeon iGPU unused for inference) |
 | RAM | 32 GB |
 | Inference runtime | Ollama (llama.cpp), GGUF Q4_K_M, CPU |
-| Models | `llama3.1:8b` (executor, warm), `qwen3:8b` (planner), `qwen2.5-coder:7b`, `nomic-embed-text` (768-dim), rule-based triage |
+| Models | `llama3.1:8b` (executor, warm), `qwen3:8b` (planner), `qwen2.5-coder:7b`, `bge-m3` (1024-dim, embeddings), rule-based triage |
 | Known limits | heavy-model mutex; ~17 GB safe coexistence ceiling; 8B-class baseline (larger models not operationally safe today) |
 
 The baseline measurement (Stage 1) captures, on this exact machine, the metrics

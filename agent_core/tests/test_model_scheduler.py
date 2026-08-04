@@ -67,8 +67,8 @@ class TestModelRegistry:
     def test_get_model_memory_shared(self):
         spec = get_model(ModelRole.MEMORY)
         assert spec is not None
-        assert spec.ram_estimate_gb == 0.5  # nomic-embed-text
-        assert spec.ollama_tag == "nomic-embed-text:latest"
+        assert spec.ram_estimate_gb == 1.5  # bge-m3 (1.2GB on disk)
+        assert spec.ollama_tag == "bge-m3:latest"
 
     def test_get_model_external(self):
         spec = get_model(ModelRole.EXTERNAL)
@@ -132,7 +132,8 @@ class TestModelRegistry:
         assert get_model(ModelRole.EXECUTOR).latency_budget_s == 20.0
         assert get_model(ModelRole.CODER).latency_budget_s == 30.0
         assert get_model(ModelRole.PLANNER).latency_budget_s == 60.0
-        assert get_model(ModelRole.MEMORY).latency_budget_s == 5.0  # nomic-embed-text (fast)
+        # bge-m3: ~2.1 s/text measured, so a MAX_BATCH_SIZE=8 batch costs ~17s
+        assert get_model(ModelRole.MEMORY).latency_budget_s == 20.0
 
     def test_idle_unload_times(self):
         """Verify idle unload times."""
@@ -247,6 +248,38 @@ class TestModelSchedulerEnsureReady:
 
         scheduler._heavy_lock.release()
 
+    def test_lease_patience_covers_longest_hold(self):
+        """heavy_lease must outwait the longest holder, or it fails OPEN.
+
+        The lease degrades by proceeding UNGUARDED when it cannot acquire in
+        time -- which puts a second heavy local model on this GPU-less CPU, the
+        exact contention storm the mutex exists to prevent, and it only logs a
+        WARNING so nobody notices. The old 120s default violated this on day
+        one: the synthesis faithfulness judge holds for 540s plus an in-lease
+        warm-up of up to 120s, so every competitor timed out.
+
+        Waiting is the safe degradation here: all heavy_lease call sites run on
+        transient threads (teacher, planner, telegram poll), never on the tick
+        thread, so a long wait cannot trip TickWatchdog.
+        """
+        from agent_core.llm.model_scheduler import (
+            HEAVY_LEASE_ACQUIRE_S, _LONGEST_HEAVY_HOLD_S,
+        )
+        assert HEAVY_LEASE_ACQUIRE_S >= _LONGEST_HEAVY_HOLD_S, (
+            f"lease patience ({HEAVY_LEASE_ACQUIRE_S}s) is below the longest "
+            f"possible hold ({_LONGEST_HEAVY_HOLD_S}s) -- the mutex would fail "
+            f"open and allow a heavy overlap"
+        )
+
+    def test_lease_default_matches_the_invariant(self):
+        """The default argument, not just the constant, must carry the value."""
+        import inspect
+        from agent_core.llm.model_scheduler import (
+            ModelScheduler, HEAVY_LEASE_ACQUIRE_S,
+        )
+        sig = inspect.signature(ModelScheduler.heavy_lease)
+        assert sig.parameters["timeout_s"].default == HEAVY_LEASE_ACQUIRE_S
+
 
 class TestModelSchedulerRelease:
     """Tests for release()."""
@@ -259,14 +292,60 @@ class TestModelSchedulerRelease:
         assert loaded.last_used > loaded.loaded_at
 
     def test_release_heavy_releases_mutex(self, scheduler, mock_psutil, mock_ollama):
-        """Release on a heavy model should release heavy mutex."""
+        """Release on a heavy model should release heavy mutex.
+
+        Acquires through the real path (_claim_heavy marks the owner) because
+        release() now refuses to free a lock this thread does not hold.
+        """
         scheduler._heavy_lock.acquire()
+        scheduler._claim_heavy()
         scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
         scheduler.release(ModelRole.PLANNER)
         # Mutex should be released - we should be able to acquire it
         acquired = scheduler._heavy_lock.acquire(timeout=0.1)
         assert acquired is True
         scheduler._heavy_lock.release()
+
+    def test_release_from_foreign_thread_cannot_steal_mutex(self, scheduler,
+                                                            mock_psutil, mock_ollama):
+        """A thread that never acquired the mutex must not be able to free it.
+
+        threading.Lock has no owner, so release() from any thread succeeds --
+        release() and force_unload() used to call it unconditionally for HEAVY
+        roles. The tick thread's idle sweep could therefore free the lock held
+        by an in-flight learning inference, so the "one heavy local model at a
+        time" invariant never actually held. Nobody waited, so the fail-open
+        warning never fired either: the breach was completely silent.
+        """
+        import threading as _t
+
+        holder_has_lock = _t.Event()
+        may_finish = _t.Event()
+
+        def holder():
+            scheduler._heavy_lock.acquire()
+            scheduler._claim_heavy()
+            holder_has_lock.set()
+            may_finish.wait(timeout=5)
+            scheduler._release_heavy_if_owner("holder")
+
+        t = _t.Thread(target=holder, daemon=True)
+        t.start()
+        assert holder_has_lock.wait(timeout=5)
+
+        # Foreign thread (this one) tries both stealing routes.
+        scheduler.register_running_model(ModelRole.PLANNER, "qwen3:8b")
+        scheduler.release(ModelRole.PLANNER)
+        scheduler.force_unload(ModelRole.PLANNER)
+
+        assert scheduler._heavy_lock.locked(), (
+            "the heavy mutex was stolen from the thread holding it -- two heavy "
+            "local models could then run on this CPU at once"
+        )
+
+        may_finish.set()
+        t.join(timeout=5)
+        assert not scheduler._heavy_lock.locked()
 
 
 class TestModelSchedulerForceUnload:

@@ -45,7 +45,7 @@ perception, (5) Relationship without RelationshipTracker.
 | 3 | **Operational Perception** | Maria sees the whole operational world | DONE |
 | 4 | **Digital Hands** | Maria can DO something | DONE |
 | 5 | **Workflow Orchestration** | Maria runs complex processes | DONE |
-| 6 | **Environment Adaptation** | Maria adapts to context | DONE |
+| 6 | **Environment Adaptation** | Maria adapts to context | PARTIAL (clock + mode-of-record live; behavioral payload CUT 2026-07-19 -- see Phase 6 note) |
 | 7 | **Trust & Autonomy Graduation** | Maria earns autonomy | BUILT, WIRED-dormant (K20 code since 04-12: TrustScorer/IncidentMemory/AutoPromotion, tick Phase 16 computes trust live ~0.80, /trust works; AUTO_PROMOTION_ENABLED OFF, incident recorder UNPLUGGED on the live path -- arming only after an honest track record, see G) |
 
 ### Six conceptual layers (mapping to phases):
@@ -153,13 +153,13 @@ don't duplicate `context_builder` (extend, don't replace); operator data LOCAL (
 - **CapabilityManifest** - a list of what Maria can REALLY do (not what is in the code, but what works and has been tested)
 - **LimitationRegistry** - an explicit list of limitations
 - **ConfidenceMap** - per-capability confidence
-- **StateReporter** - on demand or proactively
+- ~~**StateReporter** - on demand or proactively~~ (CUT 2026-07-19: strict subset of SelfPerception + SelfContext + `/status`)
 - **HonestyProtocol** - Maria NEVER claims she can do something if she has not tested it
 - **GrowthAwareness** - Maria identifies her gaps as growth goals
 
 **Capability contracts:**
 - K15: SelfModel - maintained manifest of capabilities, limitations, and confidence levels
-- K15.1: StateReporter - structured self-status on demand and proactive
+- K15.1: ~~StateReporter~~ CUT 2026-07-19 (phantom hunt r2): never called in prod; self-status is served live by SelfPerception (T-SELF-001, `/selfstatus`), awareness SelfContext (chat tail), `/status`, and `notify_mode_change`
 - K15.2: HonestyProtocol - no overclaiming, explicit uncertainty, "I don't know" as valid
 - K15.3: GrowthAwareness - limitations as identified growth targets with cost/benefit
 
@@ -284,6 +284,20 @@ don't duplicate `context_builder` (extend, don't replace); operator data LOCAL (
 **Completion criterion:** Maria works in 2 different modes with different tools but a coherent personality.
 
 **Fake progress:** 6 modes on paper. Start with 1 that works.
+
+**Status honesty (2026-07-19, phantom hunt r2):** the fake-progress trap was hit.
+What is LIVE from this phase: the learning-window clock (`is_learning_window` /
+`berlin_now` SSoT -- consumed by planner window enforcement, mode regulator
+wake/sleep, teacher gate) and the mode state machine as a mode-of-record
+(`/env`, manual LEARNING teacher-gate override). The behavioral payload the
+profiles carried (blocked/deprioritized actions, LLM/planner multipliers,
+prompt additions, notification levels) was CUT: no runtime path ever consumed
+it, and every concern it encoded is handled by a live mechanism reading the
+real signal (planner guard health gating, NOOP-backoff cadence, K7 effector
+gates, notifier `_can_send`). Precondition for any payload revival: fix the
+detector's degradation rule (REDUCED->QUIET) first -- it samples normal
+LLM-inference CPU bursts every 30 min, so daytime mode anti-correlates with
+learning intent.
 
 ---
 

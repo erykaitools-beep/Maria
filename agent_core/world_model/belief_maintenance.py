@@ -11,6 +11,7 @@ ADR-013: Rule-based, zero LLM, deterministic
 import json
 import logging
 import math
+import os
 import re
 import time
 from collections import defaultdict
@@ -122,6 +123,21 @@ _TYPE_IMPORTANCE = {
 # Evidence strength bonus: beliefs with strong provenance are more valuable
 _EVIDENCE_WEIGHT_THRESHOLD = 3  # beliefs with >= 3 evidence tuples get bonus
 
+# Confidence-first scoring (default OFF; restart to change, like other env flags).
+# The revision term rewards belief.revision, which store.revise() bumps on EVERY
+# decay/sleep/exec maintenance pass -- pure churn, not merit. Measured on the live
+# 2000-belief store: the 3 weakest (first-pruned) beliefs were fresh, high-confidence
+# FACTs (conf 0.90-0.95, rev 1) while aged churned beliefs (rev 20-840) sat protected
+# -- so freshly-learned knowledge was forgotten first. With this flag ON the revision
+# reward is dropped and its 0.15 weight moves to confidence (sum stays 1.0): fresh
+# FACTs climb off the prune floor and only stale unpromoted OBSERVATIONS are evicted.
+# WATCH on flip: eviction becomes ~100% observations -- observe that the exam->FACT
+# promotion pool is not starved (a fresh observation must survive long enough to be
+# examined). See docs/reference and the 2026-07-17 measurement.
+_CONF_FIRST = os.environ.get(
+    "BELIEF_SCORE_CONF_FIRST", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
 
 def compute_belief_score(
     belief: Belief,
@@ -164,14 +180,25 @@ def compute_belief_score(
     evidence_count = len(belief.evidence) if belief.evidence else 0
     evidence_factor = min(1.0, evidence_count / max(_EVIDENCE_WEIGHT_THRESHOLD, 1))
 
-    score = (
-        0.30 * belief.confidence
-        + 0.20 * freshness
-        + 0.15 * revision_factor
-        + 0.10 * reference_factor
-        + 0.15 * type_importance
-        + 0.10 * evidence_factor
-    )
+    if _CONF_FIRST:
+        # Drop the maintenance-revision reward; move its 0.15 to confidence.
+        # revision_factor is still computed above but deliberately unused here.
+        score = (
+            0.45 * belief.confidence
+            + 0.20 * freshness
+            + 0.10 * reference_factor
+            + 0.15 * type_importance
+            + 0.10 * evidence_factor
+        )
+    else:
+        score = (
+            0.30 * belief.confidence
+            + 0.20 * freshness
+            + 0.15 * revision_factor
+            + 0.10 * reference_factor
+            + 0.15 * type_importance
+            + 0.10 * evidence_factor
+        )
     return round(score, 4)
 
 
@@ -318,6 +345,18 @@ def find_exact_duplicates(store) -> List[Tuple[str, str]]:
 
 _DIGIT_RUNS = re.compile(r"\d+")
 
+# The topic-stat template exists in TWO historical shapes: belief_builder emits
+# "Temat 'X' wystepuje w N plikach (M zrodel)", but older records in the live
+# store stop at "... w N plikach". Exact signature equality therefore judged the
+# same template to be two different ones, and the pair slipped past this guard.
+# Measured 2026-07-25 on the live beliefs namespace: at cosine >= 0.85 that leak
+# accounted for 55 of 84 surviving pairs (65%), and it got WORSE the higher the
+# threshold went (83% at 0.90) -- near-identical template text with a different
+# subject sits at the very top of the ranking. Among the leaked pairs were
+# "xvii wiek"/"xviii wiek" (0.994) and "oprogramowanie"/"programowanie" (0.913):
+# different subjects whose merge would delete a real record.
+_OPTIONAL_SOURCES = re.compile(r"\s*\(#+ zrodel\)")
+
 
 def _is_template_pair(a, b) -> bool:
     """
@@ -337,8 +376,8 @@ def _is_template_pair(a, b) -> bool:
         return False
     if a.entity not in a.content or b.entity not in b.content:
         return False
-    sig_a = _DIGIT_RUNS.sub("#", a.content.replace(a.entity, "\x00"))
-    sig_b = _DIGIT_RUNS.sub("#", b.content.replace(b.entity, "\x00"))
+    sig_a = _OPTIONAL_SOURCES.sub("", _DIGIT_RUNS.sub("#", a.content.replace(a.entity, "\x00")))
+    sig_b = _OPTIONAL_SOURCES.sub("", _DIGIT_RUNS.sub("#", b.content.replace(b.entity, "\x00")))
     return sig_a == sig_b
 
 
@@ -358,12 +397,31 @@ def find_semantic_duplicates(
     AND re-dirties ~2000 vectors per restart (found 2026-06-10), which is
     why belief_id is deliberately NOT part of the metadata contract.
 
-    Default threshold 0.95, NOT lower: measured on the live store
-    (2026-06-10), median pairwise cosine between belief vectors is 0.733
-    and p99 is 0.875 -- a 0.85 threshold would pair 97.8% of all beliefs.
-    At 0.95 the matched pairs are genuine paraphrases. Builder stat
-    records pairing only via their shared template are filtered out by
-    _is_template_pair regardless of similarity.
+    Threshold 0.95 is now UNREACHABLE, deliberately. Do not "fix" it.
+
+    The original 0.95 was calibrated on nomic-embed-text (2026-06-10: median
+    pairwise cosine 0.733, p99 0.875). The store moved to bge-m3 on 2026-07-25,
+    whose cosine scale is different (unrelated text sits at 0.40, not 0.75), so
+    that calibration expired. Re-measured on the live beliefs namespace after
+    the swap, the honest answer turned out to be that NO threshold works:
+
+      - post-filter maximum similarity is 0.943, so 0.95 pairs nothing;
+      - of the 29 candidates at >= 0.85, an independent 3-lens panel judged
+        2 safe to merge and 27 unsafe -- unanimously, no contested cases;
+      - the highest-scoring REJECTED pair sits at 0.910 while the lowest
+        ACCEPTED sits at 0.875, i.e. the ranges OVERLAP. Cosine cannot tell
+        "same claim" from "same topic, extra detail": the 0.910 pair was
+        "Stan umozliwia ... decyzji i optymalizacje zasobow" vs "Stan umozliwia
+        ... decyzji na podstawie kontekstu" -- merging deletes a function.
+
+    Two genuine duplicates in ~1970 beliefs, both mere re-orderings of one
+    sentence. Arming this would buy 2 merges and risk 27 deleted facts, so the
+    mechanism stays observe-only until something stronger than raw similarity
+    gates it (e.g. an entailment check both ways). Lowering the threshold to
+    catch the 2 would also admit the 0.910 false positive.
+
+    Builder stat records pairing only via their shared template are filtered
+    out by _is_template_pair regardless of similarity.
 
     scan_limit caps how many beliefs are QUERIED per run. Candidate mix:
     half newest-created (fresh beliefs from build_all are the likeliest

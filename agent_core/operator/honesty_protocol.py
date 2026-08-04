@@ -4,8 +4,17 @@ HonestyProtocol (K15.2) - Evidence-based capability claims.
 Maria NEVER claims she can do something without evidence.
 "Nie wiem" is always a valid answer.
 
-Uses actual execution history (planner_decisions.jsonl) to compute
-data-driven confidence instead of static guesses.
+Live consumer: get_action_stats() feeds GrowthAwareness reliability
+targets (/growth). check_capability_claim/qualify_statement back the
+flag-gated chat honesty tail (HONESTY_HINT_ENABLED, dormant).
+
+get_evidence_based_confidence was CUT 2026-07-19 (phantom hunt r2):
+its docstring claimed "Used by CapabilityManifest" but no prod caller
+ever existed, and wiring it into the manifest as claimed would recurse
+infinitely (manifest.get_capabilities -> confidence ->
+check_capability_claim -> manifest.can_do -> get_capabilities).
+CapabilityEntry.confidence remains _estimate_confidence's static value;
+the honest availability signal is DH-C available/reason_unavailable.
 """
 
 import json
@@ -104,14 +113,6 @@ class HonestyProtocol:
             successes=successes,
             qualifier=qualifier,
         )
-
-    def get_evidence_based_confidence(self, action_name: str) -> float:
-        """Get data-driven confidence for a capability.
-
-        Used by CapabilityManifest to replace static confidence estimates.
-        """
-        check = self.check_capability_claim(action_name)
-        return check.confidence
 
     def qualify_statement(self, text: str, confidence: float) -> str:
         """Add appropriate qualifier to a statement based on confidence.

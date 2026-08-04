@@ -62,8 +62,12 @@ def _belief(entity="topic", confidence=0.5, content=None):
     )
 
 
-def _fake_vector(dim=8, seed=1.0):
+def _fake_vector(dim=None, seed=1.0):
+    # Width follows the wired embedder -- VectorStore.load() drops stale-width
+    # vectors, so a hardcoded dim breaks persistence tests on a model swap.
     import math
+    from agent_core.semantic.embedding_model import expected_dim
+    dim = dim or expected_dim() or 8
     return [math.sin(i * seed) for i in range(dim)]
 
 
@@ -259,7 +263,10 @@ class TestMetadataRefreshWithoutReembed:
 
     def test_refreshed_metadata_is_persisted(self, tmp_path):
         sm = _semantic_memory(tmp_path)
-        sm.store.add("belief:a", "text a", [0.1, 0.2], {"namespace": "beliefs"})
+        # Real-width vector: this test round-trips through load(), which drops
+        # stale-width vectors (the other tests here stay in memory, so their
+        # toy vectors are fine).
+        sm.store.add("belief:a", "text a", _fake_vector(), {"namespace": "beliefs"})
         sm.store.save()
 
         sm.index_batch("beliefs", [
@@ -500,6 +507,32 @@ class TestTemplatePairGuard:
         store.add(b)
         sem = _StubSemanticMemory([
             _hit({"namespace": "beliefs", "entity": "pewnosc"}, score=0.96),
+        ])
+
+        assert find_semantic_duplicates(store, sem) == []
+
+    def test_topic_stat_template_pair_skipped_across_shape_variants(self, store):
+        """The same template in its two historical shapes must still pair.
+
+        belief_builder emits "... w N plikach (M zrodel)", but older records in
+        the live store stop at "... w N plikach". Exact signature equality read
+        those as different templates, so the guard let them through: measured
+        2026-07-25 that leak was 65% of all surviving pairs at cosine >= 0.85,
+        including 'xvii wiek' vs 'xviii wiek' at 0.994 -- different centuries
+        whose merge deletes one.
+        """
+        a = _belief(
+            entity="xvii wiek", confidence=0.8,
+            content="Temat 'xvii wiek' wystepuje w 5 plikach (5 zrodel)",
+        )
+        b = _belief(
+            entity="xviii wiek", confidence=0.8,
+            content="Temat 'xviii wiek' wystepuje w 5 plikach",
+        )
+        store.add(a)
+        store.add(b)
+        sem = _StubSemanticMemory([
+            _hit({"namespace": "beliefs", "entity": "xviii wiek"}, score=0.994),
         ])
 
         assert find_semantic_duplicates(store, sem) == []

@@ -63,9 +63,13 @@ AGENT_CORE = os.path.join(ROOT, "agent_core")
 # Docs that do NOT describe the current state -> excluded from every check.
 # History (changelog / summaries / snapshots) and plans / specs / proposals
 # reference past or future code by design, so a mismatch there is not drift.
+# `sesja*` = verbatim session transcripts (exported working sessions).
+# They quote paths that were merely DISCUSSED --
+# hypothetical, renamed or never created -- and editing one to satisfy a
+# linter would falsify the record, so they are excluded like any history doc.
 _NON_LIVING = re.compile(
     r"(changelog|session_summary|snapshot|roadmap|_plan|_tasks|codex_tasks"
-    r"|proposal|_spec|_brief|incoming)",
+    r"|proposal|_spec|_brief|incoming|^sesja)",
     re.IGNORECASE,
 )
 

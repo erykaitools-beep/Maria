@@ -189,7 +189,20 @@ class MemoryQuery:
         # 3. Semantic search (if available)
         if self._semantic:
             try:
-                search_results = self._semantic.search(topic, top_k=top_k, threshold=0.3)
+                # Threshold and relevance both go through the model-calibrated
+                # scale. The old pairing -- raw cosine as `relevance`, competing
+                # in the sort below against the fixed 0.9/0.7/0.6/0.5 weights of
+                # the other sources -- silently reweighted results whenever the
+                # embedder changed: nomic put unrelated text at ~0.75, bge-m3 at
+                # ~0.40, so identical hits scored ~0.35 apart for no semantic
+                # reason. The old threshold=0.3 was likewise a no-op under nomic
+                # (it passed 100% of random pairs).
+                from agent_core.semantic.embedding_model import (
+                    chance_similarity, relevance_from_cosine,
+                )
+                search_results = self._semantic.search(
+                    topic, top_k=top_k, threshold=chance_similarity()
+                )
                 for sr in search_results:
                     ns = sr.entry.metadata.get("namespace", "unknown")
                     results.append(MemoryResult(
@@ -197,11 +210,12 @@ class MemoryQuery:
                         content=sr.entry.text,
                         confidence=0.5,  # Semantic similarity is not certainty
                         freshness=_freshness_score(sr.entry.metadata.get("created_ts", 0)),
-                        relevance=sr.score,
+                        relevance=relevance_from_cosine(sr.score),
                         provenance={
                             "entry_id": sr.entry.entry_id,
                             "namespace": ns,
                             "score": round(sr.score, 3),
+                            "relevance_scale": "chance-calibrated",
                         },
                     ))
             except Exception as e:

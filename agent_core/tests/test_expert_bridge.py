@@ -69,16 +69,23 @@ def _short_response():
     return "Krotka."
 
 
+# Captured at import, BEFORE _isolate_expert_input can stub it. Reading it out
+# of the class inside a fixture would just hand back the stub -- the module-level
+# autouse fixture runs first, so by then __dict__ no longer holds the original.
+_REAL_EXPERT_FILE_EXISTS = ExpertBridge.__dict__["_expert_file_exists"]
+
+
 @pytest.fixture(autouse=True)
 def _isolate_expert_input(monkeypatch):
-    """Isolate ExpertBridge tests from local input/expert_*.txt state.
+    """Default these tests to "no local material" so they exercise the pipeline.
 
-    _expert_file_exists() hardcodes the real repo input/ dir, so a pre-existing
-    input/expert_fizyka.txt (real learning material on this box) makes
-    ask_about_topic short-circuit with expert_material_already_exists and the
-    LLM-pipeline tests fail -- a test-isolation gap, not a regression from any
-    commit. Default to "no local material" so tests exercise the pipeline
-    regardless of what input/ contains.
+    _expert_file_exists() used to hardcode the real repo input/ dir, so a
+    pre-existing input/expert_fizyka.txt made ask_about_topic short-circuit and
+    the LLM-pipeline tests fail depending on what was on the box. That root
+    cause is gone (2026-07-26: it now reads EXPERT_INPUT_DIR, which conftest
+    redirects to a sandbox), but the stub stays: these tests are about the ask
+    pipeline, and every one of them would otherwise have to care about corpus
+    state. TestExpertMaterialDedup below opts OUT to exercise the real check.
     """
     monkeypatch.setattr(
         "agent_core.bulletin.expert_bridge.ExpertBridge._expert_file_exists",
@@ -144,6 +151,78 @@ class TestExpertBridgeNoDeps:
         result = bridge.ask_with_context("fizyka", "Maria potrzebuje...")
         assert result.success is False
         assert result.reason == "no_llm_fn"
+
+
+class TestExpertMaterialDedup:
+    """Both ask entry points must refuse a topic that already has material.
+
+    ask_about_topic had this Step 0 check; ask_with_context did NOT -- and
+    make_ask_expert_handler PREFERS ask_with_context whenever a context_prompt
+    is present, so in production the guarded door was the one rarely used.
+
+    That is not theoretical. input/expert_fizyka.txt held 226 appends by
+    2026-07-26, and all 44 of the non-test ones carried a
+    '# Pytanie: Maria potrzebuje...' header -- the context_prompt shape. The
+    file was over 100 KB and nothing stopped the next re-ask.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _use_real_check(self, monkeypatch, tmp_path):
+        """Opt OUT of the module-level stub; point the check at a temp corpus."""
+        import agent_core.routing.handlers as handlers
+        import agent_core.bulletin.expert_bridge as bridge_mod
+
+        monkeypatch.setattr(handlers, "EXPERT_INPUT_DIR", tmp_path)
+        monkeypatch.setattr(
+            bridge_mod.ExpertBridge,
+            "_expert_file_exists",
+            _REAL_EXPERT_FILE_EXISTS,
+        )
+        return tmp_path
+
+    def _substantial(self, tmp_path, topic="fizyka"):
+        (tmp_path / f"expert_{topic}.txt").write_text("x" * 6000, encoding="utf-8")
+
+    def test_ask_with_context_skips_when_material_exists(self, tmp_path):
+        self._substantial(tmp_path)
+        called = []
+        bridge = ExpertBridge()
+        bridge.set_llm_fn(lambda p: called.append(p) or "odpowiedz")
+
+        result = bridge.ask_with_context("fizyka", "Maria potrzebuje...")
+
+        assert result.success is False
+        assert result.reason == "expert_material_already_exists"
+        assert called == [], "LLM must not be asked at all"
+
+    def test_ask_about_topic_skips_when_material_exists(self, tmp_path):
+        self._substantial(tmp_path)
+        called = []
+        bridge = ExpertBridge()
+        bridge.set_llm_fn(lambda p: called.append(p) or "odpowiedz")
+
+        result = bridge.ask_about_topic("fizyka")
+
+        assert result.success is False
+        assert result.reason == "expert_material_already_exists"
+        assert called == []
+
+    def test_thin_file_still_allows_enrichment(self, tmp_path):
+        """A short first answer must NOT block the richer follow-up.
+
+        The corpus has exactly two genuine multi-block expert files, and both
+        show the same shape: a ~2.4 KB answer from the bare gap prompt, then
+        ~11 KB from the educational prompt. Both were under the threshold when
+        the second ask happened -- the brake must let that through.
+        """
+        (tmp_path / "expert_fizyka.txt").write_text("x" * 2400, encoding="utf-8")
+        called = []
+        bridge = ExpertBridge()
+        bridge.set_llm_fn(lambda p: called.append(p) or "odpowiedz")
+
+        bridge.ask_with_context("fizyka", "Maria potrzebuje...")
+
+        assert called, "thin file must not short-circuit the ask"
 
 
 # ═══════════════════════════════════════════════════════

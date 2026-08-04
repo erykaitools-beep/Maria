@@ -22,9 +22,6 @@ from agent_core.autonomy.authority_level import (
     AuthorityLevel,
     AuthorityConfig,
     AuthorityManager,
-    DEFAULT_TOOL_RATE_LIMITS,
-    DEFAULT_FAILURE_COOLDOWN_SEC,
-    DEFAULT_MAX_CONSECUTIVE_FAILURES,
     level_index,
 )
 from agent_core.autonomy.policy_rules import (
@@ -64,9 +61,6 @@ class TestAuthorityConfig:
     def test_defaults(self):
         cfg = AuthorityConfig()
         assert cfg.level == "observe"
-        assert cfg.tool_rate_limits == DEFAULT_TOOL_RATE_LIMITS
-        assert cfg.failure_cooldown_sec == DEFAULT_FAILURE_COOLDOWN_SEC
-        assert cfg.max_consecutive_failures == DEFAULT_MAX_CONSECUTIVE_FAILURES
         assert cfg.updated_at == 0.0
 
     def test_get_level(self):
@@ -83,13 +77,24 @@ class TestAuthorityConfig:
         restored = AuthorityConfig.from_dict(data)
         assert restored.level == "confirm"
         assert restored.updated_at == 12345.0
-        assert restored.tool_rate_limits == cfg.tool_rate_limits
 
     def test_from_dict_partial(self):
         """Missing keys use defaults."""
         cfg = AuthorityConfig.from_dict({"level": "suggest"})
         assert cfg.get_level() == AuthorityLevel.SUGGEST
-        assert cfg.failure_cooldown_sec == DEFAULT_FAILURE_COOLDOWN_SEC
+        assert cfg.updated_at == 0.0
+
+    def test_from_dict_ignores_stale_budget_keys(self):
+        """Persisted configs written before the ADR-026 cut still load."""
+        cfg = AuthorityConfig.from_dict({
+            "level": "bounded",
+            "tool_rate_limits": {"exec": 5},
+            "failure_cooldown_sec": 300.0,
+            "max_consecutive_failures": 3,
+            "updated_at": 99.0,
+        })
+        assert cfg.get_level() == AuthorityLevel.BOUNDED
+        assert cfg.updated_at == 99.0
 
     def test_from_dict_empty(self):
         cfg = AuthorityConfig.from_dict({})
@@ -143,17 +148,11 @@ class TestAuthorityManager:
         cfg = mgr.get_config()
         assert cfg.get_level() == AuthorityLevel.CONFIRM
 
-    def test_get_tool_rate_limit(self, tmp_path):
-        mgr = AuthorityManager(config_path=tmp_path / "auth.json")
-        assert mgr.get_tool_rate_limit("exec") == 5
-        assert mgr.get_tool_rate_limit("web_fetch") == 20
-        assert mgr.get_tool_rate_limit("unknown_tool") == 5  # default
-
     def test_get_status(self, tmp_path):
         mgr = AuthorityManager(config_path=tmp_path / "auth.json")
         status = mgr.get_status()
         assert status["authority_level"] == "observe"
-        assert "tool_rate_limits" in status
+        assert "updated_at" in status
 
     def test_updated_at_set_on_change(self, tmp_path):
         mgr = AuthorityManager(config_path=tmp_path / "auth.json")

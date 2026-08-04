@@ -46,9 +46,26 @@ T = TypeVar("T")
 # Default timeouts per model role (seconds)
 DEFAULT_TIMEOUTS = {
     "executor": 120.0,     # llama3.1:8b - main brain, sometimes slow on complex prompts
+    # Learning's LOCAL fallback only (router._ask_once). Separate from "executor"
+    # on purpose: this budget must not leak to callers reached from the tick
+    # thread. Measured 2026-07-25 on 30 real input/ fragments with the production
+    # learning prompt, llama3.1:8b on this CPU: median 116s, p90 191s. At the old
+    # 120s the router returned an EMPTY string for 13/30 -- learning silently got
+    # nothing rather than something worse. 230s captures 30/30 (contract-valid
+    # 7/30 -> 14/30) and still sits UNDER OLLAMA_HTTP_TIMEOUT (240) so
+    # call_with_timeout keeps firing before the socket dies, which keeps the
+    # documented chain intact: role budget < HTTP 240 < WATCHDOG_STALL_SEC 300.
+    # Do NOT raise past 240 without moving that whole chain -- ModelScheduler
+    # load/unload runs synchronously on the tick thread (Phase 9.5), so an
+    # HTTP timeout above the watchdog turns a degraded call into os._exit(1).
+    # qwen3:8b is out of reach here (median 285s) for exactly that reason.
+    "learning": 230.0,
     "planner": 180.0,      # qwen3:8b - reasoning can be slow
     "coder": 120.0,        # qwen2.5-coder:7b
-    "memory": 30.0,        # nomic-embed-text - should be fast
+    # bge-m3 since 2026-07-25: ~2.1 s/text on this CPU (nomic was ~0.8), so a
+    # full MAX_BATCH_SIZE=8 batch costs ~17s before a cold model load is added.
+    # 30s left no room for the load and turned a slow first call into a failure.
+    "memory": 200.0,
     "external": 45.0,      # NIM API (already has own timeout, this is belt+suspenders)
     "encyclopedia": 120.0, # Codex CLI (already has subprocess timeout)
     "default": 120.0,      # Unknown roles

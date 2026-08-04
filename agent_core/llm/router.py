@@ -40,6 +40,77 @@ except Exception:  # pragma: no cover - httpx ships with ollama
 
 logger = logging.getLogger(__name__)
 
+# Cap on the tape's route_reason field. Failure reasons embed the upstream error
+# body; unbounded they would ride in every frame.
+MAX_ROUTE_REASON = 160
+
+
+def _learning_local_model() -> str:
+    """Local model for the learning fallback (used once NIM is unavailable).
+
+    Thinking must stay OFF whatever the model: with it on, qwen3's median was
+    285s, past every budget in the chain, so it never returned a usable answer
+    at all (0/30). That finding still holds.
+
+    WHICH model, re-measured 2026-08-02 (30 real input/ fragments, production
+    prompt via learn_chunk, evening load 4.4->7.1, strictly sequential, scored
+    on what learn_chunk ACTUALLY validates -- summary/key_points/tags present):
+
+        llama3.1:8b            30/30   median  84s   p90  97s   max 124s
+        qwen3:8b think=False   30/30   median 103s   p90 122s   max 134s
+
+    Both clear the 230s learning budget with ~42% headroom, and spot checks
+    confirm substantive Polish output (summaries 218-474 chars, 5-7 key points,
+    on-topic tags) rather than well-formed emptiness. Paired: 0 fixes, 0 breaks,
+    p=1.000 -- a genuine tie on the contract, with llama ~18s faster per call.
+
+    THE EARLIER NUMBERS WERE STALE, NOT WRONG. The measurement this docstring
+    used to carry (llama 18/30, qwen3 27/30, medians 116s/143s, McNemar p=0.035)
+    was committed in 8d20569 at 09:27 on 2026-07-26 -- three hours BEFORE
+    c6074b6 and 028e8b6 landed at 12:31 the same day, which de-duplicated the
+    persona (~1000 tokens) and made the prefix byte-stable so the KV cache can
+    hit (prefill 117s -> 0.2s). Both models got materially faster and more
+    reliable afterwards and nobody re-ran the comparison. `.env` pinned
+    llama3.1:8b on the strength of a qwen3 latency risk that those fixes had
+    already removed.
+
+    So the default below is now a genuine toss-up on the measured contract.
+    What is NOT settled: content quality. qwen3's summaries run consistently
+    longer (337-474 chars vs 218-308); longer is not automatically better and
+    no one has judged that. Pick on quality if you ever measure it; until then
+    llama is the cheaper of two models that both clear the bar.
+
+    Override with LEARNING_LOCAL_MODEL + restart.
+    """
+    return os.environ.get("LEARNING_LOCAL_MODEL", "qwen3:8b").strip() or "qwen3:8b"
+
+
+# System prefix for the local learning call. SHORT and CONSTANT, both on purpose.
+#
+# The default persona is ~1000 tokens of identity, operator profile, conversation
+# memory and operational state -- none of which a "return JSON from this
+# fragment" task reads. It is also redundant: PROMPT_LEARN_NORMAL already opens
+# with "Jestes M.A.R.I.A. - lokalna, autonomiczna inteligencja...", so Maria was
+# introducing herself to the model twice per call.
+#
+# Worse, the persona carries a live clock refreshed on every chat turn, so the
+# prefix is never byte-identical twice and Ollama's KV cache misses every call.
+# Measured 2026-07-26 on this box: prefill 117.3s on a miss, 0.2s on a hit --
+# the chat path already solved this (CHAT_FAST_CONTEXT: "never the per-call
+# HH:MM"), the learning path never got the fix.
+#
+# Override with LEARNING_SYSTEM_PROMPT; set it to "-" to restore the persona.
+_LEARNING_SYSTEM_DEFAULT = "Odpowiadasz wylacznie czystym JSON, bez komentarza."
+
+
+def _learning_system_prompt() -> Optional[str]:
+    """Constant system prefix for learning, or None to keep the full persona."""
+    raw = os.environ.get("LEARNING_SYSTEM_PROMPT")
+    if raw is None:
+        return _LEARNING_SYSTEM_DEFAULT
+    raw = raw.strip()
+    return None if raw == "-" else (raw or _LEARNING_SYSTEM_DEFAULT)
+
 
 class LLMRouter:
     """
@@ -134,6 +205,9 @@ class LLMRouter:
             except Exception as e:
                 logger.warning(f"NIM chat failed, falling back to Ollama: {e}")
                 self._nim_fallbacks += 1
+                self._record_tape("chat", self.nim.model, prompt, "", start,
+                                  success=False,
+                                  route_reason=f"nim_failed: {e}")
 
         # Default: Ollama (always for grounded, fallback for NIM failure)
         self._ollama_calls += 1
@@ -151,10 +225,10 @@ class LLMRouter:
     def translate_to_polish(self, text: str, temperature: float = 0.2) -> str:
         """Render an English description as natural, fluent Polish, NIM-first.
 
-        Used by the vision advisor: LLaVA describes the scene in English (its
-        strength) and this turns it into clean Polish for the operator ping --
-        LLaVA 7B writes broken Polish (invented words, English fragments), whereas
-        NIM (dracarys-70b) is fluent. Budget/rate-guarded NIM-first; on any failure
+        Used by the vision advisor: the local vision model describes the scene in
+        English (its strength) and this turns it into clean Polish for the operator
+        ping -- a 4-7B vision model writes broken Polish (invented words, English
+        fragments), whereas NIM is fluent. Budget/rate-guarded NIM-first; on any failure
         falls back to the local model, then to the original English text, so a ping
         is never empty or garbled."""
         if not text or not text.strip():
@@ -178,7 +252,10 @@ class LLMRouter:
             except Exception as e:
                 logger.warning(f"[LLMRouter] vision translate NIM failed: {e}")
                 self._nim_fallbacks += 1
-        # Local fallback: weaker Polish, but far better than broken LLaVA Polish.
+                self._record_tape("vision_translate", self.nim.model, prompt, "",
+                                  start, success=False,
+                                  route_reason=f"nim_failed: {e}")
+        # Local fallback: weaker Polish, but far better than the vision model's.
         try:
             out = self.ollama.think(prompt, temperature=temperature)
             if out and out.strip():
@@ -250,6 +327,9 @@ class LLMRouter:
             except Exception as e:
                 logger.warning(f"NIM _ask_once failed, falling back to Ollama: {e}")
                 self._nim_fallbacks += 1
+                self._record_tape("learning", self.nim.model, prompt, "", start,
+                                  success=False,
+                                  route_reason=f"nim_failed: {e}")
 
         # Fallback to Ollama -- bounded so a wedged Ollama cannot hang the caller
         # forever (the 2026-06-02 freeze went through unbounded _ask_once paths).
@@ -262,20 +342,38 @@ class LLMRouter:
         _scheduler = getattr(self, "_model_scheduler", None)
         _guard = (_scheduler.heavy_lease("ask_once_ollama_fallback")
                   if _scheduler is not None else nullcontext())
+        learn_model = _learning_local_model()
         try:
             with _guard:
                 result = call_with_timeout(
                     lambda: self.ollama._ask_once(
                         prompt, temperature=temperature,
-                        force_json=force_json, **kwargs
+                        force_json=force_json,
+                        model=learn_model,
+                        # Constant, task-shaped prefix instead of the persona:
+                        # ~1000 tokens lighter AND byte-stable, so Ollama's KV
+                        # cache can actually hit. See _learning_system_prompt.
+                        system=_learning_system_prompt(),
+                        # think=False matters more than the model choice: qwen3
+                        # is a reasoning model and its thinking tokens are pure
+                        # cost here, since this prompt wants a JSON record, not
+                        # a derivation. Measured 208s -> 64s on an idle box.
+                        # Harmless on non-thinking models (verified on
+                        # llama3.1:8b: HTTP 200, normal answer).
+                        think=False,
+                        **kwargs
                     ),
-                    timeout_sec=get_timeout_for_role("executor"),
+                    # "learning", not "executor": this path runs a full learning
+                    # prompt through a local 8B model, which is measurably slower
+                    # than what the executor budget was sized for. See the
+                    # DEFAULT_TIMEOUTS["learning"] comment for the measurement.
+                    timeout_sec=get_timeout_for_role("learning"),
                     label="router._ask_once(ollama)",
                 )
         except _OLLAMA_TIMEOUT_EXC:
             logger.warning("[LLMRouter] _ask_once Ollama fallback timed out -> empty")
             result = ""
-        self._record_tape("learning", self.ollama.model, prompt, result, start,
+        self._record_tape("learning", learn_model, prompt, result, start,
                           route_reason=reason)
         return result
 
@@ -404,7 +502,10 @@ class LLMRouter:
                 response=response or "",
                 latency_ms=latency_ms,
                 success=is_success,
-                route_reason=route_reason,
+                # Failure reasons carry the upstream error body (NIM returns up
+                # to 500 chars of JSON). Unbounded, that rides along in EVERY
+                # frame -- the same shape as the 201 MB tap blowup (5d1710c).
+                route_reason=(route_reason or "")[:MAX_ROUTE_REASON],
             )
             self._llm_tape.record(entry)
         except Exception:
@@ -497,6 +598,10 @@ class LLMRouter:
                     f"falling back to local scheduler"
                 )
                 self._nim_fallbacks += 1
+                self._record_tape(
+                    role_name, self.nim.model, prompt, "", nim_start,
+                    success=False, route_reason=f"nim_primary_failed: {e}",
+                )
                 # Continue to scheduler/Ollama path below
 
         # Normalize string role to ModelRole enum for scheduler
@@ -619,8 +724,11 @@ class LLMRouter:
                 self._nim_calls += 1
                 self._record_tape("encyclopedia", self.nim.model, prompt, result, start)
                 return result
-            except Exception:
+            except Exception as e:
                 self._nim_fallbacks += 1
+                self._record_tape("encyclopedia", self.nim.model, prompt, "", start,
+                                  success=False,
+                                  route_reason=f"nim_failed: {e}")
 
         # Fallback: Ollama -- bounded (see _bounded_ask_once); a wedged Ollama
         # must not hang an encyclopedia lookup that may run on the tick path.

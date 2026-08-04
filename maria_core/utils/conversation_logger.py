@@ -7,10 +7,16 @@ LOG_DIR = "logs"
 TEXT_LOG = os.path.join(LOG_DIR, "conversation.log")
 JSON_LOG = os.path.join(LOG_DIR, "conversation.json")
 
-os.makedirs(LOG_DIR, exist_ok=True)
-
 
 def log_message(role: str, content: str):
+    # Create the directory HERE, not at import. It used to run once at import
+    # time, which quietly assumed the process never changes working directory
+    # after that -- LOG_DIR is relative, so the dir got made in whatever cwd
+    # the first import happened to see, and every later write to a different
+    # cwd died with ENOENT ("No such file or directory: 'logs/conversation.log'").
+    # Cheap: makedirs with exist_ok is a no-op once the dir exists.
+    os.makedirs(LOG_DIR, exist_ok=True)
+
     timestamp = datetime.now().isoformat()
 
     entry = {

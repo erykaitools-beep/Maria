@@ -131,6 +131,26 @@ class TestRateLimiter:
         assert limiter.check("fetch", now)[0] is False
         assert limiter.check("maintenance", now)[0] is True
 
+    def test_default_limits_only_cover_guarded_or_analytical(self):
+        """DEFAULT_RATE_LIMITS keys must never be FREE-class actions.
+
+        AutonomyPolicy.check() consults the limiter only for GUARDED and
+        ANALYTICAL classes, so a limit configured for a FREE action is dead
+        config that only misleads get_stats() into showing a live cap.
+        Regression 2026-07-18: evaluate (FREE) and review (FREE) carried limits
+        (2 and 5) that were never enforced; removed.
+        """
+        from agent_core.autonomy.rate_limiter import DEFAULT_RATE_LIMITS
+        for action in DEFAULT_RATE_LIMITS:
+            cls = classify_action(action)
+            assert cls in (
+                ActionClassification.GUARDED,
+                ActionClassification.ANALYTICAL,
+            ), f"{action!r} is {cls}; a FREE action's rate limit is never enforced"
+        # the two removed dead keys stay gone
+        assert "evaluate" not in DEFAULT_RATE_LIMITS
+        assert "review" not in DEFAULT_RATE_LIMITS
+
 
 # ============================================================
 # PolicyRules tests

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 import logging
+import threading
 import time
 import os
 from maria_core.sys.config import MEMORY_DIR
@@ -53,6 +54,24 @@ class MemoryStore:
         self.filepath = Path(filepath)
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def _lock_path(self) -> Path:
+        """Osobny plik-kłódka obok pliku danych.
+
+        Kłódka MUSI wisieć na czymś, co przeżyje replace() pliku danych.
+        Blokowanie samego pliku danych nie wystarcza: save_all podmienia
+        i-node, wiec rownolegly writer trzymalby blokade na osieroconym
+        i-node i pisal w pustke.
+        """
+        return self.filepath.with_name(self.filepath.name + '.lock')
+
+    @contextmanager
+    def _exclusive(self):
+        """Wylaczny dostep do TEGO pliku danych (append i save_all razem)."""
+        with open(self._lock_path, 'a', encoding='utf-8') as lock_f:
+            with _lock_file(lock_f):
+                yield
+
     def append(self, record: Dict[str, Any]) -> bool:
         """
         Dopisuje rekord do pliku JSONL.
@@ -64,8 +83,10 @@ class MemoryStore:
             True jeśli sukces, False jeśli błąd
         """
         try:
-            with open(self.filepath, 'a', encoding='utf-8') as f:
-                with _lock_file(f):
+            # Ta sama kłódka co save_all - inaczej append moglby dopisac
+            # do i-node'a wlasnie podmienianego przez save_all (dane znikaja).
+            with self._exclusive():
+                with open(self.filepath, 'a', encoding='utf-8') as f:
                     json_line = json.dumps(record, ensure_ascii=False)
                     f.write(json_line + '\n')
             logger.debug(f"Zapisano rekord do {self.filepath.name}")
@@ -124,14 +145,34 @@ class MemoryStore:
         Returns:
             True jeśli sukces, False jeśli błąd
         """
+        # Kłódka obejmuje zapis I podmiane. Dawniej flock szedl na plik
+        # tymczasowy i byl zwalniany PRZED replace() - czyli chronil nic.
+        with self._exclusive():
+            return self._write_records(records)
+
+    def _write_records(self, records: List[Dict[str, Any]]) -> bool:
+        """Zapis do tempa + atomowa podmiana.
+
+        WOLAJACY MUSI JUZ TRZYMAC ``_exclusive()``. Metoda sama go nie bierze,
+        bo flock na drugim deskryptorze w tym samym procesie zablokowalby
+        sie na sobie (zakleszczenie).
+        """
+        # Nazwa tempa MUSI byc unikalna per pisarz. Wspolna nazwa (dawne
+        # with_suffix('.tmp')) znaczyla, ze dwa rownolegle save_all otwieraly
+        # ten SAM plik w trybie 'w' - drugi ucinal dane pierwszego w trakcie
+        # pisania. Zmierzone: uszkodzony plik w 4 z 5 rund.
+        temp_file = self.filepath.with_name(
+            f"{self.filepath.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
         try:
-            # Zapisz do pliku tymczasowego
-            temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
-                with _lock_file(f):
-                    for record in records:
-                        json_line = json.dumps(record, ensure_ascii=False)
-                        f.write(json_line + '\n')
+                for record in records:
+                    json_line = json.dumps(record, ensure_ascii=False)
+                    f.write(json_line + '\n')
+                # Twardy reset (jak 30.07) potrafi zostawic plik z trescia
+                # ze niczego. Dane na dysk PRZED podmiana nazwy.
+                f.flush()
+                os.fsync(f.fileno())
 
             # Atomowo zastąp stary plik
             # Windows wymaga usunięcia starego pliku przed replace
@@ -143,6 +184,43 @@ class MemoryStore:
             return True
         except Exception as e:
             logger.error(f"Błąd zapisu wszystkich rekordów do {self.filepath}: {e}")
+            # Nie zostawiaj sieroty - inaczej katalog obrasta w *.tmp
+            try:
+                temp_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+
+    def update_all(self, mutate) -> bool:
+        """Odczyt-zmiana-zapis pod JEDNA kłódką (bez utraty aktualizacji).
+
+        Wzorzec ``index = load_index(); index.append(x); save_index(index)``
+        ma wyscig POMIEDZY odczytem a zapisem, ktorego blokada w save_all nie
+        domyka: dwa watki czytaja ten sam stan i drugi nadpisuje zmiane
+        pierwszego. Zmierzone na 6 watkach x 40 dopisan: **240 dopisanych,
+        40 w pliku - 200 zgubionych**.
+
+        Args:
+            mutate: funkcja lista_rekordow -> nowa_lista_rekordow.
+                NIE WOLNO jej wolac append()/save_all() na tym samym
+                MemoryStore - kłódka nie jest reentrantna (zakleszczenie).
+
+        Returns:
+            True jeśli sukces, False jeśli błąd
+        """
+        try:
+            with self._exclusive():
+                records = self.load_all()
+                updated = mutate(records)
+                if updated is None:
+                    logger.error(
+                        f"update_all: mutate() zwrocilo None dla {self.filepath.name} "
+                        f"- przerwano, plik nietkniety"
+                    )
+                    return False
+                return self._write_records(list(updated))
+        except Exception as e:
+            logger.error(f"Błąd update_all na {self.filepath}: {e}")
             return False
 
     def find(self, filter_func) -> List[Dict[str, Any]]:

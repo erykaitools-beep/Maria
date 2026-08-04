@@ -106,58 +106,39 @@ class TestConstraintValidator:
         assert len(critical) >= 1
         assert any("Temperature" in a or "temp" in a.lower() for a in critical)
 
-    def test_coherence_violation(self, validator):
-        """Low coherence should trigger WARNING."""
-        incoherent_state = {
+    def test_cognitive_metrics_do_not_gate(self, validator):
+        """Cognitive metrics no longer produce alerts.
+
+        The cognitive gates (coherence/goal-stack/error-rate/contradiction/
+        LLM-latency/attention) were removed 2026-07-18: a numb CognitiveSensor
+        (empty MemoryManager/LLMManager) fed them frozen constants they could
+        never fire on, and wiring latency would storm instead (llm_tape: 92% of
+        CPU LLM calls > 5s). Real concerns are covered live -- freeze ->
+        TickWatchdog, load -> resource sensor, error-storm -> self_repair, goal
+        saturation -> K3 MAX_ACTIVE cap. Teeth: re-add any cognitive gate and
+        this flips to failing.
+        """
+        # Every cognitive signal at a value that WOULD have tripped an old gate,
+        # with all hardware signals healthy.
+        cognitive_bad = {
             "ram_available_mb": 2000,
             "cpu_load": 30,
             "disk_used_pct": 40,
             "temp_c": 55,
-            "context_coherence": 0.5,
+            "context_coherence": 0.1,
             "coherence_ok": False,
-        }
-
-        all_ok, alerts = validator.validate(incoherent_state)
-
-        warnings = [a for a in alerts if "WARNING" in a]
-        assert len(warnings) >= 1
-        assert any("coherence" in a.lower() for a in warnings)
-
-    def test_goal_stack_runaway(self, validator):
-        """Deep goal stack should trigger ALERT."""
-        runaway_state = {
-            "ram_available_mb": 2000,
-            "cpu_load": 30,
-            "disk_used_pct": 40,
-            "temp_c": 55,
-            "coherence_ok": True,
-            "goal_stack_depth": 30,
-            "goal_stack_runaway": True,
-        }
-
-        all_ok, alerts = validator.validate(runaway_state)
-
-        alert_msgs = [a for a in alerts if "ALERT" in a]
-        assert len(alert_msgs) >= 1
-        assert any("stack" in a.lower() or "goal" in a.lower() for a in alert_msgs)
-
-    def test_error_rate_alert(self, validator):
-        """High error rate should trigger WARNING."""
-        error_state = {
-            "ram_available_mb": 2000,
-            "cpu_load": 30,
-            "disk_used_pct": 40,
-            "temp_c": 55,
-            "coherence_ok": True,
-            "error_count_1h": 25,
+            "error_count_1h": 999,
             "errors_high": True,
+            "goal_stack_depth": 999,
+            "goal_stack_runaway": True,
+            "contradiction_count": 999,
+            "inference_latency_ms": 999999,
+            "attention_dispersed": True,
         }
 
-        all_ok, alerts = validator.validate(error_state)
-
-        warnings = [a for a in alerts if "WARNING" in a]
-        assert len(warnings) >= 1
-        assert any("error" in a.lower() for a in warnings)
+        all_ok, alerts = validator.validate(cognitive_bad)
+        assert all_ok, f"cognitive metrics must not gate; got: {alerts}"
+        assert alerts == []
 
     def test_disk_critical(self, validator):
         """Very high disk usage should trigger CRITICAL."""

@@ -1525,9 +1525,9 @@ def register_telegram_commands(bridge, ctx):
 
         # Notify operator via Telegram so they get the /efapprove shortcut.
         notifier = getattr(ctx, 'telegram_notifier', None)
-        if notifier and hasattr(notifier, 'notify_effector_approval'):
+        if notifier and hasattr(notifier, 'notify_effector_request'):
             try:
-                notifier.notify_effector_approval(
+                notifier.notify_effector_request(
                     tool_name=intent.tool_name,
                     tool_args=intent.tool_args,
                     goal_description=request.goal_description,
@@ -1535,7 +1535,7 @@ def register_telegram_commands(bridge, ctx):
                     request_id=request.request_id,
                 )
             except Exception as e:
-                logger.debug(f"notify_effector_approval failed: {e}")
+                logger.debug(f"notify_effector_request failed: {e}")
 
         prefix = request.request_id[:12]
         return (
@@ -1583,14 +1583,6 @@ def register_telegram_commands(bridge, ctx):
             pending = queue.get_pending()
             for p in pending[:5]:
                 parts.append(f"  [{p.request_id[:8]}] {p.tool_name} - {p.goal_description[:40]}")
-
-        budget = getattr(ctx, 'tool_budget', None)
-        if budget:
-            bstats = budget.get_stats()
-            for tool, ts in bstats.items():
-                if ts['consecutive_failures'] > 0 or ts['locked']:
-                    parts.append(f"  {tool}: {ts['invocations_this_window']}/{ts['rate_limit']} "
-                                 f"fails={ts['consecutive_failures']} locked={ts['locked']}")
 
         return "\n".join(parts) if parts else "Brak danych efektora"
 
@@ -3983,7 +3975,13 @@ def register_telegram_commands(bridge, ctx):
         only the bare no-arg view worked (2026-06-14 audit, Rank 9)."""
         engine = ctx.workflow_engine
         if not engine:
-            return "Workflow Engine niedostepny."
+            # Distinguish "room shut on purpose" from "mount blew up" -- the old
+            # single message made a closed valve look like a broken subsystem.
+            if os.getenv("WORKFLOW_ENABLED", "").strip().lower() not in (
+                    "1", "true", "yes", "on"):
+                return ("Warsztat zamkniety: WORKFLOW_ENABLED=off.\n"
+                        "Ustaw flage w .env i zrestartuj demona, zeby otworzyc.")
+            return "Workflow Engine niedostepny (montaz sie nie powiodl - patrz logi)."
         tokens = (args or "").split()
         sub = tokens[0].lower() if tokens else "list"
 
@@ -4036,6 +4034,28 @@ def register_telegram_commands(bridge, ctx):
             ok = engine.cancel(wf_obj["workflow_id"], "operator via Telegram")
             return f"Cancelled: {wf_obj['workflow_id'][:8]}" if ok else "Nie mozna anulowac."
 
+        if sub == "approve":
+            # The valve the system already told the operator to use. ProgressReporter
+            # has always sent "Use: /wf approve <id> <step>" on a step that needs
+            # sign-off, but the subcommand did not exist -- the message pointed at
+            # nothing and the workflow stayed paused forever (resume re-pauses on
+            # the same step). Engine-side approve_step() was there the whole time
+            # with zero production callers.
+            if len(tokens) < 3:
+                return "Usage: /wf approve <id> <nr_kroku>"
+            wf_obj = _find_wf(engine, tokens[1])
+            if not wf_obj:
+                return f"Nie znaleziono: {tokens[1]}"
+            try:
+                step_order = int(tokens[2])
+            except ValueError:
+                return f"Numer kroku musi byc liczba, dostalem: {tokens[2]}"
+            ok = engine.approve_step(wf_obj["workflow_id"], step_order)
+            if not ok:
+                return "Nie mozna zatwierdzic kroku."
+            return (f"Zatwierdzony krok {step_order} w {wf_obj['workflow_id'][:8]}. "
+                    "Ruszy przy najblizszym przebiegu.")
+
         if sub == "templates":
             try:
                 from agent_core.workflow.templates import WORKFLOW_TEMPLATES
@@ -4046,7 +4066,7 @@ def register_telegram_commands(bridge, ctx):
             except Exception:
                 return "Error loading templates."
 
-        return "Usage: /wf [list|start|pause|resume|cancel|templates]"
+        return "Usage: /wf [list|start|pause|resume|cancel|approve|templates]"
 
     def _find_wf(engine, prefix):
         for w in engine.list_workflows():
@@ -4070,11 +4090,7 @@ def register_telegram_commands(bridge, ctx):
             lines = [
                 f"Mode: {status['mode']}",
                 f"Auto: {'ON' if status['auto_detect_enabled'] else 'OFF'}",
-                f"LLM budget: {status['llm_budget_multiplier']:.1f}x",
-                f"Notifications: {status['notification_level']}",
             ]
-            if status['blocked_actions']:
-                lines.append(f"Blocked: {', '.join(status['blocked_actions'])}")
             return "\n".join(lines)
 
         if sub in ("switch", "set") and len(tokens) >= 2:

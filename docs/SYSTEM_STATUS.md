@@ -32,7 +32,7 @@ regression tests.
 | Module | Status | Note / evidence |
 |---|---|---|
 | K1-K13 cognitive core | `OBSERVED` | rich runtime archive (decision_traces, action_audit, reflections) |
-| `homeostasis` (tick 1-20) | `OBSERVED` | tick loop, `homeostasis_events` 76.7k archive |
+| `homeostasis` (tick 1-21) | `OBSERVED` | tick loop, `homeostasis_events` 76.7k archive |
 | `planner` | `OBSERVED` | runs live, but `no_goals` often means "no executable goals right now", not an empty goal queue |
 | `creative` | `OBSERVED` | `creative_events` 4160 live; generator→bulletin (R1) confirmed at 19:02 |
 | `critic` | `OBSERVED` | `critique_reports` 5186 archive |
@@ -40,8 +40,8 @@ regression tests.
 | `llm` (LLMManager + NIM + scheduler) | `OBSERVED` | 15/15 reachable; nemotron-49b EXTERNAL |
 | `self_perception` (Phase 18) | `OBSERVED` | `self_state_snapshots` 49 live |
 | `routing` (IntentRouter) | `WIRED` (flag-gated) | default false via env (`routing/intent_router.py:68`) |
-| `conductor` (Phase 17) | `WIRED` + `OBSERVED` (market) | dispatcher wired; `market_task_queue` 92 rows; currently idle/skipping because there are no ready tasks or the dirty-worktree guard is active |
-| `vision` | `WIRED` (sensor optional) | LLaVA on-demand, cortex shared with the UI |
+| `conductor` (Phase 17) | `WIRED` + `OBSERVED` | dispatcher wired; task queues persist across restarts; usually idle/skipping because there are no ready tasks or the dirty-worktree guard is active |
+| `vision` | `WIRED` (sensor optional) | `gemma3:4b` on-demand behind a scene-change gate (replaced LLaVA 2026-07-25), cortex shared with the UI |
 | `orchestrator` (V3) | `WIRED` | init at `maria.py:477` |
 | **`self_repair` (Phase 19)** | **`WIRED`; `OBSERVED` in a controlled drill, not naturally in-vivo** | `SystemFailureMonitor -> RepairTaskCreator -> maria_task_queue -> approval_required gate -> dispatcher` verified 2026-05-30; live is healthy/SLEEP, so a natural candidate has not yet arisen |
 | `skills` | `LIBRARY` (1.0-backlog) | extractor exists (`teacher/skill_extractor`), no wiring to planner/tick; STATUS banner in `__init__.py` 2026-05-31; do not delete |
@@ -110,7 +110,7 @@ real data on "how this will actually work" will come from. We return to 2.0 once
 ## Stale docs — do NOT treat as runtime truth
 
 - `docs/ARCHITECTURE.md` — April 2026; claims 11 phases / 3352 tests. The code
-  actually runs 21 phases (Phase 20 = conversation condense, 06-21) and 7,145
+  actually runs 21 phases (Phase 20 = conversation condense, 06-21) and 7,267
   collected tests. Historical until regenerated.
 - Web UI `_JSONL_DATA_FLOW` (`maria_ui/app.py:2469`) — a manual map that omits,
   among others, `self_state_snapshots`, `maria_task_queue`, `creative_events`,

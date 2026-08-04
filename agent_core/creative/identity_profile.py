@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class CognitiveProfile:
     """Snapshot of Maria's cognitive development state."""
     growth_trajectory: str          # accelerating / stable / slowing / stalled
-    dominant_traits: List[str]      # top 3 personality traits by score
+    dominant_traits: List[str]      # top 3 personality trait NAMES (display only)
     domain_strengths: Dict[str, float]   # topic -> retention (top 5)
     domain_weaknesses: Dict[str, float]  # topic -> retention (bottom 5)
     capability_map: Dict[str, int]       # action_type -> count (what Maria does)
@@ -31,6 +31,9 @@ class CognitiveProfile:
     total_files: int
     completed_files: int
     coverage: float
+    # Full measured trait magnitudes (not just top-3); PersonalityPolicy
+    # thresholds read these, never list position.
+    trait_scores: Dict[str, float] = field(default_factory=dict)
     built_at: float = field(default_factory=time.time)
 
 
@@ -60,6 +63,7 @@ class IdentityProfile:
         return CognitiveProfile(
             growth_trajectory=trajectory,
             dominant_traits=[name for name, _ in dominant],
+            trait_scores=traits,
             domain_strengths=strengths,
             domain_weaknesses=weaknesses,
             capability_map=capability,

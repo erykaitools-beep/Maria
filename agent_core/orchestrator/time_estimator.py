@@ -130,7 +130,7 @@ _ACTION_TIMES = {
 _COLD_START_SECONDS = {
     "planner": 15.0,   # qwen3:8b loading
     "coder": 15.0,     # qwen2.5-coder:7b loading
-    "memory": 5.0,     # nomic-embed-text loading
+    "memory": 20.0,    # bge-m3 loading (1.2GB, vs 274MB for nomic-embed-text)
 }
 
 

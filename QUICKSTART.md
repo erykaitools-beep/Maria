@@ -48,7 +48,7 @@ bash install.sh
 
 The script is a 7-step guided setup. It checks your system, installs
 [Ollama](https://ollama.com) (the local LLM runtime), pulls the `llama3.1:8b`
-model (~5 GB — this is the slow part) plus the small `nomic-embed-text` embedding
+model (~5 GB — this is the slow part) plus the `bge-m3` embedding
 model, creates a Python virtual environment, installs dependencies, and generates
 a `.env` config with a random Web UI PIN.
 
@@ -216,15 +216,15 @@ Almost always "working, but slow." Check, in order:
 
 ### Semantic (meaning-based) search returns nothing
 
-Meaning-based search needs the `nomic-embed-text` model. `install.sh` pulls it
+Meaning-based search needs the `bge-m3` model. `install.sh` pulls it
 for you — but if you set Ollama up by hand, confirm it's present:
 
 ```bash
-ollama list | grep nomic-embed-text
+ollama list | grep bge-m3
 ```
 
 If it's missing, add it and restart Maria; results appear as she re-indexes:
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ```

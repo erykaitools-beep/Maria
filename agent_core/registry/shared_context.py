@@ -50,7 +50,7 @@ class SharedContext:
     evidence_collector: Any = None   # EvidenceCollector (Phase 2, grounded responses)
     telegram_bridge: Any = None      # TelegramBridge (operator notifications)
     codex_client: Any = None         # CodexClient (ChatGPT encyclopedia via Codex CLI)
-    semantic_search: Any = None       # SemanticMemory (nomic-embed-text vector store)
+    semantic_search: Any = None       # SemanticMemory (bge-m3 vector store)
     trace_store: Any = None            # TraceStore (Phase 1 decision traceability)
     memory_query: Any = None           # MemoryQuery (Phase 2 unified memory API)
     vision_cortex: Any = None          # VisionCortex (visual perception pipeline)
@@ -69,7 +69,6 @@ class SharedContext:
     # Phase 5 Effector Safety
     authority_manager: Any = None      # AuthorityManager (5-level authority)
     approval_queue: Any = None         # ApprovalQueue (HITL approval workflow)
-    tool_budget: Any = None            # ToolBudgetManager (per-tool rate limits)
 
     # V3 Orchestrator (Phase A)
     capability_router: Any = None      # CapabilityRouter (registry-based dispatch)
@@ -102,7 +101,6 @@ class SharedContext:
     # Self-Model Maturity (K15)
     capability_manifest: Any = None      # CapabilityManifest (K15)
     honesty_protocol: Any = None         # HonestyProtocol (K15.2)
-    state_reporter: Any = None           # StateReporter (K15.1)
     growth_awareness: Any = None         # GrowthAwareness (K15.3)
     weather_sensor: Any = None           # WeatherSensor (M3)
 

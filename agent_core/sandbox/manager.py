@@ -496,10 +496,31 @@ class SandboxManager:
         if not source.exists():
             return 0
 
-        # Wczytaj istniejace rekordy z produkcji (po id)
-        prod_records: Dict[str, dict] = {}
-        if target.exists():
-            with open(target, "r", encoding="utf-8") as f:
+        # Odczyt produkcji + merge + zapis MUSZA isc pod jedna klodka.
+        # (audyt 2026-06-12): goly open(target, "w") na zywym indeksie =
+        # crash w polowie zapisu zostawia obciety plik, a rownolegly writer
+        # moze sie przeplatac.
+        # (sledztwo 2026-07-30): sam save_all tego NIE domykal. Po pierwsze
+        # jego flock szedl na plik tymczasowy o stalej nazwie i byl zwalniany
+        # przed replace() -- chronil nic (zmierzone: uszkodzony indeks w 4 z
+        # 5 rund). Po drugie odczyt produkcji lezal POZA blokada, wiec
+        # rownolegly save_index z tresci nauki ginal bez sladu (zmierzone:
+        # 200 z 240 dopisan). update_all trzyma klodke przez calosc.
+        # Kontrakt K2: "uzywa istniejacego file locking z memory_store.py".
+        target.parent.mkdir(parents=True, exist_ok=True)
+        from maria_core.memory_engine.memory_store import MemoryStore
+
+        merged = 0
+
+        def _merge_into(prod_list: List[dict]) -> List[dict]:
+            nonlocal merged
+            prod_records: Dict[str, dict] = {}
+            for record in prod_list:
+                fid = _index_record_id(record)
+                if fid:
+                    prod_records[fid] = record
+
+            with open(source, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -507,40 +528,18 @@ class SandboxManager:
                     try:
                         record = json.loads(line)
                         fid = _index_record_id(record)
-                        if fid:
+                        if not fid:
+                            continue
+                        existing = prod_records.get(fid)
+                        if existing is None or self._sandbox_is_newer(record, existing):
                             prod_records[fid] = record
+                            merged += 1
                     except json.JSONDecodeError:
                         continue
+            return list(prod_records.values())
 
-        # Merge z sandbox
-        merged = 0
-        with open(source, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                    fid = _index_record_id(record)
-                    if not fid:
-                        continue
-                    existing = prod_records.get(fid)
-                    if existing is None or self._sandbox_is_newer(record, existing):
-                        prod_records[fid] = record
-                        merged += 1
-                except json.JSONDecodeError:
-                    continue
-
-        # Zapisz zmergowany index przez kanoniczny writer produkcji
-        # (audyt 2026-06-12): goly open(target, "w") na zywym indeksie =
-        # crash w polowie zapisu zostawia obciety plik, a rownolegly writer
-        # moze sie przeplatac. MemoryStore.save_all = tempfile + flock +
-        # atomic replace -- ta sama dyscyplina co reszta sciezki nauki
-        # (kontrakt K2: "uzywa istniejacego file locking z memory_store.py").
-        target.parent.mkdir(parents=True, exist_ok=True)
-        from maria_core.memory_engine.memory_store import MemoryStore
-        if not MemoryStore(target).save_all(list(prod_records.values())):
-            # save_all polyka wyjatki i zwraca False -- eskaluj, zeby
+        if not MemoryStore(target).update_all(_merge_into):
+            # update_all polyka wyjatki i zwraca False -- eskaluj, zeby
             # promote() poszedl w ROLLBACK zamiast klamac sukcesem.
             raise RuntimeError(f"index save failed: {target}")
 

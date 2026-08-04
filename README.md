@@ -9,7 +9,7 @@
   <p align="center">
     <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/tests-7100%2B-brightgreen" alt="7100+ tests">
+    <img src="https://img.shields.io/badge/tests-7200%2B-brightgreen" alt="7200+ tests">
     <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
     <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
   </p>
@@ -69,7 +69,7 @@ No Telegram, no API key, no cloud — that's the whole minimal local run. Step-b
 | **Operator Memory** | Remembers your name, interests, schedule, preferences across sessions |
 | **Web UI** | Chat, status dashboard, knowledge browser, experiment viewer |
 | **Telegram Bot** | Two-way communication, approve/reject goals, remote control |
-| **Vision** | Optional camera integration for scene understanding (LLaVA) |
+| **Vision** | Optional camera integration for scene understanding (`gemma3:4b`, on-demand behind a scene-change gate) |
 
 ### Architecture Overview
 
@@ -145,10 +145,11 @@ bash install.sh
 The install script will:
 1. Check system requirements
 2. Install [Ollama](https://ollama.com) (local LLM runtime)
-3. Pull the `llama3.1:8b` model (~5 GB)
+3. Pull the models: `llama3.1:8b` (~5 GB) and `bge-m3` for embeddings (~1.2 GB)
 4. Create Python virtual environment
 5. Install dependencies
 6. Generate `.env` config with random PIN
+7. Run a quick verification
 
 ### Run
 
@@ -249,15 +250,15 @@ Maria has been running continuously on a single mini PC since 2026-02-22. This i
 | **Resource ceiling** | `MemoryHigh=16G`, `MemoryMax=20G`, `OOMPolicy=kill` (systemd drop-in, hard-capped after an incident — see below) |
 | **Archival storage** | 6 TB external USB disk (ext4) for rotated logs and daily summaries |
 
-Live counters as of 2026-04-18 (~8 weeks in):
+Live counters as of 2026-08-04 (~24 weeks in):
 
 | Signal | Count |
 |---|---|
-| Knowledge entries | 286 |
-| Beliefs (post-compaction) | 1,961 |
-| Semantic vectors (nomic-embed-text, 768-dim) | 10,030 |
-| Decision traces (episode-correlated) | 4,589 |
-| Test suite | 4,490 passing · 1 xfail · 104s runtime |
+| Knowledge entries | 1,365 |
+| Beliefs | 2,000 — **at the cap**, not a total (`MAX_CURRENT_BELIEFS`; pruning decides what survives) |
+| Semantic vectors (bge-m3, 1024-dim) | 10,000 — **at the cap** (`MAX_VECTORS`), oldest evicted first |
+| Decision traces (episode-correlated) | 4,194 (rotated; older traces are archived) |
+| Test suite | 7,262 passing · 4 skipped · ~180s runtime |
 
 > The counters above are a dated snapshot. For sourced current figures (tests, code size, models, hardware), see [docs/funding/CURRENT_PROJECT_STATUS.md](docs/funding/CURRENT_PROJECT_STATUS.md).
 
@@ -320,13 +321,13 @@ maria/
 │   ├── action_safety/    # Audit log, effect validation (K10)
 │   ├── experiment/       # Parameter tuning system (K11)
 │   ├── self_analysis/    # Self-reflection via LLM (K12)
-│   ├── semantic/         # Embedding-based memory (nomic-embed-text)
+│   ├── semantic/         # Embedding-based memory (bge-m3)
 │   ├── telegram/         # Telegram bot integration
 │   ├── vision/           # Camera/vision (optional)
 │   ├── llm/              # LLM routing, model registry
 │   ├── reminders/        # Time-triggered notifications
 │   ├── web_source/       # Wikipedia + RSS content fetcher
-│   └── tests/            # 7100+ tests
+│   └── tests/            # 7200+ tests
 ├── maria_ui/             # Flask Web UI
 │   ├── templates/        # HTML (Jinja2)
 │   └── static/           # CSS + JS
@@ -356,7 +357,7 @@ python main.py
 | **LLM** | Ollama (llama3.1:8b), optional NVIDIA NIM API |
 | **Web UI** | Flask + Flask-SocketIO, vanilla JS |
 | **Storage** | JSONL files (no database) |
-| **Embeddings** | nomic-embed-text (768-dim, via Ollama) |
+| **Embeddings** | bge-m3 (1024-dim, via Ollama) — replaced nomic-embed-text 2026-07-25 |
 | **Communication** | Telegram Bot API |
 | **Tests** | pytest, all mocked, zero external deps |
 

@@ -5,6 +5,7 @@ Handles naming (slugify), metadata headers, deduplication,
 and content validation.
 """
 
+import html
 import logging
 import re
 import time
@@ -22,9 +23,37 @@ try:
 except ImportError:
     _DEFAULT_INPUT_DIR = Path(__file__).resolve().parents[2] / "input"
 
+# Floor measured on REAL text (post strip_html), not raw markup. RSS
+# <description> summaries arrive as HTML; before stripping, tag soup alone
+# cleared 200 chars while carrying ~0 real words, so content-free teasers
+# (schema.org markup from Drupal feeds like naukawpolsce.pl) passed as articles.
 MIN_CONTENT_CHARS = 200
 MAX_SLUG_LEN = 50
 HEADER_SEPARATOR = "# ---\n\n"
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_html(text: str) -> str:
+    """Reduce HTML markup in fetched content to plain text.
+
+    RSS <description> summaries arrive as HTML: schema.org markup (Drupal feeds),
+    <p>/<span>, and entities (&#8230;). Two harms: raw markup is fed to the LLM
+    as study material, and it inflates the MIN_CONTENT_CHARS gate -- tag soup
+    clears 200 chars while carrying almost no real words, so content-free teasers
+    pass as if they were articles.
+
+    No-op on tag-free content (`<` absent): Wikipedia extracts and ArticleFetcher
+    bodies pass through byte-identical, so this cannot change their behavior.
+    """
+    if not text or "<" not in text:
+        return text
+    no_tags = _TAG_RE.sub(" ", text)
+    unescaped = html.unescape(no_tags)
+    # collapse the whitespace tag removal introduces; keep paragraph breaks
+    unescaped = re.sub(r"[ \t]+", " ", unescaped)
+    unescaped = re.sub(r"\n[ \t]*\n\s*", "\n\n", unescaped)
+    return unescaped.strip()
 
 # Polish character transliteration map
 _PL_TRANS = str.maketrans({
@@ -83,6 +112,10 @@ class ContentWriter:
         Returns:
             Filename (e.g. "web_wiki_logika.txt") or None if skipped.
         """
+        # Clean HTML/markup FIRST, so the length gate below measures real text
+        # (not tag soup) and what lands in input/ is study-ready plain text.
+        content = strip_html(content)
+
         # Validate content
         if not content or len(content.strip()) < MIN_CONTENT_CHARS:
             logger.debug(

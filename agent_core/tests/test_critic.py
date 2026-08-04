@@ -1184,3 +1184,109 @@ class TestIntegration:
         result = handler(plan)
         assert result["success"] is False
         assert "No critic_agent" in result["error"]
+
+
+# =============================================================================
+# H. Exam-calibration regression (2026-07-18 phantom hunt)
+# =============================================================================
+
+class TestCriticExamCalibrationRegression:
+    """The exam-backed calibration audit was doubly dead on live data:
+    ``_load_exam_map`` did ``float(ts)`` on ISO-8601 timestamps -> ValueError
+    swallowed on every record -> empty map; and the lookups compared prefixed
+    belief source_ids (``concept:``/``file:``) against bare exam keys -> 0/2000
+    match. Separately the report cap starved every dimension but
+    shallow_knowledge. These pin the fixes with real-shaped data."""
+
+    def test_load_exam_map_parses_iso_timestamps(self, tmp_project):
+        # Real exam_results.jsonl stores ISO-8601 strings, not float epochs.
+        _write_exam_results(tmp_project / "memory" / "exam_results.jsonl", [
+            {"file": "expert_fakt.txt", "score": 0.83,
+             "timestamp": "2025-12-06T14:20:22.882813Z"},
+            {"file": "expert_fakt.txt", "score": 0.90,
+             "timestamp": "2025-12-07T10:00:00.000000Z"},
+        ])
+        critic = KnowledgeCritic(belief_store=None, project_root=str(tmp_project))
+        em = critic._load_exam_map()
+        assert "expert_fakt.txt" in em, "ISO-timestamped exams must load (was empty)"
+        assert em["expert_fakt.txt"]["count"] == 2
+        # recency weighting leans toward the newer 0.90
+        assert em["expert_fakt.txt"]["weighted_score"] > 0.83
+
+    def test_parse_exam_ts_accepts_iso_and_float(self):
+        from agent_core.critic.knowledge_critic import _parse_exam_ts
+        assert _parse_exam_ts(1733496022.0) == 1733496022.0
+        assert _parse_exam_ts("2025-12-06T14:20:22.882813Z") > 0
+        assert (_parse_exam_ts("2025-12-07T00:00:00Z")
+                > _parse_exam_ts("2025-12-06T00:00:00Z"))
+        assert _parse_exam_ts("garbage") == 0.0
+        assert _parse_exam_ts(None) == 0.0
+
+    def test_belief_exam_source_strips_prefix_without_corpus_collapse(self):
+        from agent_core.critic.knowledge_critic import _belief_exam_source
+        # prefix + #chunk + :keypoint-index -> bare source file
+        assert _belief_exam_source(
+            "concept:expert_fakt.txt#chunk_4:0") == "expert_fakt.txt"
+        assert _belief_exam_source(
+            "file:web_wiki_uczenie.txt") == "web_wiki_uczenie.txt"
+        # MUST NOT collapse expert_ -> expert (that key matches no exam);
+        # _source_group grouping dropped live matches 1285 -> 762.
+        assert _belief_exam_source("file:expert_nlp.txt") == "expert_nlp.txt"
+        # topic beliefs have no document exam of their own
+        assert _belief_exam_source("topic:python") is None
+        assert _belief_exam_source("") is None
+        # bare id (tests) passes through unchanged
+        assert _belief_exam_source("file_001") == "file_001"
+
+    def test_overconfident_matches_examined_belief_via_prefixed_source(
+        self, tmp_project
+    ):
+        # Both bugs together: prefixed source_id + ISO timestamp. A high-conf
+        # belief with a GOOD exam is cleared; one with a BAD exam is flagged as
+        # a real calibration gap (exam actually matched, not "no exam").
+        _write_exam_results(tmp_project / "memory" / "exam_results.jsonl", [
+            {"file": "expert_fakt.txt", "score": 0.95,
+             "timestamp": "2025-12-06T14:20:22.882813Z"},
+            {"file": "weak_topic.txt", "score": 0.30,
+             "timestamp": "2025-12-06T14:20:22.882813Z"},
+        ])
+        verified = _make_belief(belief_id="b-ok", entity="ok", confidence=0.9,
+                                source_id="concept:expert_fakt.txt#chunk_1:0")
+        badgap = _make_belief(belief_id="b-gap", entity="gap", confidence=0.9,
+                              source_id="file:weak_topic.txt")
+        store = _make_belief_store([verified, badgap])
+        critic = KnowledgeCritic(belief_store=store, project_root=str(tmp_project))
+        by_belief = {
+            bid: f
+            for f in critic._find_overconfident()
+            for bid in f.belief_ids
+        }
+        # verified high-conf belief with a strong exam -> NOT flagged
+        assert "b-ok" not in by_belief
+        # high-conf belief with a weak exam -> real gap, exam actually matched
+        assert "b-gap" in by_belief
+        assert by_belief["b-gap"].evidence.get("exam_count", 0) == 1
+        assert by_belief["b-gap"].evidence.get("weighted_exam_score", 1.0) < 0.5
+
+    def test_round_robin_cap_does_not_let_one_category_monopolize(self):
+        from agent_core.critic.knowledge_critic import _round_robin_cap
+        findings = []
+        for i in range(8):  # shallow_knowledge packs up to 5 belief_ids each
+            findings.append(create_finding(
+                category=FindingCategory.SHALLOW_KNOWLEDGE,
+                severity=FindingSeverity.WARNING, topic=f"t{i}", description="x",
+                suggested_action=SuggestedCritiqueAction.LEARN_MORE,
+                belief_ids=[f"{i}-{k}" for k in range(5)]))
+        for i in range(3):  # calibration findings carry 1 id each
+            findings.append(create_finding(
+                category=FindingCategory.OVERCONFIDENT,
+                severity=FindingSeverity.WARNING, topic=f"o{i}", description="x",
+                suggested_action=SuggestedCritiqueAction.VERIFY,
+                belief_ids=[f"o{i}"]))
+        # The old (severity, -len(belief_ids)) sort + [:MAX] cap would put all 8
+        # shallow first and show ONLY shallow_knowledge.
+        findings.sort(key=lambda f: (f.severity_order, -len(f.belief_ids)))
+        capped = _round_robin_cap(findings, MAX_FINDINGS_PER_REPORT)
+        assert len(capped) == MAX_FINDINGS_PER_REPORT
+        assert "overconfident" in {f.category for f in capped}, \
+            f"calibration starved by shallow: {[f.category for f in capped]}"

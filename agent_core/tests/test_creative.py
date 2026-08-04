@@ -430,6 +430,38 @@ class TestStrategicContext:
 
         assert result["action_pattern"]["total"] == 0
         assert result["learning_state"]["total_files"] == 0
+        assert result["learning_state"]["chunks_last_24h"] is None
+
+    def test_chunks_last_24h_from_same_report_as_velocity(self, tmp_path):
+        """learning_state niesie chunks_last_24h z TEGO SAMEGO raportu co
+        velocity (ostatniego z metryka) -- wartosc z jednego a details z innego
+        moglyby sie klocic o te sama godzine."""
+        meta, memory = self._setup_files(tmp_path)
+        reports = Path(meta) / "evaluation_reports.jsonl"
+        with open(reports, "w") as f:
+            f.write(json.dumps({
+                "metrics": {"learning_velocity": 5.0},
+                "details": {"learning_velocity": {"chunks_last_24h": 120}},
+            }) + "\n")
+            f.write(json.dumps({
+                "metrics": {"learning_velocity": 0.0},
+                "details": {"learning_velocity": {"chunks_last_24h": 272}},
+            }) + "\n")
+
+        state = StrategicContext(meta, memory).build()["learning_state"]
+        assert state["learning_velocity"] == 0.0
+        assert state["chunks_last_24h"] == 272
+
+    def test_chunks_last_24h_none_when_report_has_no_details(self, tmp_path):
+        """Stary format raportu (bez details) -> None, nie wybuch i nie 0."""
+        meta, memory = self._setup_files(tmp_path)
+        reports = Path(meta) / "evaluation_reports.jsonl"
+        with open(reports, "w") as f:
+            f.write(json.dumps({"metrics": {"learning_velocity": 0.0}}) + "\n")
+
+        state = StrategicContext(meta, memory).build()["learning_state"]
+        assert state["learning_velocity"] == 0.0
+        assert state["chunks_last_24h"] is None
 
 
 # --- Tension Detector ---
@@ -484,6 +516,47 @@ class TestTensionDetector:
         assert TensionCategory.OVER_RESTRICTION in categories
 
     def test_detect_stagnation(self):
+        """Real stagnation = a full silent DAY, not one quiet hour."""
+        detector = TensionDetector()
+        context = {
+            "action_pattern": {"noop_ratio": 0.3, "total": 50, "failed_ratio": 0,
+                               "distribution": {}},
+            "learning_state": {"coverage": 0.5, "learning_velocity": 0.0,
+                               "chunks_last_24h": 0, "retention_rate": 0.9},
+            "goal_state": {"active": 1, "stale_goals": []},
+            "recent_meta_goals": [],
+            "period_hours": 24,
+        }
+        tensions = detector.detect(context)
+        categories = [t.category for t in tensions]
+        assert TensionCategory.STAGNATION in categories
+        stag = [t for t in tensions if t.category == TensionCategory.STAGNATION][0]
+        assert "24h" in stag.description
+
+    def test_stagnation_hourly_zero_with_healthy_day_is_phantom(self):
+        """Velocity to probka 1h -- poza oknem nauki 09-19 jest legalnie zerowa.
+
+        Zmierzone 2026-07-18: 112/112 zerowych probek mialo chunks_last_24h>0
+        (nauka BYLA, tylko nie w tej godzinie), a WSZYSTKIE 52 refleksje
+        z napieciami z 7 dni zjadaly ten fantom (52/52 = stagnation).
+        Liczby w tescie = realne wartosci z tamtego dnia (v=0 noca, 272/24h).
+        """
+        detector = TensionDetector()
+        context = {
+            "action_pattern": {"noop_ratio": 0.3, "total": 50, "failed_ratio": 0,
+                               "distribution": {}},
+            "learning_state": {"coverage": 0.5, "learning_velocity": 0.0,
+                               "chunks_last_24h": 272, "retention_rate": 0.9},
+            "goal_state": {"active": 1, "stale_goals": []},
+            "recent_meta_goals": [],
+            "period_hours": 24,
+        }
+        categories = [t.category for t in detector.detect(context)]
+        assert TensionCategory.STAGNATION not in categories
+
+    def test_stagnation_needs_24h_evidence_not_absence(self):
+        """Brak chunks_last_24h (stary format raportu) = brak dowodu, nie dowod
+        braku -- oskarzenie o stagnacje (severity 0.7) wymaga danych 24h."""
         detector = TensionDetector()
         context = {
             "action_pattern": {"noop_ratio": 0.3, "total": 50, "failed_ratio": 0,
@@ -494,9 +567,8 @@ class TestTensionDetector:
             "recent_meta_goals": [],
             "period_hours": 24,
         }
-        tensions = detector.detect(context)
-        categories = [t.category for t in tensions]
-        assert TensionCategory.STAGNATION in categories
+        categories = [t.category for t in detector.detect(context)]
+        assert TensionCategory.STAGNATION not in categories
 
     def test_detect_epistemic_gap(self):
         detector = TensionDetector()

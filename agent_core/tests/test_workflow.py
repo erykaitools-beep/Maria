@@ -56,6 +56,19 @@ def _make_store(tmp_path=None):
     return WorkflowStore(path=path)
 
 
+def _real_policy(tmp_path):
+    """A REAL AutonomyPolicy (K7), logging into tmp_path.
+
+    Deliberately the production class, not a stand-in that answers "allowed" to
+    everything: these tests are the only proof the workflow path is actually
+    governed, and a stand-in would prove only that the stand-in says yes. The
+    log path is redirected so a test run never appends to the live daemon's
+    autonomy decisions.
+    """
+    from agent_core.autonomy import AutonomyPolicy
+    return AutonomyPolicy(log_path=tmp_path / "autonomy_decisions.jsonl")
+
+
 class FakeDelegation(DelegationManager):
     """Delegation that always succeeds."""
 
@@ -656,8 +669,9 @@ class TestDelegationManager:
         assert result.success is False
         assert "No executor available" in result.error
 
-    def test_delegate_via_capability_router(self):
+    def test_delegate_via_capability_router(self, tmp_path):
         dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
 
         class FakeRouter:
             def is_available(self, name):
@@ -676,8 +690,9 @@ class TestDelegationManager:
         assert result.success is True
         assert result.result["chunks"] == 3
 
-    def test_delegate_via_task_executor(self):
+    def test_delegate_via_task_executor(self, tmp_path):
         dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
 
         class FakeTaskResult:
             success = True
@@ -699,8 +714,9 @@ class TestDelegationManager:
         result = dm.delegate(step)
         assert result.success is True
 
-    def test_delegate_exception_handled(self):
+    def test_delegate_exception_handled(self, tmp_path):
         dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
 
         class BrokenRouter:
             def is_available(self, name):
@@ -727,6 +743,274 @@ class TestDelegationManager:
         dm.set_capability_router(FakeRouter())
         assert dm.can_delegate("learn") is True
         assert dm.can_delegate("unknown") is False
+
+
+# ========== K7 GATE ON THE WORKFLOW PATH (2026-07-21) ==========
+
+class RecordingRouter:
+    """CapabilityRouter stand-in that remembers whether it was reached."""
+
+    def __init__(self, action="fetch"):
+        self.action = action
+        self.dispatched = []
+
+    def is_available(self, name):
+        return name == self.action
+
+    def dispatch(self, plan):
+        self.dispatched.append(plan)
+        return {"success": True, "reached": True}
+
+
+class RecordingExecutor:
+    """TaskExecutor stand-in that remembers whether it was reached."""
+
+    def __init__(self):
+        self.calls = []
+
+    def execute_single(self, tool_name, tool_args, description, goal_id):
+        self.calls.append(tool_name)
+
+        class R:
+            success = True
+            task_id = "t-1"
+            results = []
+            errors = []
+        return R()
+
+
+def _blocking_policy(tmp_path):
+    """REAL AutonomyPolicy that genuinely refuses `fetch`.
+
+    Built by giving the real rate limiter a budget of zero for that action
+    rather than by stubbing check() -- the refusal travels the same code path a
+    live refusal would, including the blocked_result payload shape. `fetch` is
+    GUARDED, the tier the limiter actually consults (it is a no-op for
+    ANALYTICAL -- see af47933).
+    """
+    from agent_core.autonomy import AutonomyPolicy
+    from agent_core.autonomy.rate_limiter import ActionRateLimiter
+    return AutonomyPolicy(
+        rate_limiter=ActionRateLimiter(limits={"fetch": 0, "effector": 0}),
+        log_path=tmp_path / "autonomy_decisions.jsonl",
+    )
+
+
+class TestDelegationK7Gate:
+    """The workflow path must not reach the world below the K7 gate.
+
+    Before 2026-07-21 it did: delegate() -> CapabilityRouter.dispatch() with no
+    check and no rate-limiter record, so a workflow step could fs_write, drive
+    the effector or fetch while the planner doing the same action was governed.
+    """
+
+    def test_unwired_policy_refuses_instead_of_passing(self):
+        """Fail-closed: no gate wired == closed door, not open one."""
+        dm = DelegationManager()
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        step = WorkflowStep(order=0, action="fetch", params={}, description="x")
+        result = dm.delegate(step)
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "autonomy_policy"
+        assert router.dispatched == [], "router was reached without a gate"
+
+    def test_blocked_step_does_not_fall_through_to_task_executor(self, tmp_path):
+        """A refusal must end the step -- not demote it to the other executor.
+
+        This is the regression that matters most: if the gate returned None
+        (= "not my job") instead of a refusal, delegate() would simply try the
+        TaskExecutor next, and the blocked action would run anyway through the
+        second door.
+        """
+        dm = DelegationManager()
+        dm.set_autonomy_policy(_blocking_policy(tmp_path))
+        router = RecordingRouter()
+        executor = RecordingExecutor()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+        dm.set_task_executor(executor)
+
+        step = WorkflowStep(order=0, action="fetch", params={}, description="x")
+        result = dm.delegate(step)
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "autonomy_policy"
+        assert router.dispatched == []
+        assert executor.calls == [], "K7 refusal leaked into the TaskExecutor"
+
+    def test_allowed_step_reaches_router_and_spends_its_budget(self, tmp_path):
+        """Allowed action runs AND is recorded, so the limiter can see us.
+
+        Proven through observable behaviour rather than by peeking at counters:
+        with a budget of exactly one, a second identical step must be refused.
+        If the workflow path skipped record_execution -- as it did before this
+        change -- the budget would never run down and the second step would
+        sail through.
+        """
+        from agent_core.autonomy import AutonomyPolicy
+        from agent_core.autonomy.rate_limiter import ActionRateLimiter
+        policy = AutonomyPolicy(
+            rate_limiter=ActionRateLimiter(limits={"fetch": 1}),
+            log_path=tmp_path / "autonomy_decisions.jsonl",
+        )
+        dm = DelegationManager()
+        dm.set_autonomy_policy(policy)
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        step = WorkflowStep(order=0, action="fetch", params={}, description="x")
+
+        first = dm.delegate(step)
+        assert first.success is True
+        assert len(router.dispatched) == 1
+
+        second = dm.delegate(step)
+        assert second.success is False, "rate limiter is blind to workflow runs"
+        assert second.result["blocked_by"] == "autonomy_policy"
+        assert len(router.dispatched) == 1
+
+    def test_task_executor_path_is_gated_too(self, tmp_path):
+        """The tool door is governed as well -- it reaches net and disk."""
+        dm = DelegationManager()
+        dm.set_autonomy_policy(_blocking_policy(tmp_path))
+        executor = RecordingExecutor()
+        dm.set_task_executor(executor)
+
+        step = WorkflowStep(
+            order=0, action="web_fetch",
+            params={"tool_name": "web_fetch", "tool_args": {"url": "x"}},
+            description="x",
+        )
+        result = dm.delegate(step)
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "autonomy_policy"
+        assert executor.calls == []
+
+    def test_unclassified_tool_is_refused(self, tmp_path):
+        """A tool nobody mapped must not ride through on the day it appears.
+
+        Unmapped tools are gated as `effector`, which the authority rule refuses
+        on this path. That is the designed answer: registering a tool has to be
+        accompanied by a deliberate classification in TOOL_GATE_ACTIONS.
+        """
+        dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
+        executor = RecordingExecutor()
+        dm.set_task_executor(executor)
+
+        step = WorkflowStep(
+            order=0, action="brand_new_tool",
+            params={"tool_name": "brand_new_tool"}, description="x",
+        )
+        result = dm.delegate(step)
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "autonomy_policy"
+        assert executor.calls == []
+
+    def test_fs_write_honours_its_env_flag(self, tmp_path, monkeypatch):
+        """FS_WRITE_ENABLED was enforced in the planner only.
+
+        The workflow path reached the same effector, so a step could write to
+        disk while the flag said no. `.env` is loaded at import time in this
+        project, so the flag is cleared explicitly rather than assumed absent.
+        """
+        monkeypatch.delenv("FS_WRITE_ENABLED", raising=False)
+        monkeypatch.setenv("FS_WRITE_ENABLED", "false")
+
+        dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
+        router = RecordingRouter(action="fs_write")
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        step = WorkflowStep(order=0, action="fs_write",
+                            params={"path": "x.md"}, description="x")
+        blocked = dm.delegate(step)
+        assert blocked.success is False
+        assert blocked.result["blocked_by"] == "fs_write_disabled"
+        assert router.dispatched == []
+
+        monkeypatch.setenv("FS_WRITE_ENABLED", "true")
+        allowed = dm.delegate(step)
+        assert allowed.success is True, (
+            "flag on should restore the path, else this is a dead branch")
+        assert len(router.dispatched) == 1
+
+    def test_state_provider_feeds_live_mode_to_the_gate(self, tmp_path):
+        """The gate must judge against the organism's real state, not 'active'.
+
+        K7 rules are mode-aware, so a static default would ask the gate an
+        easier question than the planner asks it.
+        """
+        seen = {}
+
+        class SpyPolicy:
+            def check(self, action_type, action_params, goal_id,
+                      health_score, mode):
+                seen["health"] = health_score
+                seen["mode"] = mode
+
+                class R:
+                    allowed = True
+                    rule_name = None
+                    blocked_result = None
+                return R()
+
+            def record_execution(self, action_type, success):
+                pass
+
+        dm = DelegationManager()
+        dm.set_autonomy_policy(SpyPolicy())
+        dm.set_state_provider(lambda: (0.42, "sleep"))
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        dm.delegate(WorkflowStep(order=0, action="fetch", params={},
+                                 description="x"))
+        assert seen == {"health": 0.42, "mode": "sleep"}
+
+    def test_exploding_gate_is_a_closed_door(self, tmp_path):
+        """If the gate itself raises, refuse -- never fall through."""
+        class ExplodingPolicy:
+            def check(self, **kwargs):
+                raise RuntimeError("gate on fire")
+
+            def record_execution(self, action_type, success):
+                pass
+
+        dm = DelegationManager()
+        dm.set_autonomy_policy(ExplodingPolicy())
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        result = dm.delegate(
+            WorkflowStep(order=0, action="fetch", params={}, description="x"))
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "autonomy_policy"
+        assert router.dispatched == []
+
+    def test_opt_out_is_explicit(self, tmp_path):
+        """Tests of the state machine may skip the gate -- loudly, on purpose."""
+        dm = DelegationManager()
+        dm.disable_k7_gate("unit test of the state machine")
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        result = dm.delegate(
+            WorkflowStep(order=0, action="fetch", params={}, description="x"))
+        assert result.success is True
+        assert len(router.dispatched) == 1
 
 
 # ========== PROGRESS REPORTER TESTS ==========

@@ -530,8 +530,44 @@ class TestNIMClient:
 
     @patch("agent_core.llm.nim_client.requests.get")
     def test_is_available_true(self, mock_get, client):
-        """is_available returns True when API responds."""
-        mock_get.return_value = Mock(status_code=200)
+        """is_available returns True when our model is in the catalogue."""
+        mock_get.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={"data": [{"id": client.model}]}),
+        )
+        assert client.is_available() is True
+
+    @patch("agent_core.llm.nim_client.requests.get")
+    def test_is_available_false_when_model_retired(self, mock_get, client):
+        """A 200 from /models is NOT enough -- our model must be listed.
+
+        This is the 2026-07-27 outage: the catalogue answered normally with
+        101 other models while dracarys was 410 Gone. The previous version
+        only read status_code and so reported healthy all day.
+        """
+        mock_get.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={"data": [
+                {"id": "meta/llama-3.3-70b-instruct"},
+                {"id": "openai/gpt-oss-120b"},
+            ]}),
+        )
+        assert client.is_available() is False
+
+    @patch("agent_core.llm.nim_client.requests.get")
+    def test_is_available_true_when_catalogue_unparseable(self, mock_get, client):
+        """An unreadable catalogue is ignorance, not proof the model is gone."""
+        mock_get.return_value = Mock(
+            status_code=200, json=Mock(side_effect=ValueError("not json")),
+        )
+        assert client.is_available() is False  # exception path -> False
+
+    @patch("agent_core.llm.nim_client.requests.get")
+    def test_is_available_true_when_catalogue_empty(self, mock_get, client):
+        """Empty data list: unknown, so do not raise a false alarm."""
+        mock_get.return_value = Mock(
+            status_code=200, json=Mock(return_value={"data": []}),
+        )
         assert client.is_available() is True
 
     @patch("agent_core.llm.nim_client.requests.get")

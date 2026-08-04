@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "fetch": 10,
     "maintenance": 10,
-    "experiment": 1,  # K11: max 1 experiment per 6h (window override below)
+    "experiment": 1,  # K11: max 1/h. (Comment used to claim "1 per 6h (window
+                      # override below)" -- there is NO per-action window;
+                      # WINDOW_SEC is a single global 1h. K11 also sits behind a
+                      # human ADOPT/REJECT gate, so 1/h is the real, sufficient
+                      # limit. True 1/6h would need a per-action window feature.)
     "effector": 10,   # OpenClaw: max 10 tool invocations per hour
     "self_analyze": 1,  # K12: max 1 per hour. Ten limiter jest JEDYNYM
     # hamulcem na nocnej rotacji (_decide_non_learning_action) -- dzienny
@@ -31,8 +35,11 @@ DEFAULT_RATE_LIMITS: Dict[str, int] = {
     "critique": 1,      # Faza G: max 1 critique per hour (was: unlimited -> spam loop)
     "ask_expert": 10,   # ChatGPT encyclopedia: max 10 per hour
     "validate": 5,      # Cross-validation: max 5 per hour
-    "evaluate": 2,      # Evaluation: max 2 per hour
-    "review": 5,        # Spaced repetition review: max 5 per hour
+    # NB: FREE-class actions (learn/exam/review/evaluate/noop/play) are NOT
+    # listed. AutonomyPolicy.check() only consults this limiter for GUARDED and
+    # ANALYTICAL classes, so a limit here for a FREE action is never enforced --
+    # it only misled get_stats() into reporting a live cap. (Removed dead keys
+    # evaluate=2, review=5 on 2026-07-18; see __init__ FREE-class rationale.)
 }
 
 # Sliding window size

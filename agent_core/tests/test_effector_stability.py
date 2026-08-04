@@ -17,7 +17,6 @@ import pytest
 
 from agent_core.autonomy.authority_level import AuthorityLevel, AuthorityManager
 from agent_core.autonomy.approval_queue import ApprovalQueue
-from agent_core.autonomy.tool_budget import ToolBudgetManager
 from agent_core.autonomy import AutonomyPolicy
 from agent_core.autonomy.escalation import EscalationHandler
 
@@ -33,9 +32,6 @@ class TestMarathonRun:
             escalation_handler=EscalationHandler(log_path=Path("/dev/null")),
             authority_manager=mgr,
         )
-        budget = ToolBudgetManager(
-            tool_rate_limits={"web_fetch": 200, "read": 200},
-        )
         queue = ApprovalQueue(log_path=tmp_path / "q.jsonl")
 
         allowed_count = 0
@@ -48,12 +44,7 @@ class TestMarathonRun:
                 action_params={"tool_name": tool},
             )
             if result.allowed:
-                ok, _ = budget.check_budget(tool)
-                if ok:
-                    budget.record_invocation(tool, success=True)
-                    allowed_count += 1
-                else:
-                    blocked_count += 1
+                allowed_count += 1
             else:
                 blocked_count += 1
 
@@ -103,23 +94,6 @@ class TestMarathonRun:
         assert auto_exec > 0
         assert escalated > 0
         assert auto_exec + escalated == 100
-
-    def test_rate_limit_across_cycles(self):
-        """Verify rate limits hold across many invocations."""
-        budget = ToolBudgetManager(
-            tool_rate_limits={"exec": 5},
-            window_sec=3600,
-        )
-        blocked_at = None
-        for i in range(20):
-            ok, _ = budget.check_budget("exec")
-            if not ok:
-                blocked_at = i
-                break
-            budget.record_invocation("exec", success=True)
-
-        assert blocked_at == 5  # Blocked after 5 invocations
-
 
 class TestAuthorityTransitions:
     """Test authority level upgrades and downgrades."""
@@ -222,30 +196,6 @@ class TestConcurrentAccess:
         processed = [r for r in results if r[2] is not None]
         assert len(processed) == 10
 
-    def test_concurrent_budget_check(self):
-        """Multiple threads checking and recording budgets."""
-        budget = ToolBudgetManager(tool_rate_limits={"exec": 100})
-        errors = []
-
-        def worker(idx):
-            try:
-                for _ in range(20):
-                    budget.check_budget("exec")
-                    budget.record_invocation("exec", success=True)
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert not errors
-        stats = budget.get_stats()
-        assert stats["exec"]["invocations_this_window"] == 80  # 4 * 20
-
-
 class TestClockSimulation:
     """Test time-dependent behavior without real delays."""
 
@@ -262,41 +212,5 @@ class TestClockSimulation:
         expired = queue.expire_stale()
         assert expired == 1
 
-    def test_budget_window_simulation(self):
-        """Fast-forward rate limit window."""
-        budget = ToolBudgetManager(
-            tool_rate_limits={"exec": 2},
-            window_sec=3600,
-        )
-        budget.record_invocation("exec", success=True)
-        budget.record_invocation("exec", success=True)
-
-        # At limit
-        ok, _ = budget.check_budget("exec")
-        assert not ok
-
-        # Manually expire timestamps
-        state = budget._states["exec"]
-        state.invocation_timestamps = [t - 3601 for t in state.invocation_timestamps]
-
-        # Now within limit again
-        ok, _ = budget.check_budget("exec")
-        assert ok
-
-    def test_lock_expiry_simulation(self):
-        """Fast-forward tool lock."""
-        budget = ToolBudgetManager(
-            max_consecutive_failures=2,
-            failure_cooldown_sec=300,
-        )
-        budget.record_invocation("exec", success=False)
-        budget.record_invocation("exec", success=False)
-        assert budget.is_locked("exec")
-
-        # Fast-forward past lock
-        state = budget._states["exec"]
-        state.locked_until = time.time() - 1
-
-        assert not budget.is_locked("exec")
-        ok, _ = budget.check_budget("exec")
-        assert ok  # probe allowed
+# Budget window/lock simulations removed with ToolBudgetManager
+# (ADR-026 CUT 2026-07-19) -- see test_authority_drills.py note.

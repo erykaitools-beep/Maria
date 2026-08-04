@@ -43,48 +43,15 @@ class TestEnvironmentModel:
         with pytest.raises(AttributeError):
             PROFILE_DEFAULT.mode = EnvironmentMode.LEARNING
 
-    def test_profile_to_dict_roundtrip(self):
-        d = PROFILE_LEARNING.to_dict()
-        restored = EnvironmentProfile.from_dict(d)
-        assert restored.mode == EnvironmentMode.LEARNING
-        assert "learn" in restored.priority_actions
-        assert restored.llm_budget_multiplier == 1.5
-        assert restored.planner_interval_multiplier == 0.5
-        assert len(restored.auto_trigger_hours) > 0
+    # Payload-pinning tests (priority/blocked actions, multipliers,
+    # notification levels, prompt additions, profile dict roundtrip)
+    # removed with the payload cut 2026-07-19 -- they asserted constants
+    # no runtime path ever read.
 
     def test_all_profiles_exist(self):
         assert len(ENVIRONMENT_PROFILES) == 4
         for mode in EnvironmentMode:
             assert mode in ENVIRONMENT_PROFILES
-
-    def test_default_profile_is_neutral(self):
-        p = PROFILE_DEFAULT
-        assert p.priority_actions == ()
-        assert p.blocked_actions == ()
-        assert p.llm_budget_multiplier == 1.0
-        assert p.planner_interval_multiplier == 1.0
-        assert p.notification_level == "normal"
-
-    def test_learning_profile_priorities(self):
-        p = PROFILE_LEARNING
-        assert "learn" in p.priority_actions
-        assert "exam" in p.priority_actions
-        assert "fetch" in p.priority_actions
-        assert p.llm_budget_multiplier > 1.0
-
-    def test_monitoring_profile(self):
-        p = PROFILE_MONITORING
-        assert "evaluate" in p.priority_actions
-        assert "maintenance" in p.priority_actions
-        assert "experiment" in p.blocked_actions
-        assert p.llm_budget_multiplier < 1.0
-
-    def test_quiet_profile(self):
-        p = PROFILE_QUIET
-        assert "effector" in p.blocked_actions
-        assert p.notification_level == "critical"
-        assert p.llm_budget_multiplier < 0.5
-        assert len(p.auto_trigger_hours) > 0
 
     def test_learning_auto_trigger_weekdays(self):
         p = PROFILE_LEARNING
@@ -121,12 +88,6 @@ class TestEnvironmentModel:
         assert state.active_mode == EnvironmentMode.DEFAULT
         assert state.auto_detect_enabled is True
         assert state.override_until is None
-
-    def test_profile_prompt_additions_are_strings(self):
-        for mode, profile in ENVIRONMENT_PROFILES.items():
-            assert isinstance(profile.prompt_addition, str)
-            if mode != EnvironmentMode.DEFAULT:
-                assert len(profile.prompt_addition) > 0
 
 
 # ========== MODE DETECTOR TESTS ==========
@@ -179,12 +140,57 @@ class TestModeDetector:
         detector._last_switch_ts = 0
 
         class FakeCore:
-            state = SimpleNamespace(mode=Mode.REDUCED)
+            state = SimpleNamespace(mode=Mode.SLEEP)
 
         detector.set_homeostasis_core(FakeCore())
         now = datetime(2026, 4, 13, 14, 0)  # Monday 14:00 Berlin (would be LEARNING)
         result = detector.detect(EnvironmentMode.DEFAULT, now)
-        # Homeostasis degradation should override to QUIET
+        # Real degradation (SLEEP) should override to QUIET
+        assert result == EnvironmentMode.QUIET
+
+    def test_homeostasis_survival_to_quiet(self):
+        detector = ModeDetector()
+        detector._last_switch_ts = 0
+
+        class FakeCore:
+            state = SimpleNamespace(mode=Mode.SURVIVAL)
+
+        detector.set_homeostasis_core(FakeCore())
+        now = datetime(2026, 4, 13, 14, 0)
+        result = detector.detect(EnvironmentMode.DEFAULT, now)
+        assert result == EnvironmentMode.QUIET
+
+    def test_reduced_is_not_degradation(self):
+        """REDUCED must NOT flip daytime mode to QUIET.
+
+        Regression: on a CPU-only box the regulator oscillates
+        active<->reduced from normal inference bursts; with REDUCED in the
+        degradation set, the 30-min sampling made daytime mode a coin flip
+        (243 learning<->quiet switches 07-01..07-19). REDUCED is normal
+        hard work, not "operator does not want to be disturbed".
+        """
+        detector = ModeDetector()
+        detector._last_switch_ts = 0
+
+        class FakeCore:
+            state = SimpleNamespace(mode=Mode.REDUCED)
+
+        detector.set_homeostasis_core(FakeCore())
+        now = datetime(2026, 4, 13, 14, 0)  # Monday 14:00 Berlin
+        result = detector.detect(EnvironmentMode.DEFAULT, now)
+        # Time trigger wins: learning window, not QUIET
+        assert result == EnvironmentMode.LEARNING
+
+    def test_default_now_uses_berlin_clock(self, monkeypatch):
+        """detect() without `now` must read berlin_now(), not naive
+        datetime.now() (TZ-drift incident class, 2026-05-29)."""
+        from agent_core.environment import mode_detector as md
+        detector = ModeDetector()
+        detector._last_switch_ts = 0
+        monkeypatch.setattr(
+            md, "berlin_now", lambda: datetime(2026, 4, 12, 23, 0)  # 23:00 -> QUIET
+        )
+        result = detector.detect(EnvironmentMode.DEFAULT)
         assert result == EnvironmentMode.QUIET
 
     def test_homeostasis_active_no_override(self):
@@ -314,14 +320,6 @@ class TestEnvironmentManager:
         mgr.switch(EnvironmentMode.LEARNING)
         profile = mgr.get_active_profile()
         assert profile.mode == EnvironmentMode.LEARNING
-        assert "learn" in profile.priority_actions
-
-    def test_get_context(self, tmp_path):
-        mgr = self._make_manager(tmp_path)
-        ctx = mgr.get_context()
-        assert ctx["mode"] == "default"
-        assert "prompt_addition" in ctx
-        assert "notification_level" in ctx
 
     def test_get_status(self, tmp_path):
         mgr = self._make_manager(tmp_path)
@@ -329,32 +327,9 @@ class TestEnvironmentManager:
         status = mgr.get_status()
         assert status["mode"] == "monitoring"
         assert status["switched_by"] == "auto"
-        assert "evaluate" in status["priority_actions"]
 
-    def test_is_action_blocked(self, tmp_path):
-        mgr = self._make_manager(tmp_path)
-        assert mgr.is_action_blocked("learn") is False
-
-        mgr.switch(EnvironmentMode.MONITORING)
-        assert mgr.is_action_blocked("experiment") is True
-        assert mgr.is_action_blocked("learn") is False
-
-        mgr.switch(EnvironmentMode.QUIET)
-        assert mgr.is_action_blocked("effector") is True
-
-    def test_action_priority_boost(self, tmp_path):
-        mgr = self._make_manager(tmp_path)
-        mgr.switch(EnvironmentMode.LEARNING)
-
-        # Priority actions get positive boost
-        assert mgr.get_action_priority_boost("learn") > 0
-        assert mgr.get_action_priority_boost("exam") > 0
-
-        # Deprioritized actions get negative boost
-        assert mgr.get_action_priority_boost("creative") < 0
-
-        # Neutral actions get 0
-        assert mgr.get_action_priority_boost("maintenance") == 0
+    # test_get_context / test_is_action_blocked / test_action_priority_boost
+    # removed with the payload accessors (CUT 2026-07-19).
 
     def test_list_modes(self, tmp_path):
         mgr = self._make_manager(tmp_path)
@@ -406,16 +381,8 @@ class TestEnvironmentIntegration:
         mgr.add_switch_listener(lambda o, n, b: switches.append(n.value))
 
         mgr.switch(EnvironmentMode.LEARNING, by="operator")
-        assert mgr.is_action_blocked("learn") is False
-        assert mgr.get_action_priority_boost("learn") > 0
-
         mgr.switch(EnvironmentMode.MONITORING, by="auto")
-        assert mgr.is_action_blocked("experiment") is True
-        assert mgr.get_action_priority_boost("evaluate") > 0
-
         mgr.switch(EnvironmentMode.DEFAULT, by="operator")
-        assert mgr.get_action_priority_boost("learn") == 0
-        assert mgr.is_action_blocked("experiment") is False
 
         assert switches == ["learning", "monitoring", "default"]
 
@@ -429,26 +396,18 @@ class TestEnvironmentIntegration:
         assert mgr2.get_active_mode() == EnvironmentMode.QUIET
         assert mgr2._state.switched_by == "operator"
 
-    def test_mode_affects_context(self, tmp_path):
-        """Context changes with mode."""
-        path = os.path.join(str(tmp_path), "env.json")
-        mgr = EnvironmentManager(state_path=path)
-
-        ctx1 = mgr.get_context()
-        assert ctx1["prompt_addition"] == ""
-
-        mgr.switch(EnvironmentMode.LEARNING)
-        ctx2 = mgr.get_context()
-        assert "nauki" in ctx2["prompt_addition"].lower() or "nauk" in ctx2["prompt_addition"].lower()
-
     def test_detector_integration(self, tmp_path):
-        """Detector + manager work together."""
+        """Detector + manager work together.
+
+        SLEEP (real degradation) -> QUIET regardless of wall-clock time,
+        so the assertion is deterministic at any test-run hour.
+        """
         path = os.path.join(str(tmp_path), "env.json")
         detector = ModeDetector()
         detector._last_switch_ts = 0
 
         class FakeCore:
-            state = SimpleNamespace(mode=Mode.REDUCED)
+            state = SimpleNamespace(mode=Mode.SLEEP)
 
         detector.set_homeostasis_core(FakeCore())
 

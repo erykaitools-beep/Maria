@@ -17,6 +17,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Minimum real attempts before execution counts are shown in the summary.
+# Below this, no number is shown at all -- an honest blank, not a
+# fabricated prior.
+MIN_EVIDENCE_ATTEMPTS = 3
+
 
 @dataclass
 class CapabilityEntry:
@@ -71,9 +76,20 @@ class CapabilityManifest:
         self._capability_router = None
         self._ctx = None
         self._mode_fn = None
+        self._honesty = None
 
     def set_capability_router(self, router) -> None:
         self._capability_router = router
+
+    def set_honesty_protocol(self, honesty) -> None:
+        """Set HonestyProtocol for real execution counts in get_summary.
+
+        Call-path safety: get_summary only uses honesty.get_action_stats(),
+        which reads planner_decisions.jsonl and never calls back into the
+        manifest. Do NOT call check_capability_claim from here -- that path
+        goes through manifest.can_do -> get_capabilities and would recurse.
+        """
+        self._honesty = honesty
 
     def set_context(self, ctx) -> None:
         """Set SharedContext for subsystem availability checks."""
@@ -185,16 +201,27 @@ class CapabilityManifest:
         return False
 
     def get_summary(self) -> str:
-        """Human-readable summary for /profile or chat."""
+        """Human-readable summary for /profile or chat.
+
+        Capabilities with >= MIN_EVIDENCE_ATTEMPTS real executions show raw
+        counts ("37/48 ok") from planner history; the rest show no number.
+        The old static confidence percent was fiction (never evidence-based)
+        and is deliberately gone from this view.
+        """
         caps = self.get_capabilities()
         available = [c for c in caps if c.available]
         unavailable = [c for c in caps if not c.available]
+        stats = self._get_execution_stats()
 
         lines = [f"*Moje mozliwosci ({len(available)}/{len(caps)}):*", ""]
 
         if available:
             for c in available:
-                conf_str = f" ({c.confidence:.0%})" if c.confidence < 1.0 else ""
+                ev = stats.get(c.name)
+                if ev and ev.get("count", 0) >= MIN_EVIDENCE_ATTEMPTS:
+                    conf_str = f" ({ev.get('success', 0)}/{ev['count']} ok)"
+                else:
+                    conf_str = ""
                 cls_icon = {"free": "", "guarded": " [G]", "restricted": " [R]"}.get(
                     c.classification, ""
                 )
@@ -227,6 +254,16 @@ class CapabilityManifest:
         }
 
     # ── Internal ─────────────────────────────────────────────
+
+    def _get_execution_stats(self) -> Dict[str, Dict]:
+        """Real per-action execution counts, or {} when unavailable."""
+        if self._honesty is None:
+            return {}
+        try:
+            return self._honesty.get_action_stats() or {}
+        except Exception as e:
+            logger.debug("CapabilityManifest: stats unavailable: %s", e)
+            return {}
 
     def _check_subsystems(self, required: tuple) -> tuple:
         """Check if required subsystems are available in SharedContext."""

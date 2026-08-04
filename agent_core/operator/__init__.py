@@ -13,7 +13,6 @@ from agent_core.operator.honesty_protocol import HonestyProtocol
 from agent_core.operator.operator_model import OperatorModel
 from agent_core.operator.privacy_guard import PrivacyGuard
 from agent_core.operator.rhythm_detector import RhythmDetector
-from agent_core.operator.state_reporter import StateReporter
 
 __all__ = [
     "CapabilityManifest",
@@ -22,5 +21,4 @@ __all__ = [
     "OperatorModel",
     "PrivacyGuard",
     "RhythmDetector",
-    "StateReporter",
 ]

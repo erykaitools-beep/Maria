@@ -99,28 +99,6 @@ if [[ -d "$HOME/.claude/projects/-home-maria-maria" ]]; then
     echo "  claude_project_state.tar.gz ($CL_SIZE)"
 fi
 
-# market-agent state (separate repo)
-MARKET_DIR="$HOME/maria-market-agent"
-if [[ -d "$MARKET_DIR" ]]; then
-    {
-        echo "# Market-agent state at snapshot time"
-        echo
-        echo "## Branch"
-        cd "$MARKET_DIR" && git branch --show-current
-        echo
-        echo "## Recent commits (top 10)"
-        git log --oneline -10
-        echo
-        echo "## Status"
-        git status --short
-        echo
-        echo "## Uncommitted diff"
-        git diff
-        cd - > /dev/null
-    } > "$SNAPSHOT_DIR/RECOVERY/market_agent_state.txt" 2>/dev/null
-    echo "  market_agent_state.txt written"
-fi
-
 # Recovery instructions
 cat > "$SNAPSHOT_DIR/RECOVERY/RESTORE.md" <<'RESTORE_EOF'
 # Recovery procedure
@@ -156,9 +134,6 @@ rm -rf -home-maria-maria
 tar -xzf <SNAPSHOT_DIR>/RECOVERY/claude_project_state.tar.gz
 ```
 
-## Market-agent (separate repo, NOT auto-restored):
-
-See `market_agent_state.txt` for last-known state. Manual restore in `~/maria-market-agent/`.
 RESTORE_EOF
 echo "  RESTORE.md written"
 

@@ -5,7 +5,7 @@ Version: 2026-04-07 | 383 Python files | 113,552 lines of code | 3,352 tests
 
 > **[HISTORICAL — 2026-04-07]** This document describes the state as of April 2026 and is
 > NOT current: the code now runs **21 tick phases** (April 2026 had 11; historical) and the
-> test suite has grown to **7,145 collected** (up from 3,352). For current module and phase
+> test suite has grown to **7,267 collected** (up from 3,352). For current module and phase
 > status see **`docs/SYSTEM_STATUS.md`**. Do not treat this file as runtime truth until it is
 > regenerated.
 
@@ -19,7 +19,7 @@ A local, autonomous AI agent that learns on its own from text files. It runs off
 - Autonomous learning from files in input/ (no human intervention)
 - Goal system with an audit trail and a PROPOSED flow (operator approves)
 - 13 architectural contracts (K1-K13) forming the cognitive core
-- Embedding-based semantic memory (nomic-embed-text, 768-dim)
+- Embedding-based semantic memory (bge-m3, 1024-dim)
 - Telegram bridge for operator communication
 - Web UI (Flask) with an 8-panel dashboard
 
@@ -56,14 +56,14 @@ maria/
     teacher/               # Teacher agent (decides what to learn)
     consciousness/         # Personality, dreams, cross-session continuity
     llm/                   # LLM router, NIM, Codex, ModelScheduler
-    semantic/              # Semantic Memory (nomic-embed-text, vector store)
+    semantic/              # Semantic Memory (bge-m3, vector store)
     web_source/            # Wikipedia PL + RSS -> input/
     telegram/              # ClawBot - operator communication
     effector/              # OpenClaw - external action execution
     critic/                # Phase G: knowledge quality audit (7 dimensions)
     cross_validation/      # Phase F: multi-source validation
     bulletin/              # Learning Upgrade: audit, gap planner, expert bridge
-    vision/                # Vision: sensor, preprocessing, motion, scene, cortex, LLaVA
+    vision/                # Vision: sensor, preprocessing, motion, scene, cortex, gemma3:4b
     orchestrator/          # V3: OnboardingFlow, TaskOrchestrator, ProductShell (15 modules)
     routing/               # CapabilityRouter (dispatch instead of if/elif)
     tracing/               # Episode-based decision traceability
@@ -350,8 +350,8 @@ LEARN, EXAM, REVIEW, EVALUATE, MAINTENANCE, FETCH, EXPERIMENT, EFFECTOR, SELF_AN
 | MODEL-02 Executor | llama3.1:8b | 5GB | warm (always loaded) |
 | MODEL-03 Coder | qwen2.5-coder:7b | 5GB | cold |
 | MODEL-04 Triage | rule-based | 0GB | instant |
-| MODEL-05 Memory | nomic-embed-text | 274MB | cold |
-| MODEL-06 NIM | z-ai/glm5 | 0GB (API) | remote |
+| MODEL-05 Memory | bge-m3 | 1.2GB | cold |
+| MODEL-06 NIM | set by `NVIDIA_NIM_MODEL` in `.env` (optional) | 0GB (API) | remote |
 | MODEL-07 Encyclopedia | Codex CLI (ChatGPT) | 0GB | remote |
 | OpenClaw | qwen2.5:3b | 2GB | cold (separate instance) |
 
@@ -367,7 +367,9 @@ LEARN, EXAM, REVIEW, EVALUATE, MAINTENANCE, FETCH, EXPERIMENT, EFFECTOR, SELF_AN
 
 **Purpose:** Embedding-based similarity search.
 
-- **EmbeddingModel:** nomic-embed-text via Ollama, 768-dim, cosine similarity
+- **EmbeddingModel:** bge-m3 via Ollama, 1024-dim, cosine similarity (replaced
+  nomic-embed-text on 2026-07-25 — measured on this project's Polish corpus,
+  bge-m3 hit top-5 on 100% of probe questions against nomic's 43%)
 - **VectorStore:** In-memory + JSONL persist, 4 namespaces (knowledge, beliefs, hints, memories)
 - **Auto-indexer:** Background indexing at startup + incremental after fetch/learn
 - **275+ vectors** indexed
@@ -729,7 +731,7 @@ Query: get_by_episode_id(), get_failed(), get_by_goal_id()
 | Phase F | cross_validation | 38 | Multi-source validation |
 | Phase G | critic | 69 | Knowledge quality audit |
 
-**Total (2026-04-07 snapshot):** 3,352 tests across 92 test files. The suite has since grown to **7,145 collected** (`pytest agent_core/tests/ --collect-only -q`) — see `docs/SYSTEM_STATUS.md`.
+**Total (2026-04-07 snapshot):** 3,352 tests across 92 test files. The suite has since grown to **7,267 collected** (`pytest agent_core/tests/ --collect-only -q`) — see `docs/SYSTEM_STATUS.md`.
 
 ---
 
@@ -783,7 +785,7 @@ sudo systemctl start maria-ui
 
 | Dependency | Version | Purpose |
 |-----------|--------|-----|
-| Ollama | latest | Local LLMs (llama3.1:8b, qwen3:8b, nomic-embed-text) |
+| Ollama | latest | Local LLMs (llama3.1:8b, qwen3:8b, bge-m3) |
 | Flask | 3.x | Web UI |
 | Flask-SocketIO | 5.x | WebSocket chat |
 | psutil | 5.x | System metrics |

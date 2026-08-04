@@ -1685,6 +1685,75 @@ class TestGoalCycleDetection:
         bulletin_store.post.assert_called_once()
         assert planner._state.actions_since_progress.get("g1", 0) == 0
 
+    def test_rest_does_not_count_as_a_stalled_goal(self, planner_env):
+        """Degradation-blocked actions must not bill the goal for the organism's rest.
+
+        The detector fired 271 times on the META mission alone -- 46% of every
+        goal_exhausted_cycle bulletin ever raised -- while that goal was
+        learning 175 chunks a week. Of the 45 entries in the streaks that
+        raised it, 39 were actions that never ran and exactly one was a real
+        failure; 69 declines overall came from mode=reduced / low health.
+        """
+        planner, _ = planner_env
+        _, bulletin_store = self._wire_stores(planner)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD * 3):
+            planner._track_goal_cycle(plan, {
+                "success": False, "skipped": True,
+                "blocked_by": "degradation",
+                "reason": "mode=reduced: heavy LLM actions blocked",
+            })
+
+        bulletin_store.post.assert_not_called()
+        assert planner._state.actions_since_progress.get("g1", 0) == 0
+
+    def test_exhausted_goal_still_accrues_so_the_fetch_pump_keeps_firing(
+        self, planner_env
+    ):
+        """The other side of the rule -- and the one that must NOT be widened.
+
+        A goal whose own material ran out comes back skipped WITHOUT the
+        degradation marker. That streak is the trigger for the B2 fetch pump
+        (5 skips -> arm a fetch for new content), so exempting every skip would
+        silently disable the only autonomous path that pulls in new material.
+        """
+        planner, _ = planner_env
+        _, bulletin_store = self._wire_stores(planner)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD):
+            planner._track_goal_cycle(
+                plan, {"success": False, "skipped": True},
+            )
+
+        bulletin_store.post.assert_called_once()
+
+    def test_rest_does_not_reset_a_real_stall_either(self, planner_env):
+        """Rest is neutral, not a pardon: it must not zero an accrued streak.
+
+        If resting reset the counter, a goal alternating work-window and
+        rest-window would never reach the threshold and the fetch pump would
+        never arm for it.
+        """
+        planner, _ = planner_env
+        _, bulletin_store = self._wire_stores(planner)
+        plan = self._plan()
+
+        for _ in range(GOAL_CYCLE_THRESHOLD - 1):
+            planner._track_goal_cycle(plan, {"success": False, "skipped": True})
+        assert planner._state.actions_since_progress["g1"] == \
+            GOAL_CYCLE_THRESHOLD - 1
+
+        planner._track_goal_cycle(plan, {
+            "success": False, "skipped": True, "blocked_by": "degradation",
+        })
+        assert planner._state.actions_since_progress["g1"] == \
+            GOAL_CYCLE_THRESHOLD - 1, "rest wiped an accrued stall"
+
+        planner._track_goal_cycle(plan, {"success": False, "skipped": True})
+        bulletin_store.post.assert_called_once()
+
     def test_goal_cycle_empty_goal_id_noop(self, planner_env):
         planner, _ = planner_env
         _, bulletin_store = self._wire_stores(planner)
@@ -4681,18 +4750,10 @@ class TestGapLearnableGoalFilter:
 
     These now use REAL Goal objects (the only thing that exposes it -- specced()
     blocks phantom READS but not phantom WRITES, so specced(Goal) + setattr
-    would have stayed green too). The blocked-path tests are xfail(strict=True)
-    pending an operator decision on the one-word prod fix
-    (planner_core.py:2961 `"goal_type"` -> `"type"`); strict makes them fail
-    loudly as XPASS the moment that lands, so they get un-xfailed.
+    would have stayed green too). FIXED 2026-07-17: planner_core.py:2961 now
+    reads `goal.type` (was phantom `goal.goal_type`); the blocked-path tests
+    below are live assertions again, not xfail.
     """
-
-    #: planner_core.py:2961 reads a field the real Goal does not have.
-    _DEAD_FILTER = pytest.mark.xfail(
-        strict=True,
-        reason="prod bug: _is_gap_learnable_goal reads phantom goal.goal_type "
-               "(real field is goal.type) -> filter always allows",
-    )
 
     def _mk_planner(self):
         from agent_core.planner.planner_core import PlannerCore
@@ -4731,19 +4792,16 @@ class TestGapLearnableGoalFilter:
         self._wire_goal(p, GoalType.USER)
         assert p._is_gap_learnable_goal("g1") is True
 
-    @_DEAD_FILTER
     def test_meta_goal_blocked(self):
         p = self._mk_planner()
         self._wire_goal(p, GoalType.META)
         assert p._is_gap_learnable_goal("g1") is False
 
-    @_DEAD_FILTER
     def test_maintenance_goal_blocked(self):
         p = self._mk_planner()
         self._wire_goal(p, GoalType.MAINTENANCE)
         assert p._is_gap_learnable_goal("g1") is False
 
-    @_DEAD_FILTER
     def test_capability_meta_blocked(self):
         """Creative module's capability_meta goals must not hit gap pipeline.
 
@@ -4757,7 +4815,6 @@ class TestGapLearnableGoalFilter:
                         metadata={"meta_goal_type": "capability_meta"})
         assert p._is_gap_learnable_goal("g1") is False
 
-    @_DEAD_FILTER
     def test_raw_string_goal_type(self):
         """Goal type may be a raw string (not Enum) -- handle both.
 

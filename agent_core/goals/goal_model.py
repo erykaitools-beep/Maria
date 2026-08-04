@@ -102,6 +102,24 @@ class Goal:
     success_criteria: Optional[List[Dict[str, Any]]] = None
 
     @property
+    def is_perpetual(self) -> bool:
+        """A mission that is never 'done': META and MAINTENANCE.
+
+        MAINTENANCE recurs every session; META is the always-on learning
+        mission that owns the saturation->FETCH supply pump. Anything that
+        terminates one of these stops the organism from learning: on
+        2026-06-09 the non-productive-loop detector abandoned goal-meta-learn
+        and the learner idled on `no_goals` once the backlog drained, until a
+        reboot restored it on 06-23.
+
+        GoalStore.update_progress already refuses to auto-achieve these at
+        1.0, but that guard only covers the progress path -- a caller that
+        sets ACHIEVED explicitly walks straight past it. This property is the
+        single place to ask the question, so both paths agree.
+        """
+        return self.type in (GoalType.META, GoalType.MAINTENANCE)
+
+    @property
     def is_active(self) -> bool:
         """Czy cel jest aktywny (PENDING lub ACTIVE)."""
         return self.status in ACTIVE_STATUSES

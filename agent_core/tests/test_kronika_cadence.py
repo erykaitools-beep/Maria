@@ -13,7 +13,8 @@ REAL GoalStore + PlannerCore (a MagicMock store hides the missing _mark_dirty th
 would silently drop every metadata write -- the recurring bug this file guards).
 Collaborators are specced() for the same reason: the 2026-07-14 sweep swapped the
 bare MagicMocks here and immediately caught the TelegramNotifier.notify phantom
-(see the xfail on test_alert_pings_operator_on_telegram).
+(test_alert_pings_operator_on_telegram; the facade was added 2026-07-17 and the
+test is a live assertion again).
 """
 
 import time
@@ -340,23 +341,11 @@ class TestFeedRot:
         assert kwargs["topic"] == "Kronika feed-rot"
         assert kwargs["goal_id"] == cid
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "MOCK-HIDDEN BUG (revealed by specced() 2026-07-14): "
-            "planner_core._alert_feed_rot:4631 calls _telegram_notifier.notify("
-            "'feed_rot', text), but TelegramNotifier has NO notify() method -- "
-            "only notify_*() variants. Production wires the REAL TelegramNotifier "
-            "(homeostasis_module:1297 -> telegram/__init__:37), so every feed-rot "
-            "ping raises AttributeError, swallowed by the surrounding "
-            "'except Exception: logger.debug(...)'. The operator has never been "
-            "pinged about a dead market feed. Same phantom at planner_core:1189 "
-            "(learning_complete harvest, 'except Exception: pass'). The old bare "
-            "MagicMock auto-created .notify and made this assertion pass. "
-            "Fix is a production decision (Eryk) -- not made in this sweep."
-        ),
-    )
     def test_alert_pings_operator_on_telegram(self, tmp_path):
+        """FIXED 2026-07-17: TelegramNotifier.notify(category, text) facade now
+        exists and routes through _can_send. Was a mock-hidden phantom (bare
+        MagicMock auto-created .notify); specced(TelegramNotifier) now mirrors the
+        real method, so the feed-rot ping is recorded end-to-end."""
         store = _store(tmp_path)
         _, cid = _market_child(store, pantry_n=1)
         planner = _planner(tmp_path, store)
@@ -368,8 +357,9 @@ class TestFeedRot:
         for _ in range(5):
             planner._track_feed_rot(self._fetch_plan(cid), barren)
 
-        # A real TelegramNotifier has no .notify -- the ping never leaves.
         assert notifier.notify.call_count == 1
+        # feed_rot ping is categorized so quiet hours + cooldown gate it
+        assert notifier.notify.call_args[0][0] == "feed_rot"
 
     def test_non_market_goal_never_alerts(self, tmp_path):
         store = _store(tmp_path)

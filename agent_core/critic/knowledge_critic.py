@@ -24,6 +24,7 @@ import math
 import re
 import time
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -72,6 +73,84 @@ def _belief_logical_source(source_id: str) -> Optional[str]:
             body = head
     body = body.split("#", 1)[0]  # drop the '#chunk_N' fragment
     return _source_group(body) if body else None
+
+
+def _belief_exam_source(source_id: str) -> Optional[str]:
+    """Bare source_file id for matching a belief against exam_results keys.
+
+    Identical parsing to ``_belief_logical_source`` EXCEPT it does NOT pass the
+    result through ``_source_group``. ``exam_map`` is keyed by the raw per-file
+    exam id (the ``file`` field, e.g. ``expert_fakt.txt``); ``_source_group``
+    collapses corpus files to their group (``expert_`` -> ``expert``), which
+    matches no exam key. Measured on live data: routing the exam lookup through
+    ``_source_group`` drops belief->exam matches from 1285 to 762 (every
+    ``expert_*`` belief lost), while the pre-2026-07-18 raw ``source_id`` lookup
+    scored 0/2000 (prefix never stripped). Returns None for ``topic:``/empty ids
+    -- a derived topic belief has no document exam of its own. Used by
+    _find_overconfident / _find_underconfident / _find_shallow_knowledge."""
+    if not source_id:
+        return None
+    kind, sep, body = source_id.partition(":")
+    if not sep:
+        return source_id  # bare id (no prefix, e.g. in tests)
+    if kind == "topic":
+        return None
+    if kind == "concept":
+        # concept:<chunk_id>:<keypoint-index> -- drop the trailing integer index.
+        head, _, tail = body.rpartition(":")
+        if head and tail.isdigit():
+            body = head
+    body = body.split("#", 1)[0]  # drop the '#chunk_N' fragment
+    return body or None
+
+
+def _parse_exam_ts(ts) -> float:
+    """Parse an exam-result timestamp to an epoch float for recency ordering.
+
+    ``exam_results.jsonl`` stores ISO-8601 strings (e.g.
+    ``2025-12-06T14:20:22.882813Z``). The original loader did a bare
+    ``float(ts)``, which raised ValueError on EVERY record -- the per-line
+    ``except (JSONDecodeError, ValueError)`` then swallowed it, so
+    ``_load_exam_map`` silently returned ``{}`` and the entire exam-backed
+    calibration audit (over/underconfident) was dead regardless of any
+    source_id fix. Accepts float epochs (legacy) and ISO strings (with/without
+    a trailing ``Z``); unparseable -> 0.0 (sorts oldest)."""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str) and ts:
+        try:
+            return float(ts)
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _round_robin_cap(findings, max_n):
+    """Select up to ``max_n`` findings, round-robin across categories, so one
+    dimension cannot monopolize every slot.
+
+    ``findings`` must already be severity-sorted; within a category that order
+    is preserved. ``shallow_knowledge`` attaches up to 5 belief_ids while the
+    calibration dimensions attach 1 each, so the old ``(severity,
+    -len(belief_ids))`` sort + ``[:max_n]`` cap surfaced ONLY shallow_knowledge
+    in 62/62 live reports and starved every other dimension. Returned list is
+    re-sorted worst-first for display."""
+    by_category: Dict[Any, List] = {}
+    for f in findings:
+        by_category.setdefault(f.category, []).append(f)
+    picked: List = []
+    while len(picked) < max_n and any(by_category.values()):
+        for bucket in by_category.values():
+            if bucket:
+                picked.append(bucket.pop(0))
+                if len(picked) >= max_n:
+                    break
+    picked.sort(key=lambda f: (f.severity_order, -len(f.belief_ids)))
+    return picked
 
 # Decay constants (mirrored from belief_maintenance.py, read-only use)
 _DECAY_HALF_LIVES = {
@@ -168,8 +247,11 @@ class KnowledgeCritic:
             key=lambda f: (f.severity_order, -len(f.belief_ids)),
         )
 
-        # Cap
-        capped = deduped[:MAX_FINDINGS_PER_REPORT]
+        # Cap with per-dimension fairness (round-robin across categories) so one
+        # dimension cannot monopolize every slot on the -len(belief_ids)
+        # tiebreak -- the plain [:MAX] cap surfaced only shallow_knowledge in
+        # 62/62 live reports and starved the calibration dimensions.
+        capped = _round_robin_cap(deduped, MAX_FINDINGS_PER_REPORT)
         return capped, total
 
     # ═══════════════════════════════════════════════════════
@@ -317,7 +399,8 @@ class KnowledgeCritic:
                 continue
 
             source_id = b.source_id
-            exam_info = exam_map.get(source_id)
+            exam_key = _belief_exam_source(source_id)
+            exam_info = exam_map.get(exam_key) if exam_key else None
 
             if exam_info is None:
                 # No exam at all for this source
@@ -388,7 +471,8 @@ class KnowledgeCritic:
             if b.confidence >= _UNDERCONFIDENT_BELIEF_THRESHOLD:
                 continue
 
-            exam_info = exam_map.get(b.source_id)
+            exam_key = _belief_exam_source(b.source_id)
+            exam_info = exam_map.get(exam_key) if exam_key else None
             if exam_info is None:
                 continue
 
@@ -473,7 +557,10 @@ class KnowledgeCritic:
                 s for s in (_belief_logical_source(b.source_id) for b in group)
                 if s
             }
-            has_exam = any(b.source_id in exam_map for b in group)
+            has_exam = any(
+                (_belief_exam_source(b.source_id) or "") in exam_map
+                for b in group
+            )
             has_dispute_resolution = any(
                 b.source_id in dispute_files for b in group
             )
@@ -772,6 +859,7 @@ class KnowledgeCritic:
 
         # Collect all exams per file
         by_file: Dict[str, list] = defaultdict(list)
+        skipped = 0
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -782,16 +870,24 @@ class KnowledgeCritic:
                         record = json.loads(line)
                         file_id = record.get("file") or record.get("file_id", "")
                         score = record.get("score", record.get("exam_score", 0.0))
-                        ts = record.get("timestamp", 0.0)
+                        ts = _parse_exam_ts(record.get("timestamp", 0.0))
                         if file_id:
                             by_file[file_id].append({
                                 "score": float(score),
-                                "timestamp": float(ts),
+                                "timestamp": ts,
                             })
                     except (json.JSONDecodeError, ValueError):
+                        skipped += 1
                         continue
         except IOError:
             return {}
+
+        if skipped and not by_file:
+            logger.warning(
+                "[Critic] _load_exam_map: all %d exam records skipped as "
+                "unparseable -- calibration audit will see zero exams",
+                skipped,
+            )
 
         result = {}
         for file_id, exams in by_file.items():

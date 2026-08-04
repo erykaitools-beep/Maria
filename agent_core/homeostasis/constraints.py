@@ -37,15 +37,8 @@ class Thresholds:
     disk_critical_pct: float = 95     # → alert
     disk_orange_pct: float = 90       # → warning
 
-    # LLM thresholds
-    inference_timeout_ms: float = 120000  # 120 seconds → CRITICAL
-    inference_slow_ms: float = 5000       # 5 seconds → warning
-
-    # Cognitive thresholds
-    coherence_low: float = 0.80       # → alert
-    errors_high_rate: int = 20        # per hour → alert
-    goal_stack_max: int = 25          # → interrupt
-    contradiction_max: int = 10       # → semantic check
+    # (LLM-latency + cognitive thresholds removed 2026-07-18 with their dead
+    #  gates -- see ConstraintValidator.validate.)
 
     # Memory fragmentation (%)
     memory_fragmentation_high: float = 40
@@ -107,13 +100,6 @@ class ConstraintValidator:
                 f"CRITICAL: Temperature critical ({temp_c:.1f}°C), shutdown imminent"
             )
 
-        # LLM hang
-        inference_latency = state.get("inference_latency_ms", 0)
-        if inference_latency > self.thresholds.inference_timeout_ms:
-            alerts.append(
-                f"CRITICAL: LLM hang detected ({inference_latency/1000:.1f}s latency)"
-            )
-
         # Disk full
         disk_pct = state.get("disk_used_pct", 0)
         if disk_pct > self.thresholds.disk_critical_pct:
@@ -148,13 +134,6 @@ class ConstraintValidator:
                 f"ALERT: Disk usage high ({disk_pct:.1f}%)"
             )
 
-        # Goal stack runaway
-        if state.get("goal_stack_runaway", False):
-            goal_depth = state.get("goal_stack_depth", 0)
-            alerts.append(
-                f"ALERT: Goal stack depth excessive ({goal_depth})"
-            )
-
         # === WARNING CONSTRAINTS ===
 
         # RAM yellow
@@ -172,38 +151,15 @@ class ConstraintValidator:
                     f"WARNING: CPU load elevated ({cpu_load:.1f}%)"
                 )
 
-        # Coherence degraded
-        if not state.get("coherence_ok", True):
-            coherence = state.get("context_coherence", 1.0)
-            alerts.append(
-                f"WARNING: Semantic coherence degraded ({coherence:.2f})"
-            )
-
-        # Error rate elevated
-        if state.get("errors_high", False):
-            error_count = state.get("error_count_1h", 0)
-            alerts.append(
-                f"WARNING: Error rate elevated ({error_count}/hour)"
-            )
-
-        # Contradictions
-        contradiction_count = state.get("contradiction_count", 0)
-        if contradiction_count > self.thresholds.contradiction_max:
-            alerts.append(
-                f"WARNING: Contradictions in memory ({contradiction_count})"
-            )
-
-        # Inference slow
-        if inference_latency > self.thresholds.inference_slow_ms:
-            if not any("LLM" in a for a in alerts):
-                alerts.append(
-                    f"WARNING: Inference slow ({inference_latency:.0f}ms)"
-                )
-
-        # Attention fragmented
-        if state.get("attention_dispersed", False):
-            alerts.append("WARNING: Attention fragmented across multiple topics")
-
+        # NB: the cognitive gates (LLM-hang CRITICAL, coherence/contradiction/
+        # error-rate/attention/inference-slow WARNINGs, goal-stack ALERT) were
+        # removed 2026-07-18. They were fed by a numb CognitiveSensor (empty
+        # MemoryManager/LLMManager -> frozen constants) so they could never
+        # fire; wiring latency naively would instead storm (llm_tape: 92% of CPU
+        # calls > 5s). The real concerns are covered live elsewhere: LLM/tick
+        # freeze -> TickWatchdog; CPU/RAM load -> resource sensor -> REDUCED;
+        # error-storm -> self_repair action_failure_storm; goal saturation ->
+        # K3 MAX_ACTIVE_GOALS cap. Cognitive metrics remain as telemetry only.
         return (len(alerts) == 0, alerts)
 
     def has_critical(self, alerts: List[str]) -> bool:

@@ -50,6 +50,7 @@ class CognitiveSensor:
         self,
         memory_manager: Optional["MemoryManager"] = None,
         llm_manager: Optional["LLMManager"] = None,
+        ctx: Optional[object] = None,
     ) -> CognitiveMetrics:
         """
         Read cognitive state metrics.
@@ -64,30 +65,40 @@ class CognitiveSensor:
         Spec: homeostasis_spec.md lines 990-1012
         """
         try:
-            # Get coherence from memory module
+            # --- Real telemetry, pulled from live stores (pull-model 2026-07-18).
+            # These were read from an empty MemoryManager/LLMManager that only
+            # returned hardcoded constants (get_semantic_coherence->0.95,
+            # get_total_entries->0, ...) because production wired both managers
+            # with no stores. We now read the real stores via shared_context.
+            # Signals with NO honest cheap per-tick source are left neutral on
+            # purpose -- their (dead) gates are removed in the consumer layer
+            # rather than fed a fabricated number:
+            #   context_coherence  : no real coherence measure exists in the tree
+            #   contradiction_count: only the 8h critic pass computes this
+            #   episodic_freshness : no per-tick accessor without touching the
+            #                        (watch-sensitive) world_model or file I/O
+            #   inference_latency  : GPU-era thresholds do not apply to a CPU box
+            #                        (llm_tape p50 ~23s); freeze is covered live
+            #                        by TickWatchdog + the resource sensor
             context_coherence = 1.0
-            memory_entries = 0
             contradiction_count = 0
-            episodic_freshness_sec = 0
-
-            if memory_manager:
-                try:
-                    context_coherence = memory_manager.get_semantic_coherence()
-                    memory_entries = memory_manager.get_total_entries()
-                    contradiction_count = memory_manager.get_contradiction_count()
-                    episodic_freshness_sec = memory_manager.get_episodic_freshness()
-                except Exception:
-                    pass
-
-            # Get latency from LLM module
+            episodic_freshness_sec = 0.0
             inference_latency_ms = 0.0
+            memory_entries = 0
             context_tokens = 0
 
-            if llm_manager:
+            if ctx is not None:
                 try:
-                    inference_latency_ms = llm_manager.get_last_latency_ms()
-                    context_tokens = llm_manager.get_context_tokens()
-                    self._latency_history.append(inference_latency_ms)
+                    wm = getattr(ctx, "world_model", None)
+                    if wm is not None:
+                        memory_entries = int(wm.stats().get("total", 0))
+                except Exception:
+                    pass
+                try:
+                    brain = getattr(ctx, "brain", None)
+                    nim = getattr(brain, "nim", None) if brain is not None else None
+                    if nim is not None:
+                        context_tokens = int(nim.get_last_usage().get("total_tokens", 0))
                 except Exception:
                     pass
 
@@ -106,6 +117,19 @@ class CognitiveSensor:
             # Calculate attention fragmentation (0-1, higher = more fragmented)
             attention_fragmentation = min(1.0, len(self._active_topics) / 10.0)
 
+            # Real active-goal count (was self._current_goal_depth, updated only
+            # by a set_goal_depth recorder that production never called -> 0).
+            # Goals are effectively flat (K3 caps active at ~20), so this is the
+            # active count, not a tree depth.
+            goal_stack_depth = self._current_goal_depth
+            if ctx is not None:
+                try:
+                    gs = getattr(ctx, "goal_store", None)
+                    if gs is not None:
+                        goal_stack_depth = len(gs.get_active())
+                except Exception:
+                    pass
+
             return CognitiveMetrics(
                 timestamp=time.time(),
                 context_coherence=context_coherence,
@@ -114,7 +138,7 @@ class CognitiveSensor:
                 latency_p50_ms=self._get_latency_percentile(50),
                 latency_p99_ms=self._get_latency_percentile(99),
                 error_count_1h=recent_errors,
-                goal_stack_depth=self._current_goal_depth,
+                goal_stack_depth=goal_stack_depth,
                 memory_entries=memory_entries,
                 contradiction_count=contradiction_count,
                 episodic_freshness_sec=episodic_freshness_sec,

@@ -320,6 +320,52 @@ class TestTelegramNotifier:
             "[Code] wynik z /sciezka_z_podkreslnikami", parse_mode=None,
         )
 
+    def test_notify_facade_exists(self):
+        """Fantom-guard: 5 call-sites (handlers close/progress, planner harvest
+        + feed_rot) call notifier.notify(category, text). Before 2026-07-17 the
+        method did not exist -- AttributeError swallowed by their except -> every
+        such alert silently dead. hasattr must stay True."""
+        assert hasattr(TelegramNotifier, "notify")
+
+    def test_notify_facade_sends_and_marks(self):
+        notifier, bot = self._make_notifier()
+        assert notifier.notify("learning_complete", "*Nauka zakonczona*") is True
+        bot.send_message.assert_called_once_with(
+            "*Nauka zakonczona*", parse_mode="Markdown",
+        )
+
+    def test_notify_facade_honors_quiet_hours(self):
+        """THE safety contract: the facade routes through _can_send, so a
+        deferrable category is DROPPED overnight -- unlike send_raw, which
+        bypasses quiet hours by design. A naive send_raw facade would ping at
+        3am; this must not."""
+        notifier, bot = self._make_notifier()
+        notifier.set_quiet_hours_check(lambda: True)  # it is quiet now
+        for cat in ("learning_complete", "learning_progress",
+                    "goal_complete", "feed_rot"):
+            assert notifier.notify(cat, "x") is False, cat
+        bot.send_message.assert_not_called()
+
+    def test_notify_facade_honors_cooldown(self):
+        notifier, bot = self._make_notifier()
+        # learning_progress has a 30min cooldown
+        assert notifier.notify("learning_progress", "postep 1") is True
+        assert notifier.notify("learning_progress", "postep 2") is False
+        assert bot.send_message.call_count == 1
+
+    def test_notify_facade_empty_text_is_noop(self):
+        notifier, bot = self._make_notifier()
+        assert notifier.notify("learning_complete", "") is False
+        bot.send_message.assert_not_called()
+
+    def test_notify_facade_categories_are_night_silent(self):
+        """None of the four facade categories may pierce quiet hours -- a
+        learning update or feed-rot notice is never worth a 3am ping."""
+        from agent_core.telegram.notifier import QUIET_HOURS_CRITICAL
+        for cat in ("learning_complete", "learning_progress",
+                    "goal_complete", "feed_rot"):
+            assert cat not in QUIET_HOURS_CRITICAL, cat
+
     def test_notify_creative_tensions(self):
         notifier, bot = self._make_notifier()
         tensions = [
@@ -374,6 +420,55 @@ class TestTelegramNotifier:
         msg = bot.send_message.call_args[0][0]
         assert "50%" in msg
         assert "RAM critical" in msg
+
+    def test_notify_health_drop_cpu_only_suppressed(self):
+        """Self-inflicted CPU load drags health < 0.7 but is nothing to act on.
+
+        21 of a day's gated alerts on 07-18 were exactly this. Mirrors the
+        notify_mode_change CPU filter.
+        """
+        notifier, bot = self._make_notifier()
+        sent = notifier.notify_health_drop(
+            0.6, "reduced",
+            ["ALERT: CPU saturated (100.0%)", "WARNING: CPU load elevated (93.7%)"],
+        )
+        assert sent is False
+        bot.send_message.assert_not_called()
+
+    def test_notify_health_drop_non_cpu_alert_still_sent(self):
+        """A non-CPU alert (RAM) alongside CPU means something real -- send it."""
+        notifier, bot = self._make_notifier()
+        sent = notifier.notify_health_drop(
+            0.6, "reduced",
+            ["ALERT: CPU saturated (96%)", "ALERT: RAM pressure critical (120MB free)"],
+        )
+        assert sent is True
+        assert "RAM" in bot.send_message.call_args[0][0]
+
+    def test_notify_health_drop_edge_trigger_once(self):
+        """Announce an ongoing drop ONCE; re-arm only after recovery."""
+        notifier, bot = self._make_notifier()
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM critical"]) is True
+        # Same ongoing drop -- suppressed by the edge, not re-announced.
+        assert notifier.notify_health_drop(0.55, "reduced", ["RAM critical"]) is False
+        assert bot.send_message.call_count == 1
+        # Recovery re-arms; clear the time cooldown to isolate the edge.
+        notifier.reset_health_drop_edge()
+        notifier._last_sent["health_drop"] = time.time() - 8000
+        assert notifier.notify_health_drop(0.5, "reduced", ["RAM critical"]) is True
+        assert bot.send_message.call_count == 2
+
+    def test_notify_health_drop_cpu_only_does_not_consume_edge(self):
+        """A skipped CPU-only drop must NOT arm the edge -- a genuine non-CPU
+        drop right after still has to announce."""
+        notifier, bot = self._make_notifier()
+        assert notifier.notify_health_drop(
+            0.6, "reduced", ["ALERT: CPU saturated (100%)"]
+        ) is False
+        assert notifier.notify_health_drop(
+            0.5, "reduced", ["ALERT: RAM pressure critical"]
+        ) is True
+        assert bot.send_message.call_count == 1
 
     def test_notify_mode_change_degradation(self):
         notifier, bot = self._make_notifier()

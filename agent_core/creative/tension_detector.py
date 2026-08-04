@@ -68,17 +68,27 @@ class TensionDetector:
             ))
 
         # 2. STAGNATION: no learning progress
+        # Stagnation is a STRATEGIC accusation, so it needs a full silent DAY,
+        # not one quiet hour: velocity is a 1h point-sample and outside the
+        # 09-19 learning window it is legitimately zero. Measured 2026-07-18:
+        # 112/112 zero-velocity reports had chunks_last_24h > 0 (100% phantom),
+        # and ALL 52 tension-bearing reflections of the prior week fed on it.
+        # chunks_last_24h missing (old report shape) = insufficient evidence,
+        # not proof of stagnation -> no tension.
         velocity = learning_state.get("learning_velocity")
         coverage = learning_state.get("coverage", 0)
-        if velocity is not None and velocity <= STAGNATION_VELOCITY and coverage < 1.0:
+        chunks_24h = learning_state.get("chunks_last_24h")
+        if (velocity is not None and velocity <= STAGNATION_VELOCITY
+                and chunks_24h == 0 and coverage < 1.0):
             tensions.append(DetectedTension.create(
                 category=TensionCategory.STAGNATION,
                 description=(
-                    f"Predkosc nauki wynosi {velocity:.3f} - praktycznie zero. "
+                    f"Zero chunkow nauki od 24h (predkosc {velocity:.3f}). "
                     f"Pokrycie wiedzy: {coverage:.0%}. System nie robi postepu."
                 ),
                 severity=0.7,
-                evidence_refs=["evaluation_reports:learning_velocity"],
+                evidence_refs=["evaluation_reports:learning_velocity",
+                               "evaluation_reports:details.chunks_last_24h"],
                 pattern_window=window,
             ))
 

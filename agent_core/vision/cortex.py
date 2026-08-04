@@ -17,7 +17,7 @@ Phase 4: Vision Cortex (VISION_SPEC.md)
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from agent_core.vision.models import VisionMode
 from agent_core.vision.modules.base import ModuleOutput, VisionModule
@@ -240,6 +240,7 @@ class VisionCortex:
         self,
         prompt: Optional[str] = None,
         save_path: Optional[str] = None,
+        frame_gate: Optional[Callable[[str], bool]] = None,
     ) -> Optional[str]:
         """Thread-safe one-shot LLaVA scene description for the autonomous path.
 
@@ -254,9 +255,17 @@ class VisionCortex:
             prompt: override prompt for LLaVA (defaults to the SceneModule's
                 structured prompt). VisionAdvisor passes a short natural-language
                 prompt for a clean one-sentence ping.
-            save_path: if set and a description is produced, the exact frame
-                LLaVA looked at is written there (JPEG) so the operator can be
-                sent the image alongside the description.
+            save_path: if set, the exact frame LLaVA looked at is written there
+                (JPEG) so the operator can be sent the image alongside the
+                description. Written BEFORE the describe, because frame_gate
+                needs a file to look at; the advisor only sends the image when
+                a description came back, so an early write changes nothing the
+                operator sees.
+            frame_gate: optional veto called with save_path just before the
+                expensive call. Returning False skips the describe entirely --
+                that is the whole point, the ~30-120s is what we are trying not
+                to spend. Requires save_path; without one there is no frame to
+                judge and the gate is ignored.
         """
         scene_mod = self._modules.get("scene")
         if not isinstance(scene_mod, SceneModule):
@@ -281,16 +290,30 @@ class VisionCortex:
         try:
             from agent_core.vision.modules.scene.analyzer import _image_to_base64
             b64 = _image_to_base64(processed.image)
-            result = llava_fn(prompt_to_use, b64)
-            if not result or not result.strip():
-                return None
+
+            saved = False
             if save_path:
                 try:
                     import base64 as _b64
                     with open(save_path, "wb") as f:
                         f.write(_b64.b64decode(b64))
+                    saved = True
                 except Exception as e:
                     logger.warning(f"describe_snapshot frame save failed: {e}")
+
+            if frame_gate is not None and saved:
+                try:
+                    if not frame_gate(save_path):
+                        logger.info("describe_snapshot: frame_gate odrzucil klatke "
+                                    "-- pomijam drogi opis")
+                        return None
+                except Exception as e:
+                    # Fail-open: a broken gate must not blind the advisor.
+                    logger.warning(f"describe_snapshot frame_gate failed: {e}")
+
+            result = llava_fn(prompt_to_use, b64)
+            if not result or not result.strip():
+                return None
             return result.strip()
         except Exception as e:
             logger.warning(f"describe_snapshot LLaVA call failed: {e}")

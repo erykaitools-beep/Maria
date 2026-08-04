@@ -114,11 +114,15 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         block_if_heavy_active=False,
     ),
     ModelRole.MEMORY: ModelSpec(
-        model_id="nomic-embed-text",
+        model_id="bge-m3",
         role=ModelRole.MEMORY,
-        ollama_tag="nomic-embed-text:latest",  # 274MB, 768-dim embeddings
-        ram_estimate_gb=0.5,
-        latency_budget_s=5.0,
+        # Swapped from nomic-embed-text 2026-07-25: measured on this store's
+        # Polish corpus, nomic put the right memory in the top 5 for only 42.9%
+        # of probe questions (median rank 42/1500) vs 100% for bge-m3. Cost:
+        # ~2.1 s/text on this CPU vs ~0.8, and 1.2GB instead of 274MB.
+        ollama_tag="bge-m3:latest",  # 1.2GB, 1024-dim embeddings
+        ram_estimate_gb=1.5,
+        latency_budget_s=20.0,  # a batch of MAX_BATCH_SIZE=8 costs ~17s
         concurrency_class=ConcurrencyClass.BACKGROUND,
         warm_state=WarmState.COLD,  # load on demand, unload after idle
         idle_unload_s=300.0,        # 5min idle -> unload

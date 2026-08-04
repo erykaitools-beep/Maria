@@ -169,12 +169,5 @@ class PersonalityPolicy:
         return weights
 
     def _get_traits_from_profile(self, profile: CognitiveProfile) -> Dict[str, float]:
-        """Extract trait name -> score from profile's dominant_traits + full data."""
-        # Profile stores dominant_traits as names only, we need scores
-        # But we can infer: if a trait is in dominant_traits, it's > 0.5
-        # For now, use a simple heuristic based on position
-        traits: Dict[str, float] = {}
-        for i, name in enumerate(profile.dominant_traits):
-            # Approximate score: top trait = 0.7, second = 0.6, third = 0.5
-            traits[name] = 0.7 - (i * 0.1)
-        return traits
+        """Trait name -> measured magnitude (all traits, not just dominant)."""
+        return dict(profile.trait_scores)

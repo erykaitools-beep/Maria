@@ -2957,8 +2957,8 @@ class PlannerCore:
             return True
         if goal is None:
             return True
-        # Compare by string to handle both enum and raw string goal_type fields
-        gtype_raw = getattr(goal, "goal_type", None)
+        # Compare by string to handle both enum and raw string goal.type fields
+        gtype_raw = getattr(goal, "type", None)
         gtype = getattr(gtype_raw, "value", gtype_raw)
         if not isinstance(gtype, str):
             return True
@@ -3323,7 +3323,14 @@ class PlannerCore:
                         "reason": _reason, "action": plan.action_type.value,
                     })
                 plan.status = PlanStatus.SKIPPED
-                plan.result = {"success": False, "blocked_by": "degradation", "reason": _reason}
+                # skipped=True so decision_filters treats a degradation-blocked
+                # action as an idle non-event, not a real failed attempt --
+                # otherwise REDUCED-mode rest pollutes success_pct and every
+                # evidence consumer (GrowthAwareness reliability targets, K12
+                # action distribution, HonestyProtocol stats) misreads rest
+                # as capability failure.
+                plan.result = {"success": False, "skipped": True,
+                               "blocked_by": "degradation", "reason": _reason}
                 plan.message = f"Degradation: {_reason}"
                 self._emit_cycle_complete(self._state.last_cycle_tick, plan=plan)
                 self._log_decision(plan)
@@ -4345,6 +4352,30 @@ class PlannerCore:
         ActionType.SELF_ANALYZE, ActionType.CREATIVE,
     ])
 
+    @staticmethod
+    def _blocked_by_degradation(result: Dict[str, Any]) -> bool:
+        """Was this action refused because the ORGANISM was resting?
+
+        Narrow on purpose, keyed on the structural marker the degradation
+        branch writes (`blocked_by="degradation"`, planner_core.py:3333) rather
+        than on the human-readable reason text.
+
+        The distinction that matters: a goal whose OWN material ran out keeps
+        accruing stall -- that is the signal that arms the B2 fetch pump, and
+        it must survive. But an action refused because the mode is REDUCED or
+        health is low says nothing whatsoever about the goal; it is the
+        organism resting. Measured on goal-meta-learn: of the 45 entries in
+        the streaks that raised `goal_exhausted_cycle`, 39 were declines and
+        exactly one was a real failure -- 69 declines overall came from
+        mode/health. That alarm was measuring rest periods and billing them to
+        a goal that was learning 175 chunks a week.
+
+        Third instance of this family here -- see `82e3a83`, where the same
+        degradation block lacked skipped=True and made /growth report
+        "exam 33%".
+        """
+        return result.get("blocked_by") == "degradation"
+
     def _plan_made_progress(self, plan: Plan, result: Dict[str, Any]) -> bool:
         """T-B4-001: did this plan execution move its goal forward?"""
         if not result.get("success"):
@@ -4376,6 +4407,17 @@ class PlannerCore:
             # would reset the cap every fetch -> unbounded fetch loop.
             if plan.action_type != ActionType.FETCH:
                 self._clear_fetch_state(goal_id)
+            return
+
+        # Resting is NEITHER progress nor a stall: the action never ran, so it
+        # carries no evidence about the goal either way. Counting rest as a
+        # stall is what made this detector fire 271 times on the META mission
+        # alone (46% of every goal_exhausted_cycle bulletin ever raised) while
+        # that same goal was learning 175 chunks a week. A goal whose own
+        # material is exhausted still accrues here -- its actions come back
+        # skipped WITHOUT the degradation marker -- so the B2 fetch pump keeps
+        # its trigger.
+        if self._blocked_by_degradation(result):
             return
 
         count = self._state.actions_since_progress.get(goal_id, 0) + 1
@@ -4418,6 +4460,13 @@ class PlannerCore:
             goal.metadata["progress_peak"] = goal.progress
         if new_peak or self._plan_made_progress(plan, result):
             goal.metadata["stall_cycles"] = 0
+        elif self._blocked_by_degradation(result):
+            # Same rule as the cycle counter, and it matters more here: this
+            # counter feeds LEARNING_STALL_CYCLE_CAP, which ABANDONS the goal.
+            # Counting rest periods would not just raise a false alarm -- it
+            # could reap a healthy learning goal for having been asked to work
+            # while the organism was resting.
+            pass
         else:
             goal.metadata["stall_cycles"] = int(
                 goal.metadata.get("stall_cycles", 0)

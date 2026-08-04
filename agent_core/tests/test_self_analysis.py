@@ -346,6 +346,67 @@ class TestStateCollector:
         assert health["avg_health"] > 0.8
         assert "active" in health["mode_distribution"]
 
+    def _stale_project(self, tmp_path, goals):
+        meta = tmp_path / "meta_data"
+        meta.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "memory").mkdir(exist_ok=True)
+        with open(meta / "goals.jsonl", "w", encoding="utf-8") as f:
+            for g in goals:
+                f.write(json.dumps(g) + "\n")
+        return StateCollector(str(tmp_path))
+
+    def test_working_goal_is_not_stale_however_old(self, tmp_path):
+        """Staleness is time since it MOVED, not time since it was created.
+
+        The age rule this replaced reported a goal that had worked 90 minutes
+        earlier as "28.1 days stale", and flagged the always-on mission for
+        every day of its 143-day life. K12, the MISALIGNMENT tension rule and
+        the K12->K11 AGING_FACTOR heuristic all read that number.
+        """
+        now = time.time()
+        collector = self._stale_project(tmp_path, [
+            {"id": "veteran", "status": "ACTIVE", "description": "stary, pracuje",
+             "created_at": now - 30 * 86400, "updated_at": now - 3600},
+        ])
+        assert collector._collect_stale_goals(now) == []
+
+    def test_idle_goal_is_stale_and_keeps_its_age(self, tmp_path):
+        now = time.time()
+        collector = self._stale_project(tmp_path, [
+            {"id": "idle", "status": "ACTIVE", "description": "stoi",
+             "created_at": now - 30 * 86400, "updated_at": now - 10 * 86400},
+        ])
+        stale = collector._collect_stale_goals(now)
+        assert len(stale) == 1
+        assert stale[0]["days_stale"] == 10.0
+        assert stale[0]["days_old"] == 30.0, "age signal lost, not just demoted"
+
+    def test_never_touched_goal_counts_from_creation(self, tmp_path):
+        """No updated_at at all -> fall back to created_at, do not go silent."""
+        now = time.time()
+        collector = self._stale_project(tmp_path, [
+            {"id": "orphan", "status": "ACTIVE", "description": "nigdy nietkniety",
+             "created_at": now - 9 * 86400},
+        ])
+        stale = collector._collect_stale_goals(now)
+        assert len(stale) == 1
+        assert stale[0]["days_stale"] == 9.0
+
+    def test_mission_heartbeat_clears_it_from_the_stale_list(self, tmp_path):
+        """Both halves of the 2026-07-22 fix meet here.
+
+        The counter writing coverage bumps updated_at; the collector reads
+        updated_at. Without the counter the mission has no heartbeat to read,
+        and without the collector fix the heartbeat would not have been read.
+        """
+        now = time.time()
+        collector = self._stale_project(tmp_path, [
+            {"id": "goal-meta-learn", "status": "ACTIVE", "type": "meta",
+             "description": "Autonomiczna nauka", "progress": 0.606,
+             "created_at": now - 143 * 86400, "updated_at": now - 300},
+        ])
+        assert collector._collect_stale_goals(now) == []
+
 
 # =============================================================================
 # external_analyzer.py
