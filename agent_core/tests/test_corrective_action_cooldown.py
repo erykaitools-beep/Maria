@@ -135,10 +135,17 @@ def test_thermal_throttled_within_cooldown():
     assert _thermal_actions(second) == []  # gated by cooldown
 
 
-def test_thermal_re_emitted_after_cooldown():
-    """Still-hot CPU re-emits the thermal pair after the cooldown elapses."""
+def test_thermal_hysteresis_holds_until_safe_resume_threshold():
+    """Hot stays latched through the middle band and resumes once, at 70C."""
     gen = CorrectiveActionGenerator()
-    gen.generate_actions({"temp_c": 90}, alerts=[])
-    gen._last_thermal_request = time.time() - gen._thermal_cooldown - 1
-    actions = gen.generate_actions({"temp_c": 90}, alerts=[])
-    assert len(_thermal_actions(actions)) == 2
+    hot = gen.generate_actions({"temp_c": 85}, alerts=[])
+    middle = gen.generate_actions({"temp_c": 75}, alerts=[])
+    cool = gen.generate_actions({"temp_c": 70}, alerts=[])
+    cool_again = gen.generate_actions({"temp_c": 65}, alerts=[])
+
+    assert len(_thermal_actions(hot)) == 2
+    assert middle == []
+    assert [(a.target, a.action) for a in cool] == [
+        ("llm", "restore_batch_size")
+    ]
+    assert cool_again == []

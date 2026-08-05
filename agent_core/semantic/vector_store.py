@@ -317,7 +317,8 @@ class VectorStore:
         return self.add(entry_id, text, vector, metadata)
 
     def add_texts_batch(self, entries: List[Tuple[str, str, Optional[Dict]]],
-                        embedding_model: EmbeddingModel) -> int:
+                        embedding_model: EmbeddingModel,
+                        cancel_event=None) -> int:
         """Batch embed and add multiple texts. Returns count added.
 
         Args:
@@ -343,7 +344,12 @@ class VectorStore:
             return 0
 
         texts = [t for _, t, _ in to_embed]
-        vectors = embedding_model.embed_batch(texts)
+        if cancel_event is None:
+            vectors = embedding_model.embed_batch(texts)
+        else:
+            vectors = embedding_model.embed_batch(
+                texts, cancel_event=cancel_event,
+            )
 
         count = 0
         for i, (entry_id, text, meta) in enumerate(to_embed):

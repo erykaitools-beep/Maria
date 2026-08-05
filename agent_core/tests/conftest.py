@@ -18,6 +18,22 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
+@pytest.fixture(autouse=True)
+def isolated_local_compute_coordinator():
+    """Keep the process-wide thermal/compute latch from leaking across tests."""
+    from agent_core.llm.local_compute import get_local_compute_coordinator
+
+    coordinator = get_local_compute_coordinator()
+    coordinator.reset_for_tests()
+    coordinator.observe_temperature(50.0)
+    yield coordinator
+    coordinator.enter_cooling()
+    deadline = time.monotonic() + 1.0
+    while coordinator.snapshot()["active_kind"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    coordinator.reset_for_tests()
+
+
 @pytest.fixture
 def temp_data_dir():
     """Create temporary directory for test data."""

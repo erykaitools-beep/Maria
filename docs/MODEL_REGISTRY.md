@@ -268,22 +268,26 @@ Use:
 **The production baseline is MODEL-02 + MODEL-04. Everything else is an escalation.**
 ---
 ## CONCURRENCY POLICY
-### Heavy models
-Heavy = MODEL-01 or MODEL-03
-### Allowed concurrency
-- MODEL-04 may run alongside anything
-- MODEL-02 may run alongside MODEL-04 and may remain warm during a heavy task
-- MODEL-05 shared mode may run on MODEL-02 only when no heavy task is active
+### Shared CPU execution lease
+- Resident models may coexist in RAM according to the matrix above.
+- Actual local Ollama compute is strictly serialized across MODEL-01/02/03,
+  vision models, warm-up, and MODEL-05/bge-m3 embeddings.
+- MODEL-04 is rule-based and does not consume the local inference lease.
+- The legacy heavy-model mutex is subordinate to this process-wide lease.
 ### Forbidden concurrency
-- MODEL-01 and MODEL-03 must **never** execute simultaneously
-- Dedicated MODEL-05 must **never** run while MODEL-01 or MODEL-03 is active
-- Two heavy tasks must **never** be scheduled in parallel
+- No text model and vision model may execute simultaneously.
+- No text/vision model and bge-m3 embedding may execute simultaneously.
+- Two local text models must **never** execute simultaneously.
 ### Scheduler rules
-1. Max heavy jobs at once: **1**
-2. Max memory jobs at once: **1**
-3. If heavy job starts, background memory compression is paused
-4. If planner job is queued while coder is active, planner waits
-5. If coder job is queued while planner is active, coder waits unless task severity is marked `critical_patch`
+1. Max local compute jobs at once: **1**
+2. At 85°C: latch cooling, reject new local work, cancel warm-up/indexing,
+   pause learning, and request unload of actually resident Ollama models.
+3. Resume only at or below 70°C from a real sensor; values in between do not
+   cause pause/resume flapping, and a synthetic fallback reading cannot resume.
+4. Startup warms at most `llama3.1:8b`, only below 50% CPU and after a valid,
+   safe thermal reading. `qwen3:8b` loads on demand.
+5. NIM HTTP 503 (`ResourceExhausted`) starts a five-minute local-fallback
+   backoff and cancels autonomous warm-up/indexing.
 ### Emergency degradation
 If free RAM drops below **7 GB**:
 - reject planner load,
@@ -394,6 +398,7 @@ Update this registry when one of the following changes:
 ## VERSION HISTORY
 | Date | Change |
 |------|--------|
+| 2026-08-05 | v1.2 thermal latch (85/70°C), one local CPU lease, cancellable startup work, NIM-503 fallback backoff |
 | 2026-03-21 | v1.0 initial draft |
 | 2026-03-21 | v1.1 hardened: concurrency, loading policy, MODEL-05 decision, routing confidence, quality rubric |
 | 2026-03-21 | v1.1+ added MODEL-06 (NIM external API) for completeness |

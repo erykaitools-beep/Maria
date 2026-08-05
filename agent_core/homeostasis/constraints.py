@@ -95,7 +95,7 @@ class ConstraintValidator:
 
         # Temperature critical
         temp_c = state.get("temp_c", 50)
-        if temp_c > self.thresholds.temp_critical_c:
+        if temp_c >= self.thresholds.temp_critical_c:
             alerts.append(
                 f"CRITICAL: Temperature critical ({temp_c:.1f}°C), shutdown imminent"
             )
@@ -123,7 +123,7 @@ class ConstraintValidator:
             )
 
         # Temperature orange
-        if temp_c > self.thresholds.temp_orange_c:
+        if temp_c >= self.thresholds.temp_orange_c:
             alerts.append(
                 f"ALERT: Temperature high ({temp_c:.1f}°C), consider REDUCED mode"
             )

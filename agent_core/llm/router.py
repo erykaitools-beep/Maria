@@ -22,6 +22,10 @@ from agent_core.llm.execution_budget import (
     get_timeout_for_role,
     get_ollama_client,
 )
+from agent_core.llm.local_compute import (
+    LocalComputeBlocked,
+    get_local_compute_coordinator,
+)
 
 try:
     import ollama as ollama_lib
@@ -208,6 +212,9 @@ class LLMRouter:
                 self._record_tape("chat", self.nim.model, prompt, "", start,
                                   success=False,
                                   route_reason=f"nim_failed: {e}")
+                if not get_local_compute_coordinator().local_fallback_allowed():
+                    logger.warning("NIM chat fallback suppressed by safety backoff")
+                    return ""
 
         # Default: Ollama (always for grounded, fallback for NIM failure)
         self._ollama_calls += 1
@@ -256,6 +263,9 @@ class LLMRouter:
                                   start, success=False,
                                   route_reason=f"nim_failed: {e}")
         # Local fallback: weaker Polish, but far better than the vision model's.
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            logger.warning("[LLMRouter] vision translation fallback suppressed")
+            return text
         try:
             out = self.ollama.think(prompt, temperature=temperature)
             if out and out.strip():
@@ -334,6 +344,13 @@ class LLMRouter:
         # Fallback to Ollama -- bounded so a wedged Ollama cannot hang the caller
         # forever (the 2026-06-02 freeze went through unbounded _ask_once paths).
         reason = "nim_fallback" if self._nim_fallbacks > 0 else "nim_unavailable_or_budget"
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            logger.warning("[LLMRouter] Local learning fallback suppressed by safety backoff")
+            self._record_tape(
+                "learning", _learning_local_model(), prompt, "", start,
+                success=False, route_reason="local_fallback_suppressed",
+            )
+            return ""
         self._ollama_calls += 1
         # This Ollama fallback runs a heavy LOCAL model (learn/gap-analysis).
         # Serialize it on the scheduler's heavy mutex so it never overlaps the
@@ -370,6 +387,9 @@ class LLMRouter:
                     timeout_sec=get_timeout_for_role("learning"),
                     label="router._ask_once(ollama)",
                 )
+        except LocalComputeBlocked as e:
+            logger.warning("[LLMRouter] _ask_once local compute blocked: %s", e)
+            result = ""
         except _OLLAMA_TIMEOUT_EXC:
             logger.warning("[LLMRouter] _ask_once Ollama fallback timed out -> empty")
             result = ""
@@ -401,6 +421,9 @@ class LLMRouter:
                 self._nim_fallbacks += 1
 
         # Fallback to Ollama
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            logger.warning("NIM analyze_task local fallback suppressed")
+            return {}
         self._ollama_calls += 1
         return self.ollama.analyze_task(task, retries=retries)
 
@@ -550,6 +573,12 @@ class LLMRouter:
                 timeout_sec=get_timeout_for_role(role_name),
                 label=f"ask_as_role_fallback({role_name})",
             )
+        except LocalComputeBlocked as e:
+            logger.warning(
+                "[LLMRouter] Ollama fallback for %s blocked: %s",
+                role_name, e,
+            )
+            return ""
         except _OLLAMA_TIMEOUT_EXC:
             logger.warning(
                 "[LLMRouter] Ollama fallback for %s exceeded deadline -> empty",
@@ -578,6 +607,7 @@ class LLMRouter:
             Response text from the selected model
         """
         role_name = role.value if hasattr(role, "value") else str(role)
+        nim_primary_failed = False
 
         # NIM-first for primary cognitive roles (glm-5.1 test mode).
         # On failure: fall through to existing scheduler/Ollama path.
@@ -602,7 +632,16 @@ class LLMRouter:
                     role_name, self.nim.model, prompt, "", nim_start,
                     success=False, route_reason=f"nim_primary_failed: {e}",
                 )
+                nim_primary_failed = True
                 # Continue to scheduler/Ollama path below
+
+        if (nim_primary_failed
+                and not get_local_compute_coordinator().local_fallback_allowed()):
+            logger.warning(
+                "[LLMRouter] Local %s fallback suppressed after NIM ResourceExhausted",
+                role_name,
+            )
+            return ""
 
         # Normalize string role to ModelRole enum for scheduler
         if isinstance(role, str) and self._model_scheduler is not None:
@@ -648,12 +687,18 @@ class LLMRouter:
             # unblocked the caller. The shared client's httpx read-timeout tears the
             # socket down so the zombie actually dies and frees its slot.
             _client = get_ollama_client()
+            def _local_chat():
+                with get_local_compute_coordinator().lease(
+                    "text", model=result.ollama_tag, timeout_s=timeout,
+                ):
+                    return _client.chat(
+                        model=result.ollama_tag,
+                        messages=[{"role": "user", "content": prompt}],
+                        options={"temperature": temperature},
+                    )
+
             resp = call_with_timeout(
-                lambda: _client.chat(
-                    model=result.ollama_tag,
-                    messages=[{"role": "user", "content": prompt}],
-                    options={"temperature": temperature},
-                ),
+                _local_chat,
                 timeout_sec=timeout,
                 label=f"ask_as_role({role_name}:{result.ollama_tag})",
             )
@@ -732,6 +777,9 @@ class LLMRouter:
 
         # Fallback: Ollama -- bounded (see _bounded_ask_once); a wedged Ollama
         # must not hang an encyclopedia lookup that may run on the tick path.
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            logger.warning("Encyclopedia local fallback suppressed by safety backoff")
+            return ""
         self._ollama_calls += 1
         result = self._bounded_ask_once(prompt, 0.3, "encyclopedia")
         self._record_tape("encyclopedia", self.ollama.model, prompt, result, start)

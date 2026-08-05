@@ -97,6 +97,12 @@ def _make_nim_first_examiner_fn(
             except Exception as exc:
                 logger.warning("[EXAM] NIM %s failed (%s); "
                                "falling back to local %s", role, exc, fallback_model)
+        from agent_core.llm.local_compute import get_local_compute_coordinator
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            if used_cell is not None:
+                used_cell["backend"] = "local:suppressed"
+            logger.warning("[EXAM] Local %s fallback suppressed by safety backoff", role)
+            return None
         # Local examiner fallback is a heavy model (qwen3) on the CPU -- serialize
         # it on the scheduler mutex so it never overlaps the student answer or K12.
         if used_cell is not None:

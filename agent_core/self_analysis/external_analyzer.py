@@ -124,6 +124,14 @@ class ExternalAnalyzer:
                 logger.info(f"[K12] Claude CLI failed, falling back to local: {e}")
 
         # Fallback: local planner
+        from agent_core.llm.local_compute import get_local_compute_coordinator
+        if not get_local_compute_coordinator().local_fallback_allowed():
+            return AnalysisReport(
+                analyzer="local_suppressed",
+                model="",
+                recommendations=[],
+                error="Local fallback suppressed by thermal/NIM safety backoff",
+            )
         return self._analyze_with_local(state_summary)
 
     @staticmethod

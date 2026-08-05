@@ -67,6 +67,10 @@ class ResourceMetrics:
     # LLM latency (from CognitiveSensor)
     inference_latency_ms: float
 
+    # False when temp_c is only the cross-platform numeric fallback.  Safety
+    # code must never interpret that fallback as evidence of cooling.
+    temp_available: bool = True
+
     @property
     def ram_available_pct(self) -> float:
         """Calculate available RAM percentage."""

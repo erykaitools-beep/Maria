@@ -669,6 +669,16 @@ class HomeostasisCore:
                 process_count=resource_metrics.process_count,
                 temp_c=thermal_metrics.cpu_temp_c,
                 inference_latency_ms=resource_metrics.inference_latency_ms,
+                temp_available=thermal_metrics.reading_available,
+            )
+
+            # Apply the raw thermal edge before cognitive sensing or any later
+            # phase can spend more time on a saturated machine. This is also a
+            # fail-safe path when no ModuleExecutor is wired.
+            from agent_core.llm.local_compute import get_local_compute_coordinator
+            get_local_compute_coordinator().observe_temperature(
+                thermal_metrics.cpu_temp_c,
+                reading_available=thermal_metrics.reading_available,
             )
 
         _t_sub = time.perf_counter()

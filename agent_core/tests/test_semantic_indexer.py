@@ -233,7 +233,10 @@ class TestBackgroundIndexing:
         memory_dir.mkdir()
 
         sm = _mock_semantic_memory()
-        t = start_background_indexing(sm, str(data_dir), str(memory_dir), str(tmp_path), delay_sec=0)
+        t = start_background_indexing(
+            sm, str(data_dir), str(memory_dir), str(tmp_path), delay_sec=0,
+            cpu_percent_fn=lambda: 0.0,
+        )
         t.join(timeout=5)
         assert not t.is_alive()
 
@@ -242,6 +245,24 @@ class TestBackgroundIndexing:
         sm.index_batch = MagicMock(side_effect=RuntimeError("boom"))
         sm.save = MagicMock()
 
-        t = start_background_indexing(sm, "/nonexistent", "/nonexistent", "/nonexistent", delay_sec=0)
+        t = start_background_indexing(
+            sm, "/nonexistent", "/nonexistent", "/nonexistent", delay_sec=0,
+            cpu_percent_fn=lambda: 0.0,
+        )
         t.join(timeout=5)
         assert not t.is_alive()  # Should not crash
+
+    def test_thermal_cooling_cancels_delayed_indexing(
+        self, tmp_path, isolated_local_compute_coordinator,
+    ):
+        sm = _mock_semantic_memory()
+        t = start_background_indexing(
+            sm, str(tmp_path), str(tmp_path), str(tmp_path), delay_sec=30,
+            cpu_percent_fn=lambda: 0.0,
+        )
+        isolated_local_compute_coordinator.enter_cooling(85.0)
+        t.join(timeout=5)
+
+        assert not t.is_alive()
+        assert t.cancel_event.is_set()
+        sm.index_batch.assert_not_called()

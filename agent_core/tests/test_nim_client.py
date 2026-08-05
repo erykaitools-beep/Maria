@@ -16,6 +16,7 @@ from agent_core.llm.nim_client import NIMClient, NIMAPIError
 from agent_core.llm.router import LLMRouter
 from agent_core.introspection.query_router import OperationalQueryRouter
 from agent_core.tests.spec_helpers import specced
+from models.ollama_brain import OllamaBrain
 
 
 # =============================================================
@@ -432,6 +433,22 @@ class TestNIMClient:
         )
         with pytest.raises(NIMAPIError):
             client._chat([{"role": "user", "content": "test"}])
+
+    @patch("agent_core.llm.nim_client.requests.post")
+    def test_resource_exhausted_suppresses_local_router_fallback(
+        self, mock_post, client, isolated_local_compute_coordinator,
+    ):
+        """NIM 503 must defer work, not stampede the already-busy local CPU."""
+        mock_post.return_value = Mock(
+            status_code=503, text="ResourceExhausted (295/32)",
+        )
+        ollama = specced(OllamaBrain, model="llama3.1:8b")
+        ollama._ask_once.return_value = "must not run"
+        router = LLMRouter(ollama_brain=ollama, nim_client=client)
+
+        assert router._ask_once("defer this") == ""
+        ollama._ask_once.assert_not_called()
+        assert isolated_local_compute_coordinator.local_fallback_allowed() is False
 
     @patch("agent_core.llm.nim_client.requests.post")
     def test_chat_timeout(self, mock_post, client):

@@ -28,6 +28,7 @@ class ThermalMetrics:
     cpu_temp_c: float
     is_throttling: bool
     fan_speed_rpm: Optional[int]
+    reading_available: bool = True
 
 
 class ThermalSensor:
@@ -58,7 +59,7 @@ class ThermalSensor:
         Returns:
             ThermalMetrics with current temperature and throttle state
         """
-        temp = self._read_temperature()
+        temp, reading_available = self._read_temperature_with_status()
         throttling = self._check_throttling(temp)
         fan_speed = self._read_fan_speed()
 
@@ -70,6 +71,7 @@ class ThermalSensor:
             cpu_temp_c=temp,
             is_throttling=throttling,
             fan_speed_rpm=fan_speed,
+            reading_available=reading_available,
         )
 
     def get_temperature(self) -> float:
@@ -90,18 +92,24 @@ class ThermalSensor:
 
         Tries multiple sources in order of preference.
         """
+        temp, _available = self._read_temperature_with_status()
+        return temp
+
+    def _read_temperature_with_status(self) -> Tuple[float, bool]:
+        """Return temperature and whether it came from a real sensor."""
         # Try Linux thermal zone first
         temp = self._read_linux_thermal()
         if temp is not None:
-            return temp
+            return temp, True
 
         # Try psutil sensors
         temp = self._read_psutil_temp()
         if temp is not None:
-            return temp
+            return temp, True
 
-        # Fallback to default
-        return 50.0
+        # Keep the historical numeric fallback for compatibility, but mark it
+        # unavailable so a fabricated 50C cannot release a thermal latch.
+        return 50.0, False
 
     def _read_linux_thermal(self) -> Optional[float]:
         """Read temperature from Linux thermal zone."""

@@ -17,7 +17,9 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +235,10 @@ def build_summary_entries(memory_path: Path) -> List[Tuple[str, str, str]]:
     return entries
 
 
-def index_summaries(semantic_memory, memory_path, only_new: bool = True) -> int:
+def index_summaries(
+    semantic_memory, memory_path, only_new: bool = True,
+    cancel_event: Optional[threading.Event] = None,
+) -> int:
     """Index learned-chunk summaries into SUMMARY_NAMESPACE with source_file
     metadata (so results can be filtered/excluded by file). Incremental by
     default: skips entry_ids already in the store. Returns count newly indexed.
@@ -250,9 +255,12 @@ def index_summaries(semantic_memory, memory_path, only_new: bool = True) -> int:
 
     total = 0
     for source_file, batch in by_file.items():
-        total += semantic_memory.index_batch(
-            SUMMARY_NAMESPACE, batch, extra_metadata={"source_file": source_file},
-        )
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        kwargs = {"extra_metadata": {"source_file": source_file}}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        total += semantic_memory.index_batch(SUMMARY_NAMESPACE, batch, **kwargs)
     if total > 0:
         semantic_memory.save()
         logger.info(
@@ -262,7 +270,8 @@ def index_summaries(semantic_memory, memory_path, only_new: bool = True) -> int:
 
 
 def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
-                         input_dir: str) -> Dict[str, int]:
+                         input_dir: str,
+                         cancel_event: Optional[threading.Event] = None) -> Dict[str, int]:
     """Run full initial indexing of all sources.
 
     Returns dict with counts per namespace.
@@ -274,15 +283,33 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
     counts = {}
     start = time.time()
 
+    def cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
+    def index_batch(namespace, entries) -> int:
+        if cancel_event is None:
+            return semantic_memory.index_batch(namespace, entries)
+        return semantic_memory.index_batch(
+            namespace, entries, cancel_event=cancel_event,
+        )
+
+    if cancelled():
+        logger.info("[INDEXER] Cancelled before initial indexing")
+        return counts
+
     # 1. Knowledge (from knowledge_index + input file titles)
     knowledge = build_knowledge_entries(
         memory_path / "knowledge_index.jsonl",
         input_path,
     )
     if knowledge:
-        count = semantic_memory.index_batch("knowledge", knowledge)
+        count = index_batch("knowledge", knowledge)
         counts["knowledge"] = count
         logger.info(f"[INDEXER] Indexed {count} knowledge entries")
+
+    if cancelled():
+        logger.info("[INDEXER] Cancelled after knowledge indexing")
+        return counts
 
     # 2. Beliefs. Ghost cleanup runs FIRST: the store sits at its
     # MAX_VECTORS cap (2026-06-10: 6522 belief vectors vs 1997 current
@@ -300,16 +327,24 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
 
     beliefs = build_belief_entries(data_path / "beliefs.jsonl")
     if beliefs:
-        count = semantic_memory.index_batch("beliefs", beliefs)
+        count = index_batch("beliefs", beliefs)
         counts["beliefs"] = count
         logger.info(f"[INDEXER] Indexed {count} belief entries")
+
+    if cancelled():
+        logger.info("[INDEXER] Cancelled after belief indexing")
+        return counts
 
     # 3. Hints
     hints = build_hint_entries(data_path / "topic_hints.jsonl")
     if hints:
-        count = semantic_memory.index_batch("hints", hints)
+        count = index_batch("hints", hints)
         counts["hints"] = count
         logger.info(f"[INDEXER] Indexed {count} hint entries")
+
+    if cancelled():
+        logger.info("[INDEXER] Cancelled after hint indexing")
+        return counts
 
     # 4. Summaries (full learned content -> SUMMARY_NAMESPACE). Powers the
     # held-out exam's closed-book retrieval (answer from real cross-file search,
@@ -317,12 +352,17 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
     # (skips already-indexed chunks) so re-runs on later startups are cheap.
     try:
         summary_count = index_summaries(
-            semantic_memory, memory_path / "maria_longterm_memory.jsonl"
+            semantic_memory, memory_path / "maria_longterm_memory.jsonl",
+            cancel_event=cancel_event,
         )
         if summary_count:
             counts["summaries"] = summary_count
     except Exception as e:  # never let recall-index work break startup indexing
         logger.warning(f"[INDEXER] Summary indexing skipped: {e}")
+
+    if cancelled():
+        logger.info("[INDEXER] Cancelled after summary indexing")
+        return counts
 
     # Cleanup stale vectors (files that no longer exist in knowledge_index)
     stale_removed = cleanup_stale_vectors(
@@ -350,27 +390,61 @@ def run_initial_indexing(semantic_memory, data_dir: str, memory_dir: str,
 
 
 STARTUP_DELAY_SEC = 60  # Wait for homeostasis to stabilize before CPU-heavy embedding
+STARTUP_CPU_LIMIT_PCT = 50.0
 INCREMENTAL_NAMESPACE = "knowledge"
 
 
 def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
                                input_dir: str,
-                               delay_sec: float = STARTUP_DELAY_SEC) -> threading.Thread:
+                               delay_sec: float = STARTUP_DELAY_SEC,
+                               startup_cpu_limit_pct: float = STARTUP_CPU_LIMIT_PCT,
+                               cpu_percent_fn: Optional[Callable[[], float]] = None,
+                               ) -> threading.Thread:
     """Start initial indexing in a background thread after a delay.
 
     Delays embedding work to avoid CPU spike that triggers REDUCED mode.
     Returns the thread (for join/monitoring).
     """
+    from agent_core.llm.local_compute import get_local_compute_coordinator
+
+    coordinator = get_local_compute_coordinator()
+    cancel_event = threading.Event()
+    token = coordinator.register_background_task(
+        "semantic-indexer", cancel_event.set,
+        cancel_on_nim_exhausted=True,
+    )
+
     def _run():
         try:
             if delay_sec > 0:
                 logger.info(f"[INDEXER] Waiting {delay_sec:.0f}s before indexing (CPU cooldown)")
-                time.sleep(delay_sec)
-            run_initial_indexing(semantic_memory, data_dir, memory_dir, input_dir)
+                if cancel_event.wait(delay_sec):
+                    logger.info("[INDEXER] Cancelled during startup delay")
+                    return
+            coordinator.verify_startup_temperature()
+            if not coordinator.startup_background_allowed():
+                logger.info("[INDEXER] Skipped: thermal/NIM backoff active")
+                return
+            read_cpu = cpu_percent_fn or (lambda: psutil.cpu_percent(interval=0.1))
+            cpu_load = float(read_cpu())
+            if cpu_load >= startup_cpu_limit_pct:
+                logger.warning(
+                    "[INDEXER] Skipped: CPU already busy (%.1f%% >= %.1f%%)",
+                    cpu_load, startup_cpu_limit_pct,
+                )
+                return
+            run_initial_indexing(
+                semantic_memory, data_dir, memory_dir, input_dir,
+                cancel_event=cancel_event,
+            )
         except Exception as e:
             logger.error(f"[INDEXER] Background indexing failed: {e}")
+        finally:
+            coordinator.unregister_background_task(token)
 
     t = threading.Thread(target=_run, name="semantic-indexer", daemon=True)
+    t.cancel_event = cancel_event
+    t.compute_task_token = token
     t.start()
     logger.info("[INDEXER] Background indexing started")
     return t
