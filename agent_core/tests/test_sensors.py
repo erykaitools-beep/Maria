@@ -226,11 +226,13 @@ class TestThermalSensor:
         assert isinstance(result, bool)
 
     def test_is_warning_check(self):
-        """Should detect warning temperature."""
+        """The operational warning starts at the 80C cooling ceiling."""
         sensor = ThermalSensor()
 
-        result = sensor.is_warning()
-        assert isinstance(result, bool)
+        sensor._last_temp = 79.9
+        assert sensor.is_warning() is False
+        sensor._last_temp = 80.0
+        assert sensor.is_warning() is True
 
 
 class TestPowerSensor:

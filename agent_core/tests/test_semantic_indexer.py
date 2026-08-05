@@ -260,7 +260,7 @@ class TestBackgroundIndexing:
             sm, str(tmp_path), str(tmp_path), str(tmp_path), delay_sec=30,
             cpu_percent_fn=lambda: 0.0,
         )
-        isolated_local_compute_coordinator.enter_cooling(85.0)
+        isolated_local_compute_coordinator.enter_cooling(80.0)
         t.join(timeout=5)
 
         assert not t.is_alive()

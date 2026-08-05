@@ -146,7 +146,7 @@ class TestStartBackgroundWarmup:
         self, monkeypatch, isolated_local_compute_coordinator,
     ):
         monkeypatch.setenv("MARIA_WARMUP", "1")
-        isolated_local_compute_coordinator.observe_temperature(85.0)
+        isolated_local_compute_coordinator.observe_temperature(80.0)
         client = _ok_client()
         with patch.object(warmup, "get_ollama_client", return_value=client):
             t = start_background_warmup(

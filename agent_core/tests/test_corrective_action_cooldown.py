@@ -120,9 +120,9 @@ def test_thermal_pair_emitted_when_hot():
 
 
 def test_thermal_not_emitted_below_threshold():
-    """No thermal correctives below the 85 degree threshold."""
+    """No thermal correctives below the 80 degree threshold."""
     gen = CorrectiveActionGenerator()
-    actions = gen.generate_actions({"temp_c": 80}, alerts=[])
+    actions = gen.generate_actions({"temp_c": 79.9}, alerts=[])
     assert _thermal_actions(actions) == []
 
 
@@ -138,7 +138,7 @@ def test_thermal_throttled_within_cooldown():
 def test_thermal_hysteresis_holds_until_safe_resume_threshold():
     """Hot stays latched through the middle band and resumes once, at 70C."""
     gen = CorrectiveActionGenerator()
-    hot = gen.generate_actions({"temp_c": 85}, alerts=[])
+    hot = gen.generate_actions({"temp_c": 80}, alerts=[])
     middle = gen.generate_actions({"temp_c": 75}, alerts=[])
     cool = gen.generate_actions({"temp_c": 70}, alerts=[])
     cool_again = gen.generate_actions({"temp_c": 65}, alerts=[])

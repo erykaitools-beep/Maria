@@ -44,7 +44,9 @@ class ThermalSensor:
     """
 
     # Temperature thresholds from spec
-    TEMP_ORANGE_C = 85
+    # Operational ceiling for this CPU-only miniPC.  Keep aligned with the
+    # local-compute cooling latch: 85C was too close to the observed crash.
+    TEMP_ORANGE_C = 80
     TEMP_CRITICAL_C = 95
 
     def __init__(self):

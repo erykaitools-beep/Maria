@@ -280,7 +280,7 @@ Use:
 - Two local text models must **never** execute simultaneously.
 ### Scheduler rules
 1. Max local compute jobs at once: **1**
-2. At 85°C: latch cooling, reject new local work, cancel warm-up/indexing,
+2. At 80°C: latch cooling, reject new local work, cancel warm-up/indexing,
    pause learning, and request unload of actually resident Ollama models.
 3. Resume only at or below 70°C from a real sensor; values in between do not
    cause pause/resume flapping, and a synthetic fallback reading cannot resume.
@@ -398,7 +398,7 @@ Update this registry when one of the following changes:
 ## VERSION HISTORY
 | Date | Change |
 |------|--------|
-| 2026-08-05 | v1.2 thermal latch (85/70°C), one local CPU lease, cancellable startup work, NIM-503 fallback backoff |
+| 2026-08-05 | v1.2 thermal latch (80/70°C), one local CPU lease, cancellable startup work, NIM-503 fallback backoff |
 | 2026-03-21 | v1.0 initial draft |
 | 2026-03-21 | v1.1 hardened: concurrency, loading policy, MODEL-05 decision, routing confidence, quality rubric |
 | 2026-03-21 | v1.1+ added MODEL-06 (NIM external API) for completeness |

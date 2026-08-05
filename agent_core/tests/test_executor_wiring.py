@@ -84,7 +84,7 @@ def test_learning_pause_never_raises_on_teacher_error():
 
 def test_thermal_llm_action_is_real_and_metacontroller_remains_record_only():
     ex, _ = _wire()
-    llm = ex.signal_module("llm", "reduce_batch_size", factor=0.5, temp_c=85.0)
+    llm = ex.signal_module("llm", "reduce_batch_size", factor=0.5, temp_c=80.0)
     meta = ex.signal_module("metacontroller", "interrupt_goal_refinement")
     assert llm["effect"] == "thermal_cooling_active"
     assert llm["cooling"]["cooling"] is True

@@ -11,7 +11,7 @@ from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.homeostasis.event_logger import HomeostasisEventLogger
 from agent_core.homeostasis.mode_regulator import ModeRegulator
 from agent_core.homeostasis.state_model import Mode
-from agent_core.llm.local_compute import LocalComputeBlocked
+from agent_core.llm.local_compute import LocalComputeBlocked, THERMAL_STOP_C
 from agent_core.llm.manager import LLMManager
 from agent_core.memory.manager import MemoryManager
 from agent_core.modules.homeostasis_module import _wire_executor_modules
@@ -75,7 +75,13 @@ def test_critical_temperature_cancels_and_stays_latched_until_safe(
         "running-indexer", cancelled.set,
     )
     try:
-        hot = core.action_generator.generate_actions({"temp_c": 85.0}, alerts=[])
+        assert THERMAL_STOP_C == 80.0
+        assert core.action_generator.generate_actions(
+            {"temp_c": 79.9}, alerts=[]
+        ) == []
+        assert coordinator.cooling is False
+
+        hot = core.action_generator.generate_actions({"temp_c": 80.0}, alerts=[])
         core._execute_corrective_actions(hot)
 
         llm_response = next(
@@ -98,7 +104,7 @@ def test_critical_temperature_cancels_and_stays_latched_until_safe(
 
         # No pause/resume flap in the hysteresis band.
         assert core.action_generator.generate_actions(
-            {"temp_c": 80.0}, alerts=[]
+            {"temp_c": 75.0}, alerts=[]
         ) == []
         assert coordinator.cooling is True
 
@@ -153,13 +159,13 @@ def test_thermal_pressure_bypasses_startup_cpu_grace_and_has_hysteresis():
     hot = {
         "ram_available_pct": 80,
         "cpu_load": 10,
-        "temp_c": 85.0,
+        "temp_c": 80.0,
         "idle_seconds": 0,
     }
     assert regulator.decide_mode(hot, alerts=[]) == Mode.REDUCED
     regulator.transition_to(Mode.REDUCED)
 
-    middle = dict(hot, temp_c=80.0)
+    middle = dict(hot, temp_c=75.0)
     assert regulator.decide_mode(middle, alerts=[]) == Mode.REDUCED
     assert regulator._thermal_cooling is True
 
@@ -182,7 +188,7 @@ def test_operator_active_override_cannot_bypass_thermal_cooling():
         {
             "ram_available_pct": 80,
             "cpu_load": 10,
-            "temp_c": 85.0,
+            "temp_c": 80.0,
             "idle_seconds": 0,
         },
         alerts=[],
@@ -196,7 +202,7 @@ def test_missing_sensor_reading_cannot_fake_thermal_recovery(
 ):
     """The ThermalSensor fallback value (50C) is not a valid resume signal."""
     coordinator = isolated_local_compute_coordinator
-    coordinator.observe_temperature(85.0)
+    coordinator.observe_temperature(80.0)
 
     result = coordinator.observe_temperature(50.0, reading_available=False)
 
@@ -206,7 +212,7 @@ def test_missing_sensor_reading_cannot_fake_thermal_recovery(
 
     generator = CorrectiveActionGenerator()
     generator.generate_actions(
-        {"temp_c": 85.0, "temp_available": True}, alerts=[]
+        {"temp_c": 80.0, "temp_available": True}, alerts=[]
     )
     assert generator.generate_actions(
         {"temp_c": 50.0, "temp_available": False}, alerts=[]

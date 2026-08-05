@@ -358,7 +358,7 @@ LEARN, EXAM, REVIEW, EVALUATE, MAINTENANCE, FETCH, EXPERIMENT, EFFECTOR, SELF_AN
 **Golden rule:** MODEL-02 may stay resident and the rest are on-demand, but all
 local CPU inference uses one process-wide lease. Text generation, vision,
 embedding (bge-m3), warm-up, and model loading never execute concurrently.
-At 85°C the lease enters a cooling latch, cancels registered warm-up/indexing,
+At 80°C the lease enters a cooling latch, cancels registered warm-up/indexing,
 blocks Ollama fallbacks, and requests unload of resident models. It reopens only
 at or below 70°C from a real sensor reading. An NVIDIA NIM HTTP 503 suppresses
 local fallback and autonomous startup work for five minutes.

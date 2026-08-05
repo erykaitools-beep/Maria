@@ -95,7 +95,7 @@ class CorrectiveActionGenerator:
         self._alert_snapshot_cooldown = 300  # 5 minutes
         # Thermal protection is edge-triggered with hysteresis.  A cooldown is
         # insufficient here: it reissues pauses while hot and provides no safe
-        # condition for resuming.  The latch stays set throughout 70-85C.
+        # condition for resuming.  The latch stays set throughout 70-80C.
         self._thermal_cooling = False
 
     def generate_actions(

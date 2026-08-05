@@ -23,7 +23,7 @@ from typing import Callable, Dict, Iterator, Optional
 logger = logging.getLogger(__name__)
 
 
-THERMAL_STOP_C = 85.0
+THERMAL_STOP_C = 80.0
 THERMAL_RESUME_C = 70.0
 NIM_RESOURCE_EXHAUSTED_BACKOFF_S = 300.0
 LEASE_POLL_S = 0.2
