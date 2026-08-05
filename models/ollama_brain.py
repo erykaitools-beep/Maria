@@ -97,6 +97,8 @@ try:
 except Exception:
     _httpx = None
 
+from agent_core.llm.local_compute import get_local_compute_coordinator
+
 
 class BrainTimeout(Exception):
     """The local model stalled and the HTTP call hit its read-timeout.
@@ -674,7 +676,15 @@ class OllamaBrain:
         # Use the timeout-aware client (see __init__). On a stall, httpx raises a
         # TimeoutException here instead of hanging forever; it propagates like any
         # other Ollama error (think() catches it, router bounds it, callers degrade).
-        resp = self._client.chat(**chat_kwargs)
+        with get_local_compute_coordinator().lease(
+            "text",
+            model=model or self.model,
+            # Some lightweight adapters/tests construct the brain via __new__
+            # and inject a client directly. Preserve that supported path while
+            # retaining the production instance timeout.
+            timeout_s=float(getattr(self, "_http_timeout", _OLLAMA_HTTP_TIMEOUT)),
+        ):
+            resp = self._client.chat(**chat_kwargs)
         content = resp.get("message", {}).get("content", "")
         return content.strip()
 

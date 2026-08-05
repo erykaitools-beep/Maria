@@ -78,8 +78,9 @@ class StateInterpreter:
         cpu_load = smoothed_resource.cpu_percent
         memory_pressure = smoothed_resource.memory_pressure
 
-        # Thermal stress (0-1 scale, 60°C = 0, 95°C = 1)
-        thermal_stress = max(0, min(1, (smoothed_resource.temp_c - 60) / 35))
+        # Thermal safety uses the current real reading, not an EMA that could
+        # delay the stop edge. Other noisy resource metrics remain smoothed.
+        thermal_stress = max(0, min(1, (resource.temp_c - 60) / 35))
 
         return {
             "timestamp": resource.timestamp,
@@ -91,7 +92,9 @@ class StateInterpreter:
             "thermal_stress": thermal_stress,
             "memory_pressure": memory_pressure,
             "disk_used_pct": smoothed_resource.disk_used_pct,
-            "temp_c": smoothed_resource.temp_c,
+            "temp_c": resource.temp_c,
+            "smoothed_temp_c": smoothed_resource.temp_c,
+            "temp_available": resource.temp_available,
 
             # Numeric cognitive values (telemetry only; the boolean gate flags
             # coherence_ok/errors_high/goal_stack_runaway/attention_dispersed and
@@ -160,6 +163,7 @@ class StateInterpreter:
             process_count=metrics.process_count,
             temp_c=self._smoothed_temp,
             inference_latency_ms=self._smoothed_latency,
+            temp_available=metrics.temp_available,
         )
 
     def get_trend(self, metric_name: str, window: int = 5) -> str:

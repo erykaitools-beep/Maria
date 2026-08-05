@@ -568,19 +568,23 @@ class EvidenceCollector:
                 image_b64 = base64.b64encode(f.read()).decode("utf-8")
 
             # Call LLaVA via Ollama (cold start can take up to 90s)
-            resp = _requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "llava",
-                    "prompt": (
-                        "Describe exactly what you see in this image in 2-3 sentences. "
-                        "Name specific objects, colors, and surroundings. Be concrete."
-                    ),
-                    "images": [image_b64],
-                    "stream": False,
-                },
-                timeout=120,
-            )
+            from agent_core.llm.local_compute import get_local_compute_coordinator
+            with get_local_compute_coordinator().lease(
+                "vision", model="llava", timeout_s=120.0,
+            ):
+                resp = _requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={
+                        "model": "llava",
+                        "prompt": (
+                            "Describe exactly what you see in this image in 2-3 sentences. "
+                            "Name specific objects, colors, and surroundings. Be concrete."
+                        ),
+                        "images": [image_b64],
+                        "stream": False,
+                    },
+                    timeout=120,
+                )
             if resp.status_code == 200:
                 result = resp.json().get("response", "").strip()
                 if result:

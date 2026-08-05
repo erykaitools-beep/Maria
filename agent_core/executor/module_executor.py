@@ -43,6 +43,7 @@ class ModuleExecutor:
         "semantic_consistency_check",
         "interrupt_goal_refinement",
         "reduce_batch_size",
+        "restore_batch_size",
     ]
 
     def __init__(self):

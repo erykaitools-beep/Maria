@@ -1,8 +1,7 @@
 """Tests for model warm-up (agent_core/llm/warmup.py).
 
-Cold-start exam fix (2026-06-04): on daemon start, warm the exam models
-(student=llama3.1, grader=qwen3) with one small real generation each so the
-first exam doesn't pay the cold-start inference penalty. See module docstring.
+Cold-start warm-up with the 2026-08-05 thermal guard: startup may warm one 8B
+model only, after temperature/CPU checks and through the shared compute gate.
 """
 
 import threading
@@ -46,13 +45,14 @@ class TestWarmUpModels:
         assert all(r["ok"] for r in results.values())
         assert set(results) == {"a:1", "b:2"}
 
-    def test_default_models_are_student_and_grader(self):
+    def test_default_startup_warms_only_one_8b_model(self):
         client = _ok_client()
         with patch.object(warmup, "get_ollama_client", return_value=client):
             results = warm_up_models()
         assert set(results) == set(DEFAULT_WARMUP_MODELS)
         assert "llama3.1:8b" in results
-        assert "qwen3:8b" in results
+        assert "qwen3:8b" not in results
+        assert len(results) == 1
 
     def test_one_model_failure_does_not_abort_the_others(self):
         client = MagicMock()
@@ -98,27 +98,76 @@ class TestStartBackgroundWarmup:
         monkeypatch.setenv("MARIA_WARMUP", "1")
         client = _ok_client()
         with patch.object(warmup, "get_ollama_client", return_value=client):
-            t = start_background_warmup(model_tags=["a:1", "b:2"], delay_sec=0)
+            t = start_background_warmup(
+                model_tags=["a:1", "b:2"], delay_sec=0,
+                cpu_percent_fn=lambda: 0.0,
+            )
             assert isinstance(t, threading.Thread)
             t.join(timeout=5)
         assert not t.is_alive()
-        assert client.generate.call_count == 2
+        assert client.generate.call_count == 1
+        assert client.generate.call_args.kwargs["model"] == "a:1"
 
     def test_env_overrides_model_list(self, monkeypatch):
         monkeypatch.setenv("MARIA_WARMUP", "1")
         monkeypatch.setenv("MARIA_WARMUP_MODELS", "x:9, y:9")
         client = _ok_client()
         with patch.object(warmup, "get_ollama_client", return_value=client):
-            t = start_background_warmup(delay_sec=0)
+            t = start_background_warmup(
+                delay_sec=0, cpu_percent_fn=lambda: 0.0,
+            )
             t.join(timeout=5)
         called_models = {c.kwargs["model"] for c in client.generate.call_args_list}
-        assert called_models == {"x:9", "y:9"}
+        assert called_models == {"x:9"}
 
     def test_env_overrides_delay(self, monkeypatch):
         monkeypatch.setenv("MARIA_WARMUP", "1")
         monkeypatch.setenv("MARIA_WARMUP_DELAY", "0")
         client = _ok_client()
         with patch.object(warmup, "get_ollama_client", return_value=client):
-            t = start_background_warmup(model_tags=["a:1"])
+            t = start_background_warmup(
+                model_tags=["a:1"], cpu_percent_fn=lambda: 0.0,
+            )
             t.join(timeout=5)
         assert client.generate.call_count == 1
+
+    def test_busy_cpu_skips_startup_warmup(self, monkeypatch):
+        monkeypatch.setenv("MARIA_WARMUP", "1")
+        client = _ok_client()
+        with patch.object(warmup, "get_ollama_client", return_value=client):
+            t = start_background_warmup(
+                model_tags=["a:1"], delay_sec=0,
+                cpu_percent_fn=lambda: 99.0,
+            )
+            t.join(timeout=5)
+        client.generate.assert_not_called()
+
+    def test_hot_startup_skips_warmup(
+        self, monkeypatch, isolated_local_compute_coordinator,
+    ):
+        monkeypatch.setenv("MARIA_WARMUP", "1")
+        isolated_local_compute_coordinator.observe_temperature(80.0)
+        client = _ok_client()
+        with patch.object(warmup, "get_ollama_client", return_value=client):
+            t = start_background_warmup(
+                model_tags=["a:1"], delay_sec=0,
+                cpu_percent_fn=lambda: 0.0,
+            )
+            t.join(timeout=5)
+        assert t.cancel_event.is_set()
+        client.generate.assert_not_called()
+
+    def test_nim_resource_exhausted_cancels_startup_warmup(
+        self, monkeypatch, isolated_local_compute_coordinator,
+    ):
+        monkeypatch.setenv("MARIA_WARMUP", "1")
+        isolated_local_compute_coordinator.note_nim_resource_exhausted(60.0)
+        client = _ok_client()
+        with patch.object(warmup, "get_ollama_client", return_value=client):
+            t = start_background_warmup(
+                model_tags=["a:1"], delay_sec=0,
+                cpu_percent_fn=lambda: 0.0,
+            )
+            t.join(timeout=5)
+        assert t.cancel_event.is_set()
+        client.generate.assert_not_called()

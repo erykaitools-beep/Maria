@@ -109,7 +109,9 @@ def wire_proactive_generators(gen, ctx, core, proactive) -> None:
         gen.set_mode_fn(lambda: core.get_state().get("mode", "?"))
 
 
-def _wire_executor_modules(executor, core, memory_manager, llm_manager):
+def _wire_executor_modules(
+    executor, core, memory_manager, llm_manager, compute_coordinator=None,
+):
     """Register modules so homeostasis corrective signals reach REAL handlers.
 
     Incremental wiring (2026-06-14 audit, Rank 5 -- the executor was None for
@@ -122,10 +124,10 @@ def _wire_executor_modules(executor, core, memory_manager, llm_manager):
       running (idempotent, guarded -- the safe self-throttle under CPU/thermal
       pressure). ``resume`` is a no-op marker: teacher START is owned by the
       planner / learning window, not here.
-    - ``llm`` / ``metacontroller`` -> RECORD-ONLY handlers. No real knob exists
-      yet (CPU-only box, mutex-serialized inference), but the signal is now
-      logged + kept in signal_history instead of vanishing. Real effects are a
-      follow-up once the visibility event log shows them actually firing.
+    - ``llm`` -> a real thermal guard: reject new local inference, cancel
+      registered background work, and request unload of every local model.
+      Cooling is released only below the lower hysteresis threshold.
+    - ``metacontroller`` remains record-only (unrelated legacy corrective).
     """
     executor.register_module("memory", memory_manager)
 
@@ -147,6 +149,61 @@ def _wire_executor_modules(executor, core, memory_manager, llm_manager):
         {"pause": _learn_pause, "resume": _learn_resume},
     )
 
+    if compute_coordinator is None:
+        from agent_core.llm.local_compute import get_local_compute_coordinator
+        compute_coordinator = get_local_compute_coordinator()
+
+    def _emergency_unload():
+        scheduler = getattr(core, "_model_scheduler", None)
+        if scheduler is None or not hasattr(scheduler, "emergency_unload_all"):
+            return {"requested": [], "unloaded": [], "failed": []}
+        try:
+            return scheduler.emergency_unload_all()
+        except Exception as exc:
+            logger.warning("[Homeostasis] Emergency model unload failed: %s", exc)
+            return {"requested": [], "unloaded": [], "failed": [str(exc)]}
+
+    def _llm_reduce_batch_size(factor=0.5, temp_c=None, **_):
+        if hasattr(llm_manager, "reduce_batch_size"):
+            llm_manager.reduce_batch_size(factor=factor)
+        cooling = compute_coordinator.enter_cooling(temp_c=temp_c)
+        unload = _emergency_unload()
+        return {
+            "acknowledged": True,
+            "handler": "llm.reduce_batch_size",
+            "effect": "thermal_cooling_active",
+            "cooling": cooling,
+            "model_unload": unload,
+        }
+
+    def _llm_restore_batch_size(temp_c=None, **_):
+        cooling = compute_coordinator.exit_cooling(temp_c=temp_c)
+        if cooling.get("cooling"):
+            return {
+                "acknowledged": False,
+                "handler": "llm.restore_batch_size",
+                "effect": "cooling_held",
+                "cooling": cooling,
+            }
+        if hasattr(llm_manager, "restore_batch_size"):
+            llm_manager.restore_batch_size()
+        return {
+            "acknowledged": True,
+            "handler": "llm.restore_batch_size",
+            "effect": "thermal_cooling_released",
+            "cooling": cooling,
+        }
+
+    def _llm_minimize(**_):
+        if hasattr(llm_manager, "minimize"):
+            llm_manager.minimize()
+        return {
+            "acknowledged": True,
+            "handler": "llm.minimize",
+            "effect": "models_unload_requested",
+            "model_unload": _emergency_unload(),
+        }
+
     def _record_only(label):
         def _handler(**_):
             return {"acknowledged": True, "handler": label,
@@ -154,8 +211,9 @@ def _wire_executor_modules(executor, core, memory_manager, llm_manager):
         return _handler
 
     executor.register_module("llm", llm_manager, {
-        "minimize": _record_only("llm.minimize"),
-        "reduce_batch_size": _record_only("llm.reduce_batch_size"),
+        "minimize": _llm_minimize,
+        "reduce_batch_size": _llm_reduce_batch_size,
+        "restore_batch_size": _llm_restore_batch_size,
     })
     executor.register_module("metacontroller", core, {
         "interrupt_goal_refinement": _record_only(
@@ -254,10 +312,9 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"[Homeostasis] SemanticMemory failed: {e}")
 
-        # Warm-pin exam models (student=llama3.1, grader=qwen3) so the first
-        # exam after a restart doesn't pay the cold-start inference penalty
-        # (~8 min of 240s timeouts, 2026-06-04). Background thread, ENV-gated
-        # (MARIA_WARMUP=0 to disable). Runs even without SemanticMemory.
+        # Warm at most one 8B model (llama3.1) after temperature + CPU gates.
+        # qwen3 remains on-demand so startup cannot overlap two 8B warm-ups
+        # with bge-m3 indexing. ENV-gated (MARIA_WARMUP=0 to disable).
         if core:
             try:
                 from agent_core.llm.warmup import start_background_warmup
@@ -1437,25 +1494,31 @@ class HomeostasisModule(MariaModule):
                 def _llava_describe(prompt: str, image_b64: str):
                     """Call the scene vision model via Ollama /api/generate."""
                     import requests
+                    from agent_core.llm.local_compute import (
+                        get_local_compute_coordinator,
+                    )
                     try:
-                        resp = requests.post(
-                            "http://localhost:11434/api/generate",
-                            json={
-                                "model": vision_model,
-                                "prompt": prompt,
-                                "images": [image_b64],
-                                "stream": False,
-                            },
-                            # Measured 2026-07-25 on this CPU (num_predict=200):
-                            #   llava      image 75s + gen 40s (5.0 tok/s)
-                            #   gemma3:4b  image 20s + gen 20s (8.3 tok/s)
-                            # Warm inference fits easily, but a COLD load costs
-                            # ~175s on top -- the old 120s killed the first call
-                            # after ModelScheduler unloaded the model. The
-                            # advisor runs in a thread and never blocks the tick,
-                            # so a generous ceiling is free.
-                            timeout=300,
-                        )
+                        with get_local_compute_coordinator().lease(
+                            "vision", model=vision_model, timeout_s=300.0,
+                        ):
+                            resp = requests.post(
+                                "http://localhost:11434/api/generate",
+                                json={
+                                    "model": vision_model,
+                                    "prompt": prompt,
+                                    "images": [image_b64],
+                                    "stream": False,
+                                },
+                                # Measured 2026-07-25 on this CPU (num_predict=200):
+                                #   llava      image 75s + gen 40s (5.0 tok/s)
+                                #   gemma3:4b  image 20s + gen 20s (8.3 tok/s)
+                                # Warm inference fits easily, but a COLD load costs
+                                # ~175s on top -- the old 120s killed the first call
+                                # after ModelScheduler unloaded the model. The
+                                # advisor runs in a thread and never blocks the tick,
+                                # so a generous ceiling is free.
+                                timeout=300,
+                            )
                         if resp.status_code == 200:
                             return resp.json().get("response", "")
                     except Exception as e:

@@ -25,6 +25,7 @@ Usage:
 """
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -83,7 +84,8 @@ class SemanticMemory:
 
     def index_batch(self, namespace: str,
                     entries: List[Tuple],
-                    extra_metadata: Optional[Dict[str, Any]] = None) -> int:
+                    extra_metadata: Optional[Dict[str, Any]] = None,
+                    cancel_event: Optional[threading.Event] = None) -> int:
         """Embed and store multiple texts. Returns count indexed.
 
         Args:
@@ -102,7 +104,12 @@ class SemanticMemory:
             meta["namespace"] = namespace
             batch.append((entry_id, text, meta))
 
-        count = self._store.add_texts_batch(batch, self._model)
+        if cancel_event is None:
+            count = self._store.add_texts_batch(batch, self._model)
+        else:
+            count = self._store.add_texts_batch(
+                batch, self._model, cancel_event=cancel_event,
+            )
         if count > 0:
             logger.info(
                 f"[SEMANTIC] Indexed {count}/{len(entries)} texts "

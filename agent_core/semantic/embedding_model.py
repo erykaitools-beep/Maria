@@ -13,10 +13,16 @@ import hashlib
 import logging
 import math
 import os
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
 import requests
+
+from agent_core.llm.local_compute import (
+    LocalComputeBlocked,
+    get_local_compute_coordinator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +155,11 @@ class EmbeddingModel:
             self._cache[cache_key] = vec
         return vec
 
-    def embed_batch(self, texts: List[str]) -> List[List[float]]:
+    def embed_batch(
+        self,
+        texts: List[str],
+        cancel_event: Optional[threading.Event] = None,
+    ) -> List[List[float]]:
         """Embed multiple texts. Returns list of vectors (same order as input).
 
         Texts already in cache are served from cache. Only uncached texts
@@ -178,9 +188,13 @@ class EmbeddingModel:
         # Batch embed uncached texts
         if uncached_texts:
             for batch_start in range(0, len(uncached_texts), MAX_BATCH_SIZE):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 batch = uncached_texts[batch_start:batch_start + MAX_BATCH_SIZE]
                 batch_indices = uncached_indices[batch_start:batch_start + MAX_BATCH_SIZE]
-                embeddings = self._call_ollama(batch)
+                embeddings = self._call_ollama(
+                    batch, cancel_event=cancel_event,
+                )
 
                 for j, vec in enumerate(embeddings):
                     idx = batch_indices[j]
@@ -244,19 +258,33 @@ class EmbeddingModel:
 
     # --- Internal ---
 
-    def _call_ollama(self, texts: List[str]) -> List[List[float]]:
+    def _call_ollama(
+        self,
+        texts: List[str],
+        cancel_event: Optional[threading.Event] = None,
+    ) -> List[List[float]]:
         """Call Ollama /api/embed endpoint."""
         self._total_requests += 1
         start = time.time()
 
         try:
-            resp = requests.post(
-                f"{self._url}{EMBED_ENDPOINT}",
-                json={"model": self._model, "input": texts},
-                timeout=REQUEST_TIMEOUT,
-            )
+            with get_local_compute_coordinator().lease(
+                "embedding",
+                model=self._model,
+                timeout_s=REQUEST_TIMEOUT[1],
+                cancel_event=cancel_event,
+            ):
+                resp = requests.post(
+                    f"{self._url}{EMBED_ENDPOINT}",
+                    json={"model": self._model, "input": texts},
+                    timeout=REQUEST_TIMEOUT,
+                )
             elapsed_ms = (time.time() - start) * 1000
             self._total_latency_ms += elapsed_ms
+
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("[SEMANTIC] Embedding result discarded after cancellation")
+                return [[] for _ in texts]
 
             if resp.status_code != 200:
                 self._total_errors += 1
@@ -284,6 +312,10 @@ class EmbeddingModel:
         except requests.exceptions.ConnectionError:
             self._total_errors += 1
             logger.warning("[SEMANTIC] Ollama not reachable for embeddings")
+            return [[] for _ in texts]
+        except LocalComputeBlocked as e:
+            self._total_errors += 1
+            logger.info("[SEMANTIC] Embedding blocked: %s", e)
             return [[] for _ in texts]
         except Exception as e:
             self._total_errors += 1

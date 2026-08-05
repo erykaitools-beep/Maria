@@ -16,6 +16,8 @@ from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from enum import Enum
 from dataclasses import dataclass
 
+from agent_core.llm.local_compute import THERMAL_RESUME_C, THERMAL_STOP_C
+
 if TYPE_CHECKING:
     from .event_logger import HomeostasisEventLogger
 
@@ -91,8 +93,10 @@ class CorrectiveActionGenerator:
         self._cpu_pause_cooldown = 300  # 5 minutes
         self._last_alert_snapshot_request = 0
         self._alert_snapshot_cooldown = 300  # 5 minutes
-        self._last_thermal_request = 0
-        self._thermal_cooldown = 300  # 5 minutes
+        # Thermal protection is edge-triggered with hysteresis.  A cooldown is
+        # insufficient here: it reissues pauses while hot and provides no safe
+        # condition for resuming.  The latch stays set throughout 70-80C.
+        self._thermal_cooling = False
 
     def generate_actions(
         self,
@@ -169,29 +173,36 @@ class CorrectiveActionGenerator:
                 ))
                 self._last_alert_snapshot_request = now
 
-        # Action 7: Thermal throttling
+        # Action 7: Thermal protection with hysteresis
         temp_c = state.get("temp_c", 50)
-        if temp_c > 85:
-            # Check cooldown: both signals are idempotent (batch stays reduced,
-            # learning stays paused), so re-issuing every hot tick only spams
-            # the event log — same rationale as the CPU pause above.
-            if now - self._last_thermal_request > self._thermal_cooldown:
-                actions.append(CorrectiveAction(
-                    action_type=ActionType.SIGNAL_MODULE,
-                    target="llm",
-                    action="reduce_batch_size",
-                    urgency=Urgency.IMMEDIATE,
-                    reason=f"Thermal stress at {temp_c:.1f}°C",
-                    parameters={"factor": 0.5},
-                ))
-                actions.append(CorrectiveAction(
-                    action_type=ActionType.SIGNAL_MODULE,
-                    target="learning_engine",
-                    action="pause",
-                    urgency=Urgency.IMMEDIATE,
-                    reason=f"Thermal stress at {temp_c:.1f}°C",
-                ))
-                self._last_thermal_request = now
+        temp_available = state.get("temp_available", True)
+        if temp_available and temp_c >= THERMAL_STOP_C and not self._thermal_cooling:
+            self._thermal_cooling = True
+            actions.append(CorrectiveAction(
+                action_type=ActionType.SIGNAL_MODULE,
+                target="llm",
+                action="reduce_batch_size",
+                urgency=Urgency.IMMEDIATE,
+                reason=f"Thermal stress at {temp_c:.1f}°C",
+                parameters={"factor": 0.5, "temp_c": temp_c},
+            ))
+            actions.append(CorrectiveAction(
+                action_type=ActionType.SIGNAL_MODULE,
+                target="learning_engine",
+                action="pause",
+                urgency=Urgency.IMMEDIATE,
+                reason=f"Thermal stress at {temp_c:.1f}°C",
+            ))
+        elif temp_available and temp_c <= THERMAL_RESUME_C and self._thermal_cooling:
+            self._thermal_cooling = False
+            actions.append(CorrectiveAction(
+                action_type=ActionType.SIGNAL_MODULE,
+                target="llm",
+                action="restore_batch_size",
+                urgency=Urgency.SOON,
+                reason=f"Thermal recovery at {temp_c:.1f}°C",
+                parameters={"temp_c": temp_c},
+            ))
 
         # Track actions for reporting
         self._recent_actions = actions

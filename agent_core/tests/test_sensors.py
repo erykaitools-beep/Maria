@@ -186,6 +186,18 @@ class TestThermalSensor:
         assert metrics is not None
         assert hasattr(metrics, 'cpu_temp_c')
         assert hasattr(metrics, 'is_throttling')
+        assert hasattr(metrics, 'reading_available')
+
+    def test_fallback_is_marked_unavailable(self, monkeypatch):
+        """A numeric fallback must not masquerade as a safe sensor reading."""
+        sensor = ThermalSensor()
+        monkeypatch.setattr(sensor, "_read_linux_thermal", lambda: None)
+        monkeypatch.setattr(sensor, "_read_psutil_temp", lambda: None)
+
+        metrics = sensor.read_metrics()
+
+        assert metrics.cpu_temp_c == 50.0
+        assert metrics.reading_available is False
 
     def test_get_temperature(self):
         """Should return temperature in Celsius."""
@@ -214,11 +226,13 @@ class TestThermalSensor:
         assert isinstance(result, bool)
 
     def test_is_warning_check(self):
-        """Should detect warning temperature."""
+        """The operational warning starts at the 80C cooling ceiling."""
         sensor = ThermalSensor()
 
-        result = sensor.is_warning()
-        assert isinstance(result, bool)
+        sensor._last_temp = 79.9
+        assert sensor.is_warning() is False
+        sensor._last_temp = 80.0
+        assert sensor.is_warning() is True
 
 
 class TestPowerSensor:

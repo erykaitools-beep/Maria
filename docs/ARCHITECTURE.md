@@ -355,7 +355,17 @@ LEARN, EXAM, REVIEW, EVALUATE, MAINTENANCE, FETCH, EXPERIMENT, EFFECTOR, SELF_AN
 | MODEL-07 Encyclopedia | Codex CLI (ChatGPT) | 0GB | remote |
 | OpenClaw | qwen2.5:3b | 2GB | cold (separate instance) |
 
-**Golden rule:** MODEL-02 stays warm, the rest are on-demand. Heavy mutex: MODEL-01 and MODEL-03 never run at the same time.
+**Golden rule:** MODEL-02 may stay resident and the rest are on-demand, but all
+local CPU inference uses one process-wide lease. Text generation, vision,
+embedding (bge-m3), warm-up, and model loading never execute concurrently.
+At 80°C the lease enters a cooling latch, cancels registered warm-up/indexing,
+blocks Ollama fallbacks, and requests unload of resident models. It reopens only
+at or below 70°C from a real sensor reading. An NVIDIA NIM HTTP 503 suppresses
+local fallback and autonomous startup work for five minutes.
+
+Startup warm-up is limited to one 8B model (`llama3.1:8b`) and is skipped when
+CPU is at least 50%, temperature is unsafe/unavailable, or NIM fallback backoff
+is active. `qwen3:8b` is warmed on demand.
 
 **LLMRouter:** think() -> Ollama, analyze_task() -> NIM (Ollama fallback), ask_encyclopedia() -> Codex -> NIM -> Ollama
 
@@ -371,7 +381,9 @@ LEARN, EXAM, REVIEW, EVALUATE, MAINTENANCE, FETCH, EXPERIMENT, EFFECTOR, SELF_AN
   nomic-embed-text on 2026-07-25 — measured on this project's Polish corpus,
   bge-m3 hit top-5 on 100% of probe questions against nomic's 43%)
 - **VectorStore:** In-memory + JSONL persist, 4 namespaces (knowledge, beliefs, hints, memories)
-- **Auto-indexer:** Background indexing at startup + incremental after fetch/learn
+- **Auto-indexer:** Cancellable background indexing at startup + incremental
+  after fetch/learn; startup is skipped under CPU, thermal, or NIM pressure and
+  bge-m3 shares the single local-compute lease with text and vision
 - **275+ vectors** indexed
 
 **Data:** meta_data/semantic_vectors.jsonl

@@ -21,6 +21,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 
 from .state_model import Mode
+from agent_core.llm.local_compute import THERMAL_RESUME_C, THERMAL_STOP_C
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class ModeRegulator:
         self._operator_override: Optional[Tuple[Mode, float]] = None  # (mode, until_timestamp)
         self._cpu_spike_ticks: int = 0  # consecutive ticks above CPU_FOR_REDUCED_PCT
         self._startup_time: float = time.time()  # for startup grace period (CPU-only)
+        self._thermal_cooling: bool = False
 
     def decide_mode(
         self,
@@ -94,9 +96,24 @@ class ModeRegulator:
         Returns:
             Recommended mode
         """
+        temp_c = state.get("temp_c", 50)
+        temp_available = state.get("temp_available", True)
+        if temp_available and temp_c >= THERMAL_STOP_C:
+            self._thermal_cooling = True
+        elif temp_available and temp_c <= THERMAL_RESUME_C:
+            self._thermal_cooling = False
+
         # EMERGENCY: CRITICAL alerts override everything
         if any("CRITICAL" in alert for alert in alerts):
             return Mode.SURVIVAL
+
+        # Thermal safety also overrides operator/meta-controller mode requests.
+        # An ACTIVE override must never reopen background work while cooling.
+        if self._thermal_cooling:
+            self._stable_since = None
+            if self.current_mode in (Mode.ACTIVE, Mode.REDUCED):
+                return Mode.REDUCED
+            return self.current_mode
 
         # Check operator override (time-limited)
         if self._operator_override:

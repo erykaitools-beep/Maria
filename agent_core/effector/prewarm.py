@@ -18,6 +18,8 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
+from agent_core.llm.local_compute import get_local_compute_coordinator
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +56,11 @@ def warm_ollama_model(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            resp.read()
+        with get_local_compute_coordinator().lease(
+            "text", model=model, timeout_s=timeout_s,
+        ):
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                resp.read()
         logger.info(
             "[Prewarm] Ollama model '%s' warmed (keep_alive=%s)",
             model, keep_alive,

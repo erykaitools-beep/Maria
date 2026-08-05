@@ -8,6 +8,7 @@ import json
 import time
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock
 
 import pytest
@@ -373,6 +374,30 @@ class TestModelSchedulerForceUnload:
             options={"num_predict": 1},
             keep_alive="0",
         )
+
+
+class TestModelSchedulerEmergencyUnload:
+    """Thermal unload targets resident models without loading cold ones."""
+
+    @patch("agent_core.llm.model_scheduler.requests.post")
+    @patch("agent_core.llm.model_scheduler.requests.get")
+    def test_unloads_only_tracked_active_or_resident(
+        self, mock_get, mock_post, scheduler, mock_psutil, mock_ollama,
+        isolated_local_compute_coordinator,
+    ):
+        scheduler.register_running_model(ModelRole.EXECUTOR, "llama3.1:8b")
+        mock_get.return_value = SimpleNamespace(
+            status_code=200,
+            json=lambda: {"models": [{"name": "bge-m3:latest"}]},
+        )
+        mock_post.return_value = SimpleNamespace(status_code=200)
+
+        result = scheduler.emergency_unload_all()
+
+        assert result["requested"] == ["bge-m3:latest", "llama3.1:8b"]
+        requested = {call.kwargs["json"]["model"] for call in mock_post.call_args_list}
+        assert requested == {"bge-m3:latest", "llama3.1:8b"}
+        assert "qwen3:8b" not in requested
 
 
 class TestModelSchedulerRecordRequest:

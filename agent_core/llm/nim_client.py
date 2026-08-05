@@ -217,6 +217,15 @@ class NIMClient:
                     logger.error(
                         f"NIM API error {response.status_code}: {error_msg}"
                     )
+                    if response.status_code == 503:
+                        # A local fallback stampede after ResourceExhausted was
+                        # the direct trigger for the thermal incident.  Mark it
+                        # before raising so every router/client instance sees
+                        # the same short safety backoff.
+                        from agent_core.llm.local_compute import (
+                            get_local_compute_coordinator,
+                        )
+                        get_local_compute_coordinator().note_nim_resource_exhausted()
                     raise NIMAPIError(
                         f"HTTP {response.status_code}: {error_msg}"
                     )

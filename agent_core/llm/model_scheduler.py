@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import psutil
+import requests
 
 try:
     import ollama as ollama_lib
@@ -33,10 +34,14 @@ except ImportError:
 # would block the main loop forever (2026-06-02 freeze class). The shared client's
 # httpx read-timeout bounds them so a stall raises instead of hanging the tick.
 from .execution_budget import get_ollama_client
+from .local_compute import (
+    LocalComputeBlocked,
+    get_local_compute_coordinator,
+)
 
 from .model_registry import (
     ModelRole, ModelSpec, ConcurrencyClass, WarmState,
-    get_model, get_heavy_models, list_models,
+    get_model, get_heavy_models,
     RAM_EMERGENCY_FREE, LATENCY_UNHEALTHY_COUNT,
 )
 
@@ -179,6 +184,16 @@ class ModelScheduler:
             return EnsureResult(
                 success=True, ollama_tag="", role=role,
                 reason="Rule-based (no model needed)",
+                wait_time_s=time.time() - start,
+            )
+
+        # Thermal cooling is fail-closed.  Do not turn a rejected role into a
+        # second local-model fallback: every Ollama role shares the same CPU.
+        if get_local_compute_coordinator().cooling:
+            return EnsureResult(
+                success=False,
+                role=role,
+                reason="Thermal cooling active; local model load blocked",
                 wait_time_s=time.time() - start,
             )
 
@@ -357,6 +372,75 @@ class ModelScheduler:
             self._release_heavy_if_owner("force_unload")
 
         return success
+
+    def emergency_unload_all(self) -> Dict[str, List[str]]:
+        """Best-effort unload of every model Maria may have loaded locally.
+
+        Thermal handling runs on the 1 Hz tick, so it must not inherit the
+        normal 240-second Ollama read timeout.  Short, parallel control calls
+        bound the whole action to roughly six seconds even when Ollama is busy.
+        The coordinator has already rejected new inference before this runs.
+        """
+        with self._lock:
+            tags = {loaded.ollama_tag for loaded in self._loaded.values()}
+            self._loaded.clear()
+
+        # Direct learning, embedding, and vision calls bypass the scheduler's
+        # registry, but the process-wide lease records whichever one is active.
+        active_model = get_local_compute_coordinator().snapshot().get("active_model")
+        if active_model:
+            tags.add(str(active_model))
+
+        # Include other models that are genuinely resident. Never issue unload
+        # calls for every registry tag: Ollama may load a cold model in order to
+        # honour such a request, which is the opposite of an emergency stop.
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        try:
+            response = requests.get(
+                f"{base_url.rstrip('/')}/api/ps",
+                timeout=(1.0, 2.0),
+            )
+            if response.status_code == 200:
+                for item in response.json().get("models", []):
+                    tag = item.get("name") or item.get("model")
+                    if tag:
+                        tags.add(str(tag))
+        except Exception as exc:
+            logger.warning("[ModelScheduler] Emergency /api/ps failed: %s", exc)
+
+        tags = {tag for tag in tags if tag}
+
+        results: Dict[str, bool] = {}
+        results_lock = threading.Lock()
+
+        def _stop(tag: str) -> None:
+            ok = self._ollama_unload(tag, emergency=True)
+            with results_lock:
+                results[tag] = ok
+
+        threads = [
+            threading.Thread(
+                target=_stop,
+                args=(tag,),
+                name=f"thermal-unload-{tag}",
+                daemon=True,
+            )
+            for tag in sorted(tags)
+        ]
+        for thread in threads:
+            thread.start()
+        deadline = time.monotonic() + 6.0
+        for thread in threads:
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+        requested = sorted(tags)
+        unloaded = sorted(tag for tag, ok in results.items() if ok)
+        failed = sorted(tag for tag in tags if not results.get(tag, False))
+        logger.warning(
+            "[ModelScheduler] Thermal unload requested=%s unloaded=%s failed=%s",
+            requested, unloaded, failed,
+        )
+        return {"requested": requested, "unloaded": unloaded, "failed": failed}
 
     def record_request(self, role: ModelRole, latency_s: float) -> None:
         """
@@ -551,18 +635,24 @@ class ModelScheduler:
             return False
 
         try:
-            client.generate(
-                model=ollama_tag,
-                prompt=" ",
-                options={"num_predict": 1},
-                keep_alive="10m",
-            )
+            with get_local_compute_coordinator().lease(
+                "model_load", model=ollama_tag, timeout_s=60.0,
+            ):
+                client.generate(
+                    model=ollama_tag,
+                    prompt=" ",
+                    options={"num_predict": 1},
+                    keep_alive="10m",
+                )
             return True
+        except LocalComputeBlocked as e:
+            logger.info("[ModelScheduler] Load blocked for %s: %s", ollama_tag, e)
+            return False
         except Exception as e:
             logger.warning(f"[ModelScheduler] Failed to load {ollama_tag}: {e}")
             return False
 
-    def _ollama_unload(self, ollama_tag: str) -> bool:
+    def _ollama_unload(self, ollama_tag: str, emergency: bool = False) -> bool:
         """
         Unload a model from Ollama memory.
 
@@ -571,6 +661,28 @@ class ModelScheduler:
         Returns:
             True if unloaded successfully
         """
+        if emergency:
+            base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+            try:
+                response = requests.post(
+                    f"{base_url.rstrip('/')}/api/generate",
+                    json={
+                        "model": ollama_tag,
+                        "prompt": "",
+                        "stream": False,
+                        "keep_alive": 0,
+                        "options": {"num_predict": 1},
+                    },
+                    timeout=(1.0, 5.0),
+                )
+                return response.status_code == 200
+            except Exception as e:
+                logger.warning(
+                    "[ModelScheduler] Emergency unload failed for %s: %s",
+                    ollama_tag, e,
+                )
+                return False
+
         client = get_ollama_client()
         if client is None:
             return False

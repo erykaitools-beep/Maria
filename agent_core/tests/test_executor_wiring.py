@@ -13,6 +13,7 @@ from agent_core.homeostasis.actions import ActionType, CorrectiveAction, Urgency
 from agent_core.homeostasis.core import HomeostasisCore
 from agent_core.homeostasis.event_logger import HomeostasisEventLogger
 from agent_core.llm.manager import LLMManager
+from agent_core.llm.local_compute import LocalComputeCoordinator
 from agent_core.memory.manager import MemoryManager
 from agent_core.modules.homeostasis_module import _wire_executor_modules
 from agent_core.teacher.teacher_agent import TeacherAgent
@@ -35,7 +36,10 @@ def test_consolidate_episodic_reports_not_implemented_honestly():
 def _wire(teacher=None):
     ex = ModuleExecutor()
     core = SimpleNamespace(_teacher_agent=teacher)
-    _wire_executor_modules(ex, core, MemoryManager(), object())
+    _wire_executor_modules(
+        ex, core, MemoryManager(), LLMManager(),
+        compute_coordinator=LocalComputeCoordinator(),
+    )
     return ex, core
 
 
@@ -78,11 +82,13 @@ def test_learning_pause_never_raises_on_teacher_error():
     assert "boom" in resp["error"]
 
 
-def test_llm_and_metacontroller_are_record_only():
+def test_thermal_llm_action_is_real_and_metacontroller_remains_record_only():
     ex, _ = _wire()
-    llm = ex.signal_module("llm", "reduce_batch_size", factor=0.5)
+    llm = ex.signal_module("llm", "reduce_batch_size", factor=0.5, temp_c=80.0)
     meta = ex.signal_module("metacontroller", "interrupt_goal_refinement")
-    assert llm["effect"] == "recorded_only"
+    assert llm["effect"] == "thermal_cooling_active"
+    assert llm["cooling"]["cooling"] is True
+    assert llm["effect"] != "recorded_only"
     assert meta["effect"] == "recorded_only"
 
 

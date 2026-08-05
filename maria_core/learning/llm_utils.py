@@ -19,6 +19,7 @@ from maria_core.sys.config import (
     MAX_RETRIES_OLLAMA,
     OLLAMA_KEEP_ALIVE,
 )
+from agent_core.llm.local_compute import get_local_compute_coordinator
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,10 @@ def call_ollama(prompt: str, model: str = OLLAMA_MODEL, temperature: float = OLL
 
     for attempt in range(MAX_RETRIES_OLLAMA):
         try:
-            response = requests.post(url, json=payload, timeout=timeout)
+            with get_local_compute_coordinator().lease(
+                "text", model=model, timeout_s=float(timeout),
+            ):
+                response = requests.post(url, json=payload, timeout=timeout)
             response.raise_for_status()
             result = response.json()
             return result.get('response', '').strip()

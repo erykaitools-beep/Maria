@@ -13,25 +13,30 @@ b12dd7f mylnie nazwano "warm-pin": dal tylko keep_alive=30m (model zostaje w RAM
 PO zaladowaniu), ale nie laduje modelu proaktywnie -- po dlugiej przerwie i tak
 cold-startuje.
 
-Fix: przy starcie wykonaj MALA REALNA generacje na kazdym modelu egzaminacyjnym
-(student=llama3.1, grader=qwen3). To rozgrzewa wagi w RAM + compute kernels + CPU
-governor, tak ze pierwszy prawdziwy egzamin leci jak "warm" (bez 240s timeoutu).
+Fix historyczny rozgrzewal oba modele egzaminacyjne. Po incydencie termicznym
+2026-08-05 startup moze wykonac MALA REALNA generacje tylko na jednym modelu
+(student=llama3.1), i tylko gdy prawdziwy czujnik temperatury oraz CPU wskazuja
+bezpieczny stan. Grader qwen3 rozgrzewa sie na zadanie przez wspolna bramke CPU.
 Pusty-promptowy preload (done_reason=load) NIE wystarcza -- nie wykonuje
 forward-pass, wiec nie rozgrzewa sciezki inferencji.
 
-Idzie ta sama droga co egzamin (lokalne Ollama, ten sam serwer), wiec warm modele
-sa gotowe niezaleznie od tego, ze egzamin uzywa surowego call_ollama (omija
-ModelScheduler). Calls sa bounded przez shared client (httpx read-timeout) +
-call_with_timeout, zgodnie z lekcja z 2026-06-02 (zaden niezatrzymywalny call).
+Wywolanie jest anulowalne miedzy zadaniami, serializowane z tekstem, vision i
+bge-m3 oraz bounded przez shared client (httpx read-timeout) + call_with_timeout.
 """
 
 import logging
 import os
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+import psutil
 
 from .execution_budget import call_with_timeout, get_ollama_client
+from .local_compute import (
+    LocalComputeBlocked,
+    get_local_compute_coordinator,
+)
 
 try:
     from maria_core.sys.config import OLLAMA_KEEP_ALIVE as _DEFAULT_KEEP_ALIVE
@@ -41,9 +46,10 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 
-# Modele egzaminacyjne do rozgrzania: student (llama3.1) + grader (qwen3).
-# Autor pytan jest na NIM (zdalny), wiec nie wymaga rozgrzania.
-DEFAULT_WARMUP_MODELS = ["llama3.1:8b", "qwen3:8b"]
+# Startup may warm at most one 8B model automatically.  Warming both the student
+# and grader before any real work was the boot-time heat source; qwen3 now warms
+# on demand through the shared local-compute gate.
+DEFAULT_WARMUP_MODELS = ["llama3.1:8b"]
 
 # Krotka generacja wystarczy do rozgrzania compute path; nie potrzeba pelnego
 # kontekstu egzaminu (KV-cache alokacja to nie glowny koszt cold-startu).
@@ -59,6 +65,7 @@ _WARMUP_TIMEOUT_S = 120.0
 # krotszy niz indekser (60s), zeby modele byly cieple zanim ruszy ciezki embed
 # i zanim operator wysle /teacher zaraz po /restart.
 STARTUP_DELAY_SEC = 30
+STARTUP_CPU_LIMIT_PCT = 50.0
 
 
 def warm_up_models(
@@ -67,6 +74,7 @@ def warm_up_models(
     num_predict: int = _WARMUP_NUM_PREDICT,
     prompt: str = _WARMUP_PROMPT,
     timeout_s: float = _WARMUP_TIMEOUT_S,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Dict]:
     """Rozgrzej podane modele jedna mala generacja kazdy (sekwencyjnie).
 
@@ -91,6 +99,7 @@ def warm_up_models(
         model_tags = DEFAULT_WARMUP_MODELS
 
     results: Dict[str, Dict] = {}
+    coordinator = get_local_compute_coordinator()
 
     client = get_ollama_client()
     if client is None:
@@ -100,22 +109,48 @@ def warm_up_models(
         return results
 
     for tag in model_tags:
+        if cancel_event is not None and cancel_event.is_set():
+            results[tag] = {
+                "ok": False, "latency_s": 0.0, "error": "cancelled",
+                "cancelled": True,
+            }
+            continue
         start = time.time()
         try:
+            def _generate(t=tag):
+                with coordinator.lease(
+                    "warmup", model=t, timeout_s=timeout_s,
+                    cancel_event=cancel_event,
+                ):
+                    return client.generate(
+                        model=t,
+                        prompt=prompt,
+                        stream=False,
+                        keep_alive=keep_alive,
+                        options={"num_predict": num_predict},
+                    )
+
             call_with_timeout(
-                lambda t=tag: client.generate(
-                    model=t,
-                    prompt=prompt,
-                    stream=False,
-                    keep_alive=keep_alive,
-                    options={"num_predict": num_predict},
-                ),
+                _generate,
                 timeout_sec=timeout_s,
                 label=f"warmup {tag}",
             )
             latency = time.time() - start
+            if cancel_event is not None and cancel_event.is_set():
+                results[tag] = {
+                    "ok": False, "latency_s": latency, "error": "cancelled",
+                    "cancelled": True,
+                }
+                continue
             results[tag] = {"ok": True, "latency_s": latency, "error": None}
             logger.info(f"[WARMUP] {tag} warmed in {latency:.1f}s (keep_alive={keep_alive})")
+        except LocalComputeBlocked as e:
+            latency = time.time() - start
+            results[tag] = {
+                "ok": False, "latency_s": latency, "error": str(e),
+                "cancelled": True,
+            }
+            logger.info("[WARMUP] %s blocked: %s", tag, e)
         except Exception as e:
             latency = time.time() - start
             results[tag] = {"ok": False, "latency_s": latency, "error": str(e)}
@@ -131,12 +166,14 @@ def start_background_warmup(
     model_tags: Optional[List[str]] = None,
     delay_sec: float = STARTUP_DELAY_SEC,
     keep_alive: str = _DEFAULT_KEEP_ALIVE,
+    startup_cpu_limit_pct: float = STARTUP_CPU_LIMIT_PCT,
+    cpu_percent_fn: Optional[Callable[[], float]] = None,
 ) -> Optional[threading.Thread]:
     """Rozgrzej modele w wątku w tle po delayu. Zwraca wątek (lub None gdy off).
 
     Sterowane przez ENV:
       - MARIA_WARMUP=0     -> wylacz calkowicie (zwraca None)
-      - MARIA_WARMUP_MODELS=tag1,tag2 -> nadpisz liste modeli
+      - MARIA_WARMUP_MODELS=tag1,tag2 -> wybierz modele (startup bierze pierwszy)
       - MARIA_WARMUP_DELAY=N -> nadpisz delay (sekundy)
 
     Wzorzec jak start_background_indexing: daemon thread, delay na CPU-cooldown.
@@ -151,6 +188,13 @@ def start_background_warmup(
     elif model_tags is None:
         model_tags = DEFAULT_WARMUP_MODELS
 
+    if model_tags and len(model_tags) > 1:
+        logger.warning(
+            "[WARMUP] Startup is limited to one model; ignoring %s",
+            model_tags[1:],
+        )
+        model_tags = model_tags[:1]
+
     env_delay = os.environ.get("MARIA_WARMUP_DELAY")
     if env_delay:
         try:
@@ -158,16 +202,46 @@ def start_background_warmup(
         except ValueError:
             pass
 
+    coordinator = get_local_compute_coordinator()
+    cancel_event = threading.Event()
+    token = coordinator.register_background_task(
+        "model-warmup",
+        cancel_event.set,
+        cancel_on_nim_exhausted=True,
+    )
+
     def _run():
         try:
             if delay_sec > 0:
                 logger.info(f"[WARMUP] Waiting {delay_sec:.0f}s before warm-up (CPU cooldown)")
-                time.sleep(delay_sec)
-            warm_up_models(model_tags=model_tags, keep_alive=keep_alive)
+                if cancel_event.wait(delay_sec):
+                    logger.info("[WARMUP] Cancelled during startup delay")
+                    return
+            coordinator.verify_startup_temperature()
+            if not coordinator.startup_background_allowed():
+                logger.info("[WARMUP] Skipped: thermal/NIM backoff active")
+                return
+            read_cpu = cpu_percent_fn or (lambda: psutil.cpu_percent(interval=0.1))
+            cpu_load = float(read_cpu())
+            if cpu_load >= startup_cpu_limit_pct:
+                logger.warning(
+                    "[WARMUP] Skipped: CPU already busy (%.1f%% >= %.1f%%)",
+                    cpu_load, startup_cpu_limit_pct,
+                )
+                return
+            warm_up_models(
+                model_tags=model_tags,
+                keep_alive=keep_alive,
+                cancel_event=cancel_event,
+            )
         except Exception as e:
             logger.error(f"[WARMUP] Background warm-up failed: {e}")
+        finally:
+            coordinator.unregister_background_task(token)
 
     t = threading.Thread(target=_run, name="model-warmup", daemon=True)
+    t.cancel_event = cancel_event
+    t.compute_task_token = token
     t.start()
     logger.info(f"[WARMUP] Background warm-up started (models={model_tags})")
     return t
