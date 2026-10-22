@@ -16,6 +16,29 @@
 
 ---
 
+## See Maria in action
+
+**One request → a project agent → files you can open → a follow-up on the result.**
+In this 77-second demo, Maria delegates a three-player game playtest plan through
+Kritaqo, then reads the completed report without starting another job.
+
+[![Short animated preview: Maria delegates a task and opens the saved checklist](docs/demo/2026-10-22/maria-demo-preview.gif)](https://raw.githubusercontent.com/erykaitools-beep/Maria/main/docs/demo/2026-10-22/maria-context-to-action-en.mp4)
+
+**[Download full demo — MP4, 77 seconds](https://raw.githubusercontent.com/erykaitools-beep/Maria/main/docs/demo/2026-10-22/maria-context-to-action-en.mp4)**
+· [Still preview](docs/demo/2026-10-22/maria-demo-poster.png)
+· [Generated files and recording notes](docs/demo/2026-10-22/README.md)
+
+Real execution in a fictional project; waiting is shortened. English captions,
+Polish interface, no audio. The project-work segment uses configured **Kritaqo
+and OpenAI Codex**; the local Ollama memory excerpt is a separate capture.
+
+**[Try local chat →](QUICKSTART.md)** Start with the steps below.
+The demonstrated project workflow needs additional setup, including deployment
+adapters that are not bundled in the public repositories; see
+[voice and project integration requirements](docs/VOICE_AND_PROJECTS.md).
+
+---
+
 ## Start with local chat
 
 Linux, Python 3.10+, and a running [Ollama](https://ollama.com/download) with an

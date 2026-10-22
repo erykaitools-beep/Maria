@@ -1,0 +1,3 @@
+# Preserve the approved video and the generated CSV byte for byte.
+*.mp4 binary
+RESULTS.csv -text
