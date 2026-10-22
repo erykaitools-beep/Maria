@@ -84,6 +84,7 @@ def test_paused_runtime_cannot_start_unscoped_local_models(monkeypatch, kind):
 
 def test_interactive_embedding_still_respects_thermal_gate(monkeypatch):
     monkeypatch.setenv("MARIA_BACKGROUND_REASONING", "0")
+    monkeypatch.setenv("MARIA_CHAT_BACKEND", "codex")
     coordinator = LocalComputeCoordinator()
     with work_purpose(WorkPurpose.INTERACTION):
         with coordinator.lease("embedding", timeout_s=1):

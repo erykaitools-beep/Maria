@@ -16,6 +16,30 @@
 
 ---
 
+## Start with local chat
+
+Linux, Python 3.10+, and a running [Ollama](https://ollama.com/download) with an
+installed chat model are required. If you choose `llama3.1:8b` and do not already
+have it, download it deliberately with `ollama pull llama3.1:8b` first.
+
+```bash
+git clone https://github.com/erykaitools-beep/Maria.git
+cd Maria
+python3 scripts/start_chat.py --model llama3.1:8b
+```
+
+Open **http://127.0.0.1:5000** and enter the PIN printed in the terminal. The
+launcher creates `.venv-chat` and a private `.env` only when missing, installs
+core dependencies, and starts local chat without background learning or project
+execution. It does not install/start Ollama or download models. Existing
+configuration is preserved; use a separate clone alongside an established
+installation. macOS and Windows have not been validated for this path.
+
+**[Quick start and troubleshooting](QUICKSTART.md)** covers model preparation,
+`--port`, `--prepare-only`, persistence, and the separate full-daemon option.
+
+---
+
 ## Screenshots
 
 <p align="center">
@@ -54,34 +78,25 @@ See **[Voice, conversation, and projects](docs/VOICE_AND_PROJECTS.md)** for setu
 
 This repository is a curated source snapshot. Runtime data, credentials, model weights, external project repositories, and device-specific configuration are not included. Registered shared projects are not arbitrary discovered folders, and a completed agent report is not independent verification of its files or a human test.
 
-> **New here?** **[QUICKSTART.md](QUICKSTART.md)** describes the original local Ollama installation path. Downloads and setup time depend on your hardware and connection. Keep **[GLOSSARY.md](GLOSSARY.md)** open for architectural terms, or use **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
+> **New here?** Start with **[local chat](QUICKSTART.md)**. Voice, external
+> project services and autonomous operation are optional, separately configured
+> capabilities; the quick-start launcher does not enable them.
 
-### Local installation
+### Other runtime profiles
 
-```bash
-git clone https://github.com/erykaitools-beep/Maria.git
-cd Maria
-bash install.sh          # Ollama + models + deps (the model download is the slow part)
-source venv/bin/activate
-python maria.py          # answer the name prompt in the terminal, then open http://localhost:5000
-```
+The full daemon can retain perception, memory, learning, and deterministic
+background actions according to its configuration. `lean` shortens model
+residency; it does not by itself disable background reasoning. Review
+`MARIA_BACKGROUND_REASONING`, `MARIA_WARMUP`, `MARIA_TELEGRAM_INTEGRATION` and
+`MARIA_CONDUCTOR_INTEGRATION` before choosing that runtime. The local-chat
+launcher applies its own narrower process settings and does not stop previously
+authorized work running elsewhere.
 
-The local Ollama path does not require a cloud-model account. The installer downloads local models; inspect its configuration before running it on an existing installation. Additional voice and project integrations need separate setup.
-
-For interactive use without autonomous background reasoning, explicitly configure:
-
-```dotenv
-MARIA_RUNTIME_PROFILE=lean
-MARIA_BACKGROUND_REASONING=0
-MARIA_WARMUP=0
-MARIA_TELEGRAM_INTEGRATION=0
-MARIA_CONDUCTOR_INTEGRATION=0
-MARIA_CHAT_BACKEND=ollama
-```
-
-`lean` controls model residency; it does not by itself disable background reasoning. These settings retain stored memory and perception, but do not complete waiting autonomous goals or cancel already authorized external work. Defaults preserve legacy background behavior.
-
-For optional Codex chat, set `MARIA_CHAT_BACKEND=codex`, configure `CODEX_BIN` if needed, and select an available model with `MARIA_CODEX_MODEL`. A compatible authenticated external Codex installation is required. Configured Codex failures are reported without silently switching to Ollama. The selected runtime model is not provider attestation, and changing it does not grant new tools.
+Optional Codex chat requires a separately installed, compatible, authenticated
+Codex runtime and a model available to the account. Its configured failures are
+reported without silently switching the turn to Ollama. The selected model is
+not provider attestation, and changing it grants no new tools. This optional
+backend belongs to the separately configured runtime, not `start_chat.py`.
 
 ### Key Features
 
@@ -151,57 +166,31 @@ For optional Codex chat, set `MARIA_CHAT_BACKEND=codex`, configure `CODEX_BIN` i
 | Funding & hardware research | [docs/funding/](docs/funding/) |
 | Hardware benchmark plan | [docs/funding/HARDWARE_BENCHMARK_PLAN.md](docs/funding/HARDWARE_BENCHMARK_PLAN.md) |
 
-## Quick Start
+## Running Maria
 
-### Requirements
+**Start here:** [QUICKSTART.md](QUICKSTART.md) prepares and runs local chat with
+an existing Ollama model. Python dependencies need Internet on first setup;
+model weights are downloaded only through a command you run separately. Chat
+history and request receipts persist in `maria_ui/data/`, with conversation and
+operator-related state in `meta_data/`. Preserve both directories and `.env`.
 
-- **OS:** Linux (Ubuntu 22.04+), macOS
-- **Python:** 3.10+
-- **RAM:** 16 GB+ (8 GB minimum)
-- **Disk:** 10 GB free (for LLM model)
+### Advanced: full daemon and learning
 
-### Install
+The full runtime is optional. Review `install.sh`, `.env.example` and the
+[advanced quick-start section](QUICKSTART.md#advanced-the-full-daemon) before
+using it. The legacy installer can install/start Ollama, pull chat and embedding
+models, and install the full dependency set. It keeps an existing `.env`, but is
+not a non-mutating upgrade tool. The daemon uses `venv/`; the chat launcher uses
+its separate `.venv-chat/`.
 
-```bash
-git clone https://github.com/erykaitools-beep/Maria.git
-cd Maria
-bash install.sh
-```
-
-The install script will:
-1. Check system requirements
-2. Install [Ollama](https://ollama.com) (local LLM runtime)
-3. Pull the models: `llama3.1:8b` (~5 GB) and `bge-m3` for embeddings (~1.2 GB)
-4. Create Python virtual environment
-5. Install dependencies
-6. Generate `.env` config with random PIN
-7. Run a quick verification
-
-### Run
-
-```bash
-source venv/bin/activate
-python maria.py
-```
-
-On the **first run**, Maria introduces herself in the terminal and asks your name — answer there, then she finishes starting up.
-
-Open `http://localhost:5000` in your browser and enter the PIN (printed at the end of `install.sh`, and stored in `.env`).
-
-**Confirm she's alive:** on the dashboard, **Mode** reads `ACTIVE`, **Health** sits near `1.0`, and the **tick count** climbs every second. For a fast no-browser check, run `python maria.py --check`.
-
-### Give her something to learn
-
-Drop `.txt` files into `input/`. Maria will find them and start learning automatically.
-
-```bash
-cp my_notes.txt input/
-# Background learning must be enabled for automatic processing.
-```
+When background learning is explicitly enabled in the full daemon, text files
+in `input/` can be processed by its planner. This does not happen in chat-only
+mode. Dashboard counters and health labels are not substitutes for testing the
+specific model or integration you configured.
 
 ## Configuration
 
-Core settings are in `.env` (created by `install.sh`). Optional integrations also require external runtimes and private configuration; see the [current interaction guide](docs/VOICE_AND_PROJECTS.md).
+Core settings are in `.env` (created by the chat launcher or legacy installer). Optional integrations also require external runtimes and private configuration; see the [current interaction guide](docs/VOICE_AND_PROJECTS.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -224,7 +213,11 @@ Core settings are in `.env` (created by `install.sh`). Optional integrations als
 
 Commands: `/status`, `/goals`, `/approve`, `/reject`, `/learn`, `/remind`, `/help`
 
-### Optional: Systemd service
+### Optional: Systemd service for the full daemon
+
+This is an advanced daemon deployment, not the local-chat launcher. Prepare its
+full environment and configuration first; do not point the service at
+`.venv-chat` without reviewing the different requirements.
 
 `scripts/maria.service` is a template — open it and set `User=` and the absolute paths to match your clone, then:
 
@@ -238,7 +231,7 @@ sudo systemctl enable --now maria
 
 ### The Tick Loop
 
-Maria runs a 1Hz homeostasis loop:
+The full daemon runs a 1Hz homeostasis loop; the local-chat launcher does not:
 
 ```
 SENSE → INTERPRET → VALIDATE → DECIDE → ACT → HEALTH → PERCEIVE → PLANNER → TELEGRAM → REMINDERS → PROACTIVE

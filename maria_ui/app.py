@@ -35,12 +35,37 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from agent_core.storage.jsonl_reader import JSONLCursor, read_jsonl_tail
-from agent_core.llm.chat_backend import chat_backend_config, create_chat_backend
+from agent_core.llm.chat_backend import chat_backend_config as _configured_chat_backend, create_chat_backend
 from agent_core.llm.chat_backend import interactive_tools_match, prepare_interactive_tools
 from agent_core.llm.kritaqo_portfolio import suppress_legacy_tool_actions, interactive_tools_used
 from uuid import uuid4
 from agent_core.llm.work_priority import WorkPurpose, work_purpose
 from agent_core.runtime_profile import background_reasoning_enabled
+
+
+def chat_only_mode():
+    """Explicit first-chat UI mode; unset preserves the existing runtime."""
+    return os.environ.get("MARIA_CHAT_ONLY", "").strip() == "1"
+
+
+def chat_backend_config():
+    if chat_only_mode():
+        return {"provider": "ollama", "model": os.environ.get("MARIA_CHAT_MODEL", "llama3.1:8b"),
+                "configured": True}
+    return _configured_chat_backend()
+
+
+def _chat_only_work_request(text):
+    from agent_core.perception.learning_intent import (
+        detect_learning_intent, detect_cancel_intent, detect_operational_intent,
+    )
+    return bool(detect_learning_intent(text) or detect_cancel_intent(text)
+                or detect_operational_intent(text) or (re.match(
+                    r"^(?:maria[,\s]+)?(?:przygotuj|wykonaj|uruchom|zleć|zlec|anuluj|"
+                    r"zapisz|zmień|zmien|stwórz|stworz|usuń|usun|submit|run|execute|create)\b",
+                    text, re.IGNORECASE) and re.search(
+                        r"\b(?:projekt\w*|kritaqo|kritago|krytago|roblox\w*|plik\w*|folder\w*|"
+                        r"zadani\w*|project\w*|file\w*|directory|task\w*)\b", text, re.IGNORECASE)))
 
 # Import config
 from maria_ui.config import (
@@ -492,6 +517,8 @@ def _get_chat_turn_store():
 
 
 def _get_work_service():
+    if chat_only_mode():
+        return None
     from agent_core.llm.kritaqo_work_service import get_work_service
     return get_work_service()
 
@@ -547,6 +574,8 @@ def maybe_save_chat(role: str, content: str):
 
 def _create_ui_router(brain):
     """Create LLM Router for Web UI. Returns None if NIM unavailable."""
+    if chat_only_mode():
+        return None
     try:
         from maria_core.sys.config import (
             NVIDIA_NIM_API_KEY, NVIDIA_NIM_BASE_URL, NVIDIA_NIM_MODEL,
@@ -781,9 +810,16 @@ def get_maria_brain():
                         identity_store=_id_store,
                         verify_model=False,
                         http_timeout=_chat_timeout,
-                        chat_backend=create_chat_backend(timeout_s=_chat_timeout),
-                        request_context_provider=create_kritaqo_context_provider(),
+                        chat_backend=(None if chat_only_mode() else create_chat_backend(timeout_s=_chat_timeout)),
+                        request_context_provider=(None if chat_only_mode() else create_kritaqo_context_provider()),
                     )
+                    if chat_only_mode():
+                        note = ("\nTryb tylko rozmowy: nie masz narzędzi wykonawczych ani dostępu do projektów. "
+                                "Nie wykonujesz zadań, nie uruchamiasz nauki i nie obiecujesz późniejszych powiadomień. "
+                                "Możesz wyjaśniać i omawiać plany; nie twierdź, że wykonałaś pracę.")
+                        brain.history[0]["content"] += note
+                        if hasattr(brain, "system_prompt"):
+                            brain.system_prompt += note
 
                     # Wire conversation memory for persistent context
                     if CONSCIOUSNESS_AVAILABLE:
@@ -842,7 +878,7 @@ def get_maria_brain():
                     # Wire work_context_provider so Maria knows her own goals
                     # in chat (closes Bug 2 from postmortem 2026-05-14).
                     try:
-                        brain.set_work_context_provider(_build_work_context_for_brain)
+                        brain.set_work_context_provider((lambda: "") if chat_only_mode() else _build_work_context_for_brain)
                         print("[UI] [OK] Work context provider wired")
                     except Exception as e:
                         print(f"[UI] Work context provider not wired: {e}")
@@ -860,7 +896,7 @@ def get_maria_brain():
 
                     # Wrap with LLM Router if NIM available
                     router = (_create_ui_router(brain)
-                              if chat_backend_config()["provider"] == "ollama" else None)
+                              if not chat_only_mode() and chat_backend_config()["provider"] == "ollama" else None)
                     _maria_brain = router if router else brain
                     print("[UI] [OK] Brain initialized")
                 except Exception as e:
@@ -1066,6 +1102,9 @@ def start_notification_monitor():
     global _notification_thread, _last_event_timestamp, _last_planner_timestamp
     global _event_cursor, _planner_cursor
 
+    if chat_only_mode():
+        return
+
     if _notification_thread is not None and _notification_thread.is_alive():
         print("[UI] [NOTIFY] Monitor already running")
         return
@@ -1204,7 +1243,7 @@ def api_auth_ping():
 @require_auth
 def index():
     """Main page - chat interface."""
-    return render_template('index.html', active_page='chat')
+    return render_template('index.html', active_page='chat', chat_only=chat_only_mode())
 
 
 @app.route('/api/status')
@@ -2602,6 +2641,14 @@ def handle_chat_message(data):
     # Emit "thinking" status
     emit('chat_status', {'status': 'thinking'})
 
+    if chat_only_mode() and _chat_only_work_request(user_message):
+        explanation = ("To tryb tylko rozmowy. Nie uruchamiam pracy, nauki ani zadań w projektach "
+                       "i nie zmieniam istniejących zadań. Mogę omówić plan w czacie.")
+        add_ui_chat_message("maria", explanation)
+        maybe_save_chat("maria", explanation)
+        _emit_chat_response({'success': True, 'message': explanation, 'fallback': False})
+        return
+
     # Get response from Maria
     brain = get_maria_brain()
 
@@ -2626,7 +2673,7 @@ def handle_chat_message(data):
     # Scope comes only from this authenticated socket's user turns. Freeze it
     # before retrying; neither global model history nor client data grants it.
     try:
-        tool_context = prepare_interactive_tools(
+        tool_context = None if chat_only_mode() else prepare_interactive_tools(
             getattr(brain, "_chat_backend", None), user_message,
             interaction_id, session_id)
     except Exception:
@@ -2634,10 +2681,10 @@ def handle_chat_message(data):
         _emit_chat_response({'success': False,
                               'error': 'Nie udalo sie ustalic kontekstu zadania. Sprobuj ponownie.'})
         return
-    _tool_request = interactive_tools_match(
+    _tool_request = False if chat_only_mode() else interactive_tools_match(
         getattr(brain, "_chat_backend", None), user_message, interaction_id,
         tool_context=tool_context)
-    _exclusive_tool_request = suppress_legacy_tool_actions(_tool_request, tool_context)
+    _exclusive_tool_request = chat_only_mode() or suppress_legacy_tool_actions(_tool_request, tool_context)
     tool_turn_kwargs = {"interaction_id": interaction_id} if _tool_request else {}
     if _tool_request and tool_context is not None:
         tool_turn_kwargs["tool_context"] = tool_context

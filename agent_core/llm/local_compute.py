@@ -13,6 +13,7 @@ only after the lower resume threshold is reached.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import uuid
@@ -309,10 +310,14 @@ class LocalComputeCoordinator:
         from agent_core.runtime_profile import background_reasoning_enabled
         from agent_core.llm.work_priority import WorkPurpose
         if not background_reasoning_enabled():
-            # The operator-first startup uses a remote conversational model.
-            # Keep stored vectors; permit their explicit interactive lookup,
-            # but do not silently start a local text/VLM fallback or indexing.
-            if kind != "embedding" or current_work_purpose() != WorkPurpose.INTERACTION:
+            # Explicit local chat and vector lookup remain available on demand.
+            # A remote/unknown chat backend must never gain a local text fallback.
+            # Background work and all VLM work stay paused; admitted interactions
+            # still require the normal thermal/slot checks below.
+            provider = os.environ.get("MARIA_CHAT_BACKEND", "ollama").strip().lower()
+            chat_only = os.environ.get("MARIA_CHAT_ONLY", "").strip() == "1"
+            interactive_kind = kind == "embedding" or (kind == "text" and (chat_only or provider == "ollama"))
+            if not interactive_kind or current_work_purpose() != WorkPurpose.INTERACTION:
                 raise LocalComputeBlocked("local model work paused by operator-first runtime")
         reason = self._blocked_reason(cancel_event)
         if reason:

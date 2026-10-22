@@ -170,16 +170,36 @@ echo ""
 
 echo -e "${YELLOW}[6/7] Configuration...${NC}"
 
-if [ -f ".env" ]; then
+# BEGIN INITIAL CREDENTIALS
+# Existing configuration (including symlinks) belongs to the operator.
+if [ -e ".env" ] || [ -L ".env" ]; then
     echo -e "  .env: ${GREEN}already exists (keeping your config)${NC}"
 else
-    cp .env.example .env
-    # Generate a random PIN
-    RANDOM_PIN=$(python3 -c "import secrets; print(secrets.token_hex(4))")
-    sed -i "s/MARIA_PIN=change-me-123/MARIA_PIN=$RANDOM_PIN/" .env
-    echo -e "  .env: ${GREEN}created from template${NC}"
-    echo -e "  Web UI PIN: ${YELLOW}$RANDOM_PIN${NC} (change in .env if needed)"
+    python3 - <<'MARIA_CREDENTIALS'
+import os
+from pathlib import Path
+import re
+import secrets
+
+pin = secrets.token_hex(4)
+secret = secrets.token_hex(32)
+text = Path(".env.example").read_text(encoding="utf-8")
+for name, value in (("MARIA_PIN", pin), ("MARIA_SECRET_KEY", secret)):
+    pattern = re.compile(r"^" + name + r"=.*$", re.MULTILINE)
+    line = name + "=" + value
+    text = pattern.sub(lambda _: line, text) if pattern.search(text) else text.rstrip("\n") + "\n" + line + "\n"
+# Exclusivity protects an existing file even if it appeared after the shell check.
+# Secrets are private from the first write, independent of the caller's umask.
+fd = os.open(".env", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as stream:
+    stream.write(text)
+    stream.flush()
+    os.fsync(stream.fileno())
+print("  .env: created from template")
+print("  Web UI PIN: " + pin + " (change in .env if needed)")
+MARIA_CREDENTIALS
 fi
+# END INITIAL CREDENTIALS
 
 # Create required directories
 mkdir -p input memory meta_data docs/incoming logs

@@ -20,12 +20,16 @@
     </div>
   </div>
 
+  {% if chat_only %}
+  <p role="note">Lokalny czat — historia jest zapisywana. Ten tryb nie wykonuje zadań w projektach ani pracy w tle.</p>
+  {% else %}
   <section class="mo-work-panel" aria-label="Projekty i zadania">
     <label for="workProject">Projekt rozmowy</label>
     <select id="workProject" aria-describedby="workStatus"><option value="">Odczytuję projekty…</option></select>
     <p id="workStatus" role="status" aria-live="polite">Odczytuję zapisany stan pracy…</p>
     <details class="mo-work-ledger"><summary>Zadania i zapisane wyniki</summary><div id="workTasks"></div></details>
   </section>
+  {% endif %}
 
   <div class="mo-rate-warning" id="rateLimitWarning">
     Limit wiadomosci. Poczekaj <span id="waitTime">0</span>s...
@@ -41,6 +45,7 @@
     </div>
   </div>
 
+  {% if not chat_only %}
   <section class="mo-voice-panel" aria-label="Głos Marii">
     <div class="mo-voice-controls">
       <button type="button" class="mo-btn mo-btn--primary" id="voiceMic" aria-pressed="false">Mów</button>
@@ -52,10 +57,11 @@
     <p class="mo-voice-status" id="voiceStatus" role="status" aria-live="polite"></p>
     <p class="mo-voice-note">Rozpoznawanie odbywa się na miniPC. Strona musi pozostać widoczna; podczas odczytu mikrofon nie nasłuchuje. „Stop” zatrzymuje rozmowę głosową, nie zadanie na komputerze.</p>
   </section>
+  {% endif %}
 
   <div class="mo-chat-input">
     <input type="text" class="mo-chat-input__field" id="chatInput" data-voice-backend="local"
-           placeholder="Napisz lub podyktuj wiadomość…" aria-label="Wiadomość do Marii" autocomplete="off">
+           placeholder="{{ 'Napisz wiadomość…' if chat_only else 'Napisz lub podyktuj wiadomość…' }}" aria-label="Wiadomość do Marii" autocomplete="off">
     <button type="button" class="mo-chat-input__send" id="sendBtn" disabled>
       Wyślij
     </button>
@@ -65,8 +71,10 @@
 {% endblock %}
 
 {% block scripts %}
+{% if not chat_only %}
 <script src="{{ url_for('static', filename='js/chat_local_stt.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chat_voice.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chat_work.js') }}"></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 {% endblock %}
