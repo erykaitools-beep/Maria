@@ -1,230 +1,169 @@
-# Quick Start — Maria in 10 minutes
+# Quick start: local chat
 
-This is the honest, no-shortcuts path from a fresh clone to a running Maria you
-can watch learn. No Telegram, no cloud API, no account — just your machine and a
-local LLM.
+Start with a browser conversation using an **already installed local Ollama
+chat model**. This path needs no cloud-model account. It does not start the
+learning daemon, run project work, or configure voice.
 
-New to the vocabulary (daemon, tick loop, belief, mode, K1–K13)? Keep
-[GLOSSARY.md](GLOSSARY.md) open in another tab. If something breaks, jump to
-[Troubleshooting](#troubleshooting) at the bottom or [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+This setup targets **Linux with Python 3.10+**. macOS and Windows have not been
+validated for this launcher. Model memory and disk requirements depend on the
+model you choose; no GPU is required by Maria's chat interface.
 
-## One honest heads-up first
+The browser interface is currently in Polish and loads its Socket.IO JavaScript
+from a CDN. A local model does not make that first browser load fully offline.
 
-Maria runs entirely on your CPU (no GPU required). That has one consequence you
-should expect from the start: **she thinks in minutes, not milliseconds.** The
-one-time model download is a few gigabytes, learning a file takes several
-minutes, and a chat reply lands in roughly a minute. This is normal. Most
-"nothing is happening" moments are really "it's working, and slow." The steps
-below tell you exactly what a healthy, working system looks like at each stage so
-you can tell the difference.
+## 1. Prepare Python and Ollama
 
-## Before you start
+You need Python with `venv`/`ensurepip` support, Git, and a running
+[Ollama installation](https://ollama.com/download). On Ubuntu/Debian, missing
+Python setup tools can be installed deliberately with:
 
-| You need | Details |
-|----------|---------|
-| **OS** | Linux (Ubuntu 22.04+ recommended) or macOS |
-| **Python** | 3.10 or newer (`python3 --version`) |
-| **RAM** | 16 GB recommended (8 GB works, slower) |
-| **Disk** | ~10 GB free (the local LLM is ~5 GB) |
-| **Internet** | Only for install (download Ollama + the model). Maria runs offline afterward. |
-| **Time** | ~10 minutes on a decent connection. The `llama3.1:8b` model download dominates — budget more on slow links. |
+```bash
+sudo apt install python3 python3-venv git
+```
 
-You do **not** need a Telegram bot, an NVIDIA NIM key, a camera, or any API key.
-Those are all optional add-ons ([README](README.md) covers them). This guide is
-the minimal local run.
+Install and start Ollama using its instructions. Then inspect your models:
 
-## Step 1 — Get the code
+```bash
+ollama list
+```
+
+Choose an installed **chat** model, not an embedding-only model. The following
+example uses `llama3.1:8b`. If you want that model and it is not installed,
+download it explicitly:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+That command downloads model weights and needs Internet access and sufficient
+free disk space. The Maria launcher never installs or starts Ollama, downloads
+models, or selects another model silently. You may instead use another chat
+model from your `ollama list` with `--model NAME`.
+
+## 2. Start the chat
 
 ```bash
 git clone https://github.com/erykaitools-beep/Maria.git
 cd Maria
+python3 scripts/start_chat.py --model llama3.1:8b
 ```
 
-## Step 2 — Run the installer
+On the first run, the launcher creates **`.venv-chat`**, installs
+`requirements-core.txt`, and creates a private **`.env`** only if none exists.
+Dependency installation needs Internet access. The new configuration contains a
+random login PIN and a persistent session key. Neither the virtual environment
+activation command nor a terminal name prompt is needed.
+
+Open **http://127.0.0.1:5000**, enter the **Login PIN** printed in the terminal,
+and type a message. The model is called when you send a message; listing the
+model or opening the page does not demonstrate successful inference. Keep the
+terminal running. **Ctrl+C stops this chat process.**
+
+For the next session, run the same `python3 scripts/start_chat.py --model ...`
+command from this clone. The launcher reuses the environment and configuration;
+changed core requirements may trigger dependency installation again.
+
+## What this mode does
+
+- Uses the explicitly selected local Ollama backend and listens on
+  **127.0.0.1 only**, with debugging and the reloader disabled.
+- Keeps browser chat history and durable request receipts in `maria_ui/data/`.
+  Conversation memory and operator-related state also use `meta_data/`.
+  Preserve **both directories and `.env`** when keeping or backing up this
+  installation. These contain private data and do not belong in a public commit.
+- Does not start autonomous background reasoning, learning, Telegram, conductor
+  work, cloud-model routing, or Kritaqo project execution. You can discuss plans;
+  a chat response is not evidence that a task ran on another computer.
+
+An existing `.env` is not overwritten. The launcher nevertheless selects its
+local chat profile **for this process**, even if that file or your shell selects
+another backend or background mode. It does not stop another Maria process,
+change its settings, or cancel work already running elsewhere. Use a separate
+clone to try the quick start beside an existing installation.
+
+## Options and troubleshooting
+
+### Check preparation without opening the UI
+
+```bash
+python3 scripts/start_chat.py --model llama3.1:8b --prepare-only
+```
+
+This can install Python dependencies and create `.env`. It checks that Ollama
+lists the model, then exits. **It does not invoke the model or prove that chat
+inference works.** Run again without `--prepare-only` to open the chat process.
+
+### Port 5000 is already in use
+
+Choose another port; the launcher does not stop the existing program:
+
+```bash
+python3 scripts/start_chat.py --model llama3.1:8b --port 5050
+```
+
+Open the local URL printed by the launcher.
+
+### Ollama is not responding or uses another local port
+
+Start Ollama separately and check `ollama list`. The default server URL is
+`http://127.0.0.1:11434`. For a different **loopback** endpoint:
+
+```bash
+python3 scripts/start_chat.py --model llama3.1:8b --ollama-url http://127.0.0.1:11435
+```
+
+Only local HTTP Ollama URLs are accepted. A missing model produces an explicit
+error; choose an installed model or download one yourself.
+
+### Python cannot create the environment
+
+Install the matching Python `venv`/`ensurepip` support for your distribution,
+then retry. Do not run the launcher with `sudo`. If a dependency installation
+fails, keep the error output and retry after addressing it; do not treat that as
+a completed setup.
+
+### Existing configuration has a blank PIN or session key
+
+The launcher preserves `.env` and refuses to start when `MARIA_PIN` or
+`MARIA_SECRET_KEY` is blank. Set a private nonempty PIN and a randomly generated
+session key in that file, or use a fresh clone for a clean setup. A key can be
+generated locally with Python's `secrets.token_hex(32)`; never publish it.
+Changing an established session key invalidates existing browser sessions.
+Symlinked `.env` files are not supported by this quick-start launcher.
+
+## Optional voice and project integrations
+
+The local text chat is the starting point, not an automatic installation of
+all integrations. Browser microphone use from a phone needs a reachable trusted
+HTTPS origin, a separately installed whisper.cpp binary/model, and explicit
+origin configuration. The loopback address above is not a phone-access URL.
+Optional Kritaqo project tools require its separate installation, bridge and
+existing project permissions; they stay disabled in this chat-only launcher.
+Codex chat likewise needs a separate compatible authenticated installation and
+is not selected by this launcher.
+
+See [Voice, conversation, and project work](docs/VOICE_AND_PROJECTS.md) for those
+separate paths and their limits. No Docker deployment is supplied by this guide.
+
+## Advanced: the full daemon
+
+The full runtime includes the homeostasis loop and optional learning, perception
+and integrations. It is a separate setup, not required for local chat. Read
+[README](README.md), the configuration template and **`install.sh` before running
+it**: the legacy installer can install/start Ollama, download both chat and
+embedding models, and install the full Python dependency set, including optional
+vision and test packages.
+
+For an installation you have reviewed:
 
 ```bash
 bash install.sh
-```
-
-The script is a 7-step guided setup. It checks your system, installs
-[Ollama](https://ollama.com) (the local LLM runtime), pulls the `llama3.1:8b`
-model (~5 GB — this is the slow part) plus the `bge-m3` embedding
-model, creates a Python virtual environment, installs dependencies, and generates
-a `.env` config with a random Web UI PIN.
-
-**What you'll see:** step-by-step `[1/7] … [7/7]` progress, then a green
-`Installation complete!` banner. Near the end it prints your generated PIN:
-
-```
-  .env: created from template
-  Web UI PIN: a1b2c3d4 (change in .env if needed)
-```
-
-Write that PIN down — you'll need it in Step 4. (You can always find it again;
-see Troubleshooting.)
-
-> If the model download stalls or fails, that's the most common install hiccup —
-> see [Troubleshooting](#troubleshooting). Everything else in the script is fast.
-
-## Step 3 — Start Maria
-
-```bash
 source venv/bin/activate
 python maria.py
 ```
 
-**Answer the name prompt in the terminal first.** On the very first run Maria
-introduces herself and asks your name *in the terminal*. This is her onboarding,
-and it blocks until you answer — the Web UI does **not** start until you do.
-Type a name and press Enter.
-
-**What you'll see** after that: a startup banner with your RAM, CPU cores, and
-detected Ollama models, then:
-
-```
-  Web UI:   http://localhost:5000
-  Daemon:   homeostasis tick loop (1Hz)
-  Stop:     Ctrl+C or SIGTERM
-```
-
-The terminal keeps streaming log lines from here on — that's the daemon ticking
-once per second. Leave it running.
-
-## Step 4 — Open the dashboard
-
-Open **http://localhost:5000** in your browser and enter the PIN from Step 2.
-
-**What you'll see:** the Status Dashboard. The signs that Maria is alive and
-healthy:
-
-- **Mode** reads `ACTIVE` (she drops to `REDUCED`, `SLEEP`, or `SURVIVAL` only
-  under load or idle — see [GLOSSARY.md](GLOSSARY.md))
-- **Health** is a score near `1.0`
-- The **tick count** climbs every second
-- Knowledge / beliefs / goals counters are shown (they may start near zero on a
-  fresh install — that's expected)
-
-If the dashboard loads and the tick count is rising, you have a working Maria.
-
-## Step 5 — Give her something to learn
-
-Maria learns from plain-text files you drop into the `input/` folder. The
-installer created it; drop a `.txt` in and she picks it up automatically on her
-next planner cycle (about a minute).
-
-```bash
-echo "The Great Barrier Reef is the world's largest coral reef system,
-composed of over 2,900 individual reefs off the coast of Queensland, Australia." > input/reef.txt
-```
-
-Or copy any notes you already have:
-
-```bash
-cp ~/my_notes.txt input/
-```
-
-**What you'll see:** nothing instant — this is the CPU-is-slow moment. Within a
-minute or two the planner scans `input/`, then over the next several minutes
-Maria chunks the file, calls the local LLM to extract knowledge, and writes it to
-her knowledge index. The **knowledge counter on the dashboard ticks up** once
-extraction finishes. Your file stays in `input/`; Maria tracks its progress by
-content hash, so re-dropping the same text won't re-learn it.
-
-> Patience check: on CPU, one small file becoming visible knowledge in
-> 2–5 minutes is normal. If it's been much longer, see Troubleshooting.
-
-## Confirm it's alive
-
-Any time you want a fast, no-browser health check, run:
-
-```bash
-python maria.py --check
-```
-
-It verifies Python, your `.env`, Ollama connectivity, and the key Python
-dependencies, then prints `[OK] All checks passed` (exit code 0) or lists exactly
-what's wrong (exit code 1). This is the quickest way to answer "is my
-environment set up correctly?"
-
-## What "healthy" looks like — recap
-
-| Signal | Healthy value |
-|--------|---------------|
-| `python maria.py --check` | `[OK] All checks passed` |
-| Dashboard **Mode** | `ACTIVE` |
-| Dashboard **tick count** | rising every second |
-| **Health** score | near `1.0` |
-| Dropped a `.txt` | knowledge counter rises within a few minutes |
-| Chat reply latency | ~1 minute on CPU (up to a few minutes when busy) |
-
-## Where to go next
-
-- **Vocabulary:** [GLOSSARY.md](GLOSSARY.md) — every term above, in plain language
-- **The full picture:** [README.md](README.md) — features, architecture, production notes
-- **Optional Telegram bot / NIM analysis:** [README.md → Configuration](README.md#configuration)
-- **How her mind is structured:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CONTRACTS.md](docs/CONTRACTS.md)
-- **Run the tests:** `python -m pytest agent_core/tests/ -q`
-
----
-
-## Troubleshooting
-
-The five things most likely to trip up a first run. For a fuller FAQ, see
-[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-
-### `http://localhost:5000` refuses to connect
-
-Usually one of three things:
-
-1. **You haven't answered the name prompt yet.** On first run the Web UI only
-   starts *after* you type your name in the terminal (Step 3). Check the terminal.
-2. **Ollama isn't running,** so the daemon couldn't finish starting. Confirm with
-   `ollama list`. If it errors, start Ollama: `ollama serve` (or
-   `sudo systemctl start ollama`), then restart `python maria.py`.
-3. **Port 5000 is taken** by another program. Change it in `.env`
-   (`MARIA_PORT=5050`), then restart. Run `python maria.py --check` to confirm
-   the rest of the environment is fine.
-
-### The model download is slow, failed, or ran out of disk
-
-`install.sh` pulls `llama3.1:8b` (~5 GB) — the longest step. If it fails midway,
-just re-run `bash install.sh`; Ollama resumes the download and skips work already
-done. Make sure you have ~10 GB free (`df -h .`). To pull manually and watch
-progress: `ollama pull llama3.1:8b`.
-
-### I can't find my Web UI PIN
-
-It's stored in the `.env` file the installer created:
-
-```bash
-grep MARIA_PIN .env
-```
-
-Change it to anything you like (min 6 characters) and restart Maria.
-
-### I dropped a `.txt` in `input/` and nothing happened
-
-Almost always "working, but slow." Check, in order:
-
-1. Give it time — expect **minutes on CPU**, not seconds. Watch the knowledge
-   counter on the dashboard, or the log lines in the terminal.
-2. Confirm the folder exists and the file is really there:
-   `ls input/`. If `input/` is missing (it's created at install and isn't part of
-   the cloned repo), make it: `mkdir input`.
-3. Confirm the file ends in `.txt` and contains real prose — Maria only scans
-   `.txt` files.
-
-### Semantic (meaning-based) search returns nothing
-
-Meaning-based search needs the `bge-m3` model. `install.sh` pulls it
-for you — but if you set Ollama up by hand, confirm it's present:
-
-```bash
-ollama list | grep bge-m3
-```
-
-If it's missing, add it and restart Maria; results appear as she re-indexes:
-
-```bash
-ollama pull bge-m3
-```
+Review `.env` and explicitly choose which background features to enable. The
+first daemon run may ask your name in the terminal. Its behavior and readiness
+checks differ from the chat-only launcher; a visible web page is not proof that
+learning, models or external project execution work. Do not use the legacy
+installer as an unreviewed upgrade command for an existing deployment.

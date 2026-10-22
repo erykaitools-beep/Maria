@@ -39,7 +39,8 @@ if not UI_PIN:
     )
 
 # Session secret key (auto-generated if not set)
-SECRET_KEY = os.environ.get("MARIA_SECRET_KEY", secrets.token_hex(32))
+_configured_secret = os.environ.get("MARIA_SECRET_KEY", "")
+SECRET_KEY = _configured_secret if _configured_secret.strip() else secrets.token_hex(32)
 
 # Rate limiting
 RATE_LIMIT_MESSAGES = max(1, min(60, int(os.environ.get("MARIA_CHAT_RATE_LIMIT", "2"))))
@@ -80,6 +81,8 @@ def _tailscale_origins(port):
     not logged in. Origins matter for the SocketIO handshake -- Flask-
     SocketIO validates the Origin header against this list.
     """
+    if os.environ.get("MARIA_CHAT_ONLY", "").strip() == "1":
+        return []
     import subprocess
 
     origins = []
