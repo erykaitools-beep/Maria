@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from agent_core.perception.event import PerceptionEvent, PerceptionSource
 from agent_core.vision.modules.motion.detector import AlertLevel, MotionClassification
+from agent_core.vision.modules.objects.detector import describe_objects_polish
 from agent_core.vision.percept import VisionPercept
 
 
@@ -103,6 +104,11 @@ class VisionPerceptionAdapter:
                 "health": round(percept.vision_health.overall, 3),
                 "modules_run": percept.modules_run,
                 "sensor_id": percept.sensor_id,
+                "objects": (
+                    [d.to_dict() for d in percept.objects.detections]
+                    if percept.objects else []
+                ),
+                "objects_summary": describe_objects_polish(percept.objects),
             },
             ttl=defaults[1],
             parent_event_id=None,
@@ -123,6 +129,11 @@ class VisionPerceptionAdapter:
                 "alert_level": motion.alert_level.value,
                 "regions_count": len(motion.regions),
                 "summary": percept.summary,
+                "objects": (
+                    [d.to_dict() for d in percept.objects.detections]
+                    if percept.objects else []
+                ),
+                "objects_summary": describe_objects_polish(percept.objects),
             },
             ttl=defaults[1],
             parent_event_id=None,

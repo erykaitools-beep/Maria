@@ -119,6 +119,14 @@ class Task:
     def is_terminal(self) -> bool:
         return self.status in TERMINAL_STATUSES
 
+    @property
+    def requires_approval(self) -> bool:
+        """Return the current approval state, not the creation-time flag."""
+        return (
+            not self.is_terminal
+            and bool(self.artifacts.get("approval_required", False))
+        )
+
 
 def create_task(
     project: str,

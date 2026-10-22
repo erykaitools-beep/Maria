@@ -5,6 +5,47 @@ All notable changes to M.A.R.I.A. are documented here.
 Older, session-by-session development notes from before 1.0.0 are archived in
 [docs/CHANGELOG.md](docs/CHANGELOG.md) (Polish, kept as written at the time).
 
+## [Unreleased] - 2026-10-22 public source refresh
+
+This is a curated source update, not an export of runtime data or a claim that
+optional integrations are configured on a fresh clone. Earlier entries retain
+their original dates and measurements.
+
+### Added
+
+- Foreground local speech input through externally configured whisper.cpp,
+  bounded PCM WAV uploads, explicit errors, and no silent vendor-service fallback.
+- Maria/Mario wake, about four seconds of audio silence to finish an utterance,
+  and a three-minute idle-listening window for follow-ups without repeating the
+  name. Stop and visibility/lifecycle gates invalidate late callbacks.
+- Bounded automatic speech, complete persistent chat, and explicit full readout.
+  Restored history and recovered replies do not autoplay.
+- Optional Codex chat with scoped tools and runtime selected-model context.
+  Failures are surfaced without silently switching the turn to Ollama.
+- Durable chat receipts, response correlation, and recovery without automatically
+  resending an uncertain turn. SQLite complements existing JSON/JSONL stores.
+- Optional Kritaqo project selection, task cards, known-job observation, artifacts,
+  shared verification records, and explicit new-work requests. Registered scope
+  and current host permissions are required; completed is not independently verified.
+- [Voice and projects guide](docs/VOICE_AND_PROJECTS.md) covering configuration,
+  evidence semantics, foreground controls, and limitations.
+
+### Changed
+
+- Operator-first settings can explicitly pause background reasoning and warmup
+  while retaining conversation, stored memory, and perception. Lean model
+  residency and reasoning admission are independent controls.
+- README distinguishes local components from optional network services and removes
+  undated test-count badges, installation-time promises, and the JSONL-only claim.
+
+### Limitations
+
+- External runtimes, model files, credentials, Kritaqo setup, and project grants
+  are not bundled. Android sources/APK remain separate; physical Android voice
+  acceptance is pending.
+- No locked-phone listening, analysis on ordinary refresh, executor-result
+  verification guarantee, or end-to-end voice latency benchmark is claimed.
+
 ## [1.1.0] - 2026-08-04
 
 Roughly four months of continuous production running since 1.0.0. Everything

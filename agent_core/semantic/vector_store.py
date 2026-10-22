@@ -12,7 +12,9 @@ Usage:
 
 import json
 import logging
+import math
 import time
+from array import array
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -74,7 +76,7 @@ def _eviction_priority(entry: "VectorEntry") -> int:
 
 class VectorEntry:
     """Single entry in the vector store."""
-    __slots__ = ("entry_id", "text", "vector", "metadata", "created_ts")
+    __slots__ = ("entry_id", "text", "_vector", "_norm", "metadata", "created_ts")
 
     def __init__(self, entry_id: str, text: str, vector: List[float],
                  metadata: Optional[Dict[str, Any]] = None,
@@ -84,6 +86,18 @@ class VectorEntry:
         self.vector = vector
         self.metadata = metadata or {}
         self.created_ts = created_ts or time.time()
+
+    @property
+    def vector(self) -> List[float]:
+        """Return a list snapshot; compact storage owns its vector and norm."""
+        return self._vector.tolist()
+
+    @vector.setter
+    def vector(self, values) -> None:
+        # Binary64 preserves every stored Python float: no quantization,
+        # dimensional migration, second dense matrix, or embedding request.
+        self._vector = array("d", values)
+        self._norm = math.sqrt(sum(value * value for value in self._vector))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -172,9 +186,9 @@ class VectorStore:
                     try:
                         d = json.loads(line)
                         entry = VectorEntry.from_dict(d)
-                        if not entry.vector:  # Skip entries without vectors
+                        if not entry._vector:  # Skip entries without vectors
                             continue
-                        if want_dim and len(entry.vector) != want_dim:
+                        if want_dim and len(entry._vector) != want_dim:
                             wrong_dim += 1
                             continue
                         self._entries[entry.entry_id] = entry
@@ -394,18 +408,27 @@ class VectorStore:
         if not query_vector:
             return []
 
+        # Norms are invariant until a vector is replaced. Compute the query
+        # norm once and reuse each compact entry's norm rather than performing
+        # three Python loops per entry. Operation order matches the old cosine.
+        query_norm = math.sqrt(sum(value * value for value in query_vector))
+
         results: List[SearchResult] = []
         # list() snapshot: the store is lock-free and the semantic-indexer
         # thread adds/removes entries (ghost cleanup, eviction) while other
         # threads search -- iterating the live view raises RuntimeError
         # (dict changed size). GIL makes the snapshot itself atomic.
         for entry in list(self._entries.values()):
-            if not entry.vector:
+            if not entry._vector:
                 continue
             if namespace and entry.metadata.get("namespace") != namespace:
                 continue
 
-            score = EmbeddingModel.cosine_similarity(query_vector, entry.vector)
+            if len(query_vector) != len(entry._vector) or not query_norm or not entry._norm:
+                score = 0.0
+            else:
+                dot = sum(x * y for x, y in zip(query_vector, entry._vector))
+                score = dot / (query_norm * entry._norm)
             if score >= threshold:
                 results.append(SearchResult(entry, score))
 
@@ -441,6 +464,9 @@ class VectorStore:
             "dirty_count": len(self._dirty_ids),
             "namespaces": namespaces,
             "evicted_by_namespace": dict(self._evicted_by_namespace),
+            "vector_storage": "binary64",
+            "vector_payload_bytes": sum(len(e._vector) * e._vector.itemsize
+                                        for e in list(self._entries.values())),
         }
 
     # --- Internal ---

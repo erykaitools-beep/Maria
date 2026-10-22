@@ -227,10 +227,13 @@ def test_flag_off_uses_legacy_full_history(monkeypatch):
     captured = {}
 
     def fake_chat(messages, **kw):
-        captured["messages"] = messages  # legacy passes the live deque itself
+        captured["messages"] = messages  # request metadata requires an isolated copy
         return "ok"
 
     monkeypatch.setattr(b, "_chat", fake_chat)
     b.think("legacy pytanie")
-    assert captured["messages"] is b.history
+    assert captured["messages"] is not b.history
+    assert captured["messages"][-1] == {"role": "user", "content": "legacy pytanie"}
+    assert "current_chat_instance" in captured["messages"][-2]["content"]
+    assert not any("current_chat_instance" in m["content"] for m in b.history)
     assert b.history[0]["role"] == "system"

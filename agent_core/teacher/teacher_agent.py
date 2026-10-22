@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 
 from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 from agent_core.teacher.teaching_strategy import (
     TeachingStrategy,
     SpacedRepetitionScheduler,
@@ -141,6 +142,7 @@ class TeacherAgent:
     # Main loop
     # ──────────────────────────────────────────────
 
+    @work_purpose(WorkPurpose.BACKGROUND)
     def run_session(
         self,
         max_iterations: int = 10,
@@ -356,6 +358,25 @@ class TeacherAgent:
                 params={"reason": "exam_ready"},
             )
 
+        # P2.4: Second chance for first-fail exams. exam_agent marks attempt 1
+        # as exam_failed ("druga szansa") and only attempt 2+ as hard_topic;
+        # the legacy REPL loop retried exam_failed (learning_agent candidates)
+        # but this port only looked at hard_topic, so first-fail files sat
+        # forever -- 216 files stuck at exam_attempts=1 by 2026-08-09.
+        # FILL_GAP on such a file is a no-op re-learn that flips it to
+        # "learned", so P2 re-examines it; attempt 2 always exits the bucket
+        # (pass -> completed, fail -> hard_topic).
+        second_chance = self._filter_records(by_status.get("exam_failed", []))
+        if second_chance:
+            target = second_chance[0]
+            file_id = target.get("id", target.get("file", ""))
+            return TeachingStrategy(
+                TeachingStrategy.FILL_GAP,
+                file_id,
+                params={"reason": "exam_failed_second_chance",
+                        "attempts": target.get("exam_attempts", 0)},
+            )
+
         # P2.5: Retry hard topics before starting new content
         # (was P5 with completed_count >= 3 gate - too late)
         hard_topics = self._filter_records(by_status.get("hard_topic", []))
@@ -423,6 +444,7 @@ class TeacherAgent:
                 len(by_status.get("learning", []))
                 + len(by_status.get("learned", []))
                 + len(snapshot.get("new_files_available", []))
+                + len(by_status.get("exam_failed", []))
                 + len(by_status.get("hard_topic", []))
             )
             if total_unfiltered > 0:
@@ -553,12 +575,29 @@ class TeacherAgent:
         use_simple = strategy.params.get("reason") == "retry_hard_topic"
         result = self._learn_chunk_fn(file_id, use_simple)
 
+        # LABEL FIX, same shape as _exec_review's (2026-08-12): when the named
+        # file is not learnable, selection falls back to priority and a DIFFERENT
+        # file gets learned. Reporting strategy.target then credits progress to a
+        # file nothing happened to.
+        learned_id = (result or {}).get("file_id") or file_id
+
         if result and result.get("success", False):
             self._stats["chunks_learned"] += 1
-            return {"success": True, "file_id": file_id, "type": "learn"}
-        else:
-            return {"success": False, "file_id": file_id, "type": "learn",
-                    "error": result.get("error", "learn failed") if result else "learn returned None"}
+            return {"success": True, "file_id": learned_id, "type": "learn",
+                    "requested_file_id": file_id}
+
+        # "Nothing to learn" is idle, not broken. It must carry the skip flag all
+        # the way up: the self-repair failure-storm detector counts
+        # `success is False and not skipped`, so labelling an idle tick a failure
+        # would manufacture an incident out of a quiet queue.
+        if result and result.get("skipped"):
+            return {"success": False, "skipped": True, "file_id": learned_id,
+                    "type": "learn", "reason": result.get("reason", ""),
+                    "requested_file_id": file_id}
+
+        return {"success": False, "file_id": learned_id, "type": "learn",
+                "requested_file_id": file_id,
+                "error": result.get("error", "learn failed") if result else "learn returned None"}
 
     def _exec_review(self, strategy: TeachingStrategy) -> Dict[str, Any]:
         """Execute REVIEW strategy (run exam)."""
@@ -569,6 +608,38 @@ class TeacherAgent:
 
         result = self._run_exam_fn(file_id)
 
+        # LABEL FIX (2026-08-12): the STAGED pipeline deliberately resumes an
+        # in-flight exam FIRST, even when the strategy names a different file
+        # (exam_agent.run_exam_if_ready). So the file that was actually examined
+        # is the one the result reports -- never assume it is strategy.target.
+        # Measured drift: 2026-08-12 13:24 the plan log credited score 1.0 to
+        # efekt_cieplarniany while exam_results.jsonl (and the index) show the
+        # 1.0 belonged to prawo_administracyjne. Cosmetic in the log, but the
+        # failure branch below parks a file in exam cooldown -- with the wrong
+        # id it benched a HEALTHY file and left the broken one eligible, which
+        # is precisely the loop that cooldown (BUG B, 2026-05-25) exists to stop.
+        examined_id = (result or {}).get("file_id") or file_id
+
+        if result and result.get("skipped"):
+            # Thermal start-gate (2026-08-10): cooling is active, so no exam
+            # stage ran at all. NOT a pipeline failure -- no failure counter,
+            # no exam cooldown; the file stays eligible and the next session
+            # retries on a cooler CPU.
+            logger.info(f"[EXAM] Deferred (thermal) for {file_id}")
+            return {"success": False, "skipped": True, "file_id": file_id,
+                    "type": "exam", "reason": result.get("reason", "deferred")}
+
+        if result and result.get("staged"):
+            # Staged pipeline (2026-08-10): one heavy stage ran and persisted
+            # its state; the exam completes in a later session. Real work, but
+            # exams_run counts COMPLETED exams only.
+            self._stats["exam_stages_run"] = (
+                self._stats.get("exam_stages_run", 0) + 1)
+            logger.info(
+                f"[EXAM] Stage '{result['staged']}' done for {examined_id}")
+            return {"success": True, "file_id": examined_id,
+                    "type": "exam_stage", "stage": result["staged"]}
+
         if result and result.get("success", False):
             self._stats["exams_run"] += 1
             if result.get("passed", False):
@@ -577,15 +648,13 @@ class TeacherAgent:
                 # Advisory only; never let a notify hiccup break the exam path.
                 if self._milestone_fn is not None:
                     try:
-                        self._milestone_fn(
-                            result.get("file_id", file_id), result.get("score", 0)
-                        )
+                        self._milestone_fn(examined_id, result.get("score", 0))
                     except Exception as e:
                         logger.debug(f"milestone_fn failed: {e}")
             self._stats["reviews_done"] += 1
             self._stats["last_exam_score"] = result.get("score", 0)
-            self._stats["last_exam_file"] = result.get("file_id", file_id)
-            return {"success": True, "file_id": file_id, "type": "exam",
+            self._stats["last_exam_file"] = examined_id
+            return {"success": True, "file_id": examined_id, "type": "exam",
                     "score": result.get("score", 0),
                     "passed": result.get("passed", False)}
         else:
@@ -598,15 +667,17 @@ class TeacherAgent:
             self._stats["exam_pipeline_failures"] += 1
             err_msg = result.get("error", "exam failed") if result else "exam returned None"
             logger.warning(
-                f"[EXAM] Pipeline failure for {file_id}: {err_msg} "
+                f"[EXAM] Pipeline failure for {examined_id}: {err_msg} "
                 f"(session failures: {self._stats['exam_pipeline_failures']})"
             )
             # BUG B fix (audit 2026-05-25): park this file so P2 stops picking
             # it back up next iteration. Without cooldown the planner re-picks
             # the same learned-but-broken file every window and the new-file
-            # queue starves.
-            self._mark_exam_cooldown(file_id)
-            return {"success": False, "file_id": file_id, "type": "exam",
+            # queue starves. Park the file that ACTUALLY ran (see examined_id
+            # above) -- parking strategy.target instead benched a healthy file
+            # and let the broken one loop.
+            self._mark_exam_cooldown(examined_id)
+            return {"success": False, "file_id": examined_id, "type": "exam",
                     "error": err_msg}
 
     def _exec_fill_gap(self, strategy: TeachingStrategy) -> Dict[str, Any]:

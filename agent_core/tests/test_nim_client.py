@@ -435,20 +435,29 @@ class TestNIMClient:
             client._chat([{"role": "user", "content": "test"}])
 
     @patch("agent_core.llm.nim_client.requests.post")
-    def test_resource_exhausted_suppresses_local_router_fallback(
+    def test_resource_exhausted_backs_off_background_not_foreground(
         self, mock_post, client, isolated_local_compute_coordinator,
     ):
-        """NIM 503 must defer work, not stampede the already-busy local CPU."""
+        """NIM 503 backs off background compute but keeps foreground fallback.
+
+        The old behaviour (503 suppresses the local fallback outright) starved
+        learning of any answer during the chronic 503 storms of 2026-08-06..09:
+        the shared endpoint stayed saturated for days, so every learning call
+        landed inside a backoff window and returned "".
+        """
         mock_post.return_value = Mock(
             status_code=503, text="ResourceExhausted (295/32)",
         )
         ollama = specced(OllamaBrain, model="llama3.1:8b")
-        ollama._ask_once.return_value = "must not run"
+        ollama._ask_once.return_value = "local fallback answer"
         router = LLMRouter(ollama_brain=ollama, nim_client=client)
 
-        assert router._ask_once("defer this") == ""
-        ollama._ask_once.assert_not_called()
-        assert isolated_local_compute_coordinator.local_fallback_allowed() is False
+        assert router._ask_once("learn this") == "local fallback answer"
+        ollama._ask_once.assert_called_once()
+        coord = isolated_local_compute_coordinator
+        assert coord.nim_backoff_active() is True
+        assert coord.local_fallback_allowed() is True
+        assert coord.startup_background_allowed() is False
 
     @patch("agent_core.llm.nim_client.requests.post")
     def test_chat_timeout(self, mock_post, client):
@@ -880,3 +889,64 @@ class TestLLMRouter:
         result = router.think("Czesc, jak sie masz?")
         assert result == "NIM response"
         nim.think.assert_called_once()
+
+
+class TestPlannerFallbackGateNamesItsRealCause:
+    """The suppression path must blame the gate that actually closed.
+
+    router.ask_as_role() logged "suppressed after NIM ResourceExhausted", but the
+    gate it consults -- local_fallback_allowed() -- checks THERMAL COOLING only;
+    its own docstring says the NIM backoff deliberately does not reach that path.
+    On 2026-08-19, with the NIM key dead, that line sent a debugging session
+    hunting a 403-to-ResourceExhausted misclassification while the real cause was
+    42 unbroken minutes of thermal cooling.
+    """
+
+    def test_nim_backoff_alone_does_not_close_the_gate(
+        self, isolated_local_compute_coordinator
+    ):
+        coord = isolated_local_compute_coordinator
+        coord.note_nim_resource_exhausted()
+        assert coord.nim_backoff_active() is True
+        assert coord.local_fallback_allowed() is True, (
+            "NIM backoff must not gate the foreground path -- letting it through "
+            "starved learning of its local fallback during the 503 storms"
+        )
+
+    def test_cooling_is_what_closes_the_gate(
+        self, isolated_local_compute_coordinator
+    ):
+        coord = isolated_local_compute_coordinator
+        coord.observe_temperature(95.0)
+        assert coord.local_fallback_allowed() is False
+
+    def test_suppression_message_does_not_blame_nim(self, caplog, monkeypatch):
+        """Pins the wording, because the wording is what misled the debugging."""
+        import logging
+        from unittest.mock import MagicMock
+        import agent_core.llm.router as router_mod
+
+        monkeypatch.setenv("NIM_PRIMARY_ROLES", "planner")
+        router = router_mod.LLMRouter.__new__(router_mod.LLMRouter)
+        router.nim = MagicMock(spec=NIMClient)
+        router.nim.model = "nim/x"
+        router.nim.api_key = "synthetic-test-credential"
+        router.nim.is_available.return_value = True
+        router.nim._ask_once.side_effect = Exception("HTTP 403: Forbidden")
+        router.budget = None
+        router._llm_tape = None
+        router._model_scheduler = None
+        router._nim_fallbacks = 0
+
+        coord = router_mod.get_local_compute_coordinator()
+        coord.observe_temperature(95.0)
+        try:
+            with caplog.at_level(logging.WARNING):
+                router.ask_as_role("planner", "plan something")
+            text = caplog.text
+            assert "thermally gated" in text
+            assert "ResourceExhausted" not in text, (
+                "must not name a gate it never consulted"
+            )
+        finally:
+            coord.observe_temperature(50.0)

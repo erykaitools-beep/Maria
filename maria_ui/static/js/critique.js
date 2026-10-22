@@ -1,6 +1,7 @@
 /* critique.js - Knowledge Critique (Faza G) dashboard */
 (function () {
   'use strict';
+  const M = MariaUI;
 
   // Tab switching
   document.querySelectorAll('.mo-tab').forEach(function (tab) {
@@ -24,7 +25,7 @@
 
   // -- Report tab --
   function loadReport() {
-    M.apiFetch('/api/critique/report').then(function (data) {
+    return M.apiFetch('/api/critique/report').then(function (data) {
       var el = M.$('report-summary');
       if (!data || data.error) {
         el.innerHTML = '<div class="mo-empty-state">' + (data && data.error || 'Brak danych') + '</div>';
@@ -80,7 +81,7 @@
 
   // -- Findings tab --
   function loadFindings() {
-    M.apiFetch('/api/critique/findings').then(function (data) {
+    return M.apiFetch('/api/critique/findings').then(function (data) {
       var el = M.$('findings-list');
       if (!data || !data.findings || !data.findings.length) {
         el.innerHTML = '<div class="mo-empty-state">Brak findings</div>';
@@ -116,7 +117,7 @@
 
   // -- History tab --
   function loadHistory() {
-    M.apiFetch('/api/critique/history').then(function (data) {
+    return M.apiFetch('/api/critique/history').then(function (data) {
       var el = M.$('history-list');
       if (!data || !data.reports || !data.reports.length) {
         el.innerHTML = '<div class="mo-empty-state">Brak historii</div>';
@@ -159,12 +160,6 @@
     });
   };
 
-  // Initial load
-  loadReport();
-  loadFindings();
-  loadHistory();
-
-  // Auto-refresh every 60s
-  setInterval(function () { loadReport(); loadFindings(); }, 60000);
-  setInterval(loadHistory, 120000);
+  M.createPoller(() => Promise.all([loadReport(), loadFindings()]), 60000);
+  M.createPoller(loadHistory, 120000);
 })();

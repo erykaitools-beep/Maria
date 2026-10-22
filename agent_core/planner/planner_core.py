@@ -19,11 +19,15 @@ from agent_core.planner.planner_model import (
     Plan, PlanStatus, PlannerState, ActionType, create_plan,
 )
 from agent_core.planner.planner_guard import PlannerGuard
-from agent_core.planner.goal_selector import GoalSelector, deadline_mode
+from agent_core.planner.goal_selector import (
+    GoalSelector, deadline_mode, is_fetch_handoff_goal,
+)
 from agent_core.planner.action_executor import ActionExecutor
 from agent_core.planner.stuck_handler import StuckHandler, FETCH_RETRY_CAP
 from agent_core.planner.time_context import TimeContext
 from agent_core.planner.decision_filters import result_is_skipped
+from agent_core.runtime_profile import background_reasoning_enabled
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 from agent_core.tracing.episode import (
     generate_episode_id, current_episode_id, clear_episode_id,
     set_current_trace,
@@ -137,6 +141,57 @@ LEARNING_WINDOW_ACTIONS = frozenset({
 # skipping 100% of cycles, while capping attempts so a failing learn loop can't
 # hammer the executor the way it did before the window existed (264+/day).
 OFF_WINDOW_LEARN_BUDGET = 8
+
+# Drain bonus (2026-08-12): EXTRA off-window budget reserved for exam-family
+# actions, granted ONLY while the exam_failed backlog is non-empty, so it
+# switches itself off when the queue reaches zero.
+#
+# Why: measured 2026-08-12, the exam relay is not slow -- it is idle. One exam
+# stage costs 2-4 min of CPU (load 51, 73-81C) followed by 13-15 min of nothing
+# (load 1.2, 48C). What sets that 13-15 min is NOT YET KNOWN: it is NOT
+# TEACHER_COOLDOWN (that gates only the idle-auto path, which has never fired --
+# zero teacher_session/idle_auto events in the log; every session is
+# planner-driven), and NOT K7 (learn/exam/review are FREE-class, unlimited).
+# Do not "fix" the cadence by editing TEACHER_COOLDOWN -- nothing reads it here.
+# Meanwhile the night (00-09, CPU 41-45C, the coldest hours) issued 8 `learn`
+# actions and ZERO exams, having spent 152 cycles on `evaluate`. With 3 stages
+# per exam the drain ran at ~1 file/h inside the 09-19 window only: ~2 weeks.
+#
+# SIZING, measured on the first night (2026-08-12/13) rather than guessed.
+# 24 was the opening bid; it proved too small for a reason that only shows up
+# once the clock crosses midnight:
+#
+#   pula #0: Aug 12 19:04 -> 21:47  (24 grants, exhausted)
+#   pula #1: Aug 13 00:00 -> 02:xx  (24 grants, exhausted)
+#
+# Both pools ran dry, so the budget -- not thermals, not cadence -- was the
+# binding constraint at both ends of the night. The night produced 27 stages,
+# 14 completed exams and took exam_failed 163 -> 146: 17 files, against ~2/day
+# before the fixes.
+#
+# The catch, and the reason 48 alone was not the fix (resolved 2026-08-15): the
+# counter used to key off _berlin_date_key(), which pairs the WRONG two halves.
+# A calendar day holds two unlit stretches -- 00:00-09:00 and 19:00-24:00 -- but
+# they belong to DIFFERENT nights. Pool #1 above is the 13 Aug pool emptied by
+# 02:00 while closing the night of the 12th, which left 13 Aug evening with
+# nothing at all. Raising the cap only moved the starvation from the morning to
+# the evening. The pool now keys on the dark stretch (_drain_stretch_key), so
+# each night gets its own allowance and midnight stops resetting work in
+# progress.
+#
+# 48 = 2 x the 24 each half actually consumed -- and under stretch-keying those
+# two halves are now in the same pool, which is exactly the 48 measured below. Full coverage of the dark
+# window at the observed 8 grants/h would want ~112 (14 unlit hours), but that
+# is a bigger jump than the thermal evidence supports in one move: the same
+# night logged 70 thermal-latch alarms, so the 80C governor is queued up right
+# behind the budget. Raise again only after a night where 48 also runs dry AND
+# the latch is not the thing doing the throttling.
+#
+# The companion to a bigger cap is the thermal check in _enforce_learning_window
+# (2026-08-12): without it a unit granted during cooling is simply lost, so a
+# higher cap would mostly feed the latch. With it, a hot moment DEFERS instead
+# of spending, and the machine paces itself into the cool windows.
+OFF_WINDOW_EXAM_DRAIN_BONUS = 48
 
 
 class PlannerCore:
@@ -759,6 +814,7 @@ class PlannerCore:
 
         return False
 
+    @work_purpose(WorkPurpose.BACKGROUND)
     def run_cycle(self, tick_count: int) -> Optional[Plan]:
         """
         Execute one planner cycle. The core ReAct loop.
@@ -813,6 +869,24 @@ class PlannerCore:
                 if plan is not None:
                     return plan
 
+        # An enabled, approved file task can make progress before expensive
+        # replanning or reflection. _finalize_plan retains all existing gates.
+        plan = self._maybe_fs_write({})
+        if plan is not None:
+            return self._finalize_plan(plan)
+
+        # Keep admitted deterministic actions above; defer autonomous cognition.
+        # Other user goals remain pending until background reasoning is resumed.
+        if not background_reasoning_enabled():
+            trace.add_step("planner", "background_reasoning", "paused")
+            trace.finalize(success=False, result_summary="background_reasoning_paused")
+            self._save_trace(trace)
+            self._emit_cycle_complete(tick_count, background_reasoning_paused=True)
+            self._log_skip(tick_count, "background_reasoning_paused", [])
+            self._save_state()
+            clear_episode_id()
+            return None
+
         # -- STEP 1.7: STRATEGIC PLANNING (v2 Phase B) --
         # Gated on _strategic_drives (see _strategic_replan_due): off => no
         # blocking LLM replan, which is both free and freeze-proof.
@@ -856,14 +930,6 @@ class PlannerCore:
         # -- STEP 2.5: CREATIVE CHECK (independent of goal cycle) --
         # Creative runs on its own cooldown, not competing with learn/fetch
         plan = self._maybe_creative(context)
-        if plan is not None:
-            return self._finalize_plan(plan)
-
-        # -- STEP 2.6: FS_WRITE (B2) -- first real effector action, flag-gated --
-        # When a goal carries an unmet file_exists success criterion, write the
-        # file so the goal can close on EXTERNAL evidence. Behind FS_WRITE_ENABLED
-        # (default OFF) -> no-op, so the loop below is unchanged until observed.
-        plan = self._maybe_fs_write(context)
         if plan is not None:
             return self._finalize_plan(plan)
 
@@ -1089,7 +1155,7 @@ class PlannerCore:
         from agent_core.routing.handlers import (
             resolve_goal_files, independently_verified_completed_ids,
             heldout_verified_completed_ids, _credit_progress,
-            _verification_mode, _heldout_min_score,
+            _verification_mode, _heldout_min_score, _is_rolling_pantry,
         )
 
         # Only INDEPENDENTLY exam-verified files may force-close a goal -- never
@@ -1152,7 +1218,14 @@ class PlannerCore:
             frac = _credit_progress(
                 goal, sum(1 for fid in files if fid in goal_verified), len(files),
             )
-            if frac <= goal.progress:
+            # Same door as update_learning_goal: a rolling pantry may also write
+            # DOWNWARD, because its denominator grows with every fetch. Every
+            # other goal keeps the one-way ratchet.
+            rolling_down = (
+                _is_rolling_pantry(goal)
+                and abs(frac - goal.progress) > 1e-9
+            )
+            if frac <= goal.progress and not rolling_down:
                 continue
             # update_progress auto-ACHIEVES an ACTIVE goal at >= 1.0; a PENDING
             # goal needs the transition made explicitly.
@@ -1515,10 +1588,27 @@ class PlannerCore:
         trigger = False
         trigger_reason = ""
 
-        # Periodic trigger
-        if since_analysis >= self.SELF_ANALYSIS_INTERVAL_SEC:
+        # Periodic trigger -- gated to the evening analysis shift, so the
+        # heaviest reasoning call in the system stops landing inside the
+        # 09-18:59 learning window and fighting it for `_heavy_lock` and for
+        # thermal headroom. Alarm triggers below deliberately bypass this: an
+        # alarm that waits until 19:00 is not an alarm.
+        allowed, shift_reason = self._self_analysis.shift.should_run_periodic()
+        if allowed:
+            # Inside the shift, the shift's own min-gap and budget do the
+            # pacing. Applying SELF_ANALYSIS_INTERVAL_SEC on top would permit
+            # exactly one pass per evening (the next 4h mark falls at 23:00,
+            # outside the window), leaving the daily budget structurally
+            # unspendable -- a ceiling the system could never reach.
             trigger = True
             trigger_reason = "periodic"
+        elif shift_reason == "shift_disabled":
+            # Shift switched off: fall back to the round-the-clock cadence.
+            if since_analysis >= self.SELF_ANALYSIS_INTERVAL_SEC:
+                trigger = True
+                trigger_reason = "periodic"
+        else:
+            logger.debug(f"[K12] periodic analysis held: {shift_reason}")
 
         # K9 needs_human trigger
         if not trigger and self._meta_cognition and hasattr(self._meta_cognition, "needs_human"):
@@ -2148,7 +2238,7 @@ class PlannerCore:
                          self._project_child_material_count(g)
                          if (g.metadata or {}).get("project_parent") else None)}
                 cands.append(c)
-            off_ok = (self._off_window_budget_remaining() > 0 and self._heavy_action_mode_ok())
+            off_ok = (self._off_window_any_allowed() and self._heavy_action_mode_ok())
             frame = build_frame(
                 episode_id=getattr(trace, "episode_id", "") if trace else "",
                 tick_count=tick_count, now=_t.time(),
@@ -2179,7 +2269,7 @@ class PlannerCore:
 
         # 8b: off-window learning is allowed up to a daily budget, so goals are
         # not hard-filtered just because we are outside the learning window.
-        off_window_allowed = self._off_window_budget_remaining() > 0
+        off_window_allowed = self._off_window_any_allowed()
 
         # Deadline urgency (Etap B, fix 2026-07-06): GOAL_DEADLINE_ENABLED was
         # born wired to select_goal()/rank_goals() -- entrypoints the live
@@ -2209,7 +2299,16 @@ class PlannerCore:
                     "reason": reason,
                 })
         self._last_skip_reasons = infeasible
-        scored.sort(key=lambda x: x[0], reverse=True)
+        # Ties go to the fetch-handoff pantry. Aging is clamped at MAX_AGING, so
+        # every long-lived priority-1.0 goal ends up on exactly 5.000 and the
+        # winner was decided by list order -- which put the always-feasible
+        # mission first and served the pantry only the leftovers (2026-08-15:
+        # 143 pantry plans in scattered gaps, then 55 min of none while 34 fresh
+        # files waited and the mission re-examined material it already knew).
+        # Only EQUAL scores are affected; a goal that genuinely ranks higher
+        # still wins. GoalSelector.select_goal has a stronger rule (handoff wins
+        # outright) but the live cycle does not call it -- see the note there.
+        scored.sort(key=lambda x: (-x[0], 0 if is_fetch_handoff_goal(x[1]) else 1))
 
         # Filter out stuck-cooled goals (reuses the cycle's `now` from above)
         expired = [gid for gid, until_ts in self._state.stuck_cooldowns.items()
@@ -2643,14 +2742,35 @@ class PlannerCore:
         # when the current mode/health would actually let the action execute --
         # otherwise the degradation gate in _finalize_plan blocks it (REDUCED /
         # low health) and we would burn budget on a no-op.
-        if (self._off_window_budget_remaining() > 0
+        # Thermal start-gate (2026-08-12, same night the drain bonus shipped):
+        # the exam pipeline refuses a stage outright while the cooling latch is
+        # engaged (teacher_module._run_exam -> local_fallback_allowed), so an
+        # approval here would spend a budget unit on a session that does
+        # nothing. Measured: of the first 5 drain units, the one granted at
+        # 19:40:42 was followed 1 second later by "[EXAM] Thermal cooling
+        # active; deferring exam stage". This is the SAME rationale
+        # _heavy_action_mode_ok already encodes for mode/health -- the thermal
+        # latch simply did not exist when that guard was written (it landed
+        # 2026-08-10), so this completes the original intent rather than adding
+        # a new policy.
+        if not self._thermal_allows_heavy():
+            logger.info(
+                f"[Planner] Goal {goal.id} action={action.value} deferred "
+                f"off-window: thermal cooling active (budget NOT spent)"
+            )
+            return ActionType.NOOP, "thermal_cooling"
+
+        if (self._off_window_budget_remaining(action) > 0
                 and self._heavy_action_mode_ok()):
-            self._consume_off_window_budget()
+            on_drain = self._consume_off_window_budget(action)
             self._last_off_window_approved = True
             logger.info(
                 f"[Planner] Goal {goal.id} action={action.value} allowed "
                 f"off-window ({self._state.off_window_learn_used}/"
-                f"{OFF_WINDOW_LEARN_BUDGET} off-window budget used today)"
+                f"{OFF_WINDOW_LEARN_BUDGET} off-window budget used today"
+                + (f", drain {self._state.off_window_drain_used}/"
+                   f"{OFF_WINDOW_EXAM_DRAIN_BONUS}" if on_drain else "")
+                + ")"
             )
             return action, None
 
@@ -2685,24 +2805,148 @@ class PlannerCore:
         from agent_core.environment.environment_model import berlin_now
         return berlin_now().strftime("%Y-%m-%d")
 
-    def _off_window_budget_remaining(self) -> int:
+    @staticmethod
+    def _drain_stretch_key() -> str:
+        """Identity of the current DARK STRETCH: 19:00 -> 09:00 across midnight.
+
+        The drain pool used to key off _berlin_date_key() like the base budget,
+        and that pairs the WRONG two halves. A calendar day holds two unlit
+        stretches -- 00:00-09:00 and 19:00-24:00 -- but they belong to different
+        nights: the morning closes the stretch that opened the PREVIOUS evening.
+        Sharing one pool between them meant the evening inherited a pool the
+        morning had already emptied.
+
+        Measured 2026-08-12/13, which is exactly the pairing this key restores:
+
+            19:04 -> 21:47 Aug 12   24 grants, exhausted   |  ONE stretch,
+            00:00 -> 02:xx Aug 13   24 grants, exhausted   |  48 total
+
+        Under date-keying those 24+24 landed in two different pools while the
+        evening of Aug 13 -- a genuinely new stretch -- started with nothing,
+        because the Aug 13 pool had been spent by 02:00. Raising the cap
+        24 -> 48 did not fix that; it only moved the starvation from the
+        morning to the evening. This does fix it: each stretch gets its own 48.
+
+        Named for the evening that OPENED the stretch, so both halves agree
+        across midnight. Hours come from PROFILE_LEARNING (the window SSoT),
+        never hardcoded -- widen the window and this follows.
+        """
+        from datetime import timedelta
+
+        from agent_core.environment.environment_model import (
+            PROFILE_LEARNING,
+            berlin_now,
+        )
+
+        now = berlin_now()
+        window_start_hour = min(PROFILE_LEARNING.auto_trigger_hours)
+        if now.hour < window_start_hour:
+            # Small hours: still inside the stretch that opened last evening.
+            return (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        return now.strftime("%Y-%m-%d")
+
+    def _drain_bonus_applies(self, action: Optional[ActionType]) -> bool:
+        """True when this action may draw on the exam_failed drain allowance.
+
+        Two conditions, both required:
+        1. It is a TEACHER-driving action. LEARN belongs here even though the
+           bonus exists for exams: measured 2026-08-11..12, every off-window
+           learn-family action the planner emitted was `learn` (K8 almost always
+           picks learn_topic -- see the D1.5c note above) and ZERO were `exam`,
+           yet all 8 of those night actions ran an exam STAGE. The executor
+           routes LEARN/EXAM/REVIEW alike into TeacherAgent.run_session, and the
+           teacher then picks the stage from its OWN P1..P6 ladder. Gating on
+           EXAM alone would have been a producer nothing ever consumes.
+           FETCH/ASK_EXPERT stay on the plain 8 -- they reach for the link and
+           an external LLM, not the teacher, and the night is when the Kimi
+           download runs (cron pauses it only 04:45-06:20).
+        2. There is actually a backlog. When exam_failed hits 0 the bonus
+           evaporates by itself and the planner returns to its normal rhythm --
+           no flag to unset later.
+        """
+        if action not in (ActionType.LEARN, ActionType.EXAM, ActionType.REVIEW):
+            return False
+        try:
+            from agent_core.teacher.exam_backlog import exam_failed_count
+            return exam_failed_count() > 0
+        except Exception:  # noqa: BLE001 - fail closed: no backlog read, no bonus
+            return False
+
+    def _drain_budget_remaining(self) -> int:
+        """Exam-family drain actions still allowed in the current dark stretch.
+
+        Keyed by _drain_stretch_key(), NOT by the calendar day: midnight falls
+        in the middle of a night's work and must not reset the pool.
+        """
+        if self._state.off_window_drain_stretch != self._drain_stretch_key():
+            return OFF_WINDOW_EXAM_DRAIN_BONUS
+        return max(0, OFF_WINDOW_EXAM_DRAIN_BONUS
+                   - self._state.off_window_drain_used)
+
+    def _off_window_any_allowed(self) -> bool:
+        """True if ANY learn-family action can still run off-window today.
+
+        Used by the goal-ranking filter and the decision tap, which run BEFORE
+        an action type exists. It must account for the drain allowance too:
+        ranking on the base budget alone would filter learning goals away once
+        the plain 8 are spent, and _enforce_learning_window -- where the bonus
+        lives -- would never be reached. (Producer fixed, consumer still reading
+        the old field: the exact shape of the 2026-07-22 mission-counter bug.)
+        """
+        if self._off_window_budget_remaining() > 0:
+            return True
+        return (self._drain_bonus_applies(ActionType.LEARN)
+                and self._drain_budget_remaining() > 0)
+
+    def _off_window_budget_remaining(
+        self, action: Optional[ActionType] = None
+    ) -> int:
         """Learn-family actions still allowed off-window today (8b).
 
         Resets at Berlin midnight. Irrelevant while the window is open (the
         window check short-circuits before the budget is ever consulted).
+
+        Exam-family actions add the drain allowance on top while the
+        exam_failed backlog is non-empty (see _drain_bonus_applies).
         """
         today = self._berlin_date_key()
         if self._state.off_window_learn_date != today:
-            return OFF_WINDOW_LEARN_BUDGET
-        return max(0, OFF_WINDOW_LEARN_BUDGET - self._state.off_window_learn_used)
+            base = OFF_WINDOW_LEARN_BUDGET
+        else:
+            base = max(
+                0, OFF_WINDOW_LEARN_BUDGET - self._state.off_window_learn_used)
+        if self._drain_bonus_applies(action):
+            return base + self._drain_budget_remaining()
+        return base
 
-    def _consume_off_window_budget(self) -> None:
-        """Record one off-window learn-family action against today's budget (8b)."""
+    def _consume_off_window_budget(
+        self, action: Optional[ActionType] = None
+    ) -> bool:
+        """Record one off-window learn-family action against today's budget (8b).
+
+        Returns True when the action was charged to the drain allowance rather
+        than the base budget. The drain pool is spent FIRST for exam-family
+        actions, so a night of exams leaves the base 8 intact for LEARN/FETCH;
+        once the drain pool runs dry (or the backlog is gone) exams fall back to
+        the base budget exactly as before.
+        """
         today = self._berlin_date_key()
         if self._state.off_window_learn_date != today:
             self._state.off_window_learn_date = today
             self._state.off_window_learn_used = 0
+        # The drain pool rolls on its OWN clock (see _drain_stretch_key): the
+        # base budget still resets at midnight, the drain pool at 19:00. Reset
+        # them together and the night loses its allowance halfway through.
+        stretch = self._drain_stretch_key()
+        if self._state.off_window_drain_stretch != stretch:
+            self._state.off_window_drain_stretch = stretch
+            self._state.off_window_drain_used = 0
+        if (self._drain_bonus_applies(action)
+                and self._drain_budget_remaining() > 0):
+            self._state.off_window_drain_used += 1
+            return True
         self._state.off_window_learn_used += 1
+        return False
 
     def _heavy_action_mode_ok(self) -> bool:
         """True if the current mode/health would let a heavy LLM action run.
@@ -2722,6 +2966,26 @@ class PlannerCore:
                 st.mode.value, st.health_score
             )
             return allowed
+        except Exception:
+            return True
+
+    def _thermal_allows_heavy(self) -> bool:
+        """False while the local-compute cooling latch is engaged.
+
+        Companion to _heavy_action_mode_ok for the off-window budget: that one
+        asks "would mode/health let this run", this one asks "would the thermal
+        latch let this run". Both exist so a budget unit is only spent on an
+        action that can actually do work.
+
+        Fail-OPEN (True) on any error, matching _heavy_action_mode_ok: an
+        unwired coordinator (unit tests, partial boot) must not silently block
+        every off-window action.
+        """
+        try:
+            from agent_core.llm.local_compute import (
+                get_local_compute_coordinator,
+            )
+            return get_local_compute_coordinator().local_fallback_allowed()
         except Exception:
             return True
 
@@ -4437,7 +4701,9 @@ class PlannerCore:
 
         Resets to 0 whenever the goal either (a) makes typed material progress
         this cycle -- a new chunk learned / exam passed / review done, per
-        _plan_made_progress -- or (b) lifts its progress score to a new high-water.
+        _plan_made_progress -- or (b) lifts its progress score to a new
+        high-water (for the rolling pantry: verifies one more FILE than ever
+        before, since its fraction has a growing denominator).
         So a goal still ingesting new content, or whose recall just got verified,
         is never counted as stalled. Only a goal that keeps cycling on exhausted /
         unverifiable material accrues, and is reaped by the LEARNING_STALL_CYCLE_CAP
@@ -4454,10 +4720,45 @@ class PlannerCore:
             return
         if goal is None or goal.type != GoalType.LEARNING:
             return
-        peak = goal.metadata.get("progress_peak")
-        new_peak = peak is None or goal.progress > float(peak) + 1e-9
-        if new_peak:
+        from agent_core.routing.handlers import _is_rolling_pantry
+        owned = len(goal.metadata.get("file_ids") or [])
+        if _is_rolling_pantry(goal) and owned > 0:
+            # A fraction whose denominator grows cannot serve as a high-water
+            # mark: the supply pump dilutes it faster than exams lift it, so the
+            # peak freezes and EVERY later cycle is counted as a stall -- which
+            # is why the live pantry goal accrued stall_cycles (and an
+            # IMPROVEMENT bulletin every 5 cycles) while it was still verifying
+            # files. Count the VERIFIED FILES instead: monotone, and it cannot
+            # be gamed by the pump -- fetching material moves the denominator,
+            # never this number. (Deliberately NOT reset on merge: a counter the
+            # pump can reset would never reap a genuinely dead goal, the same
+            # hole the updated_at-based reapers already have.)
+            verified_now = int(round(goal.progress * owned))
+            peak_v = goal.metadata.get("verified_peak")
+            peak_owned = goal.metadata.get("verified_peak_owned")
+            new_peak = peak_v is None or verified_now > int(peak_v)
+            if new_peak:
+                goal.metadata["verified_peak"] = verified_now
+                goal.metadata["verified_peak_owned"] = owned
+            elif (peak_owned is not None and owned <= int(peak_owned)
+                    and verified_now < int(peak_v)):
+                # The count fell WITHOUT the pump adding anything, so this is
+                # information about verification, not dilution -- correct the
+                # peak down. Without this the first cycle after a restart seeds
+                # the peak from whatever the frozen record still says (live:
+                # 0.90625 x 300 = 272 files that were never verified), and that
+                # phantom peak could never be beaten again. Not a stall reset:
+                # a correction is not progress.
+                goal.metadata["verified_peak"] = verified_now
+                goal.metadata["verified_peak_owned"] = owned
+            # Keep the fraction peak in step so no reader sees a phantom gap
+            # between a 0.66 progress and a 0.91 "peak" it can never reach.
             goal.metadata["progress_peak"] = goal.progress
+        else:
+            peak = goal.metadata.get("progress_peak")
+            new_peak = peak is None or goal.progress > float(peak) + 1e-9
+            if new_peak:
+                goal.metadata["progress_peak"] = goal.progress
         if new_peak or self._plan_made_progress(plan, result):
             goal.metadata["stall_cycles"] = 0
         elif self._blocked_by_degradation(result):
@@ -5028,6 +5329,7 @@ class PlannerCore:
         block_reasons: Optional[List[str]] = None,
         no_goals: bool = False,
         plan: Optional[Plan] = None,
+        background_reasoning_paused: bool = False,
     ) -> None:
         """Emit planner_cycle_complete PerceptionEvent at end of every cycle."""
         if self._homeostasis_core is None:
@@ -5040,6 +5342,8 @@ class PlannerCore:
 
             if guard_blocked:
                 message = f"Planowanie wstrzymane: {', '.join(block_reasons or [])}"
+            elif background_reasoning_paused:
+                message = "Autonomiczne rozumowanie wstrzymane - oczekuje na dopuszczone dzialania"
             elif no_goals:
                 message = "Brak aktywnych celow - czekam"
             elif plan is not None:
@@ -5052,6 +5356,7 @@ class PlannerCore:
                 "cycle": self._state.total_cycles,
                 "guard_blocked": guard_blocked,
                 "no_goals": no_goals,
+                "background_reasoning_paused": background_reasoning_paused,
                 "message": message,
             }
 
@@ -5177,6 +5482,7 @@ class PlannerCore:
     def get_status(self) -> Dict[str, Any]:
         """Get planner status for /plan status command."""
         return {
+            "background_reasoning_enabled": background_reasoning_enabled(),
             "total_cycles": self._state.total_cycles,
             "total_plans_executed": self._state.total_plans_executed,
             "last_cycle_tick": self._state.last_cycle_tick,

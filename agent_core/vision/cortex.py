@@ -16,12 +16,17 @@ Phase 4: Vision Cortex (VISION_SPEC.md)
 """
 
 import logging
+import threading
 import time
-from typing import Callable, Dict, List, Optional
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Optional
+
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 
 from agent_core.vision.models import VisionMode
 from agent_core.vision.modules.base import ModuleOutput, VisionModule
 from agent_core.vision.modules.motion.detector import MotionModule, MotionOutput
+from agent_core.vision.modules.objects.detector import ObjectOutput
 from agent_core.vision.modules.scene.analyzer import SceneModule, SceneOutput
 from agent_core.vision.percept import VisionPercept, generate_summary
 from agent_core.vision.preprocessing.preprocessor import ProcessedFrame, VisionPreprocessor
@@ -33,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Quality thresholds for running modules
 _QUALITY_FOR_SCENE = 0.3
 _QUALITY_FOR_MOTION = 0.2
+_QUALITY_FOR_OBJECTS = 0.3
 
 
 class VisionCortex:
@@ -62,6 +68,8 @@ class VisionCortex:
         self._active_sensor_id: Optional[str] = None
         self._last_percept: Optional[VisionPercept] = None
         self._last_frame_image: Optional[Any] = None  # np.ndarray from last capture
+        self._last_processed_frame: Optional[ProcessedFrame] = None
+        self._capture_lock = threading.RLock()
 
     def add_sensor(self, sensor: VisionSensor) -> None:
         """Register a sensor."""
@@ -102,17 +110,26 @@ class VisionCortex:
         return len(self._modules)
 
     def perceive(self) -> Optional[VisionPercept]:
+        # Serialize camera/preprocessor and stateful local modules. Never hold
+        # this lock while waiting for an on-demand VLM description.
+        with self._capture_lock:
+            return self._perceive_local()
+
+    def _perceive_local(self) -> Optional[VisionPercept]:
         """Run the full visual perception pipeline.
 
         Returns None only if no sensor is available.
         Returns degraded VisionPercept if sensor has issues.
         """
         t0 = time.monotonic()
+        self._last_processed_frame = None
+        self._last_frame_image = None
 
         # 1. Select best sensor
         sensor = self._select_best_sensor()
         if sensor is None:
-            return self._make_blind_percept()
+            self._last_percept = self._make_blind_percept()
+            return self._last_percept
 
         self._active_sensor_id = sensor.sensor_id
 
@@ -120,19 +137,21 @@ class VisionCortex:
         frame = sensor.capture_frame()
         if frame is None:
             health = sensor.health
-            return VisionPercept(
+            self._last_percept = VisionPercept(
                 vision_health=health,
                 quality=0.0,
                 summary=health.to_human_description(),
                 sensor_id=sensor.sensor_id,
                 total_processing_time_ms=(time.monotonic() - t0) * 1000.0,
             )
+            return self._last_percept
 
         # 3. Preprocess
         processed = self._preprocessor.process(frame)
 
         # 4. Run modules adaptively
         motion_output = None
+        objects_output = None
         scene_output = None
         modules_run = []
 
@@ -143,6 +162,13 @@ class VisionCortex:
             motion_output = self._run_module("motion", processed)
             if motion_output is not None:
                 modules_run.append("motion")
+
+        # Fast local object detector. This provides concrete semantics in the
+        # tick without waking the slow VLM and is inert unless registered.
+        if "objects" in self._modules and quality >= _QUALITY_FOR_OBJECTS:
+            objects_output = self._run_module("objects", processed)
+            if objects_output is not None:
+                modules_run.append("objects")
 
         # Scene module
         if "scene" in self._modules and quality >= _QUALITY_FOR_SCENE:
@@ -157,6 +183,7 @@ class VisionCortex:
             quality=quality,
             motion=motion_output if isinstance(motion_output, MotionOutput) else None,
             scene=scene_output if isinstance(scene_output, SceneOutput) else None,
+            objects=objects_output if isinstance(objects_output, ObjectOutput) else None,
         )
 
         elapsed = (time.monotonic() - t0) * 1000.0
@@ -166,6 +193,7 @@ class VisionCortex:
             vision_mode=frame.mode,
             quality=quality,
             motion=motion_output if isinstance(motion_output, MotionOutput) else None,
+            objects=objects_output if isinstance(objects_output, ObjectOutput) else None,
             scene=scene_output if isinstance(scene_output, SceneOutput) else None,
             summary=summary,
             total_processing_time_ms=elapsed,
@@ -175,6 +203,7 @@ class VisionCortex:
 
         self._last_percept = percept
         self._last_frame_image = processed.image
+        self._last_processed_frame = processed
         return percept
 
     def open_all_sensors(self) -> int:
@@ -198,44 +227,57 @@ class VisionCortex:
         self._active_sensor_id = None
 
     def describe_scene_llava(self) -> Optional[str]:
-        """On-demand scene description using LLaVA (~30s).
+        """Describe a fresh snapshot without modifying the tick's module."""
+        return self.describe_snapshot()
 
-        Temporarily enables LLaVA on SceneModule, captures a fresh frame,
-        and returns the description. Used for chat queries ("co widzisz?"),
-        not in the tick loop.
-        """
+    def perceive_snapshot(self) -> Optional[VisionPercept]:
+        """Detailed manual perception of one frame, isolated from tick state."""
+        return self.perceive_snapshot_with_frame()[0]
+
+    @work_purpose(WorkPurpose.ACTION)
+    def perceive_snapshot_with_frame(self):
+        """Return the manual percept and its exact image, even as ticks continue."""
+        with self._capture_lock:
+            percept = self.perceive()
+            processed = self._last_processed_frame
+            image = self._last_frame_image.copy() if self._last_frame_image is not None else None
+            if processed is not None and image is not None:
+                processed = replace(processed, image=image)
         scene_mod = self._modules.get("scene")
-        if not isinstance(scene_mod, SceneModule):
-            return None
+        fn = getattr(scene_mod, "_llava_describe", None)
+        if (percept is None or processed is None or fn is None
+                or not isinstance(scene_mod, SceneModule)
+                or processed.quality.overall < _QUALITY_FOR_SCENE):
+            return percept, image
+        private_scene = SceneModule(llava_fn=fn)
+        private_scene._prompt = scene_mod._prompt
+        result = private_scene.analyze(processed)
+        if result is None:
+            return percept, image
+        return replace(percept, scene=result, summary=generate_summary(
+            health=percept.vision_health, quality=percept.quality,
+            motion=percept.motion, objects=percept.objects, scene=result,
+        ), total_processing_time_ms=(
+            percept.total_processing_time_ms + result.processing_time_ms
+        )), image
 
-        llava_fn = getattr(scene_mod, '_llava_describe', None)
-        if llava_fn is None:
-            return None
+    def preview_snapshot(self):
+        """Copy one consistent live percept/frame for the off-tick publisher."""
+        from agent_core.vision.preview import percept_state
+        with self._capture_lock:
+            percept = self._last_percept
+            if percept is None:
+                return None, None
+            state = {"status": self.get_status(), "last_percept": percept_state(percept)}
+            sensor = self.active_sensor
+            if sensor is not None:
+                state["health"] = {"sensor_id": sensor.sensor_id,
+                                   "health": sensor.health.to_dict(),
+                                   "description": sensor.health.to_human_description()}
+            image = self._last_frame_image.copy() if self._last_frame_image is not None else None
+            return state, image
 
-        sensor = self._select_best_sensor()
-        if sensor is None:
-            return None
-
-        frame = sensor.capture_frame()
-        if frame is None:
-            return None
-
-        processed = self._preprocessor.process(frame)
-        if processed.quality.overall < _QUALITY_FOR_SCENE:
-            return None
-
-        # Temporarily enable LLaVA for this one call
-        old_fn = scene_mod._llava_fn
-        scene_mod._llava_fn = llava_fn
-        try:
-            result = scene_mod.analyze(processed)
-            if result and result.backend_used == "llava":
-                return result.description
-        finally:
-            scene_mod._llava_fn = old_fn
-
-        return None
-
+    @work_purpose(WorkPurpose.ACTION)
     def describe_snapshot(
         self,
         prompt: Optional[str] = None,
@@ -244,12 +286,8 @@ class VisionCortex:
     ) -> Optional[str]:
         """Thread-safe one-shot LLaVA scene description for the autonomous path.
 
-        describe_scene_llava() temporarily mutates the SHARED SceneModule's
-        _llava_fn, which races the per-tick scene run: the tick would pick up
-        the LLaVA fn and run a ~30s call inline (tick_overrun) and the result
-        comes back garbled (None -> no ping). This variant calls LLaVA directly
-        on its own captured frame WITHOUT touching the shared module, so it is
-        safe to run from VisionAdvisor's background thread.
+        Camera capture is serialized with regular perception; the slow call
+        runs after releasing that lock and never changes the shared module.
 
         Args:
             prompt: override prompt for LLaVA (defaults to the SceneModule's
@@ -277,13 +315,14 @@ class VisionCortex:
         if llava_fn is None or prompt_to_use is None:
             return None
 
-        sensor = self._select_best_sensor()
-        if sensor is None:
-            return None
-        frame = sensor.capture_frame()
-        if frame is None:
-            return None
-        processed = self._preprocessor.process(frame)
+        with self._capture_lock:
+            sensor = self._select_best_sensor()
+            if sensor is None:
+                return None
+            frame = sensor.capture_frame()
+            if frame is None:
+                return None
+            processed = self._preprocessor.process(frame)
         if processed.quality.overall < _QUALITY_FOR_SCENE:
             return None
 
@@ -318,6 +357,27 @@ class VisionCortex:
         except Exception as e:
             logger.warning(f"describe_snapshot LLaVA call failed: {e}")
             return None
+
+    def save_last_frame(self, save_path: str, *, image=None) -> bool:
+        """Save the exact most recent processed frame without another capture.
+
+        Used by the YOLO26 advisor path: the event and photo stay bound to the
+        same perception, and no VLM call is needed just to create a snapshot.
+        """
+        source = self._last_frame_image if image is None else image
+        if source is None:
+            return False
+        try:
+            from pathlib import Path
+            import cv2
+
+            target = Path(save_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            image = source.copy()
+            return bool(cv2.imwrite(str(target), image))
+        except Exception as e:
+            logger.warning("save_last_frame failed: %s", e)
+            return False
 
     def reset(self) -> None:
         """Reset internal state (preprocessor + modules)."""

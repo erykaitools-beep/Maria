@@ -18,6 +18,8 @@ things here are silent when they break, which is why they are pinned:
 import os
 import re
 from unittest.mock import MagicMock, patch
+from agent_core.llm.llm_tape import LLMTape
+from agent_core.tests.spec_helpers import specced
 
 import pytest
 
@@ -82,7 +84,7 @@ class TestThinkAndModelReachTheClient:
         brain.model = "llama3.1:8b"
         brain.system_prompt = "sys"
         brain._llm_tape = None
-        brain._client = MagicMock()
+        brain._client = MagicMock(spec=["chat", "generate", "embed", "embeddings", "list", "show"])
         brain._client.chat.return_value = {"message": {"content": "{}"}}
         return brain
 
@@ -130,7 +132,7 @@ class TestThinkAndModelReachTheClient:
     def test_tape_records_the_model_that_actually_ran(self):
         """A tape naming the wrong model poisons every later measurement."""
         brain = self._brain_with_fake_client()
-        brain._llm_tape = MagicMock()
+        brain._llm_tape = specced(LLMTape)
         brain._ask_once("p", model="qwen3:8b")
         entry = brain._llm_tape.record.call_args.args[0]
         assert getattr(entry, "model", None) == "qwen3:8b"

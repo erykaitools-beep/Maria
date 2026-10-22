@@ -26,6 +26,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, TypeVar
 
@@ -150,7 +151,9 @@ def call_with_timeout(
         TimeoutError: If fn() exceeds deadline.
         Any exception that fn() raises.
     """
-    future = _executor.submit(fn)
+    # Pool workers are reused: copy each submission's purpose and restore the
+    # worker context on exit, including exceptions and caller timeouts.
+    future = _executor.submit(copy_context().run, fn)
     _track_submitted()
     future.add_done_callback(_track_done)
     try:

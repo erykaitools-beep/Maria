@@ -3,6 +3,7 @@
 {% block page_class %}mo-page--chat{% endblock %}
 
 {% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chat_voice.css') }}">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
 {% endblock %}
 
@@ -19,8 +20,19 @@
     </div>
   </div>
 
+  <section class="mo-work-panel" aria-label="Projekty i zadania">
+    <label for="workProject">Projekt rozmowy</label>
+    <select id="workProject" aria-describedby="workStatus"><option value="">Odczytuję projekty…</option></select>
+    <p id="workStatus" role="status" aria-live="polite">Odczytuję zapisany stan pracy…</p>
+    <details class="mo-work-ledger"><summary>Zadania i zapisane wyniki</summary><div id="workTasks"></div></details>
+  </section>
+
   <div class="mo-rate-warning" id="rateLimitWarning">
     Limit wiadomosci. Poczekaj <span id="waitTime">0</span>s...
+  </div>
+  <div id="chatPendingNotice" role="status" hidden>
+    Wynik poprzedniej wiadomości jest niepewny. Sprawdź historię i karty zadań. Nie ponawiaj zlecenia bez sprawdzenia.
+    <button type="button" class="mo-btn mo-btn--ghost" id="chatContinue">Rozumiem — nowa wiadomość</button>
   </div>
 
   <div class="mo-chat-messages" id="chatMessages">
@@ -29,11 +41,23 @@
     </div>
   </div>
 
+  <section class="mo-voice-panel" aria-label="Głos Marii">
+    <div class="mo-voice-controls">
+      <button type="button" class="mo-btn mo-btn--primary" id="voiceMic" aria-pressed="false">Mów</button>
+      <button type="button" class="mo-btn mo-btn--ghost" id="voiceToggle" aria-pressed="false">Włącz głos</button>
+      <button type="button" class="mo-btn mo-btn--ghost" id="voicePlay" disabled>Odsłuchaj</button>
+      <button type="button" class="mo-btn mo-btn--ghost" id="voiceInterrupt" disabled>Przerwij odczyt</button>
+      <button type="button" class="mo-btn mo-btn--ghost" id="voiceStop" disabled>Stop</button>
+    </div>
+    <p class="mo-voice-status" id="voiceStatus" role="status" aria-live="polite"></p>
+    <p class="mo-voice-note">Rozpoznawanie odbywa się na miniPC. Strona musi pozostać widoczna; podczas odczytu mikrofon nie nasłuchuje. „Stop” zatrzymuje rozmowę głosową, nie zadanie na komputerze.</p>
+  </section>
+
   <div class="mo-chat-input">
-    <input type="text" class="mo-chat-input__field" id="chatInput"
-           placeholder="Napisz wiadomosc..." autocomplete="off">
-    <button class="mo-chat-input__send" id="sendBtn">
-      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    <input type="text" class="mo-chat-input__field" id="chatInput" data-voice-backend="local"
+           placeholder="Napisz lub podyktuj wiadomość…" aria-label="Wiadomość do Marii" autocomplete="off">
+    <button type="button" class="mo-chat-input__send" id="sendBtn" disabled>
+      Wyślij
     </button>
   </div>
 
@@ -41,5 +65,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/chat_local_stt.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat_voice.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat_work.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 {% endblock %}

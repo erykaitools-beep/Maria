@@ -82,6 +82,14 @@ class AnalysisReport:
     model: Optional[str] = None       # Concrete model name used by analyzer
     input_summary_hash: str = ""
     recommendations: List[AnalysisRecommendation] = field(default_factory=list)
+    # The analyst is asked for three sections and, until 2026-08-16, only one
+    # survived: the parser read "recommendations" and dropped the rest on the
+    # floor. The two discarded ones carried the cross-cutting diagnosis -- on a
+    # live run they held "the recommendation loop itself is broken" and the
+    # paragraph that correctly named a 100% exam failure as the priority, while
+    # the kept section listed topics.
+    systemic_issues: List[str] = field(default_factory=list)
+    summary: str = ""
     goals_created: List[str] = field(default_factory=list)
     beliefs_updated: int = 0
     duration_ms: float = 0.0
@@ -106,6 +114,8 @@ class AnalysisReport:
             model=d.get("model"),
             input_summary_hash=d.get("input_summary_hash", ""),
             recommendations=recs,
+            systemic_issues=[str(s) for s in (d.get("systemic_issues") or [])],
+            summary=d.get("summary", "") or "",
             goals_created=d.get("goals_created", []),
             beliefs_updated=d.get("beliefs_updated", 0),
             duration_ms=d.get("duration_ms", 0),
@@ -117,6 +127,20 @@ class AnalysisReport:
 # Limits
 MAX_RECOMMENDATIONS_PER_REPORT = 5
 MAX_PROPOSED_GOALS_FROM_ANALYSIS = 3
+
+# Systemic issues get their own Telegram section rather than competing with
+# recommendations for the notifier's five slots -- they are the cross-cutting
+# finding, not another topic to learn.
+MAX_SYSTEMIC_ISSUES = 4
+SYSTEMIC_ISSUE_MAX_CHARS = 240
+# The notifier truncates the summary block at 500 chars; leaving headroom keeps
+# the shift footer from being the thing that gets cut off. DISPLAY limit --
+# applied by the formatter, which cuts on a word boundary and marks the cut.
+SUMMARY_MAX_CHARS = 380
+# What gets persisted in the report. Wider than the card so the full paragraph
+# survives in self_analysis_reports.jsonl for later reading, but still bounded:
+# this is unvalidated model output.
+SUMMARY_STORED_MAX_CHARS = 1200
 
 # Max length of one composed recommendation line. Five of these sit comfortably
 # inside Telegram's message limit; long enough that a real finding + its number
@@ -154,8 +178,32 @@ def _truncate(text: str, limit: int) -> str:
     return cut + "..."
 
 
-def format_report_for_telegram(report: "AnalysisReport") -> tuple:
-    """Build a clean (summary, recommendations) pair for the K12 Telegram card.
+def format_shift_footer(shift_status: Optional[Dict[str, Any]]) -> str:
+    """One line telling the operator where the evening shift stands.
+
+    Without it the operator sees analyses arriving with no sense of whether the
+    shift has just started or is about to run out of budget -- three identical
+    looking cards in an evening say nothing about pacing.
+    """
+    if not shift_status:
+        return ""
+    runs = shift_status.get("runs_today", 0)
+    spent = shift_status.get("spent_min", 0)
+    budget = shift_status.get("budget_min", 0)
+    return f"[zmiana: przebieg {runs}, {spent:.0f} z {budget:.0f} min]"
+
+
+def format_report_for_telegram(
+    report: "AnalysisReport",
+    shift_status: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    """Build the (summary, recommendations, systemic_issues) K12 Telegram card.
+
+    Systemic issues travel separately rather than folded into the
+    recommendation list: the notifier shows only five recommendation lines, so
+    merging them would let a cross-cutting diagnosis push out the concrete
+    advice, or be pushed out by it. Until 2026-08-16 they were not returned at
+    all -- the parser dropped them before anything could format them.
 
     The notifier used to receive ``report.raw_response[:300]`` (raw JSON / model
     prose) as the summary and ``str(recommendation)`` dataclass reprs as the
@@ -186,6 +234,23 @@ def format_report_for_telegram(report: "AnalysisReport") -> tuple:
                 line = _truncate(head or description, REC_LINE_MAX)
         if line:
             recs.append(_markdown_safe(line))
+
+    issues = [
+        _markdown_safe(_truncate(str(s).strip(), SYSTEMIC_ISSUE_MAX_CHARS))
+        for s in (report.systemic_issues or [])[:MAX_SYSTEMIC_ISSUES]
+        if str(s).strip()
+    ]
+
     provenance = report.model or report.analyzer or "?"
-    summary = _markdown_safe(f"{provenance}: {len(recs)} rekomendacji")
-    return summary, recs
+    head = f"{provenance}: {len(recs)} rekomendacji"
+    if issues:
+        head += f", {len(issues)} problemy ukladowe"
+
+    parts = [_markdown_safe(head)]
+    if report.summary:
+        parts.append(_markdown_safe(_truncate(report.summary, SUMMARY_MAX_CHARS)))
+    footer = format_shift_footer(shift_status)
+    if footer:
+        parts.append(footer)
+
+    return "\n".join(parts), recs, issues

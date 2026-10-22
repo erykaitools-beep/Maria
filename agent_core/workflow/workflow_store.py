@@ -49,18 +49,15 @@ class WorkflowStore:
     def save(self, workflow: WorkflowState) -> None:
         """Save or update a workflow (append to JSONL)."""
         with self._lock:
-            self._workflows[workflow.workflow_id] = workflow
             self._append(workflow)
+            self._workflows[workflow.workflow_id] = workflow
             self._maybe_compact()
 
     def _append(self, workflow: WorkflowState) -> None:
         """Append single workflow record to JSONL."""
-        try:
-            os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(workflow.to_dict(), ensure_ascii=False) + "\n")
-        except OSError as e:
-            logger.error("Failed to write workflow: %s", e)
+        os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
+        with open(self._path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(workflow.to_dict(), ensure_ascii=False) + "\n")
 
     def _maybe_compact(self) -> None:
         """Compact JSONL if too many duplicate keys (>2x in-memory count)."""

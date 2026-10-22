@@ -531,7 +531,7 @@ NIM_MONTHLY_TOKEN_LIMIT=2000000
 ### Changed
 - **`maria_core/sys/config.py`** - Dodano `python-dotenv` loading + `OLLAMA_BASE_URL` z env var
 - **`maria_core/sys/maria_heartbeat.py`** (v1.3 -> v1.4):
-  - Usuniety hardcoded `C:\Users\eras-\...\ollama.exe`
+  - Usuniety hardcoded `C:\Users\<USER>\...\ollama.exe`
   - `os.startfile()` (Windows-only) -> `subprocess.Popen()` (cross-platform)
   - Ollama wykrywana przez `shutil.which("ollama")` + env var `OLLAMA_PATH`
   - Health check uzywa `OLLAMA_BASE_URL` z config

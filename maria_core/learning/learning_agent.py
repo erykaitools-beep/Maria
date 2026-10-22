@@ -6,6 +6,7 @@ Utilities (call_ollama, JSON parsing) przeniesione do llm_utils.py.
 Chunking przeniesiony do chunking.py.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
@@ -18,6 +19,7 @@ from maria_core.sys.config import (
     STATUS_LEARNING,
     STATUS_LEARNED,
     STATUS_EXAM_FAILED,
+    STATUS_HARD_TOPIC,
     get_timestamp,
 )
 from maria_core.memory_engine.memory_store import (
@@ -34,6 +36,38 @@ from maria_core.learning.llm_utils import (
 from maria_core.learning.chunking import intelligent_chunk_text
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LearnResult:
+    """Outcome of one learn attempt.
+
+    Exists to separate "nothing to do" from "worked" and from "broke". The old
+    bare bool collapsed the first two: a file whose chunks were all in memory
+    returned True, so a no-op logged as a success. That inflated learn action
+    success by 22% on 2026-07-16 (101 actions vs 83 chunks) and, once such files
+    reached the head of the priority queue, kept the planner reporting 100%
+    success at zero learning velocity.
+
+    Truthy iff a chunk was actually learned, so existing ``if success:`` callers
+    keep working; ``skipped`` is what tells a caller this consumed no work.
+    A skip must never be reported as a failure -- the self-repair failure-storm
+    detector counts ``success is False and not skipped``, so mislabelling an
+    idle tick would manufacture a fake incident.
+    """
+
+    learned: bool
+    skipped: bool = False
+    reason: str = ""
+    # Which file this call ACTUALLY touched. When a caller names a file that is
+    # not learnable, selection falls back to priority and works on a different
+    # one -- so the requested id is not the processed id. The exam path carried
+    # the same bug until 2026-08-12, where crediting a score to strategy.target
+    # benched a healthy file and left the broken one eligible.
+    file_id: str = ""
+
+    def __bool__(self) -> bool:
+        return self.learned
 
 
 # ========== PROMPTY ==========
@@ -129,7 +163,8 @@ def learn_next_chunk(
     ollama_model: str = OLLAMA_MODEL,
     llm_fn=None,
     target_file_id: str = None,
-) -> bool:
+    use_simple: Optional[bool] = None,
+) -> "LearnResult":
     """
     Uczy sie nastepnego chunka z pliku.
 
@@ -139,10 +174,19 @@ def learn_next_chunk(
         memory_path: Sciezka do pamieci dlugoterminowej
         ollama_model: Nazwa modelu Ollama
         llm_fn: Optional LLM function
-        target_file_id: Optional file ID to learn from (overrides priority selection)
+        target_file_id: Optional file ID to learn from (overrides priority selection).
+            A named file may be HARD_TOPIC: those are excluded from the priority
+            pool on purpose, but naming one explicitly is how the teacher asks for
+            a simpler retry, and refusing it silently sent that request to some
+            other file entirely.
+        use_simple: Force the simple (post-failed-exam) prompt on or off.
+            None means "derive from status", which is what the autonomous loop
+            wants. The teacher passes True for retry_hard_topic -- that intent
+            used to be accepted by the wrapper and dropped on the floor.
 
     Returns:
-        True jesli cos przetworzono, False jesli brak pracy
+        LearnResult. Truthy iff a chunk was really learned; `file_id` names the
+        file actually processed, which is NOT always target_file_id.
     """
     logger.info("[BRAIN] Rozpoczynam nauke nastepnego chunka...")
 
@@ -153,7 +197,7 @@ def learn_next_chunk(
     candidates = [r for r in index if r['status'] in [STATUS_NEW, STATUS_LEARNING, STATUS_EXAM_FAILED]]
     if not candidates:
         logger.info("[OK] Brak plikow do nauki")
-        return False
+        return LearnResult(learned=False, skipped=True, reason="no_candidates")
 
     # Jesli podano konkretny plik, uzyj go
     target = None
@@ -163,7 +207,18 @@ def learn_next_chunk(
                 target = r
                 break
         if target is None:
-            logger.warning(f"[LEARN] Requested file {target_file_id} not in candidates, falling back to priority")
+            # HARD_TOPIC is kept out of the priority pool deliberately -- it must
+            # not be picked up by the autonomous loop. But naming one explicitly
+            # is exactly how the teacher asks for a simpler retry
+            # (strategy reason == "retry_hard_topic"), and refusing it here sent
+            # that request silently to whatever sat on top of the ranking.
+            for r in index:
+                if r['id'] == target_file_id and r['status'] == STATUS_HARD_TOPIC:
+                    target = r
+                    logger.info(f"[LEARN] Wskazany hard_topic {target_file_id} -- powtorka na zyczenie")
+                    break
+        if target is None:
+            logger.warning(f"[LEARN] Requested file {target_file_id} not learnable, falling back to priority")
 
     # Fallback: sortuj po priorytecie
     if target is None:
@@ -181,35 +236,57 @@ def learn_next_chunk(
             content = f.read()
     except Exception as e:
         logger.error(f"Nie mogę odczytać {filepath}: {e}")
-        return False
+        return LearnResult(learned=False, reason="source_unreadable", file_id=file_id)
 
     # Podziel na chunki
     chunks = intelligent_chunk_text(content)
     target['total_chunks'] = len(chunks)
 
+    # Określ czy użyć prostego prompta.
+    # Liczone PRZED wyborem chunka, bo decyduje o tym, co znaczy "przerobiony".
+    # Explicit override wins; None means derive from status, which is what the
+    # autonomous loop wants. The teacher's retry_hard_topic intent arrives here.
+    if use_simple is None:
+        use_simple = (target['status'] == STATUS_EXAM_FAILED)
+
     # Sprawdź które chunki już przerobiono
     existing_memories = get_memories_for_file(file_id, memory_path)
-    learned_chunk_ids = {m.get('chunk_id') for m in existing_memories}
+    all_learned_ids = {m.get('chunk_id') for m in existing_memories}
+
+    if use_simple:
+        # Przebieg ratunkowy po oblanym egzaminie ma przerobić materiał OD NOWA
+        # prostszym promptem (PROMPT_LEARN_SIMPLE). Liczenie tu rekordów ze
+        # zwykłego przebiegu sprawiało, że każdy chunk wyglądał na gotowy, więc
+        # prostszy prompt NIGDY nie startował: 4 rekordy learned_simple na 9952
+        # w całej historii projektu. Plik wracał na drugie podejście egzaminu
+        # niezmieniony, a akcja learn meldowała sukces nie ucząc się niczego
+        # (K12 widział to jako "velocity flat at 0.0 while learn reports 100").
+        pending_against = {
+            m.get('chunk_id') for m in existing_memories if m.get('learned_simple')
+        }
+    else:
+        pending_against = all_learned_ids
 
     # Znajdź pierwszy nieprzerobiony chunk
     chunk_to_learn = None
     chunk_idx = None
     for idx, (chunk_text, start, end) in enumerate(chunks):
         chunk_id = f"{file_id}#chunk_{idx}"
-        if chunk_id not in learned_chunk_ids:
+        if chunk_id not in pending_against:
             chunk_to_learn = chunk_text
             chunk_idx = idx
             break
 
     if chunk_to_learn is None:
+        # Nie ma czego uczyć. To NIE jest sukces nauki -- oznaczanie tego jako
+        # sukces zawyżało skuteczność akcji learn o 22% już 2026-07-16
+        # (101 akcji vs 83 chunki, patrz knowledge_analyzer.count_chunks_learned)
+        # i utrzymywało planer w przekonaniu, że pracuje.
         logger.info(f"[OK] Plik {file_id} calkowicie nauczony ({len(chunks)} chunkow)")
         target['status'] = STATUS_LEARNED
         target['chunks_learned'] = len(chunks)
         save_index(index, index_path)
-        return True
-
-    # Określ czy użyć prostego prompta
-    use_simple = (target['status'] == STATUS_EXAM_FAILED)
+        return LearnResult(learned=False, skipped=True, reason="nothing_to_learn", file_id=file_id)
 
     # Backoff: skip chunk po zbyt wielu probach
     MAX_CHUNK_RETRIES = 5
@@ -232,7 +309,7 @@ def learn_next_chunk(
             "questions": [],
         }
         append_memory(memory_record, memory_path)
-        target['chunks_learned'] = len(learned_chunk_ids) + 1
+        target['chunks_learned'] = len(all_learned_ids | {fail_key})
         target['status'] = STATUS_LEARNING
         target['updated_at'] = get_timestamp()
         # Wyczysc failure counter dla tego chunka
@@ -240,7 +317,7 @@ def learn_next_chunk(
         target['chunk_failures'] = chunk_failures
         save_index(index, index_path)
         logger.info(f"[OK] Pominieto chunk {chunk_idx + 1}/{len(chunks)} z {file_id}")
-        return True
+        return LearnResult(learned=False, skipped=True, reason="chunk_backoff", file_id=file_id)
 
     # Ucz sie chunka
     learned_data = learn_chunk(chunk_to_learn, use_simple=use_simple, llm_fn=llm_fn)
@@ -254,7 +331,7 @@ def learn_next_chunk(
         target['chunk_failures'] = chunk_failures
         save_index(index, index_path)
         logger.error(f"Nie udalo sie nauczyc chunka {chunk_idx} ({fail_count + 1}/{MAX_CHUNK_RETRIES})")
-        return False
+        return LearnResult(learned=False, reason="llm_returned_nothing", file_id=file_id)
 
     # Zapisz do pamięci
     memory_record = {
@@ -269,13 +346,18 @@ def learn_next_chunk(
 
     append_memory(memory_record, memory_path)
 
-    # Aktualizuj indeks
-    target['chunks_learned'] = len(learned_chunk_ids) + 1
+    # Aktualizuj indeks. Liczone z UNII wszystkich chunkow, nie z licznika
+    # przebiegu: w przebiegu ratunkowym pending_against to tylko rekordy
+    # learned_simple, wiec licznik oparty na nim cofnalby postep pliku do zera.
+    target['chunks_learned'] = len(all_learned_ids | {f"{file_id}#chunk_{chunk_idx}"})
     target['status'] = STATUS_LEARNING
     target['updated_at'] = get_timestamp()
 
     save_index(index, index_path)
 
-    logger.info(f"[OK] Nauczono chunk {chunk_idx + 1}/{len(chunks)} z {file_id}")
+    logger.info(
+        f"[OK] Nauczono chunk {chunk_idx + 1}/{len(chunks)} z {file_id}"
+        f"{' (przebieg ratunkowy, prosty prompt)' if use_simple else ''}"
+    )
 
-    return True
+    return LearnResult(learned=True, reason="simple" if use_simple else "normal", file_id=file_id)

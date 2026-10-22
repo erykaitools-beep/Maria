@@ -8,7 +8,10 @@ Design principles (from roadmap):
 - Operator can pause/resume/cancel at any time
 """
 
+import hashlib
+import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +52,8 @@ class WorkflowEngine:
         self._store = store
         self._delegation = delegation
         self._progress_reporter = None
+        self._lock = threading.RLock()
+        self._inflight: set[str] = set()
 
     def set_progress_reporter(self, reporter: Any) -> None:
         """Set optional ProgressReporter for Telegram/perception events."""
@@ -110,40 +115,78 @@ class WorkflowEngine:
         Returns StepResult if a step was executed, None if nothing to do.
         Called once per planner tick for active workflows.
         """
-        wf = self._store.get(workflow_id)
-        if wf is None:
-            return None
-        if wf.status != WorkflowStatus.RUNNING:
-            return None
-
-        step = wf.current_step_def
-        if step is None:
-            # All steps done
-            self._complete(wf)
-            return None
-
-        # Check if step requires approval
-        if step.requires_approval:
-            if not wf.metadata.get(f"step_{step.order}_approved"):
-                wf.status = WorkflowStatus.PAUSED
-                wf.paused_by = "approval_needed"
-                wf.updated_at = time.time()
-                self._store.save(wf)
-                if self._progress_reporter:
-                    self._progress_reporter.on_step_approval_needed(wf, step)
+        with self._lock:
+            wf = self._store.get(workflow_id)
+            if (
+                wf is None
+                or wf.status != WorkflowStatus.RUNNING
+                or workflow_id in self._inflight
+            ):
                 return None
 
-        # Execute step
-        result = self._delegation.delegate(step, wf.goal_id)
-        wf.results.append(result)
-        wf.updated_at = time.time()
+            step = wf.current_step_def
+            if step is None:
+                self._complete(wf)
+                return None
+            step_index = wf.current_step
 
-        if result.success:
-            self._handle_success(wf, step, result)
-        else:
-            self._handle_failure(wf, step, result)
+            if step.requires_approval:
+                approval_key = self._approval_key(step.order)
+                approval = wf.metadata.get(approval_key)
+                fingerprint = self._step_fingerprint(step)
+                if not isinstance(approval, dict) or approval.get("fingerprint") != fingerprint:
+                    wf.metadata.pop(approval_key, None)
+                    wf.status = WorkflowStatus.PAUSED
+                    wf.paused_by = "approval_needed"
+                    wf.updated_at = time.time()
+                    self._store.save(wf)
+                    if self._progress_reporter:
+                        self._progress_reporter.on_step_approval_needed(wf, step)
+                    return None
 
-        return result
+                # Approval is single-use and must be durably consumed before dispatch.
+                consumed = wf.metadata.pop(approval_key)
+                wf.updated_at = time.time()
+                try:
+                    self._store.save(wf)
+                except OSError:
+                    wf.metadata[approval_key] = consumed
+                    raise
+
+            self._inflight.add(workflow_id)
+
+        try:
+            result = self._delegation.delegate(step, wf.goal_id)
+        except Exception:
+            with self._lock:
+                self._inflight.discard(workflow_id)
+            raise
+
+        with self._lock:
+            try:
+                current = self._store.get(workflow_id)
+                if (
+                    current is None
+                    or current.status != WorkflowStatus.RUNNING
+                    or current.current_step != step_index
+                ):
+                    logger.warning(
+                        "Discarding late result for workflow %s step %d after state change",
+                        workflow_id,
+                        step.order,
+                    )
+                    return result
+                current.results.append(result)
+                current.updated_at = time.time()
+
+                if result.success:
+                    self._handle_success(current, step, result)
+                else:
+                    self._handle_failure(current, step, result)
+
+                return result
+            finally:
+                self._inflight.discard(workflow_id)
 
     def advance_next_active(self) -> Optional[StepResult]:
         """Advance the highest-priority active workflow. For tick loop."""
@@ -177,7 +220,11 @@ class WorkflowEngine:
     def resume(self, workflow_id: str) -> bool:
         """Resume a paused workflow."""
         wf = self._store.get(workflow_id)
-        if wf is None or wf.status != WorkflowStatus.PAUSED:
+        if (
+            wf is None
+            or wf.status != WorkflowStatus.PAUSED
+            or wf.paused_by == "approval_needed"
+        ):
             return False
 
         wf.status = WorkflowStatus.RUNNING
@@ -193,34 +240,49 @@ class WorkflowEngine:
 
     def cancel(self, workflow_id: str, reason: str = "") -> bool:
         """Cancel a non-terminal workflow."""
-        wf = self._store.get(workflow_id)
-        if wf is None or wf.is_terminal:
-            return False
+        with self._lock:
+            wf = self._store.get(workflow_id)
+            if wf is None or wf.is_terminal:
+                return False
 
-        wf.status = WorkflowStatus.CANCELLED
-        wf.error = reason or "Cancelled by operator"
-        wf.completed_at = time.time()
-        wf.updated_at = time.time()
-        self._store.save(wf)
+            wf.status = WorkflowStatus.CANCELLED
+            wf.error = reason or "Cancelled by operator"
+            wf.completed_at = time.time()
+            wf.updated_at = time.time()
+            self._store.save(wf)
 
-        if self._progress_reporter:
-            self._progress_reporter.on_workflow_cancelled(wf)
+            if self._progress_reporter:
+                self._progress_reporter.on_workflow_cancelled(wf)
 
-        logger.info("Cancelled workflow %s: %s", workflow_id, reason)
-        return True
+            logger.info("Cancelled workflow %s: %s", workflow_id, reason)
+            return True
 
-    def approve_step(self, workflow_id: str, step_order: int) -> bool:
+    def approve_step(
+        self, workflow_id: str, step_order: int, approved_by: str = "operator"
+    ) -> bool:
         """Approve a step that requires approval."""
-        wf = self._store.get(workflow_id)
-        if wf is None:
-            return False
-        wf.metadata[f"step_{step_order}_approved"] = True
-        if wf.status == WorkflowStatus.PAUSED and wf.paused_by == "approval_needed":
+        with self._lock:
+            wf = self._store.get(workflow_id)
+            step = wf.current_step_def if wf is not None else None
+            if (
+                wf is None
+                or wf.status != WorkflowStatus.PAUSED
+                or wf.paused_by != "approval_needed"
+                or step is None
+                or step.order != step_order
+                or not step.requires_approval
+            ):
+                return False
+            wf.metadata[self._approval_key(step_order)] = {
+                "fingerprint": self._step_fingerprint(step),
+                "approved_at": time.time(),
+                "approved_by": approved_by,
+            }
             wf.status = WorkflowStatus.RUNNING
             wf.paused_by = None
-        wf.updated_at = time.time()
-        self._store.save(wf)
-        return True
+            wf.updated_at = time.time()
+            self._store.save(wf)
+            return True
 
     # --- Query ---
 
@@ -272,6 +334,17 @@ class WorkflowEngine:
         return self._store.get(workflow_id)
 
     # --- Internal ---
+
+    @staticmethod
+    def _approval_key(step_order: int) -> str:
+        return f"step_{step_order}_approval"
+
+    @staticmethod
+    def _step_fingerprint(step: WorkflowStep) -> str:
+        payload = json.dumps(
+            step.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _handle_success(
         self, wf: WorkflowState, step: WorkflowStep, result: StepResult

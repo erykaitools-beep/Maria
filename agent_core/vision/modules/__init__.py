@@ -6,5 +6,6 @@ degraded mode when image quality is poor.
 
 Modules:
     motion  - Movement detection (frame differencing)
+    objects - Fast object detection (YOLO26 through OpenCV DNN)
     scene   - Scene description (LLaVA via Ollama)
 """

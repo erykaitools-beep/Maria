@@ -160,6 +160,17 @@ class PlannerState:
     # learn attempts in 72h, glm-5.1 test 2026-04-21).
     off_window_learn_date: str = ""   # YYYY-MM-DD of the current budget day
     off_window_learn_used: int = 0    # learn-family actions used off-window today
+    # Drain bonus (2026-08-12): exam-family actions spent off-window against the
+    # SEPARATE exam_failed-drain allowance, counted apart from the base budget so
+    # a night of exams cannot cannibalise the 8 learn/fetch actions.
+    #
+    # Keyed by DARK STRETCH (19:00 -> 09:00), not by calendar day (2026-08-15).
+    # It used to share off_window_learn_date, which put midnight in the middle
+    # of the pool's life: the morning half of a night drained the same pool the
+    # coming evening would need. See PlannerCore._drain_stretch_key.
+    # Empty stretch on an older persisted state = one free full pool on upgrade.
+    off_window_drain_stretch: str = ""  # YYYY-MM-DD of the evening that opened it
+    off_window_drain_used: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -185,6 +196,8 @@ class PlannerState:
             "last_play_ts": self.last_play_ts,
             "off_window_learn_date": self.off_window_learn_date,
             "off_window_learn_used": self.off_window_learn_used,
+            "off_window_drain_stretch": self.off_window_drain_stretch,
+            "off_window_drain_used": self.off_window_drain_used,
         }
 
     @staticmethod
@@ -212,4 +225,6 @@ class PlannerState:
             last_play_ts=d.get("last_play_ts", 0.0),
             off_window_learn_date=d.get("off_window_learn_date", ""),
             off_window_learn_used=d.get("off_window_learn_used", 0),
+            off_window_drain_stretch=d.get("off_window_drain_stretch", ""),
+            off_window_drain_used=d.get("off_window_drain_used", 0),
         )

@@ -213,11 +213,9 @@ class TestRouterSchedulerAccessor:
 
 class TestExamExaminerWiring:
     def test_local_grader_fallback_runs_inside_heavy_lease(self, monkeypatch):
-        """The exam grader's LOCAL fallback executes within scheduler.heavy_lease()."""
+        """The exam grader (local examiner) executes within scheduler.heavy_lease()."""
         from agent_core.modules import teacher_module
 
-        # Force the local fallback: no NIM key -> nim stays None -> _run goes local.
-        monkeypatch.setattr("maria_core.sys.config.NVIDIA_NIM_API_KEY", "")
         monkeypatch.setattr(
             "maria_core.learning.llm_utils.call_ollama",
             lambda *a, **k: "LOCAL_GRADE",
@@ -234,10 +232,9 @@ class TestExamExaminerWiring:
         assert events == [("enter", "exam_grader_local"), ("exit", "exam_grader_local")]
 
     def test_examiner_fallback_no_lease_when_scheduler_absent(self, monkeypatch):
-        """Without a scheduler the fallback still works (degrades to no lease)."""
+        """Without a scheduler the examiner still works (degrades to no lease)."""
         from agent_core.modules import teacher_module
 
-        monkeypatch.setattr("maria_core.sys.config.NVIDIA_NIM_API_KEY", "")
         monkeypatch.setattr(
             "maria_core.learning.llm_utils.call_ollama",
             lambda *a, **k: "LOCAL_AUTHOR",

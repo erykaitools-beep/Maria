@@ -70,7 +70,7 @@ function loadTasks() {
     ? '/api/tasks?limit=30&status=' + _currentFilter
     : '/api/tasks?limit=30';
 
-  fetch(url)
+  return fetch(url)
     .then(r => r.json())
     .then(data => {
       renderTaskList(data.tasks || []);
@@ -260,12 +260,12 @@ function switchToTab(tabId) {
 
 function startAutoRefresh() {
   if (_refreshTimer) return;
-  _refreshTimer = setInterval(loadTasks, 5000);
+  _refreshTimer = MariaUI.createPoller(loadTasks, 5000, { immediate: false });
 }
 
 function stopAutoRefresh() {
   if (_refreshTimer) {
-    clearInterval(_refreshTimer);
+    _refreshTimer.stop();
     _refreshTimer = null;
   }
 }
@@ -306,4 +306,4 @@ function showToast(msg, type) {
 }
 
 // -- Init --
-loadTasks();
+_refreshTimer = MariaUI.createPoller(loadTasks, 5000);

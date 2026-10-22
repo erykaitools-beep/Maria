@@ -65,7 +65,8 @@ class TestFrameSchema:
         pc._find_weak_topic_file = lambda snap: None
         pc._pick_expert_topic = lambda: None
         pc._project_child_material_count = lambda g: 0
-        pc._off_window_budget_remaining = lambda: 0
+        pc._off_window_budget_remaining = lambda action=None: 0
+        pc._off_window_any_allowed = lambda: False
         pc._heavy_action_mode_ok = lambda: True
         pc._is_action_rate_limited = lambda a: False
 

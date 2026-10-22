@@ -1683,6 +1683,62 @@ class TestUpdateLearningGoal:
         )
         store.update_progress.assert_called_once_with("g-1", 0.1)
 
+    def _pantry_env(self, source):
+        """A goal owning 4 files, 2 of them exam-verified, recorded at 0.90625.
+
+        The live shape on 2026-08-15: the record held a peak fraction from a
+        much smaller batch while the pump had tripled the denominator.
+        """
+        goal = create_goal(
+            goal_type=GoalType.LEARNING,
+            description="Naucz sie pobranych materialow",
+            priority=1.0,
+            metadata={"source": source,
+                      "file_ids": ["a.txt", "b.txt", "c.txt", "d.txt"]},
+        )
+        goal.progress = 0.90625
+        store = specced(GoalStore)
+        store.get.return_value = goal
+        analyzer = MagicMock()
+        analyzer.get_knowledge_snapshot.return_value = {}
+        return goal, store, analyzer
+
+    def test_rolling_pantry_progress_may_fall(self):
+        """The pantry reports what it measured, in BOTH directions.
+
+        Its denominator grows with every fetch, so a one-way ratchet freezes the
+        number: measured live, the record said 0.90625 while the set was
+        197/300 = 0.657. Nothing downstream may keep reading the old high-water.
+        """
+        goal, store, analyzer = self._pantry_env("fetch_handoff")
+        with patch("agent_core.routing.handlers."
+                   "independently_verified_completed_ids",
+                   return_value={"a.txt", "b.txt"}):
+            update_learning_goal(
+                _plan(goal_id=goal.id), {"chunks_learned": 1},
+                goal_store=store, knowledge_analyzer=analyzer,
+                telegram_notifier=None,
+            )
+        store.update_progress.assert_called_once_with(goal.id, 0.5)
+
+    def test_ordinary_learning_goal_still_ratchets(self):
+        """The one-way rule stays for every goal with a FIXED file set.
+
+        There the denominator does not move, so a fall means lost verification
+        (an exam record aged out, a file went duplicate) and must not un-credit
+        work already done.
+        """
+        goal, store, analyzer = self._pantry_env("teacher")
+        with patch("agent_core.routing.handlers."
+                   "independently_verified_completed_ids",
+                   return_value={"a.txt", "b.txt"}):
+            update_learning_goal(
+                _plan(goal_id=goal.id), {"chunks_learned": 1},
+                goal_store=store, knowledge_analyzer=analyzer,
+                telegram_notifier=None,
+            )
+        store.update_progress.assert_not_called()
+
 
 class TestIndependentlyVerifiedCompletedIds:
     """The trusted-DONE set (audit 2026-06-01): a file may force-close a goal

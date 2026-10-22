@@ -38,7 +38,7 @@ RATE_WINDOW_SEC = 3600
 # Default log path
 _META_DIR = Path(__file__).resolve().parents[2] / "meta_data"
 _DEFAULT_LOG_PATH = _META_DIR / "codex_interactions.jsonl"
-_FALLBACK_CODEX_BIN = "/home/maria/.npm-global/bin/codex"
+_FALLBACK_CODEX_BIN = "codex"
 _QUERY_SANDBOX = os.environ.get("CODEX_QUERY_SANDBOX", "read-only")
 _IMPL_SANDBOX = os.environ.get("CODEX_IMPL_SANDBOX", "workspace-write")
 _APPROVAL_POLICY = os.environ.get("CODEX_APPROVAL_POLICY", "never")

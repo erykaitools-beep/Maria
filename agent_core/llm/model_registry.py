@@ -8,6 +8,7 @@ Hardware: NiPoGi Mini PC | Ryzen 5 7430U | 32 GB RAM | Ubuntu 22.04
 Runtime: Ollama (primary) | NVIDIA NIM (external)
 """
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
@@ -24,6 +25,7 @@ class ModelRole(Enum):
     MEMORY = "memory"         # MODEL-05: Summarization, fact extraction
     EXTERNAL = "external"     # MODEL-06: NIM API (cloud, model via config.DEFAULT_NIM_MODEL)
     ENCYCLOPEDIA = "encyclopedia"  # MODEL-07: Codex CLI (ChatGPT), interactive knowledge
+    ANALYST = "analyst"       # MODEL-08: K12 evening shift, strongest model this box runs
 
 
 class ConcurrencyClass(Enum):
@@ -155,6 +157,33 @@ _REGISTRY: Dict[ModelRole, ModelSpec] = {
         min_free_ram_gb=0.0,
         fallback_role=ModelRole.EXTERNAL,  # NIM fallback, then EXECUTOR
         block_if_heavy_active=False,
+    ),
+    ModelRole.ANALYST: ModelSpec(
+        # MODEL-08: the K12 evening shift's head. The NIM key expires
+        # 2026-08-18, after which the analyst seat would fall through to
+        # qwen3:8b -- a demotion for the one job that reads the whole system.
+        #
+        # Deliberately empty by default: which tag belongs here is decided by
+        # scripts/bench_k12_analyst.py on this box, not by assumption. An empty
+        # tag drops out of get_local_models() and the cascade skips this tier,
+        # so the socket exists before the bulb is chosen.
+        #
+        # On a CPU-only box the wall clock is memory bandwidth per token, which
+        # is why the candidates are MoE (few active parameters) rather than the
+        # dense model of the same size class.
+        model_id=os.getenv("K12_ANALYST_MODEL", "") or "unset",
+        role=ModelRole.ANALYST,
+        ollama_tag=os.getenv("K12_ANALYST_MODEL", ""),
+        ram_estimate_gb=float(os.getenv("K12_ANALYST_RAM_GB", "19.0")),
+        # Not a chat latency. One shift pass on a 30B MoE running on this CPU is
+        # minutes, and the real ceiling is the shift's own daily budget.
+        latency_budget_s=1800.0,
+        concurrency_class=ConcurrencyClass.HEAVY,
+        warm_state=WarmState.COLD,
+        idle_unload_s=600.0,   # release the RAM soon after the shift ends
+        min_free_ram_gb=float(os.getenv("K12_ANALYST_MIN_FREE_RAM_GB", "21.0")),
+        fallback_role=ModelRole.PLANNER,  # today's behaviour, unchanged
+        block_if_heavy_active=True,
     ),
 }
 

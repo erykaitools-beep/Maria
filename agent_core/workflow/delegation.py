@@ -23,6 +23,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from agent_core.workflow.workflow_model import StepResult, WorkflowStep
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,13 @@ TOOL_GATE_ACTIONS: Dict[str, str] = {
     "file_read": "fetch",
     "file_list": "fetch",
     "file_write": "fs_write",
+    # Model release audits are read-only. Local checks are analytical; remote
+    # pin verification is governed like any other metadata fetch and also has
+    # an explicit workflow approval step.
+    "publishable_manifest_audit": "evaluate",
+    "calibration_dataset_audit": "evaluate",
+    "publishable_remote_audit": "fetch",
+    "publishable_release_gate": "evaluate",
 }
 
 # An unmapped tool is governed as `effector`, which in practice means REFUSED:
@@ -92,6 +100,7 @@ class DelegationManager:
         self._gate_disabled = True
         logger.warning("DelegationManager: K7 gate DISABLED (%s)", reason)
 
+    @work_purpose(WorkPurpose.ACTION)
     def delegate(
         self,
         step: WorkflowStep,
@@ -200,8 +209,13 @@ class DelegationManager:
         if self._state_provider is not None:
             try:
                 health, mode = self._state_provider()
-            except Exception as e:  # provider must never decide the outcome
-                logger.warning("State provider failed, using defaults: %s", e)
+            except Exception as e:
+                logger.error("Workflow step '%s' refused: state unavailable: %s", action_type, e)
+                return {
+                    "success": False,
+                    "blocked_by": "state_unavailable",
+                    "error": f"K7 state provider failed (fail-closed): {e}",
+                }
 
         try:
             check = self._autonomy_policy.check(

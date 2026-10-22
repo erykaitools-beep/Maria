@@ -354,31 +354,18 @@ def test_run_exam_provenance_defaults_non_independent(monkeypatch, tmp_path):
     assert recorded["grader_model"] is None
 
 
-# --- 3. NIM-first examiner (author + grader): honest fallback ------------------
+# --- 3. Local examiner (author + grader): never the student, never NIM ---------
 
-def test_nim_grader_falls_back_to_qwen3_never_student(monkeypatch):
-    """Trust-regime keystone (2026-06-06): when NIM grading fails, the grader
-    falls back to the LOCAL qwen3 examiner (independent), NEVER the student model.
+def test_grader_runs_on_examiner_never_student(monkeypatch):
+    """Trust-regime keystone: grading runs on the local EXAMINER model
+    (independent), NEVER the student model.
 
-    The old local-only grader existed precisely because a naive NIM grader timed
-    out and the ROUTER silently fell back to the student -> hidden self-grade
-    flagged 'independent'. This test pins the explicit, never-student fallback.
+    The independence guarantee survived two backend eras (local qwen3 ->
+    NIM-first -> local again 2026-08-10); this pins the invariant that outlived
+    them: whatever runs the grade, it is not the model being examined.
     """
-    import maria_core.sys.config as cfg
     import maria_core.learning.llm_utils as llm_utils
-    import agent_core.llm.nim_client as nim_mod
     from agent_core.modules import teacher_module
-
-    monkeypatch.setattr(cfg, "NVIDIA_NIM_API_KEY", "test-key", raising=False)
-
-    class FailingNIM:
-        def __init__(self, **kw):
-            pass
-
-        def _ask_once(self, *a, **kw):
-            raise RuntimeError("NIM down")
-
-    monkeypatch.setattr(nim_mod, "NIMClient", FailingNIM)
 
     calls = {}
 
@@ -392,38 +379,50 @@ def test_nim_grader_falls_back_to_qwen3_never_student(monkeypatch):
     grader = teacher_module._make_exam_grader_fn("qwen3:8b")
     out = grader("grade this")
 
-    assert calls["model"] == "qwen3:8b"        # fell back to the examiner...
+    assert calls["model"] == "qwen3:8b"        # the examiner...
     assert calls["model"] != "llama3.1:8b"     # ...NOT the student
-    assert calls["num_predict"] == 2048        # grader fallback cap
+    assert calls["num_predict"] == 2048        # grader cap
     assert "graded" in out
 
 
-def test_examiner_timeouts_grader_longer_than_author(monkeypatch):
-    """The grader gets a longer NIM timeout (240s) than the author (120s): a
-    full 6-question rubric measured ~170s, and the author's 120s would cut it
-    off mid-grade -- the exact pitfall that kept grading local until now.
+def test_examiner_never_touches_nim(monkeypatch):
+    """Exam author + grader stay LOCAL even with a NIM key configured
+    (2026-08-10): the nemotron swap recalibrated the whole exam without a code
+    change (fail 16% -> 45-58%), and NIM credits expire 2026-08-18. The exam
+    must not silently return to NIM with the next working key.
     """
     import maria_core.sys.config as cfg
+    import maria_core.learning.llm_utils as llm_utils
     import agent_core.llm.nim_client as nim_mod
     from agent_core.modules import teacher_module
 
     monkeypatch.setattr(cfg, "NVIDIA_NIM_API_KEY", "test-key", raising=False)
 
-    seen = {"timeouts": []}
+    constructed = {"n": 0}
 
-    class CapturingNIM:
+    class CountingNIM:
         def __init__(self, **kw):
-            seen["timeouts"].append(kw.get("timeout"))
+            constructed["n"] += 1
 
         def _ask_once(self, *a, **kw):
             return "{}"
 
-    monkeypatch.setattr(nim_mod, "NIMClient", CapturingNIM)
+    monkeypatch.setattr(nim_mod, "NIMClient", CountingNIM)
 
-    teacher_module._make_exam_author_fn("qwen3:8b")
-    teacher_module._make_exam_grader_fn("qwen3:8b")
+    calls = {"models": []}
+    monkeypatch.setattr(
+        llm_utils, "call_ollama",
+        lambda prompt, model=None, num_predict=None, num_ctx=None: (
+            calls["models"].append(model) or '{"exam": []}'),
+    )
 
-    assert seen["timeouts"] == [120, 240]
+    author = teacher_module._make_exam_author_fn("qwen3:8b")
+    grader = teacher_module._make_exam_grader_fn("qwen3:8b")
+    author("write questions")
+    grader("grade answers")
+
+    assert constructed["n"] == 0               # NIM never even constructed
+    assert calls["models"] == ["qwen3:8b", "qwen3:8b"]
 
 
 # --- 4. Context cap (answer input-bound fix, 2026-06-06) -----------------------
@@ -482,24 +481,12 @@ def test_execute_exam_answers_concise(monkeypatch):
 
 # --- 5. Actual-grader provenance (C4, 2026-07-12) ------------------------------
 
-def test_used_cell_records_local_fallback(monkeypatch):
-    """When NIM fails, the cell records the LOCAL fallback backend -- the
-    NIM-vs-fallback split used to be invisible behind the constant label."""
-    import maria_core.sys.config as cfg
+def test_used_cell_records_local_examiner(monkeypatch):
+    """The cell records the ACTUAL local backend that graded -- provenance
+    stays honest now that the examiner is pinned local (2026-08-10)."""
     import maria_core.learning.llm_utils as llm_utils
-    import agent_core.llm.nim_client as nim_mod
     from agent_core.modules import teacher_module
 
-    monkeypatch.setattr(cfg, "NVIDIA_NIM_API_KEY", "test-key", raising=False)
-
-    class FailingNIM:
-        def __init__(self, **kw):
-            self.model = kw.get("model")
-
-        def _ask_once(self, *a, **kw):
-            raise RuntimeError("NIM down")
-
-    monkeypatch.setattr(nim_mod, "NIMClient", FailingNIM)
     monkeypatch.setattr(llm_utils, "call_ollama",
                         lambda *a, **kw: '{"final_score": 0.5, "graded": []}')
 
@@ -509,30 +496,26 @@ def test_used_cell_records_local_fallback(monkeypatch):
     assert cell["backend"] == "local:qwen3:8b"
 
 
-def test_used_cell_records_nim_success(monkeypatch):
-    """When NIM answers, the cell records nim:<model> -- the REAL grader, which
-    on the live box is dracarys (a Llama-3.1 finetune, same lineage as the
-    student), not the 'different family' the old constant label implied."""
-    import maria_core.sys.config as cfg
-    import agent_core.llm.nim_client as nim_mod
+def test_used_cell_records_suppressed_on_cooling(
+    monkeypatch, isolated_local_compute_coordinator,
+):
+    """Thermal cooling blocks the examiner (returns None) and the cell says so
+    -- a cooled-off grade must never look like a graded exam in provenance."""
+    import maria_core.learning.llm_utils as llm_utils
     from agent_core.modules import teacher_module
 
-    monkeypatch.setattr(cfg, "NVIDIA_NIM_API_KEY", "test-key", raising=False)
-    monkeypatch.setattr(cfg, "NVIDIA_NIM_MODEL", "dracarys-test-70b", raising=False)
+    called = {"n": 0}
+    monkeypatch.setattr(llm_utils, "call_ollama",
+                        lambda *a, **kw: called.__setitem__("n", called["n"] + 1))
 
-    class OkNIM:
-        def __init__(self, **kw):
-            self.model = kw.get("model")
-
-        def _ask_once(self, *a, **kw):
-            return '{"final_score": 1.0, "graded": []}'
-
-    monkeypatch.setattr(nim_mod, "NIMClient", OkNIM)
-
+    isolated_local_compute_coordinator.enter_cooling()
     cell = {"backend": None}
     grader = teacher_module._make_exam_grader_fn("qwen3:8b", used_cell=cell)
-    grader("grade this")
-    assert cell["backend"] == "nim:dracarys-test-70b"
+    out = grader("grade this")
+
+    assert out is None
+    assert cell["backend"] == "local:suppressed"
+    assert called["n"] == 0
 
 
 def test_record_carries_actual_grader_and_author(monkeypatch, tmp_path):
@@ -624,3 +607,212 @@ def test_numeric_date_fragments_not_parsed_as_negatives():
     row = {"match": "numeric", "canonical": "-12", "tolerance": 0}
     score, _ = exam_agent._score_heldout_answer(row, "Raport z 2026-07-12")
     assert score == 0.0
+
+
+# --- 7. Exam calibration prompts (2026-08-10) ----------------------------------
+# The nemotron era proved the exam's difficulty lives in the PROMPTS' slack:
+# the same templates produced 62-char factual questions under dracarys and
+# 153-char multi-part essays under nemotron (fail 16% -> 45-58%, same student).
+# These pins hold the calibration rules so a future prompt edit cannot silently
+# reopen that slack.
+
+def test_generate_prompt_pins_single_clause_questions():
+    p = exam_agent.PROMPT_GENERATE_EXAM
+    assert "JEDNYM poleceniem" in p          # one task per question
+    assert "1-2 zdania" in p                 # short expected answer
+    assert "NIE wyliczaj" in p               # expected = essence, not a checklist
+
+
+def test_grade_prompt_pins_correctness_over_completeness():
+    p = exam_agent.PROMPT_GRADE_EXAM
+    assert "nie kompletność" in p            # grade what IS there
+    assert "0.6-0.8" in p                    # concise-but-correct band
+    assert "wyrozumiały dla zwięzłości" in p  # brevity is not an error
+
+
+# --- 8. Staged exam pipeline (2026-08-10) --------------------------------------
+# Three back-to-back heavy generations overheat past the 80C cooling latch
+# (baseline 75-79C), which used to discard the whole exam mid-flight (3/3 on
+# 2026-08-10). With stage_path the pipeline runs ONE heavy stage per call and
+# persists state between calls -- surviving cooling gaps and daemon restarts.
+
+def _staged_setup(monkeypatch, tmp_path, records=None):
+    """Wire run_exam_if_ready mocks for staged-flow tests."""
+    recorded = {}
+    recs = records or [
+        {"id": "f1", "status": STATUS_LEARNED, "exam_attempts": 0,
+         "last_scores": [], "priority": 10},
+    ]
+    monkeypatch.setattr(exam_agent, "load_index", lambda p: recs)
+    monkeypatch.setattr(exam_agent, "save_index", lambda idx, p: None)
+    monkeypatch.setattr(exam_agent, "append_exam_result",
+                        lambda d, p: recorded.update(d))
+    monkeypatch.setattr(
+        exam_agent, "get_memories_for_file",
+        lambda fid, mp: [{"summary": "s", "key_points": ["k"]}],
+    )
+    monkeypatch.setattr(
+        exam_agent, "generate_exam",
+        lambda c, n, llm_fn=None: [{"q": "q1", "expected": "e1"}],
+    )
+    monkeypatch.setattr(
+        exam_agent, "answer_exam",
+        lambda c, qs, llm_fn=None, concise=False: [{"a": "a1"}],
+    )
+    monkeypatch.setattr(
+        exam_agent, "grade_exam",
+        lambda qs, ans, llm_fn=None: {
+            "graded": [{"score": 0.9}], "final_score": 0.9},
+    )
+    return recs, recorded
+
+
+def _run_staged(tmp_path, stage):
+    return exam_agent.run_exam_if_ready(
+        index_path=tmp_path / "i.jsonl", memory_path=tmp_path / "m.jsonl",
+        exam_path=tmp_path / "e.jsonl", stage_path=stage,
+    )
+
+
+def test_staged_exam_three_calls_complete(monkeypatch, tmp_path):
+    """authored -> answered -> complete across three calls; state file lives
+    between calls and is gone after grading; the record lands on call 3."""
+    recs, recorded = _staged_setup(monkeypatch, tmp_path)
+    stage = tmp_path / "exam_stage.json"
+
+    r1 = _run_staged(tmp_path, stage)
+    assert r1["executed"] is False and r1["staged"] == "authored"
+    assert json.loads(stage.read_text())["stage"] == "authored"
+    assert recorded == {}                       # nothing recorded yet
+
+    r2 = _run_staged(tmp_path, stage)
+    assert r2["executed"] is False and r2["staged"] == "answered"
+    assert json.loads(stage.read_text())["answers"] == [{"a": "a1"}]
+
+    r3 = _run_staged(tmp_path, stage)
+    assert r3["executed"] is True and r3["passed"] is True
+    assert r3["score"] == 0.9
+    assert not stage.exists()                   # state cleared
+    assert recorded["file"] == "f1"
+    assert recs[0]["exam_attempts"] == 1        # attempt counted ONCE, at grade
+
+
+def test_staged_exam_resumes_pending_over_target(monkeypatch, tmp_path):
+    """A pending staged exam resumes FIRST even when the caller targets
+    another file -- one exam in flight at a time, the target waits."""
+    recs, _ = _staged_setup(monkeypatch, tmp_path, records=[
+        {"id": "fX", "status": STATUS_LEARNED, "exam_attempts": 0,
+         "last_scores": [], "priority": 10},
+        {"id": "fY", "status": STATUS_LEARNED, "exam_attempts": 0,
+         "last_scores": [], "priority": 99},
+    ])
+    stage = tmp_path / "exam_stage.json"
+    exam_agent._save_exam_stage(stage, {
+        "file_id": "fX", "stage": "authored",
+        "questions": [{"q": "q1", "expected": "e1"}],
+        "started_at": "now", "started_ts": time_now(),
+    })
+
+    r = exam_agent.run_exam_if_ready(
+        index_path=tmp_path / "i.jsonl", memory_path=tmp_path / "m.jsonl",
+        exam_path=tmp_path / "e.jsonl", stage_path=stage,
+        target_file_id="fY",
+    )
+    assert r["file_id"] == "fX"
+    assert r["staged"] == "answered"
+
+
+def test_staged_exam_stale_state_discarded(monkeypatch, tmp_path):
+    """State older than EXAM_STAGE_MAX_AGE_H is dropped; the call starts a
+    fresh stage-1 instead of resuming a fossil."""
+    _staged_setup(monkeypatch, tmp_path)
+    stage = tmp_path / "exam_stage.json"
+    exam_agent._save_exam_stage(stage, {
+        "file_id": "f1", "stage": "answered",
+        "questions": [{"q": "q", "expected": "e"}], "answers": [{"a": "a"}],
+        "started_at": "old",
+        "started_ts": time_now() - (exam_agent.EXAM_STAGE_MAX_AGE_H + 1) * 3600,
+    })
+
+    r = _run_staged(tmp_path, stage)
+    assert r["staged"] == "authored"            # fresh start, not a grade
+
+
+def test_staged_exam_corrupt_state_discarded(monkeypatch, tmp_path):
+    """Unparseable state file is discarded (with a fresh stage-1), never a crash."""
+    _staged_setup(monkeypatch, tmp_path)
+    stage = tmp_path / "exam_stage.json"
+    stage.write_text("not-json{", encoding="utf-8")
+
+    r = _run_staged(tmp_path, stage)
+    assert r["staged"] == "authored"
+
+
+def test_staged_exam_failed_stage_clears_state(monkeypatch, tmp_path):
+    """A stage that fails (student returns nothing) clears the state so the
+    next attempt starts clean, and reports a pipeline failure (executed=False,
+    no staged marker)."""
+    recs, _ = _staged_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(exam_agent, "answer_exam",
+                        lambda c, qs, llm_fn=None, concise=False: None)
+    stage = tmp_path / "exam_stage.json"
+    exam_agent._save_exam_stage(stage, {
+        "file_id": "f1", "stage": "authored",
+        "questions": [{"q": "q", "expected": "e"}],
+        "started_at": "now", "started_ts": time_now(),
+    })
+
+    r = _run_staged(tmp_path, stage)
+    assert r["executed"] is False
+    assert "staged" not in r
+    assert not stage.exists()
+
+
+def time_now():
+    import time as _t
+    return _t.time()
+
+
+def test_exam_wrapped_thermal_defer(monkeypatch, isolated_local_compute_coordinator):
+    """During active cooling _run_exam_wrapped defers with skipped=True and
+    never reaches run_exam_if_ready -- no work starts on a hot CPU."""
+    from agent_core.modules.teacher_module import TeacherModule
+
+    called = {"n": 0}
+    monkeypatch.setattr(
+        exam_agent, "run_exam_if_ready",
+        lambda **kw: called.__setitem__("n", called["n"] + 1) or {},
+    )
+    isolated_local_compute_coordinator.enter_cooling()
+
+    mod = TeacherModule.__new__(TeacherModule)
+    out = mod._run_exam_wrapped("f1")
+
+    assert out["skipped"] is True and out["success"] is False
+    assert called["n"] == 0
+
+
+def test_staged_exam_author_provenance_survives_staging(monkeypatch, tmp_path):
+    """The author runs two calls before the record is written (with fresh
+    cells each call) -- its backend must be snapshotted into the staged state
+    at stage 1 and land in the final record."""
+    recs, recorded = _staged_setup(monkeypatch, tmp_path)
+    stage = tmp_path / "exam_stage.json"
+
+    def run(meta):
+        return exam_agent.run_exam_if_ready(
+            index_path=tmp_path / "i.jsonl", memory_path=tmp_path / "m.jsonl",
+            exam_path=tmp_path / "e.jsonl", stage_path=stage,
+            grader_meta=meta,
+        )
+
+    # Call 1: the author fn "ran" and its cell holds the actual backend.
+    run({"author_cell": {"backend": "local:qwen3:8b"}})
+    # Calls 2-3: fresh (empty) cells, as every real session builds new ones.
+    run({"author_cell": {"backend": None}})
+    r3 = run({"author_cell": {"backend": None},
+              "grader_cell": {"backend": "local:qwen3:8b"}})
+
+    assert r3["executed"] is True
+    assert recorded["author_model"] == "local:qwen3:8b"
+    assert recorded["grader_model"] == "local:qwen3:8b"

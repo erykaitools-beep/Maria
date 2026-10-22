@@ -17,13 +17,11 @@ document.querySelectorAll('.mo-tab').forEach(tab => {
 // -- Data loading --
 
 function loadValidation() {
-  loadStats();
-  loadDisputes();
-  loadHistory();
+  return Promise.all([loadStats(), loadDisputes(), loadHistory()]);
 }
 
 function loadStats() {
-  fetch('/api/validation/stats')
+  return fetch('/api/validation/stats')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('validation-stats');
@@ -72,7 +70,7 @@ function loadStats() {
 }
 
 function loadDisputes() {
-  fetch('/api/validation/disputes?limit=30')
+  return fetch('/api/validation/disputes?limit=30')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('validation-disputes');
@@ -117,7 +115,7 @@ function loadDisputes() {
 }
 
 function loadHistory() {
-  fetch('/api/validation/history?limit=20')
+  return fetch('/api/validation/history?limit=20')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('validation-history');
@@ -160,7 +158,4 @@ function loadHistory() {
     });
 }
 
-// Initial load
-loadValidation();
-// Auto-refresh every 60s
-setInterval(loadValidation, 60000);
+MariaUI.createPoller(loadValidation, 60000);

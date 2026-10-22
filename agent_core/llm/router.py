@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import time
+from agent_core.runtime_profile import model_keep_alive
 from contextlib import nullcontext
 from typing import Dict, Any, Optional
 
@@ -26,6 +27,7 @@ from agent_core.llm.local_compute import (
     LocalComputeBlocked,
     get_local_compute_coordinator,
 )
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 
 try:
     import ollama as ollama_lib
@@ -307,6 +309,7 @@ class LLMRouter:
         """
         return bool(self._PERSONAL_PATTERNS.search(prompt))
 
+    @work_purpose(WorkPurpose.BACKGROUND)
     def _ask_once(
         self, prompt: str, temperature: float = 0.3,
         force_json: bool = False, **kwargs
@@ -513,6 +516,25 @@ class LLMRouter:
         except (ImportError, AttributeError):
             pass
 
+        # Full-fidelity capture for teacher-replacement training. Separate file,
+        # separate limits: the tape below truncates to 200/2000 chars because its
+        # consumers inline entries into prompts, which makes it useless as a
+        # corpus. Failures here must never reach the caller.
+        try:
+            from agent_core.llm.teacher_capture import capture as _capture_teacher
+
+            _capture_teacher(
+                model=model or "unknown",
+                role=role,
+                prompt=prompt or "",
+                response=response or "",
+                success=success and bool(response and response.strip()),
+                latency_ms=latency_ms,
+                route_reason=route_reason or "",
+            )
+        except Exception:
+            pass
+
         if self._llm_tape is None:
             return
         try:
@@ -586,6 +608,7 @@ class LLMRouter:
             )
             return ""
 
+    @work_purpose(WorkPurpose.BACKGROUND)
     def ask_as_role(
         self, role, prompt: str, temperature: float = 0.3
     ) -> str:
@@ -637,10 +660,18 @@ class LLMRouter:
 
         if (nim_primary_failed
                 and not get_local_compute_coordinator().local_fallback_allowed()):
+            # Name the gate that actually closed. local_fallback_allowed() checks
+            # THERMAL COOLING only -- its own docstring says the NIM backoff
+            # deliberately does not reach this path -- but this line blamed NIM
+            # for years. On 2026-08-19 it sent a debugging session after a dead
+            # NIM key while the real cause was 42 minutes of unbroken cooling.
             logger.warning(
-                "[LLMRouter] Local %s fallback suppressed after NIM ResourceExhausted",
+                "[LLMRouter] Local %s fallback suppressed: local compute is "
+                "thermally gated (NIM primary had already failed)",
                 role_name,
             )
+            self._thermal_fallback_blocks = getattr(
+                self, "_thermal_fallback_blocks", 0) + 1
             return ""
 
         # Normalize string role to ModelRole enum for scheduler
@@ -693,8 +724,22 @@ class LLMRouter:
                 ):
                     return _client.chat(
                         model=result.ollama_tag,
+                        keep_alive=model_keep_alive("role", "5m"),
                         messages=[{"role": "user", "content": prompt}],
                         options={"temperature": temperature},
+                        # think=False, same as the learning path (see
+                        # router._ask_once). Role callers want a STRUCTURED
+                        # record -- the planner parses JSON -- so a reasoning
+                        # model's thinking tokens are pure cost here. Measured
+                        # 2026-08-11 on the production planner prompt (4.2KB,
+                        # 3 paired runs, daemon live, load 2.5-4.4):
+                        #   qwen3:8b thinking   median 415s, 0/3 under budget
+                        #   qwen3:8b think=False median 114s, 3/3 under budget
+                        # Raising the 180s budget could NOT have fixed this:
+                        # the thinking arm missed even a 230s ceiling 3/3.
+                        # A top-level chat arg on purpose -- inside `options`
+                        # the server silently ignores it.
+                        think=False,
                     )
 
             resp = call_with_timeout(
@@ -718,8 +763,17 @@ class LLMRouter:
             self._ollama_calls += 1
             ask_start = time.time()
             text = self._bounded_ask_once(prompt, temperature, role_name)
+            # success reflects THIS call's outcome, not the scheduler's.
+            # Until 2026-08-11 it was hardcoded False, so a fallback that
+            # answered fine still landed on the tape as a failure: over 7 days
+            # 53 of 120 planner entries carried a 290-2000 char answer while
+            # counting as losses. That inflated the measured failure rate of
+            # the local path from 41% to 73% -- the exact number the NIM
+            # cutover decision rests on. route_reason still carries the
+            # scheduler's error, so nothing is lost by telling the truth here.
             self._record_tape(role_name, self.ollama.model, prompt, text, ask_start,
-                              success=False, route_reason=f"scheduler_inference_fail:{e}")
+                              success=bool(text),
+                              route_reason=f"scheduler_inference_fail:{e}")
             return text
         finally:
             self._model_scheduler.release(result.role)
@@ -793,14 +847,27 @@ class LLMRouter:
         """
         Get current active backend name.
 
+        Reports what is actually carrying the calls, not what is configured.
+        `_should_use_nim()` answers "may we try NIM", which stays True for a
+        rejected key: it only tests that the key string is non-empty. Measured
+        2026-08-15 rehearsing the 08-18 expiry -- every call 403s and falls
+        back to Ollama while this method kept reporting "hybrid" to the UI.
+
         Returns:
             "hybrid" - NIM for learning, Ollama for chat
-            "ollama" - Ollama only (NIM unavailable or depleted)
+            "ollama" - Ollama only (NIM unavailable, rejected or depleted)
             "nim" - NIM only (unlikely in practice)
         """
-        if self._should_use_nim():
-            return "hybrid"
-        return "ollama"
+        if not self._should_use_nim():
+            return "ollama"
+        try:
+            from agent_core.llm.nim_health import STATUS_UNAVAILABLE, get_nim_health
+
+            if get_nim_health().snapshot().status == STATUS_UNAVAILABLE:
+                return "ollama"
+        except Exception:
+            logger.debug("[LLMRouter] health tracker unreadable in active_backend")
+        return "hybrid"
 
     def get_budget_status(self) -> str:
         """

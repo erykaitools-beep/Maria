@@ -638,6 +638,22 @@ def _verification_mode(goal) -> str:
     ).strip().lower()
 
 
+def _is_rolling_pantry(goal) -> bool:
+    """True for the one always-growing fetch_handoff learning goal.
+
+    Every fetch merges its files into THIS goal (there is only ever one active
+    handoff, see the merge above), so its denominator grows ~30 files/day while
+    verification advances far slower. A high-water ratchet on a fraction whose
+    denominator grows is a FROZEN number, not a monotone one: measured live
+    2026-08-15 the record read 0.90625 (29/32 -- the batch size back in June)
+    while the actual set was 197/300 = 0.657. Such a goal must be allowed to
+    report its progress going DOWN when the supply pump delivers new material --
+    the same honest shape the mission already has (update_mission_progress).
+    """
+    meta = getattr(goal, "metadata", None) or {}
+    return meta.get("source") == "fetch_handoff"
+
+
 def _heldout_min_score(goal) -> float:
     """Per-goal held-out pass bar (C7 calibration knob), default 0.6.
 
@@ -834,7 +850,15 @@ def update_learning_goal(
             elif result.get("chunks_learned", 0) > 0:
                 progress = min(0.9, goal.progress + 0.1)
 
-        if progress > goal.progress:
+        # A rolling pantry reports the measured fraction in BOTH directions, but
+        # only when that fraction was actually measured from files (file_based);
+        # the nudge fallback above stays one-way for every goal.
+        rolling_down = (
+            file_based
+            and _is_rolling_pantry(goal)
+            and abs(progress - goal.progress) > 1e-9
+        )
+        if progress > goal.progress or rolling_down:
             goal_store.update_progress(plan.goal_id, progress)
 
         goal_refreshed = goal_store.get(plan.goal_id)
@@ -1174,14 +1198,24 @@ def make_exam_handler(
                     r = exam_fn(target_file_id) or {}
             except Exception as e:
                 return {"success": False, "error": f"exam failed: {e}"}
+            if r.get("skipped"):
+                # Thermal start-gate: no stage ran; defer without failure credit.
+                return {"success": False, "skipped": True,
+                        "reason": r.get("reason", "thermal_deferred"),
+                        "exams_run": 0}
+            # Staged pipeline: a non-final stage is real work but NOT a
+            # completed exam -- goal credit must wait for the grading call.
+            staged = bool(r.get("staged"))
             result = {
-                "success": bool(r.get("success")),
-                "exams_run": 1 if r.get("success") else 0,
+                "success": bool(r.get("success")) and not staged,
+                "exams_run": 1 if r.get("success") and not staged else 0,
                 "exams_passed": 1 if r.get("passed") else 0,
                 "score": r.get("score", 0.0),
                 "file": r.get("file_id", target_file_id),
                 "source": params.get("source", "heldout_drill"),
             }
+            if staged:
+                result["staged"] = r["staged"]
             if r.get("heldout_fallback"):
                 # Surfaced for the planner/traces: the drill asked for the
                 # mechanical grader but the bank had too few rows.
@@ -1627,8 +1661,11 @@ def make_self_analyze_handler(
                     from agent_core.self_analysis.recommendation_model import (
                         format_report_for_telegram,
                     )
-                    summary, recs = format_report_for_telegram(report)
-                    notifier.notify_self_analysis(summary, recs)
+                    from agent_core.self_analysis.shift import safe_shift_status
+                    summary, recs, issues = format_report_for_telegram(
+                        report, safe_shift_status(self_analysis)
+                    )
+                    notifier.notify_self_analysis(summary, recs, issues)
                 except Exception:
                     pass
 

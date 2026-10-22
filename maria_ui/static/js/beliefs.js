@@ -15,13 +15,11 @@ document.querySelectorAll('.mo-tab').forEach(tab => {
 });
 
 function loadBeliefs() {
-  loadStats();
-  loadGaps();
-  loadRecent();
+  return Promise.all([loadStats(), loadGaps(), loadRecent()]);
 }
 
 function loadStats() {
-  fetch('/api/beliefs/stats')
+  return fetch('/api/beliefs/stats')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('beliefs-stats');
@@ -84,7 +82,7 @@ function loadStats() {
 }
 
 function loadGaps() {
-  fetch('/api/beliefs/gaps')
+  return fetch('/api/beliefs/gaps')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('beliefs-gaps');
@@ -126,7 +124,7 @@ function loadGaps() {
 }
 
 function loadRecent() {
-  fetch('/api/beliefs/recent?limit=25')
+  return fetch('/api/beliefs/recent?limit=25')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('beliefs-recent');
@@ -176,7 +174,4 @@ function loadRecent() {
     });
 }
 
-// Initial load
-loadBeliefs();
-// Auto-refresh every 60s
-setInterval(loadBeliefs, 60000);
+MariaUI.createPoller(loadBeliefs, 60000);

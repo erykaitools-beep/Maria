@@ -408,6 +408,41 @@ class TestTelegramNotifier:
         assert "K12" in msg
         assert "Increase fetch" in msg
 
+    def test_notify_self_analysis_renders_systemic_issues(self):
+        """The cross-cutting diagnosis must reach the operator.
+
+        Until 2026-08-16 the parser discarded systemic_issues entirely, so the
+        strongest half of every K12 report never left the process.
+        """
+        notifier, bot = self._make_notifier()
+        assert notifier.notify_self_analysis(
+            "summary",
+            ["Increase fetch rate"],
+            ["petla rekomendacji jest zepsuta"],
+        ) is True
+        msg = bot.send_message.call_args[0][0]
+        assert "petla rekomendacji jest zepsuta" in msg
+        assert "Problemy ukladowe" in msg
+
+
+    def test_systemic_issues_are_shown_above_recommendations(self):
+        """Read top-down on a phone, the diagnosis outranks the topic list."""
+        notifier, bot = self._make_notifier()
+        notifier.notify_self_analysis(
+            "summary", ["konkretne zalecenie"], ["diagnoza ukladowa"],
+        )
+        msg = bot.send_message.call_args[0][0]
+        assert msg.index("diagnoza ukladowa") < msg.index("konkretne zalecenie")
+
+
+    def test_notify_self_analysis_without_issues_is_unchanged(self):
+        """Old two-argument call sites must keep working."""
+        notifier, bot = self._make_notifier()
+        assert notifier.notify_self_analysis("summary", ["zalecenie"]) is True
+        msg = bot.send_message.call_args[0][0]
+        assert "Problemy ukladowe" not in msg
+
+
     def test_notify_needs_human(self):
         notifier, bot = self._make_notifier()
         assert notifier.notify_needs_human("Low confidence") is True

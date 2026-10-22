@@ -17,7 +17,7 @@
 #   - .env             (konfiguracja - kopiowana jako env_backup, plaintext + chmod 600)
 #
 # Szyfrowanie (AES256, gpg symmetric) CALEGO tarballa:
-#   Backup niesie sekrety (claude_memory=funding/IP). Gdy
+#   Backup niesie sekrety (configuration and conversation data). Gdy
 #   podasz haslo -- caly tarball jest szyfrowany do .tar.gz.gpg, plaintext
 #   kasowany. Bez hasla backup POWSTAJE, ale skrypt GLOSNO ostrzega.
 #   Uzbrojenie:  echo -n 'twoje-haslo' > ~/.maria_backup_pass && chmod 600 ~/.maria_backup_pass
@@ -30,10 +30,11 @@
 # =============================================================================
 
 set -e
+umask 077
 
 # Konfiguracja
-MARIA_DIR="/home/maria/maria"
-BACKUP_ROOT="${1:-/mnt/storage/backups}"
+MARIA_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKUP_ROOT="${1:-$HOME/maria_backups}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$BACKUP_ROOT/maria_backup_$TIMESTAMP"
 MAX_BACKUPS=30  # ile backupow trzymac (starsze kasowane) - duzy dysk
@@ -112,9 +113,7 @@ if [ -f "$MARIA_DIR/.env" ]; then
 fi
 
 # --- Kod + pelna historia git (drill restore 2026-07-06) ---
-# origin niesie TYLKO okrojony snapshot main (ADR-029); ~471 commitow dev
-# istnieje wylacznie na tym dysku. Bundle = jeden plik z CALYM repo
-# (wszystkie branche); odtworzenie: git clone maria_repo.bundle maria
+# Include repository history for local disaster recovery. Keep backups private.
 if [ -d "$MARIA_DIR/.git" ]; then
     if git -C "$MARIA_DIR" bundle create "$BACKUP_DIR/maria_repo.bundle" --all >/dev/null 2>&1; then
         info "maria_repo.bundle (kod + pelna historia git)"
@@ -123,19 +122,6 @@ if [ -d "$MARIA_DIR/.git" ]; then
     fi
     git -C "$MARIA_DIR" diff > "$BACKUP_DIR/maria_uncommitted.patch" 2>/dev/null || true
     git -C "$MARIA_DIR" status --short > "$BACKUP_DIR/maria_git_status.txt" 2>/dev/null || true
-fi
-
-# --- Notatki wspolpracy + pamiec Claude (gitignored / poza repo) ---
-if [ -d "$MARIA_DIR/claude_notes" ]; then
-    safe_cp "$MARIA_DIR/claude_notes" "$BACKUP_DIR/" "claude_notes/"
-fi
-if [ -d "$MARIA_DIR/docs/archive" ]; then
-    mkdir -p "$BACKUP_DIR/docs"
-    safe_cp "$MARIA_DIR/docs/archive" "$BACKUP_DIR/docs/" "docs/archive/ (lokalne snapshoty, gitignored)"
-fi
-CLAUDE_MEM="/home/maria/.claude/projects/-home-maria-maria/memory"
-if [ -d "$CLAUDE_MEM" ]; then
-    safe_cp "$CLAUDE_MEM" "$BACKUP_DIR/claude_memory" "claude_memory/ (pamiec dlugoterminowa Claude)"
 fi
 
 # --- Konfiguracja systemu (do odtworzenia na golej maszynie) ---
@@ -152,7 +138,7 @@ rm -rf "$BACKUP_DIR"
 info "Skompresowano -> maria_backup_$TIMESTAMP.tar.gz"
 
 # --- Szyfrowanie (AES256, gpg symmetric) ---
-# Backup niesie sekrety plaintext (claude_memory=funding/IP).
+# Backup niesie sekrety plaintext (configuration and conversation data).
 # Z haslem szyfrujemy CALY tarball i kasujemy plaintext. BEZ hasla backup i tak
 # POWSTAJE (kopia wazniejsza niz nic), ale GLOSNO ostrzegamy -- inaczej cichy
 # regres do plaintextu. Odszyfrowanie: gpg -d plik.tar.gz.gpg > plik.tar.gz
@@ -177,7 +163,7 @@ if [ -n "$BACKUP_PASS" ] && command -v gpg >/dev/null 2>&1; then
         warn "SZYFROWANIE NIE POWIODLO SIE -- backup zostaje PLAINTEXT ($ARTIFACT)"
     fi
 elif [ -z "$BACKUP_PASS" ]; then
-    warn "BRAK HASLA -> backup PLAINTEXT (sekrety: claude_memory)"
+    warn "BRAK HASLA -> backup PLAINTEXT (sekrety: konfiguracja)"
     warn "Uzbroj szyfrowanie: echo -n 'twoje-haslo' > $BACKUP_PASSFILE && chmod 600 $BACKUP_PASSFILE"
 else
     warn "gpg niedostepny -> backup PLAINTEXT ($ARTIFACT)"

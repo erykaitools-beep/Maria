@@ -147,6 +147,11 @@ EXAM_MIN_QUESTIONS = 4              # minimum pytań
 # TYLKO regularnego generate path (calculate_num_questions); held-out uzywa banku.
 EXAM_MAX_QUESTIONS = 6             # maksimum pytań (CPU-bound timeout, patrz wyzej)
 
+# Egzamin etapowy (2026-08-10): stan miedzy sesjami (author -> answer -> grade,
+# jedna ciezka generacja na sesje nauczyciela; koperta termiczna 70-80C nie
+# miesci trzech pod rzad). Plik przezywa restart demona -- egzamin sie wznawia.
+EXAM_STAGE_FILE = BASE_DIR / "meta_data" / "exam_stage.json"
+
 # Twardy budzet (call_with_timeout) na odpowiedz studenta -- jedyny krok egzaminu
 # wciaz na lokalnym CPU po przeniesieniu generate+grade na NIM (2026-06-06).
 # call_ollama sam retry'uje MAX_RETRIES x HTTP-timeout -- zawieszony llama dawal

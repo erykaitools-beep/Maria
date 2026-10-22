@@ -74,6 +74,16 @@ class ModeRegulator:
         self._startup_time: float = time.time()  # for startup grace period (CPU-only)
         self._thermal_cooling: bool = False
 
+    @property
+    def is_thermal_cooling(self) -> bool:
+        """Is the thermal latch currently holding the box in REDUCED?
+
+        Public because the event logger cannot infer this from temperature
+        alone: the latch engages at THERMAL_STOP_C but only releases at
+        THERMAL_RESUME_C, so a demotion logged at 78C can still be thermal.
+        """
+        return self._thermal_cooling
+
     def decide_mode(
         self,
         state: Dict[str, Any],

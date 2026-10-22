@@ -573,6 +573,42 @@ class TestTeacherDecisions:
         assert strategy.target_file_id == "reviewed.txt"
         assert strategy.params["reason"] == "spaced_repetition"
 
+    def test_p2_4_exam_failed_gets_second_chance(self, tmp_path):
+        """P2.4: A first-fail (exam_failed) file is retried before new content.
+
+        exam_agent marks attempt 1 as exam_failed ("druga szansa"); until
+        2026-08-09 the teacher never picked these up again, so they sat
+        forever at exam_attempts=1 (216 files in the live index).
+        """
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("failed_once.txt", status="exam_failed",
+                               exam_attempts=1, last_scores=[0.4]),
+        ])
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        snapshot["new_files_available"] = [{"id": "new.txt", "priority": 90}]
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.strategy_type == TeachingStrategy.FILL_GAP
+        assert strategy.target_file_id == "failed_once.txt"
+        assert strategy.params["reason"] == "exam_failed_second_chance"
+        assert strategy.params["attempts"] == 1
+
+    def test_p2_4_exam_failed_before_hard_topic(self, tmp_path):
+        """P2.4 beats P2.5: a fresh first-fail outranks a 2+-attempt hard topic."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("hard.txt", status="hard_topic", exam_attempts=2),
+            _make_index_record("failed_once.txt", status="exam_failed",
+                               exam_attempts=1),
+        ])
+        snapshot = agent.analyzer.get_knowledge_snapshot()
+        strategy = agent._decide_next_strategy(snapshot, 1)
+
+        assert strategy is not None
+        assert strategy.strategy_type == TeachingStrategy.FILL_GAP
+        assert strategy.target_file_id == "failed_once.txt"
+        assert strategy.params["reason"] == "exam_failed_second_chance"
+
     def test_p2_5_hard_topic_before_new_files(self, tmp_path):
         """P2.5: Hard topics prioritized before new content."""
         agent = _make_teacher(tmp_path, index_records=[
@@ -2148,3 +2184,162 @@ class TestCountChunksLearned:
                 }) + "\n")
 
         assert analyzer.count_chunks_learned(24.0) == 1
+
+
+class TestStagedExamReview:
+    """Staged exam semantics in _exec_review (2026-08-10): a non-final stage
+    is session work but NOT a completed exam; a thermal defer is neither a
+    pipeline failure nor a cooldown."""
+
+    def test_staged_result_counts_no_exam_and_no_cooldown(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("ready.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": True, "staged": "authored", "file_id": fid,
+            "passed": False, "score": 0.0,
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "ready.txt"))
+
+        assert result["success"] is True
+        assert result["type"] == "exam_stage"
+        assert agent._stats["exams_run"] == 0
+        assert agent._stats["exam_pipeline_failures"] == 0
+        assert not agent._is_in_exam_cooldown("ready.txt")
+
+    def test_thermal_skip_is_not_failure_and_no_cooldown(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("ready.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": False, "skipped": True,
+            "reason": "thermal_deferred", "file_id": fid,
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "ready.txt"))
+
+        assert result["success"] is False
+        assert result["skipped"] is True
+        assert agent._stats["exam_pipeline_failures"] == 0
+        assert not agent._is_in_exam_cooldown("ready.txt")
+
+    def test_completed_exam_still_counts(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("ready.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": True, "passed": True, "score": 0.8, "file_id": fid,
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "ready.txt"))
+
+        assert result["success"] is True
+        assert result["type"] == "exam"
+        assert agent._stats["exams_run"] == 1
+        assert agent._stats["exams_passed"] == 1
+
+
+# ══════════════════════════════════════════════════════
+# TestStagedExamLabelling (2026-08-12)
+# ══════════════════════════════════════════════════════
+
+class TestStagedExamLabelling:
+    """The staged exam pipeline resumes an IN-FLIGHT file first, even when the
+    strategy names a different one (exam_agent.run_exam_if_ready). Everything
+    downstream must follow the file that actually ran, not strategy.target.
+
+    Real drift that motivated these tests: on 2026-08-12 13:24 the plan log
+    credited score 1.0 to efekt_cieplarniany while exam_results.jsonl showed
+    the 1.0 belonged to prawo_administracyjne.
+    """
+
+    def test_completed_exam_reports_the_file_that_actually_ran(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("target.txt", status="learned"),
+        ])
+        # Staged machine was mid-exam on another file and resumed THAT one.
+        agent.set_exam_fn(lambda fid: {
+            "success": True, "passed": True, "score": 1.0,
+            "file_id": "resumed.txt",
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "target.txt"))
+
+        assert result["file_id"] == "resumed.txt"
+        assert agent._stats["last_exam_file"] == "resumed.txt"
+
+    def test_milestone_is_announced_for_the_file_that_actually_ran(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("target.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": True, "passed": True, "score": 0.9,
+            "file_id": "resumed.txt",
+        })
+        seen = []
+        agent.set_milestone_fn(lambda fid, score: seen.append(fid))
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        agent._exec_review(TeachingStrategy(TeachingStrategy.REVIEW, "target.txt"))
+
+        assert seen == ["resumed.txt"]
+
+    def test_pipeline_failure_parks_the_broken_file_not_the_healthy_one(self, tmp_path):
+        """The point of the cooldown (BUG B, 2026-05-25) is to stop P2 from
+        re-picking a BROKEN file. Parking strategy.target instead benched a
+        healthy file AND left the broken one eligible -- the exact loop the
+        cooldown exists to prevent."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("target.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": False, "file_id": "resumed.txt", "error": "parser truncation",
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "target.txt"))
+
+        assert result["file_id"] == "resumed.txt"
+        assert agent._is_in_exam_cooldown("resumed.txt") is True
+        assert agent._is_in_exam_cooldown("target.txt") is False
+
+    def test_staged_result_reports_the_file_that_actually_ran(self, tmp_path):
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("target.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {
+            "success": True, "staged": "authored", "file_id": "resumed.txt",
+            "passed": False, "score": 0.0,
+        })
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "target.txt"))
+
+        assert result["type"] == "exam_stage"
+        assert result["file_id"] == "resumed.txt"
+
+    def test_result_without_file_id_falls_back_to_strategy_target(self, tmp_path):
+        """The exception path in teacher_module._run_exam returns no file_id at
+        all -- the old behaviour (park the requested file) must survive."""
+        agent = _make_teacher(tmp_path, index_records=[
+            _make_index_record("target.txt", status="learned"),
+        ])
+        agent.set_exam_fn(lambda fid: {"success": False, "error": "boom"})
+
+        from agent_core.teacher.teacher_agent import TeachingStrategy
+        result = agent._exec_review(
+            TeachingStrategy(TeachingStrategy.REVIEW, "target.txt"))
+
+        assert result["file_id"] == "target.txt"
+        assert agent._is_in_exam_cooldown("target.txt") is True

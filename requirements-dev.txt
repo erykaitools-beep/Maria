@@ -1,0 +1,2 @@
+# Development tools; not required by the daemon.
+pytest>=7.0.0

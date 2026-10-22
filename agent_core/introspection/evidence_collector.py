@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent_core.introspection.query_router import ResponseMode
-from maria_core.sys.config import DEFAULT_NIM_MODEL
+from agent_core.runtime_profile import model_keep_alive
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ class EvidenceCollector:
         self._self_analysis = None
         self._goal_store = None
         self._memory_query = None
+        self._chat_runtime_reader = None
         self._vision_cortex = None
 
         # Compact summary cache
@@ -81,6 +82,9 @@ class EvidenceCollector:
         self._summary_ttl: float = 30.0  # seconds
 
     # -- DI setters --
+
+    def set_chat_runtime_reader(self, reader):
+        self._chat_runtime_reader = reader
 
     def set_homeostasis_core(self, core):
         self._homeostasis_core = core
@@ -365,30 +369,24 @@ class EvidenceCollector:
             confidence=0.95,
         ))
 
-        # LLM backend
+        # Only the wired chat instance can identify the interactive backend.
+        backend_context = "Bieżący silnik rozmowy: unknown (brak danych runtime)."
+        if callable(self._chat_runtime_reader):
+            try:
+                value = self._chat_runtime_reader()
+                if isinstance(value, str) and 0 < len(value) <= 2000:
+                    backend_context = value
+            except Exception:
+                pass
         evidence.append(Evidence(
-            key="identity_backend",
-            value=(
-                "Backend LLM: Ollama llama3.1:8b (executor, lokalny), "
-                f"qwen3:8b (planner), NIM {DEFAULT_NIM_MODEL} (cloud), "
-                "Claude Code CLI (3/h), Codex/ChatGPT (10/h). "
-                "Dzialaje offline-first na mini PC (AMD Ryzen 5, 32GB RAM, Ubuntu)."
-            ),
-            source="model_registry",
-            confidence=0.95,
+            key="identity_backend", value=backend_context,
+            source="current_chat_instance", confidence=0.95,
         ))
-
-        # Limitations
         evidence.append(Evidence(
             key="identity_limitations",
-            value=(
-                "Moje ograniczenia: lokalny LLM (8B parametrow), "
-                "brak stalego internetu, nauka tylko z plikow tekstowych, "
-                "kodowanie ograniczone limitem Claude 3/h, "
-                "efektory przez OpenClaw (z approval gates)."
-            ),
-            source="self_model",
-            confidence=0.9,
+            value="Moje możliwości zależą od aktywnych adapterów i bramek operatora. "
+                  "Nazwa silnika nie potwierdza dostępu do narzędzi ani urządzeń.",
+            source="self_model", confidence=0.9,
         ))
 
         # Development direction
@@ -582,6 +580,7 @@ class EvidenceCollector:
                         ),
                         "images": [image_b64],
                         "stream": False,
+                        "keep_alive": model_keep_alive("vision", "5m"),
                     },
                     timeout=120,
                 )

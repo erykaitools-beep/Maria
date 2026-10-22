@@ -14,6 +14,38 @@ def router():
 
 
 class TestQueryRouterClassify:
+    @pytest.mark.parametrize("text", [
+        "jak wygląda plakat zrobiłaś, skończony czy jak możesz mieć potwierdzić",
+        "Jak wygląda wynik zadania w Kritaqo?",
+        "Opisz obraz w gotowym pliku plakatu",
+        "Jak wygląda pakiet Halloween?",
+        "Jaki problem z przygotowaniem grafiki?",
+        "Jak wygląda gotowy dokument?",
+        "Pokaż plakat bez kamery",
+        "Nie używaj kamery, opisz plakat",
+        "Jak wygląda projekt kamery w Roblox?",
+        "Opisz plakat bez korzystania z kamery",
+        "Opisz plakat bez używania kamery",
+        "Nie opisuj obrazu z kamery, pokaż plakat",
+        "Sprawdź status projektu Roblox",
+    ])
+    def test_work_result_is_not_usb_or_local_state(self, router, text):
+        assert router.classify(text) == ResponseMode.NORMAL
+
+    @pytest.mark.parametrize("text", [
+        "Co widzisz w kamerze?",
+        "Pokaż otoczenie",
+        "Opisz plakat przed kamerą",
+        "Co widać w kadrze?",
+        "Jak wygląda pokój w kamerze?",
+        "Pokaż podgląd kamery z plakatem Roblox",
+    ])
+    def test_explicit_camera_view_remains_available(self, router, text):
+        assert router.classify(text) == ResponseMode.GROUNDED_VISION
+
+    def test_ordinary_learning_file_question_stays_operational(self, router):
+        assert router.classify("Ile plików już znasz?") == ResponseMode.GROUNDED_LEARNING
+
     def test_normal_chat(self, router):
         assert router.classify("Opowiedz mi zart") == ResponseMode.NORMAL
 

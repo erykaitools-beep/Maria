@@ -195,22 +195,91 @@ class TestLLMTapeGetRecentErrors:
 # -- LLMTape rotation --
 
 class TestLLMTapeRotation:
+    """Rotation must ARCHIVE history, not consume it.
+
+    The old scheme renamed onto a single `.jsonl.bak` and unlinked whatever the
+    previous rotation left there. With one file holding 139 days of every LLM
+    call, the first rotation split the history and the second destroyed half.
+    """
+
     def test_rotation_at_size_limit(self, tmp_path):
         tape = LLMTape(path=tmp_path / "tape.jsonl", max_size_bytes=500)
-        # Write enough to exceed 500 bytes
         for i in range(20):
-            entry = make_tape_entry("m", "r", f"prompt {i}", "x" * 50, 0)
-            tape.record(entry)
+            tape.record(make_tape_entry("m", "r", f"prompt {i}", "x" * 50, 0))
 
-        backup = tmp_path / "tape.jsonl.bak"
-        assert backup.exists()
-        # Current file should be smaller than max
+        assert tape.archives(), "rotation must leave an archive behind"
         assert tape.path.stat().st_size < 500
 
     def test_no_rotation_under_limit(self, tape, sample_entry):
         tape.record(sample_entry)
-        backup = tape.path.with_suffix(".jsonl.bak")
-        assert not backup.exists()
+        assert not tape.archives()
+
+    def test_second_rotation_keeps_the_first(self, tmp_path):
+        """The whole point: rotating twice must not destroy the older half."""
+        tape = LLMTape(path=tmp_path / "tape.jsonl", max_size_bytes=400)
+        for i in range(40):
+            tape.record(make_tape_entry("m", "r", f"p{i}", "y" * 40, 0))
+            time.sleep(0.001)
+
+        archives = tape.archives()
+        assert len(archives) >= 2, f"expected several archives, got {archives}"
+
+    def test_no_entry_is_lost_across_rotations(self, tmp_path):
+        """Every prompt written must still be findable somewhere afterwards."""
+        tape = LLMTape(path=tmp_path / "tape.jsonl", max_size_bytes=400)
+        written = []
+        for i in range(40):
+            prompt = f"unikat-{i}"
+            written.append(prompt)
+            tape.record(make_tape_entry("m", "r", prompt, "z" * 40, 0))
+
+        seen = set()
+        for path in [tape.path] + tape.archives():
+            if not path.exists():
+                continue
+            with LLMTape._open_any(path) as handle:
+                for line in handle:
+                    line = line.strip()
+                    if line:
+                        seen.add(json.loads(line)["prompt_summary"])
+        missing = [p for p in written if p not in seen]
+        assert not missing, f"rotation lost {len(missing)} entries: {missing[:5]}"
+
+    def test_archives_are_compressed(self, tmp_path):
+        tape = LLMTape(path=tmp_path / "tape.jsonl", max_size_bytes=500)
+        for i in range(20):
+            tape.record(make_tape_entry("m", "r", f"prompt {i}", "x" * 50, 0))
+        assert any(p.suffix == ".gz" for p in tape.archives())
+
+
+class TestRotationDoesNotStarveConsumers:
+    """EvidenceCollector and K12 read this tape. A fresh file must not read as
+    'the model went quiet' for the whole window following a rotation."""
+
+    def _rotated_tape(self, tmp_path):
+        tape = LLMTape(path=tmp_path / "tape.jsonl", max_size_bytes=600)
+        for i in range(30):
+            tape.record(make_tape_entry("m", "r", f"p{i}", "x" * 60, 0))
+        assert tape.archives()
+        return tape
+
+    def test_get_recent_reaches_into_archive(self, tmp_path):
+        tape = self._rotated_tape(tmp_path)
+        live = sum(1 for _ in open(tape.path, encoding="utf-8"))
+        recent = tape.get_recent(limit=20)
+        assert len(recent) > live, "must top up from the archive, not stop at the live file"
+        assert len(recent) <= 20
+
+    def test_get_stats_window_spans_the_archive(self, tmp_path):
+        tape = self._rotated_tape(tmp_path)
+        stats = tape.get_stats(period_hours=24)
+        live = sum(1 for _ in open(tape.path, encoding="utf-8"))
+        assert stats["total_calls"] > live
+
+    def test_stats_still_respect_the_cutoff(self, tmp_path):
+        """Reaching into archives must not mean ignoring the time window."""
+        tape = self._rotated_tape(tmp_path)
+        assert tape.get_stats(period_hours=0)["total_calls"] == 0
 
 
 # -- Thread safety --

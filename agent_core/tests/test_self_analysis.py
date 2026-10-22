@@ -21,6 +21,7 @@ from agent_core.self_analysis.recommendation_model import (
     AnalyzerBackend,
     MAX_RECOMMENDATIONS_PER_REPORT,
     format_report_for_telegram,
+    MAX_SYSTEMIC_ISSUES,
     _gen_id,
 )
 from agent_core.self_analysis.recommendation_applier import _is_searchable_topic
@@ -530,7 +531,7 @@ class TestExternalAnalyzer:
                 ),
             ],
         )
-        summary, recs = format_report_for_telegram(report)
+        summary, recs, _ = format_report_for_telegram(report)
         assert "raw_response" not in summary and "{" not in summary
         assert "qwen3:8b" in summary and "1" in summary
         assert recs == ["fizyka -> learn: brak podstaw mechaniki"]
@@ -551,7 +552,7 @@ class TestExternalAnalyzer:
                 ),
             ],
         )
-        _, recs = format_report_for_telegram(report)
+        _, recs, _ = format_report_for_telegram(report)
         assert recs == [
             "exam strategy -> experiment: exam success rate is low (0.19), adjust strategy"
         ]
@@ -568,7 +569,7 @@ class TestExternalAnalyzer:
                 ),
             ],
         )
-        _, recs = format_report_for_telegram(report)
+        _, recs, _ = format_report_for_telegram(report)
         line = recs[0]
         assert line.startswith("fizyka -> learn: ")
         assert line.endswith("...")
@@ -584,7 +585,7 @@ class TestExternalAnalyzer:
                 ),
             ],
         )
-        _, recs = format_report_for_telegram(report)
+        _, recs, _ = format_report_for_telegram(report)
         assert recs == ["fizyka -> learn"]
 
     def test_format_report_neutralises_telegram_markdown(self):
@@ -603,7 +604,7 @@ class TestExternalAnalyzer:
                 ),
             ],
         )
-        summary, recs = format_report_for_telegram(report)
+        summary, recs, _ = format_report_for_telegram(report)
         for bad in ("_", "*", "`", "[", "]"):
             assert bad not in recs[0], f"{bad!r} leaked into a recommendation line"
             assert bad not in summary, f"{bad!r} leaked into the summary"
@@ -1416,3 +1417,405 @@ class TestPlannerIntegration:
         result = executor.execute(plan)
         assert result["success"] is True
         assert result["recommendations"] == 1
+
+
+# =============================================================================
+# Prior recommendations feedback loop (K12 slow-loop closure)
+# =============================================================================
+
+class TestPriorRecommendations:
+    """K12 reads its own past reports back, so it stops repeating itself.
+
+    Before this, self_analysis_reports.jsonl had grown to 1551 reports since
+    2026-03-24 without a single read-back: 7263 recommendations over 1336
+    topics, 'system_stability' re-recommended from March to July.
+    """
+
+    def _write_reports(self, meta, entries):
+        path = meta / "self_analysis_reports.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+        return path
+
+    def _report(self, ts, topics_actions):
+        return {
+            "report_id": f"sa-{ts:.0f}",
+            "timestamp": ts,
+            "recommendations": [
+                {"topic": t, "suggested_action": a} for t, a in topics_actions
+            ],
+        }
+
+    def test_absent_file_is_not_an_error(self, tmp_project):
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(time.time())
+        assert out["window_reports"] == 0
+        assert out["recurring"] == []
+
+    def test_repeated_topic_is_reported_with_counts(self, tmp_project):
+        now = time.time()
+        meta = tmp_project / "meta_data"
+        self._write_reports(meta, [
+            self._report(now - 30 * 86400, [("system_stability", "learn")]),
+            self._report(now - 10 * 86400, [("system_stability", "learn")]),
+            self._report(now - 2 * 86400, [("system_stability", "experiment")]),
+        ])
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(now)
+
+        assert out["window_reports"] == 3
+        rec = [r for r in out["recurring"] if r["topic"] == "system stability"]
+        assert len(rec) == 1, "repeated topic must surface exactly once"
+        rec = rec[0]
+        assert rec["times_in_window"] == 3
+        assert rec["first_seen_days_ago"] == pytest.approx(30, abs=0.5)
+        assert rec["last_seen_days_ago"] == pytest.approx(2, abs=0.5)
+        # The action shown must be the most RECENT one, not the first.
+        assert rec["last_suggested_action"] == "experiment"
+
+    def test_one_off_topic_is_not_flagged_as_recurring(self, tmp_project):
+        now = time.time()
+        meta = tmp_project / "meta_data"
+        self._write_reports(meta, [self._report(now - 86400, [("seen_once", "learn")])])
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(now)
+        assert out["recurring"] == []
+        assert out["distinct_topics_in_window"] == 1
+
+    def test_underscore_and_space_variants_count_as_one_topic(self, tmp_project):
+        """'learning_velocity' and 'learning velocity' are the same finding.
+
+        Live data had 158 vs 20 hits for that pair; counting them apart
+        understated the very repetition this field exists to expose, and hid
+        the more recent of the two timestamps.
+        """
+        now = time.time()
+        meta = tmp_project / "meta_data"
+        self._write_reports(meta, [
+            self._report(now - 20 * 86400, [("learning_velocity", "learn")]),
+            self._report(now - 3 * 86400, [("Learning Velocity", "experiment")]),
+        ])
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(now)
+
+        assert out["distinct_topics_in_window"] == 1
+        assert len(out["recurring"]) == 1
+        rec = out["recurring"][0]
+        assert rec["topic"] == "learning velocity"
+        assert rec["times_in_window"] == 2
+        # Merging must also correct recency, not just the count.
+        assert rec["last_seen_days_ago"] == pytest.approx(3, abs=0.5)
+
+    def test_window_is_capped_and_labelled_as_a_window(self, tmp_project):
+        """Counts are window-scoped; the field names must not promise all-time."""
+        now = time.time()
+        meta = tmp_project / "meta_data"
+        many = [
+            self._report(now - (500 - i) * 3600, [("noisy_topic", "learn")])
+            for i in range(500)
+        ]
+        self._write_reports(meta, many)
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(now)
+
+        assert out["window_reports"] == 400, "tail read must cap the window"
+        assert out["recurring"][0]["times_in_window"] == 400
+        assert "window_days" in out
+
+    def test_corrupt_line_does_not_derail_the_read(self, tmp_project):
+        now = time.time()
+        meta = tmp_project / "meta_data"
+        path = meta / "self_analysis_reports.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self._report(now - 86400, [("real_topic", "learn")])) + "\n")
+            f.write("{ this is not json\n")
+            f.write(json.dumps(self._report(now - 3600, [("real_topic", "learn")])) + "\n")
+        out = StateCollector(str(tmp_project))._collect_prior_recommendations(now)
+        assert out["recurring"][0]["times_in_window"] == 2
+
+    def test_tail_read_returns_the_last_records(self, tmp_project):
+        """Reading from the end must not lose or duplicate the boundary record."""
+        meta = tmp_project / "meta_data"
+        path = meta / "self_analysis_reports.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for i in range(300):
+                f.write(json.dumps({"n": i, "pad": "x" * 500}) + "\n")
+        got = StateCollector(str(tmp_project))._tail_jsonl(path, 120)
+        assert len(got) == 120
+        assert [r["n"] for r in got] == list(range(180, 300))
+
+    def test_collect_exposes_prior_recommendations(self, populated_project):
+        """The field must reach the analyst, not just exist as a helper."""
+        summary = StateCollector(str(populated_project)).collect()
+        assert "prior_recommendations" in summary
+
+    def test_prompt_instructs_the_analyst_what_to_do_with_history(self, populated_project):
+        """History without an instruction is just more noise in the prompt."""
+        summary = StateCollector(str(populated_project)).collect_with_prompt()
+        prompt = summary["analysis_prompt"]
+        assert "prior_recommendations" in prompt
+        assert "systemic_issues" in prompt
+
+
+# =============================================================================
+# Systemic issues + summary: the two report sections that used to be discarded
+# =============================================================================
+
+class TestNarrativeSections:
+    """The prompt asks for three sections; only one used to survive parsing.
+
+    On a live run the discarded ones held "the recommendation loop itself is
+    broken" and a summary that correctly named a 100% exam failure rate as the
+    priority, while the kept section listed topics to learn.
+    """
+
+    def _json_response(self, **over):
+        payload = {
+            "recommendations": [
+                {"category": "knowledge_gap", "topic": "synthesis",
+                 "description": "stale goal", "priority": 0.8,
+                 "suggested_action": "learn"},
+            ],
+            "systemic_issues": [
+                "petla rekomendacji jest zepsuta",
+                "egzaminy oblewane w 100%",
+            ],
+            "summary": "Maria stoi w trybie reduced przez 84% cykli.",
+        }
+        payload.update(over)
+        return json.dumps(payload)
+
+    def test_parse_narrative_extracts_both_sections(self):
+        an = ExternalAnalyzer()
+        issues, summary = an._parse_narrative(self._json_response())
+        assert issues == ["petla rekomendacji jest zepsuta",
+                          "egzaminy oblewane w 100%"]
+        assert "reduced" in summary
+
+    def test_parse_narrative_survives_markdown_fencing(self):
+        an = ExternalAnalyzer()
+        fenced = "```json\n" + self._json_response() + "\n```"
+        issues, summary = an._parse_narrative(fenced)
+        assert len(issues) == 2
+        assert summary
+
+    def test_freetext_yields_no_narrative(self):
+        """Empty here means 'no JSON returned', NOT 'nothing is wrong'."""
+        an = ExternalAnalyzer()
+        assert an._parse_narrative("zwykla proza bez jsona") == ([], "")
+
+    def test_issues_are_capped(self):
+        an = ExternalAnalyzer()
+        many = self._json_response(systemic_issues=[f"problem {i}" for i in range(20)])
+        issues, _ = an._parse_narrative(many)
+        assert len(issues) == MAX_SYSTEMIC_ISSUES
+
+    def test_analyzer_puts_narrative_on_the_report(self):
+        """End to end: a backend response must land the narrative on the report."""
+        an = ExternalAnalyzer()
+        an.set_nim_fn(lambda _p: self._json_response())
+        report = an.analyze({"input_hash": "abc", "analysis_prompt": "x"})
+        assert report.error is None
+        assert len(report.recommendations) == 1
+        assert len(report.systemic_issues) == 2
+        assert "reduced" in report.summary
+
+    def test_report_roundtrip_preserves_the_narrative(self):
+        report = AnalysisReport(
+            systemic_issues=["a", "b"],
+            summary="podsumowanie",
+        )
+        restored = AnalysisReport.from_dict(report.to_dict())
+        assert restored.systemic_issues == ["a", "b"]
+        assert restored.summary == "podsumowanie"
+
+    def test_from_dict_tolerates_reports_written_before_the_fields_existed(self):
+        """5.9MB of historical reports predate these two fields."""
+        restored = AnalysisReport.from_dict({"report_id": "sa-old"})
+        assert restored.systemic_issues == []
+        assert restored.summary == ""
+
+
+class TestTelegramCardSections:
+
+    def _report(self):
+        return AnalysisReport(
+            model="nemotron",
+            recommendations=[
+                AnalysisRecommendation(
+                    rec_id=f"r{i}", category="knowledge_gap", topic=f"temat{i}",
+                    description="opis", priority=0.5, suggested_action="learn",
+                )
+                for i in range(5)
+            ],
+            systemic_issues=["petla rekomendacji jest zepsuta", "egzaminy 0%"],
+            summary="Maria stoi w trybie reduced.",
+        )
+
+    def test_issues_come_back_separately_from_recommendations(self):
+        summary, recs, issues = format_report_for_telegram(self._report())
+        assert len(issues) == 2
+        assert len(recs) == 5
+
+    def test_issues_do_not_consume_recommendation_slots(self):
+        """The notifier renders only five recommendation lines.
+
+        Folding systemic issues into that list would let a cross-cutting
+        diagnosis push out concrete advice, or be pushed out by it.
+        """
+        _, recs, issues = format_report_for_telegram(self._report())
+        assert all("petla rekomendacji" not in r for r in recs)
+        assert len(recs) == 5
+
+    def test_summary_reaches_the_card(self):
+        summary, _, _ = format_report_for_telegram(self._report())
+        assert "reduced" in summary
+
+    def test_head_counts_both_sections(self):
+        summary, _, _ = format_report_for_telegram(self._report())
+        assert "5 rekomendacji" in summary
+        assert "2 problemy ukladowe" in summary
+
+    def test_shift_footer_is_appended_when_status_given(self):
+        status = {"runs_today": 2, "spent_min": 34.0, "budget_min": 90.0}
+        summary, _, _ = format_report_for_telegram(self._report(), status)
+        assert "przebieg 2" in summary
+        assert "34 z 90 min" in summary
+
+    def test_no_footer_without_status(self):
+        summary, _, _ = format_report_for_telegram(self._report())
+        assert "zmiana:" not in summary
+
+    def test_card_fits_the_notifier_summary_budget(self):
+        """The notifier truncates the summary block at 500 chars.
+
+        If the parts overflow, the shift footer -- appended last -- is what
+        gets cut, so the pacing line would vanish exactly when the evening is
+        busiest.
+        """
+        report = self._report()
+        report.summary = "x" * 2000
+        status = {"runs_today": 3, "spent_min": 88.0, "budget_min": 90.0}
+        summary, _, _ = format_report_for_telegram(report, status)
+        assert len(summary) <= 500
+        assert "88 z 90 min" in summary
+
+    def test_empty_narrative_degrades_to_the_old_card(self):
+        report = AnalysisReport(model="qwen3:8b")
+        summary, recs, issues = format_report_for_telegram(report)
+        assert issues == []
+        assert recs == []
+        assert "0 rekomendacji" in summary
+
+    def test_long_summary_is_cut_on_a_word_boundary(self):
+        """Two truncations in a row let the crude one win.
+
+        _parse_narrative used to cut to the display budget with a raw slice;
+        the formatter's word-boundary trim then saw a string already at the
+        limit and passed it through, so a live card ended "...acted upon. The
+        sta" with no ellipsis. Parse-time now stores wide, display-time trims.
+        """
+        report = self._report()
+        report.summary = ("Maria gromadzi pliki ale nie zamienia wiedzy na zdane "
+                          "egzaminy oraz stoi w trybie reduced przez wiekszosc czasu. ") * 6
+        summary, _, _ = format_report_for_telegram(report)
+        body = summary.split("\n")[1]
+        assert body.endswith("...")
+        assert not body.endswith(" ...")
+        # The cut must land between words, never inside one.
+        assert body[:-3].rstrip() == body[:-3]
+        assert len(summary) <= 500
+
+
+# =============================================================================
+# MODEL-08: the local analyst seat (K12 evening shift head)
+# =============================================================================
+
+class TestLocalAnalystTier:
+    """The seat NIM vacates on 2026-08-18.
+
+    Without it the cascade falls from a 550B cloud model straight to qwen3:8b,
+    which is a tick-latency planner seat, not an analyst's.
+    """
+
+    _JSON = json.dumps({
+        "recommendations": [{"category": "knowledge_gap", "topic": "t",
+                             "description": "d", "priority": 0.5,
+                             "suggested_action": "learn"}],
+        "systemic_issues": ["cos jest ukladowo zle"],
+        "summary": "podsumowanie",
+    })
+
+    def test_no_tag_means_the_tier_is_skipped(self, monkeypatch):
+        """Empty tag = socket without a bulb: today's behaviour, not a failure."""
+        monkeypatch.delenv("K12_ANALYST_MODEL", raising=False)
+        an = ExternalAnalyzer()
+        an.set_analyst_fn(lambda _p: self._JSON)
+        assert an._analyze_with_analyst({"input_hash": "x"}) is None
+
+    def test_tag_without_a_wired_fn_is_skipped(self, monkeypatch):
+        monkeypatch.setenv("K12_ANALYST_MODEL", "qwen3:30b-a3b")
+        an = ExternalAnalyzer()
+        assert an._analyze_with_analyst({"input_hash": "x"}) is None
+
+    def test_analyst_parses_all_three_sections(self, monkeypatch):
+        monkeypatch.setenv("K12_ANALYST_MODEL", "qwen3:30b-a3b")
+        an = ExternalAnalyzer()
+        an.set_analyst_fn(lambda _p: self._JSON)
+        report = an._analyze_with_analyst({"input_hash": "x", "analysis_prompt": "p"})
+        assert report.error is None
+        assert report.analyzer == "local_analyst"
+        assert report.model == "qwen3:30b-a3b"
+        assert len(report.recommendations) == 1
+        assert report.systemic_issues == ["cos jest ukladowo zle"]
+        assert report.summary == "podsumowanie"
+
+    def test_cascade_prefers_nim_while_the_key_lives(self, monkeypatch):
+        monkeypatch.setenv("K12_ANALYST_MODEL", "qwen3:30b-a3b")
+        an = ExternalAnalyzer()
+        an.set_nim_fn(lambda _p: self._JSON)
+        an.set_analyst_fn(lambda _p: pytest.fail("analyst must not run while NIM answers"))
+        report = an.analyze({"input_hash": "x", "analysis_prompt": "p"})
+        assert report.analyzer == "nim_api"
+
+    def test_analyst_takes_over_when_nim_fails(self, monkeypatch):
+        """2026-08-18 in miniature."""
+        monkeypatch.setenv("K12_ANALYST_MODEL", "qwen3:30b-a3b")
+
+        def _dead_nim(_p):
+            raise RuntimeError("401 key expired")
+
+        an = ExternalAnalyzer()
+        an.set_nim_fn(_dead_nim)
+        an.set_analyst_fn(lambda _p: self._JSON)
+        an.set_llm_fn(lambda _p: pytest.fail("must not demote to the planner model"))
+        report = an.analyze({"input_hash": "x", "analysis_prompt": "p"})
+        assert report.analyzer == "local_analyst"
+        assert report.systemic_issues
+
+    def test_analyst_failure_still_degrades_to_the_planner(self, monkeypatch):
+        """The seat must never be a single point of failure for K12."""
+        monkeypatch.setenv("K12_ANALYST_MODEL", "qwen3:30b-a3b")
+        an = ExternalAnalyzer()
+        an.set_analyst_fn(lambda _p: (_ for _ in ()).throw(RuntimeError("oom")))
+        an.set_llm_fn(lambda _p: self._JSON)
+        report = an.analyze({"input_hash": "x", "analysis_prompt": "p"})
+        assert report.analyzer == "local_planner"
+        assert len(report.recommendations) == 1
+
+
+class TestAnalystRegistry:
+
+    def test_analyst_role_is_heavy_and_cold(self):
+        """18.6GB in 26GB of RAM: mutex-protected, loaded only for the shift."""
+        from agent_core.llm.model_registry import (
+            ModelRole, get_model, ConcurrencyClass, WarmState,
+        )
+        spec = get_model(ModelRole.ANALYST)
+        assert spec.concurrency_class == ConcurrencyClass.HEAVY
+        assert spec.warm_state == WarmState.COLD
+        assert spec.block_if_heavy_active is True
+        assert spec.idle_unload_s > 0, "an 18GB model must not linger in RAM"
+        assert spec.fallback_role == ModelRole.PLANNER
+
+    def test_untagged_analyst_stays_out_of_the_local_model_list(self):
+        from agent_core.llm.model_registry import ModelRole, get_local_models
+        roles = {s.role for s in get_local_models()}
+        if not os.getenv("K12_ANALYST_MODEL", "").strip():
+            assert ModelRole.ANALYST not in roles

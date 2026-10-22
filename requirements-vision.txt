@@ -1,0 +1,6 @@
+# USB capture, motion, preprocessing and the light image change gate.
+# Install alongside requirements-core.txt; continuous YOLO additionally needs
+# requirements-vision-objects.txt and its separately installed model artifact.
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+pillow>=10.0.0

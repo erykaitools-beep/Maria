@@ -1,0 +1,88 @@
+/* Chat-only sizing: the conversation keeps its space when voice diagnostics grow.
+   Short visual viewports (including a keyboard) may scroll the outer page. */
+.mo-page--chat { min-height: 0; }
+.mo-page--chat .mo-chat-container {
+  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+  min-height: 0;
+  padding: 12px;
+  overflow: visible;
+}
+.mo-page--chat #clearBtn { min-height: 44px; }
+.mo-page--chat #chatPendingNotice { flex-shrink:0; padding:8px; overflow-wrap:anywhere; font-size:13px; }
+.mo-page--chat #chatContinue { min-height:44px; }
+.mo-page--chat .mo-work-panel { flex-shrink:0; padding:8px 0; min-width:0; max-height:160px; overflow-y:auto; overscroll-behavior-y:contain; }
+.mo-page--chat .mo-work-panel:has(> .mo-work-ledger[open]) { max-height:min(65svh,600px); }
+.mo-page--chat .mo-work-panel label { font-size:13px; display:block; }
+.mo-page--chat #workProject { min-height:44px; width:100%; max-width:100%; color:var(--mo-text-primary); background:var(--mo-bg-secondary); border:1px solid var(--mo-border); border-radius:8px; font-size:16px; padding:6px; }
+.mo-page--chat #workStatus { font-size:12px; margin:4px 0; overflow-wrap:anywhere; }
+.mo-page--chat .mo-work-ledger > summary { cursor:pointer; min-height:44px; padding:10px 0; }
+.mo-page--chat .mo-work-ledger[open] > summary { position:sticky; top:0; z-index:1; background:var(--mo-bg-secondary); }
+.mo-page--chat #workTasks { min-width:0; }
+.mo-page--chat .mo-work-card { border:1px solid var(--mo-border); border-radius:8px; padding:8px; margin:4px 0; overflow-wrap:anywhere; }
+.mo-page--chat .mo-work-card summary { min-height:44px; cursor:pointer; }
+.mo-page--chat .mo-work-state { display:block; font-size:13px; }
+.mo-page--chat .mo-work-card[data-state="uncertain"], .mo-page--chat .mo-work-card[data-state="human"] { border-style:dashed; }
+.mo-page--chat .mo-work-result { white-space:pre-wrap; max-height:min(40svh,360px); overflow-y:auto; overscroll-behavior-y:contain; }
+.mo-page--chat .mo-work-card a { display:block; padding:10px 0; min-height:44px; }
+.mo-page--chat .mo-work-card button { min-height:44px; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.mo-page--chat .mo-work-card pre { font:inherit; white-space:pre-wrap; overflow-wrap:anywhere; }
+@media (max-height:500px) {
+  .mo-page--chat .mo-work-panel { max-height:64px; padding:0; }
+  .mo-page--chat .mo-work-panel > label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+}
+.mo-page--chat .mo-chat-header,
+.mo-page--chat .mo-rate-warning,
+.mo-page--chat .mo-voice-panel,
+.mo-page--chat .mo-chat-input { flex-shrink: 0; }
+.mo-page--chat .mo-chat-messages {
+  flex: 1 1 0;
+  min-height: max(190px, 40vh);
+  min-height: max(190px, 40svh);
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.mo-page--chat .mo-msg {
+  flex-shrink: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.mo-page--chat .mo-voice-panel { padding: 10px 12px; border-top: 1px solid var(--mo-border); background: var(--mo-bg-secondary); }
+.mo-page--chat .mo-voice-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mo-page--chat .mo-voice-controls #voiceHandsfree { grid-column: auto; }
+.mo-page--chat .mo-voice-panel .mo-btn { min-height: 44px; padding: 8px 6px; white-space: normal; justify-content: center; font-size: 14px; touch-action: manipulation; }
+.mo-page--chat .mo-voice-panel [aria-pressed="true"] { outline: 2px solid var(--mo-accent); outline-offset: -2px; }
+.mo-page--chat .mo-voice-status { margin: 6px 0 0; color: var(--mo-text-secondary); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.mo-page--chat .mo-voice-status:empty { margin: 0; }
+.mo-page--chat .mo-voice-options { margin-top: 4px; font-size: 13px; }
+.mo-page--chat .mo-voice-options > summary { min-height: 44px; display: list-item; align-content: center; padding: 10px 0; cursor: pointer; touch-action: manipulation; color: var(--mo-text-secondary); }
+.mo-page--chat .mo-voice-options__body { max-height: 180px; max-height: min(180px, 24svh); overflow-y: auto; overscroll-behavior-y: contain; padding: 2px 2px 8px; }
+.mo-page--chat .mo-voice-options__controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mo-page--chat .mo-voice-note { margin: 6px 0 0; color: var(--mo-text-muted); font-size: 12px; line-height: 1.4; }
+.mo-page--chat .mo-voice-diagnostic { margin: 6px 0 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--mo-text-secondary); }
+.mo-page--chat .mo-chat-input { gap: 8px; padding-top: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.mo-page--chat .mo-chat-input__field { font-size: 16px; min-width: 0; padding: 10px 12px; }
+.mo-page--chat .mo-chat-input__send { min-width: 54px; min-height: 44px; font-size: 14px; }
+@media (max-width: 600px) {
+  .mo-page--chat .mo-chat-header { flex-wrap: nowrap; gap: 8px; padding-bottom: 8px; margin-bottom: 4px; }
+  .mo-page--chat .mo-chat-header > .mo-flex:first-child { min-width: 0; flex-wrap: wrap; gap: 2px 8px; }
+  .mo-page--chat .mo-chat-header__title { font-size: 15px; }
+  .mo-page--chat #chatModelBadge { max-width: 58vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mo-page--chat .mo-chat-header .mo-btn { min-height: 44px; padding: 8px; }
+  .mo-page--chat .mo-chat-messages { gap: 10px; padding: 8px 0; }
+  .mo-page--chat .mo-msg { max-width: 96%; padding: 10px 12px; }
+  .mo-page--chat .mo-voice-panel { padding: 8px; }
+}
+/* The global navigation has many links. Keep its intrinsic width from expanding
+   the chat's mobile landscape layout viewport; other pages are unaffected. */
+body:has(> .mo-page--chat) .mo-topbar { min-width: 0; max-width: 100%; gap: 8px; }
+body:has(> .mo-page--chat) .mo-topbar__nav { min-width: 0; flex-shrink: 1; overflow-x: auto; }
+body:has(> .mo-page--chat) .mo-topbar__nav > a { flex-shrink: 0; white-space: nowrap; }
+body:has(> .mo-page--chat) .mo-topbar__right { flex-shrink: 0; }
+body:has(> .mo-page--chat) .mo-topbar__brand { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  body:has(> .mo-page--chat) .mo-topbar { padding-left: 12px; padding-right: 12px; }
+}

@@ -19,12 +19,13 @@ const MariaUI = {
 
   async apiFetch(url, opts = {}) {
     try {
-      const res = await fetch(url, opts);
+      const { errorBody = false, ...requestOptions } = opts;
+      const res = await fetch(url, requestOptions);
       if (res.status === 401 || (res.redirected && res.url.includes('/login'))) {
         window.location.href = '/login';
         return null;
       }
-      if (!res.ok) return null;
+      if (!res.ok && !errorBody) return null;
       return await res.json();
     } catch (e) {
       console.error('[MariaUI] apiFetch error:', url, e);
@@ -235,32 +236,70 @@ const MariaUI = {
 
   // --- Auto-refresh ---
 
+  createPoller(callback, intervalMs, options = {}) {
+    // Schedule after completion, not at fixed intervals. A hidden document
+    // starts no new request; returning to it refreshes immediately.
+    let timer = null;
+    let running = false;
+    let stopped = false;
+    let pagePaused = false;
+    const enabled = options.enabled || (() => true);
+    const clear = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    const schedule = () => {
+      clear();
+      if (!stopped && !pagePaused && !document.hidden && enabled()) {
+        timer = setTimeout(run, intervalMs);
+      }
+    };
+    const run = async () => {
+      clear();
+      if (stopped || pagePaused || document.hidden || running || !enabled()) return;
+      running = true;
+      try { await callback(); }
+      catch (error) { console.error('[MariaUI] refresh failed:', error); }
+      finally { running = false; schedule(); }
+    };
+    const visibility = () => { clear(); if (!document.hidden) run(); };
+    const stop = () => {
+      stopped = true;
+      clear();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', pageHide);
+      window.removeEventListener('pageshow', pageShow);
+    };
+    const pageHide = (event) => {
+      if (event.persisted) { pagePaused = true; clear(); } else stop();
+    };
+    const pageShow = (event) => {
+      if (event.persisted) { pagePaused = false; run(); }
+    };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', pageHide);
+    window.addEventListener('pageshow', pageShow);
+    if (options.immediate === false) schedule(); else run();
+    return { stop, refresh: run };
+  },
+
   _refreshInterval: null,
   _refreshCounter: 0,
   _refreshMax: 3,
 
   startAutoRefresh(callback, intervalMs = 3000) {
+    this.stopAutoRefresh();
     this._refreshMax = Math.round(intervalMs / 1000);
     this._refreshCounter = this._refreshMax;
 
-    // Initial call
-    callback();
-
-    this._refreshInterval = setInterval(() => {
-      this._refreshCounter--;
-      const timer = this.$('refreshTimer');
-      if (timer) timer.textContent = this._refreshCounter;
-
-      if (this._refreshCounter <= 0) {
-        this._refreshCounter = this._refreshMax;
-        callback();
-      }
-    }, 1000);
+    const timer = this.$('refreshTimer');
+    if (timer) timer.textContent = this._refreshMax;
+    this._refreshInterval = this.createPoller(callback, intervalMs);
   },
 
   stopAutoRefresh() {
     if (this._refreshInterval) {
-      clearInterval(this._refreshInterval);
+      this._refreshInterval.stop();
       this._refreshInterval = null;
     }
   },
@@ -277,3 +316,6 @@ const MariaUI = {
                    '<span>' + this.escapeHtml(mode || '--') + '</span>';
   },
 };
+
+// Older dashboards read the shared helper through window.
+window.MariaUI = MariaUI;

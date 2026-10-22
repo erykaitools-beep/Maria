@@ -111,6 +111,13 @@ scripts/generate_project_summary_pdf.py
 # M.A.R.I.A. Mobile web preview (temporary ~41MB build artifact, served at :5000/static/mobile)
 maria_ui/static/mobile/
 
+# Private conversation receipts and project execution state.
+maria_ui/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+AGENTS.md
+
 # Private funding/strategy docs -- NEVER publish (ADR-029). Kept on disk, out of git.
 # The PUBLIC funding docs in docs/funding/ (README, FUNDING_BRIEF, CURRENT_PROJECT_STATUS,
 # HARDWARE_BENCHMARK_PLAN, PUBLIC_DELIVERABLES) ARE tracked so the public snapshot keeps them.

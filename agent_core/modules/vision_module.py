@@ -94,24 +94,13 @@ class VisionModule(MariaModule):
             print("[Vision] Nie zainicjalizowano")
             return
 
-        # Temporarily enable LLaVA for detailed scene description
-        scene_mod = cortex._modules.get("scene")
-        llava_fn = getattr(scene_mod, '_llava_describe', None) if scene_mod else None
-        if scene_mod and llava_fn:
-            scene_mod.set_llava_fn(llava_fn)
-            print("[Vision] Robie zdjecie (z LLaVA - moze potrwac ~30s)...")
-        else:
-            print("[Vision] Robie zdjecie...")
+        print("[Vision] Robie zdjecie (opis moze potrwac)...")
 
         try:
-            percept = cortex.perceive()
+            percept = cortex.perceive_snapshot()
         except Exception as e:
             print(f"[Vision] Blad: {e}")
             return
-        finally:
-            # Disable LLaVA after snap to not block tick loop
-            if scene_mod and llava_fn:
-                scene_mod._llava_fn = None
 
         if percept is None:
             print("[Vision] Nie udalo sie zrobic zdjecia (brak sensora lub problem sprzetu)")
