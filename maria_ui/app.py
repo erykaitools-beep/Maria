@@ -3,13 +3,14 @@ M.A.R.I.A. Web UI - Flask Application
 Sprint 5: Proactive notifications
 """
 
-from flask import Flask, render_template, jsonify, request, session, redirect, url_for, send_from_directory, send_file
+from flask import Flask, g, render_template, jsonify, request, session, redirect, url_for, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
 import logging
 import os
 import sys
 import time
 import json
+import io
 import re
 import html
 import hmac
@@ -19,6 +20,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from functools import wraps
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,13 @@ except ImportError:
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from agent_core.storage.jsonl_reader import JSONLCursor, read_jsonl_tail
+from agent_core.llm.chat_backend import chat_backend_config, create_chat_backend
+from agent_core.llm.chat_backend import interactive_tools_match, prepare_interactive_tools
+from agent_core.llm.kritaqo_portfolio import suppress_legacy_tool_actions, interactive_tools_used
+from uuid import uuid4
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
+from agent_core.runtime_profile import background_reasoning_enabled
 
 # Import config
 from maria_ui.config import (
@@ -56,7 +65,7 @@ except ImportError:
 
 # Import OllamaBrain for chat (with fallback)
 try:
-    from models.ollama_brain import OllamaBrain, BrainTimeout
+    from models.ollama_brain import OllamaBrain, BrainTimeout, BrainBackendError
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
@@ -112,15 +121,28 @@ UI_START_TIME = time.time()
 # Maria's brain instance (lazy initialization)
 _maria_brain = None
 _brain_lock = threading.Lock()
+_chat_turn_lock = threading.Lock()
 
 # Vision cortex reference (set from maria.py when running in unified mode)
 _vision_cortex = None
+_vision_publisher = None
+_vision_snapshots = None
 
 
-def set_vision_cortex(cortex) -> None:
+def set_vision_cortex(cortex, publisher=None) -> None:
     """Set vision cortex for evidence collector (called from maria.py)."""
-    global _vision_cortex
+    global _vision_cortex, _vision_publisher, _vision_snapshots
+    if _vision_snapshots is not None:
+        _vision_snapshots.close()
     _vision_cortex = cortex
+    _vision_publisher = publisher
+    from agent_core.vision.snapshot_service import VisionSnapshotService
+    _vision_snapshots = VisionSnapshotService(cortex) if cortex is not None else None
+
+
+def close_vision_snapshots() -> None:
+    if _vision_snapshots is not None:
+        _vision_snapshots.close()
 
 
 # Live SelfContext (Super-META E2), shared from maria.py in unified mode so the
@@ -216,6 +238,10 @@ _last_known_alerts_count = 0
 _last_event_timestamp = 0.0
 _last_planner_timestamp = 0.0
 NOTIFICATION_CHECK_INTERVAL = 5  # seconds
+_event_cursor = None
+_planner_cursor = None
+_event_pending = deque()
+_planner_pending = deque()
 
 
 def _load_persisted_chat_history() -> int:
@@ -234,19 +260,10 @@ def _load_persisted_chat_history() -> int:
         _ui_chat_history_loaded = True
         return 0
     try:
-        # Tail-only read: open + readlines is fine, file is bounded by
-        # rotation (caller may add later). For now no rotation - file
-        # grows; we only keep last MAX_UI_CHAT_HISTORY entries in memory.
-        with open(CHAT_LOG_FILE, encoding="utf-8") as f:
-            lines = f.readlines()
-        recent = lines[-MAX_UI_CHAT_HISTORY:]
+        recent = read_jsonl_tail(CHAT_LOG_FILE, MAX_UI_CHAT_HISTORY)
         loaded = 0
         with _ui_chat_lock:
-            for line in recent:
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+            for e in recent:
                 _ui_chat_history.append({
                     "role": e.get("role", "system"),
                     "content": e.get("content", ""),
@@ -449,6 +466,43 @@ def require_auth(f):
     return decorated_function
 
 
+# Optional local STT: registration only; no process or model is loaded here.
+from maria_ui.voice_routes import configured_voice_origins, create_voice_blueprint
+app.register_blueprint(create_voice_blueprint(
+    is_authenticated, _bearer_token_valid,
+    lambda: configured_voice_origins(CORS_ORIGINS),
+))
+
+
+# Project work is single-operator, like the existing authenticated panel.
+# Factories are lazy: registration does not contact hosts or start models.
+from maria_ui.chat_turns import ChatTurnStore, TurnConflict, valid_request_id
+from maria_ui.work_routes import create_work_blueprint
+
+_chat_turn_store = None
+_chat_turn_store_lock = threading.Lock()
+
+
+def _get_chat_turn_store():
+    global _chat_turn_store
+    with _chat_turn_store_lock:
+        if _chat_turn_store is None:
+            _chat_turn_store = ChatTurnStore(Path(CHAT_LOG_FILE).parent / "chat-turns")
+        return _chat_turn_store
+
+
+def _get_work_service():
+    from agent_core.llm.kritaqo_work_service import get_work_service
+    return get_work_service()
+
+
+app.register_blueprint(create_work_blueprint(
+    is_authenticated, _bearer_token_valid,
+    lambda: configured_voice_origins(CORS_ORIGINS),
+    _get_work_service, _get_chat_turn_store,
+))
+
+
 # =============================================================================
 # CHAT LOGGING
 # =============================================================================
@@ -456,11 +510,17 @@ def require_auth(f):
 def save_chat_message(role: str, content: str):
     """Save chat message to log file."""
     try:
+        # Preserve normal reports for history reloads; keep unusually large output bounded.
+        limit = 40000
+        clipped = len(content) > limit
+        note = "\n\n[Zapis historii skrócony: odpowiedź przekroczyła 40 000 znaków.]"
+        saved = content if not clipped else content[:limit - len(note)] + note
         entry = {
             "timestamp": time.time(),
             "datetime": datetime.now().isoformat(),
             "role": role,
-            "content": content[:500]  # Truncate for storage
+            "content": saved,
+            "truncated": clipped,
         }
 
         with open(CHAT_LOG_FILE, 'a', encoding='utf-8') as f:
@@ -567,15 +627,9 @@ def _verify_third_party_claim(
             return {"confirmed": False,
                     "evidence_summary": "llm_tape unavailable"}
         try:
-            with open(tape_path, encoding="utf-8") as f:
-                # Read tail only - tape can be big
-                lines = f.readlines()[-50:]
+            entries = read_jsonl_tail(tape_path, 50)
             recent_chat_roles = []
-            for line in lines:
-                try:
-                    e = _json.loads(line)
-                except Exception:
-                    continue
+            for e in entries:
                 if e.get("ts", 0) < cutoff:
                     continue
                 role = e.get("role", "")
@@ -718,11 +772,17 @@ def get_maria_brain():
                     except Exception:
                         _chat_timeout = 75
 
+                    # Optional, on-demand Kritaqo metadata. Creating the
+                    # provider performs no authentication or network requests.
+                    from agent_core.llm.kritaqo_context import create_kritaqo_context_provider
+
                     brain = OllamaBrain(
-                        model="llama3.1:8b",
+                        model=chat_backend_config()["model"],
                         identity_store=_id_store,
                         verify_model=False,
                         http_timeout=_chat_timeout,
+                        chat_backend=create_chat_backend(timeout_s=_chat_timeout),
+                        request_context_provider=create_kritaqo_context_provider(),
                     )
 
                     # Wire conversation memory for persistent context
@@ -756,14 +816,14 @@ def get_maria_brain():
                         from agent_core.introspection.response_builder import ResponseBuilder
 
                         _qr = OperationalQueryRouter()
-                        _ec = EvidenceCollector(project_root="/home/maria/maria")
+                        _ec = EvidenceCollector(project_root=str(PROJECT_ROOT))
                         _rb = ResponseBuilder()
 
                         # Wire LLM tape if available
                         try:
                             from agent_core.llm.llm_tape import LLMTape
                             from pathlib import Path as _Path
-                            _tape = LLMTape(path=_Path("/home/maria/maria/meta_data/llm_tape.jsonl"))
+                            _tape = LLMTape(path=PROJECT_ROOT / "meta_data" / "llm_tape.jsonl")
                             _ec.set_llm_tape(_tape)
                             brain.set_llm_tape(_tape)
                         except Exception:
@@ -799,7 +859,8 @@ def get_maria_brain():
                             print(f"[UI] SelfContext not wired: {e}")
 
                     # Wrap with LLM Router if NIM available
-                    router = _create_ui_router(brain)
+                    router = (_create_ui_router(brain)
+                              if chat_backend_config()["provider"] == "ollama" else None)
                     _maria_brain = router if router else brain
                     print("[UI] [OK] Brain initialized")
                 except Exception as e:
@@ -863,25 +924,23 @@ def notification_monitor_loop():
     while not _notification_stop_event.is_set():
         try:
             if HOMEOSTASIS_AVAILABLE:
-                event_logger = get_event_logger()
-                events = event_logger.get_recent_events(limit=10)
+                if not _event_pending and _event_cursor:
+                    _event_pending.extend(_event_cursor.poll())
 
-                current_mode = "ACTIVE"
-                new_alerts = []
-
-                for event in events:
+                while _event_pending:
+                    event = _event_pending[0]
                     evt_type = event.get("event", event.get("event_type", ""))
                     evt_ts = event.get("timestamp", event.get("ts", 0))
-
-                    # Skip already processed events
-                    if evt_ts <= _last_event_timestamp:
-                        continue
+                    if not isinstance(evt_ts, (int, float)):
+                        evt_ts = 0
 
                     # Check for mode changes
                     if evt_type == "mode_change":
                         from_mode = event.get("from_mode", "?")
                         to_mode = event.get("to_mode", "?")
-                        current_mode = to_mode
+                        if not isinstance(to_mode, str):
+                            _event_pending.popleft()
+                            continue
 
                         if to_mode != _last_known_mode:
                             # Mode changed - send notification
@@ -912,7 +971,7 @@ def notification_monitor_loop():
                     # Check for alerts
                     elif evt_type == "alert":
                         severity = event.get("severity", "WARNING")
-                        alert_msg = event.get("message", "Nieznany alert")
+                        alert_msg = str(event.get("message", "Nieznany alert"))
 
                         # Only notify on CRITICAL and ALERT severity
                         if severity in ["CRITICAL", "ALERT"]:
@@ -923,17 +982,13 @@ def notification_monitor_loop():
                                 data={"severity": severity, "full_message": alert_msg}
                             )
 
+                    elif evt_type == "state_snapshot":
+                        _last_known_mode = event.get("mode", "ACTIVE")
+
                     # Update last timestamp
                     if evt_ts > _last_event_timestamp:
                         _last_event_timestamp = evt_ts
-
-                # Update mode from state_snapshot if no mode_change found
-                for event in events:
-                    if event.get("event", event.get("event_type")) == "state_snapshot":
-                        snapshot_mode = event.get("mode", "ACTIVE")
-                        if snapshot_mode != _last_known_mode:
-                            _last_known_mode = snapshot_mode
-                        break
+                    _event_pending.popleft()
 
         except Exception as e:
             print(f"[UI] [NOTIFY] [ERROR] Monitor error: {e}")
@@ -952,26 +1007,17 @@ def notification_monitor_loop():
 
 def _check_planner_notifications():
     """Check planner_decisions.jsonl for new decisions and send notifications."""
-    global _last_planner_timestamp
+    global _last_planner_timestamp, _planner_cursor
 
     if not _PLANNER_DECISIONS_PATH.exists():
         return
 
-    # Read last few lines (tail approach - read all, take last few new ones)
-    new_decisions = []
+    if _planner_cursor is None or _planner_cursor.path != _PLANNER_DECISIONS_PATH:
+        _planner_cursor = JSONLCursor(_PLANNER_DECISIONS_PATH)
+        _planner_pending.clear()
     try:
-        with open(_PLANNER_DECISIONS_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    decision = json.loads(line)
-                    ts = decision.get("timestamp", 0)
-                    if ts > _last_planner_timestamp:
-                        new_decisions.append(decision)
-                except json.JSONDecodeError:
-                    continue
+        if not _planner_pending:
+            _planner_pending.extend(_planner_cursor.poll())
     except IOError:
         return
 
@@ -982,14 +1028,18 @@ def _check_planner_notifications():
         "ask_expert", "experiment",
     }
 
-    for decision in new_decisions:
+    while _planner_pending:
+        decision = _planner_pending[0]
         action = decision.get("action_type", "")
         ts = decision.get("timestamp", 0)
+        if not isinstance(ts, (int, float)):
+            ts = 0
 
         if ts > _last_planner_timestamp:
             _last_planner_timestamp = ts
 
-        if action not in NOTIFY_ACTIONS:
+        if not isinstance(action, str) or action not in NOTIFY_ACTIONS:
+            _planner_pending.popleft()
             continue
 
         message = decision.get("message", "")
@@ -997,7 +1047,9 @@ def _check_planner_notifications():
             goal = decision.get("goal_description", "")
             message = f"{action}: {goal}" if goal else action
 
-        success = decision.get("result", {}).get("success", False)
+        message = str(message)
+        result = decision.get("result")
+        success = result.get("success", False) if isinstance(result, dict) else False
         status_icon = "OK" if success else "FAIL"
 
         send_proactive_notification(
@@ -1006,19 +1058,36 @@ def _check_planner_notifications():
             message=message[:150],
             data={"action": action, "success": success}
         )
+        _planner_pending.popleft()
 
 
 def start_notification_monitor():
     """Start the notification monitor thread."""
     global _notification_thread, _last_event_timestamp, _last_planner_timestamp
+    global _event_cursor, _planner_cursor
 
     if _notification_thread is not None and _notification_thread.is_alive():
         print("[UI] [NOTIFY] Monitor already running")
         return
 
+    # Observe only already known project tasks, without model calls or resubmits.
+    try:
+        service = _get_work_service()
+        if service is not None:
+            service.start()
+    except Exception:
+        logger.warning("[UI][WORK] Task observer unavailable")
+
     # Initialize last timestamp to now to avoid old notifications
     _last_event_timestamp = time.time()
     _last_planner_timestamp = time.time()
+    _planner_cursor = JSONLCursor(_PLANNER_DECISIONS_PATH)
+    _planner_cursor.skip_existing()
+    _planner_pending.clear()
+    _event_pending.clear()
+    if HOMEOSTASIS_AVAILABLE:
+        _event_cursor = JSONLCursor(get_event_logger().log_path)
+        _event_cursor.skip_existing()
     _notification_stop_event.clear()
 
     _notification_thread = threading.Thread(
@@ -1033,6 +1102,12 @@ def stop_notification_monitor():
     """Stop the notification monitor thread."""
     global _notification_thread
 
+    try:
+        service = _get_work_service()
+        if service is not None:
+            service.stop()
+    except Exception:
+        logger.warning("[UI][WORK] Task observer shutdown incomplete")
     _notification_stop_event.set()
     if _notification_thread is not None:
         _notification_thread.join(timeout=2)
@@ -1080,6 +1155,8 @@ def login():
 @app.route('/logout')
 def logout():
     """Logout and clear session."""
+    if is_authenticated():
+        _clear_interactive_tool_context()
     session.clear()
     return redirect(url_for('login'))
 
@@ -1201,6 +1278,8 @@ def api_status():
         "last_event": last_event,
         "homeostasis_connected": HOMEOSTASIS_AVAILABLE,
         "ollama_connected": OLLAMA_AVAILABLE,
+        "chat_backend": chat_backend_config(),
+        "background_reasoning_enabled": background_reasoning_enabled(),
         "chat_history_count": history_count
     }
     return jsonify(status)
@@ -2363,6 +2442,7 @@ def handle_connect(auth=None):
     emit('connected', {
         'message': 'Polaczono z M.A.R.I.A.',
         'ollama_available': OLLAMA_AVAILABLE,
+        'chat_backend': chat_backend_config(),
         'rate_limit': {
             'messages': RATE_LIMIT_MESSAGES,
             'window_sec': RATE_LIMIT_WINDOW_SEC
@@ -2373,10 +2453,94 @@ def handle_connect(auth=None):
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection."""
+    _clear_interactive_tool_context(request.sid)
     print("[UI] [SOCKET] Client disconnected")
 
 
+def _clear_interactive_tool_context(conversation_id=None):
+    """Forget task scope without starting a brain or touching durable jobs."""
+    backend = getattr(_maria_brain, "_chat_backend", None)
+    provider = getattr(backend, "tool_provider", None)
+    name = "clear_all_contexts" if conversation_id is None else "clear_context"
+    clear = getattr(provider, name, None)
+    if callable(clear):
+        if conversation_id is None:
+            clear()
+        else:
+            clear(conversation_id)
+
+
+def _emit_chat_response(payload):
+    """Persist a final reply before emitting it; a dropped socket can reconcile."""
+    current = getattr(g, "chat_turn_receipt", None)
+    if current is not None:
+        payload = dict(payload, request_id=current["request_id"])
+        try:
+            _get_chat_turn_store().complete(current["request_id"], payload)
+        except Exception:
+            logger.warning("[UI][CHAT] Reply receipt could not be persisted")
+    emit('chat_response', payload)
+
+
+def _serialize_chat_turn(handler):
+    """Serialize shared history and deduplicate new clients by durable nonce."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        data = args[0] if args and isinstance(args[0], dict) else {}
+        nonce = data.get("request_id") if handler.__name__ == "handle_chat_message" else None
+        raw = data.get("message", "")
+        receipt = None
+        if nonce is not None:
+            if not valid_request_id(nonce) or not isinstance(raw, str) or len(raw) > MAX_MESSAGE_LENGTH:
+                emit('chat_response', {"success": False, "code": "invalid_request", "error": "Nieprawidłowa wiadomość.", "request_id": nonce if valid_request_id(nonce) else None})
+                return
+            try:
+                old = _get_chat_turn_store().lookup(nonce, raw)
+                if old:
+                    emit('chat_ack', {"request_id": nonce, "state": old["state"]})
+                    if old.get("response"):
+                        emit('chat_response', dict(old["response"], replayed=True))
+                    return
+            except TurnConflict:
+                emit('chat_response', {"success": False, "code": "request_conflict", "error": "Identyfikator dotyczy innej wiadomości. Nic nie wysłano ponownie.", "request_id": nonce})
+                return
+            except Exception:
+                emit('chat_response', {"success": False, "code": "receipt_unavailable", "error": "Nie można zapisać potwierdzenia. Wiadomość nie została przyjęta.", "request_id": nonce})
+                return
+        if not _chat_turn_lock.acquire(blocking=False):
+            payload = {'success': False, 'code': 'busy',
+                       'error': 'Kończę poprzednią odpowiedź. Poczekaj chwilę.'}
+            if nonce is not None:
+                payload['request_id'] = nonce
+            emit('chat_response', payload)
+            return
+        try:
+            if nonce is not None:
+                try:
+                    receipt = _get_chat_turn_store().claim(nonce, raw)
+                except Exception:
+                    emit('chat_response', {"success": False, "code": "receipt_unavailable", "error": "Nie można zapisać potwierdzenia. Wiadomość nie została przyjęta.", "request_id": nonce})
+                    return
+                emit('chat_ack', {"request_id": nonce, "state": receipt["state"]})
+                if not receipt["new"]:
+                    if receipt.get("response"):
+                        emit('chat_response', dict(receipt["response"], replayed=True))
+                    return
+                g.chat_turn_receipt = receipt
+            with work_purpose(WorkPurpose.INTERACTION):
+                return handler(*args, **kwargs)
+        finally:
+            if receipt is not None and receipt.get("new"):
+                try:
+                    _get_chat_turn_store().mark_unknown(nonce)
+                except Exception:
+                    logger.warning("[UI][CHAT] Interrupted receipt could not be persisted")
+            g.pop("chat_turn_receipt", None)
+            _chat_turn_lock.release()
+    return wrapped
+
 @socketio.on('chat_message')
+@_serialize_chat_turn
 def handle_chat_message(data):
     """Handle incoming chat message from user."""
     # Get session ID for rate limiting
@@ -2385,7 +2549,7 @@ def handle_chat_message(data):
     # Check rate limit
     allowed, wait_time = check_rate_limit(session_id)
     if not allowed:
-        emit('chat_response', {
+        _emit_chat_response({
             'success': False,
             'error': f'Limit wiadomosci. Poczekaj {wait_time}s.',
             'rate_limited': True,
@@ -2394,13 +2558,13 @@ def handle_chat_message(data):
         return
 
     # Get and sanitize message
-    raw_message = data.get('message', '')
+    raw_message = data.get('message', '') if isinstance(data, dict) else ''
     user_message = sanitize_input(raw_message)
 
     # Validate
     is_valid, error = validate_message(user_message)
     if not is_valid:
-        emit('chat_response', {
+        _emit_chat_response({
             'success': False,
             'error': error
         })
@@ -2449,12 +2613,37 @@ def handle_chat_message(data):
         # Save fallback response to UI history
         add_ui_chat_message("maria", fallback_msg)
 
-        emit('chat_response', {
+        _emit_chat_response({
             'success': True,
             'message': fallback_msg,
             'fallback': True
         })
         return
+
+    # A server-owned identity survives every retry of this interactive turn.
+    # The client/model cannot choose it or redirect a persisted tool operation.
+    interaction_id = getattr(g, "chat_turn_receipt", {}).get("interaction_id") or uuid4().hex
+    # Scope comes only from this authenticated socket's user turns. Freeze it
+    # before retrying; neither global model history nor client data grants it.
+    try:
+        tool_context = prepare_interactive_tools(
+            getattr(brain, "_chat_backend", None), user_message,
+            interaction_id, session_id)
+    except Exception:
+        logger.warning("[UI][TOOLS] Context preparation failed")
+        _emit_chat_response({'success': False,
+                              'error': 'Nie udalo sie ustalic kontekstu zadania. Sprobuj ponownie.'})
+        return
+    _tool_request = interactive_tools_match(
+        getattr(brain, "_chat_backend", None), user_message, interaction_id,
+        tool_context=tool_context)
+    _exclusive_tool_request = suppress_legacy_tool_actions(_tool_request, tool_context)
+    tool_turn_kwargs = {"interaction_id": interaction_id} if _tool_request else {}
+    if _tool_request and tool_context is not None:
+        tool_turn_kwargs["tool_context"] = tool_context
+    logger.info("[UI][TOOLS] interaction=%s routed=%s contextual=%s",
+                interaction_id, _tool_request, tool_context is not None)
+    _op_handled = False
 
     # Conversation-Driven Learning: detect cancel or learning intent
     try:
@@ -2463,7 +2652,7 @@ def handle_chat_message(data):
         )
 
         # Check cancel intent first (before learning detection)
-        cancel = detect_cancel_intent(user_message)
+        cancel = None if _exclusive_tool_request else detect_cancel_intent(user_message)
         if cancel:
             _cancel_topic = cancel["topic"]
             try:
@@ -2500,7 +2689,7 @@ def handle_chat_message(data):
                 print(f"[UI] [CDL] Cancel failed: {e}")
 
         # Check learning intent
-        intent = detect_learning_intent(user_message)
+        intent = None if _exclusive_tool_request else detect_learning_intent(user_message)
         if intent and not cancel:
             _topic = intent["topic"]
             _action = intent["action"]
@@ -2553,7 +2742,7 @@ def handle_chat_message(data):
                 print(f"[UI] [CDL] Goal creation failed: {e}")
         # Check operational intent (fetch, critique, evaluate, etc.)
         _op_handled = False
-        if not intent and not cancel:
+        if not intent and not cancel and not _exclusive_tool_request:
             from agent_core.perception.learning_intent import detect_operational_intent
             op_intent = detect_operational_intent(user_message)
             if op_intent:
@@ -2611,7 +2800,7 @@ def handle_chat_message(data):
                     _resp = _labels.get(_op_action, f"Przyjelam polecenie: {_op_action}.")
                     _resp += " Dam znac o wyniku."
                     add_ui_chat_message("maria", _resp)
-                    emit('chat_response', {
+                    _emit_chat_response({
                         'success': True,
                         'message': _resp,
                         'fallback': False,
@@ -2637,12 +2826,17 @@ def handle_chat_message(data):
     timed_out = False
     for _attempt in range(2):
         try:
-            response = brain.think(user_message, raise_on_timeout=True)
+            response = brain.think(user_message, raise_on_timeout=True,
+                                   **tool_turn_kwargs)
             break
         except BrainTimeout as e:
             timed_out = True
             last_error = e
             print(f"[UI] [CHAT] think() timed out (model busy/cold on CPU): {e}")
+            break
+        except BrainBackendError as e:
+            last_error = e
+            logger.warning("Configured chat backend unavailable: %s", e)
             break
         except Exception as e:
             last_error = e
@@ -2659,6 +2853,9 @@ def handle_chat_message(data):
     # chat (2026-06-08). ASCII-only Polish per ADR-005.
     _busy_msg = ("Jestem teraz zajeta ciezkim mysleniem (planer/nauka na CPU), "
                  "sprobuj za chwile.")
+    if chat_backend_config()["provider"] == "codex":
+        _busy_msg = ("Nie otrzymalam odpowiedzi od Codexa. Sprawdz polaczenie, "
+                     "logowanie i limit konta; sprobuj ponownie za chwile.")
 
     if response:
         print(f"[UI] [CHAT] Maria: {response[:50]}...")
@@ -2677,7 +2874,7 @@ def handle_chat_message(data):
             from agent_core.perception.maria_speech_intent import (
                 detect_maria_intent, detect_past_claim, detect_third_party_claim,
             )
-            maria_intent = detect_maria_intent(response)
+            maria_intent = None if (_exclusive_tool_request or interactive_tools_used(tool_context)) else detect_maria_intent(response)
             if maria_intent and maria_intent.get("action") != "planner_delegation":
                 # Mirror of user-side detect_operational_intent flow:
                 # Maria says "Pobiore X" -> USER goal with forced_action_type.
@@ -2797,12 +2994,12 @@ def handle_chat_message(data):
             _resp_payload['maria_intent'] = _maria_intent_payload
         if _confabulation_payload is not None:
             _resp_payload['confabulation_flag'] = _confabulation_payload
-        emit('chat_response', _resp_payload)
+        _emit_chat_response(_resp_payload)
     elif timed_out:
         # Model stalled on the read-timeout: alive but busy/cold. Tell the
         # operator plainly instead of leaving the chat dead (the 2026-06-08 bug).
         print("[UI] [CHAT] Timeout -> busy message to operator")
-        emit('chat_response', {
+        _emit_chat_response({
             'success': True,
             'message': _busy_msg,
             'fallback': True,
@@ -2810,16 +3007,16 @@ def handle_chat_message(data):
         })
     elif last_error:
         print(f"[UI] [ERROR] Chat error after retries: {last_error}")
-        emit('chat_response', {
+        _emit_chat_response({
             'success': True,
-            'message': 'Przepraszam, Ollama jest teraz zajeta (planner pracuje). Sprobuj za chwile.',
+            'message': _busy_msg,
             'fallback': True
         })
     else:
         # Empty reply with no exception -> treat like a soft stall: same clear
         # busy message rather than a vague "nie udalo mi sie" (still not silence).
         print("[UI] [CHAT] Empty response -> busy message to operator")
-        emit('chat_response', {
+        _emit_chat_response({
             'success': True,
             'message': _busy_msg,
             'fallback': True,
@@ -2827,14 +3024,21 @@ def handle_chat_message(data):
 
 
 @socketio.on('clear_history')
+@_serialize_chat_turn
 def handle_clear_history():
     """Clear Maria's conversation history (both brain and UI)."""
     global _maria_brain
+    try:
+        _get_chat_turn_store().forget_responses()
+    except Exception:
+        emit('history_cleared', {'success': False, 'error': 'Nie udało się wyczyścić zapisu odpowiedzi. Historia pozostała bez zmian.'})
+        return
+    _clear_interactive_tool_context()
 
     # Clear Ollama brain history
     with _brain_lock:
         if _maria_brain:
-            _maria_brain.history = [_maria_brain.history[0]]
+            _maria_brain.history = deque([_maria_brain.history[0]], maxlen=50)
             print("[UI] [CHAT] Brain history cleared")
 
     # Clear UI chat history
@@ -4049,7 +4253,11 @@ _VISION_STATE_PATH = PROJECT_ROOT / "meta_data" / "vision_state.json"
 
 
 def _read_vision_state():
-    """Read vision state from JSON file (written by tick loop)."""
+    """Use the unified runtime's memory, with a compatibility file fallback."""
+    if _vision_publisher is not None:
+        state = _vision_publisher.state()
+        if state is not None:
+            return state
     if not _VISION_STATE_PATH.exists():
         return None
     try:
@@ -4057,6 +4265,16 @@ def _read_vision_state():
             return json.loads(fh.read())
     except Exception:
         return None
+
+
+@app.route('/api/vision/state')
+@require_auth
+def api_vision_state():
+    """One consistent response for status, analysis, health and frame version."""
+    if _vision_publisher is not None:
+        _vision_publisher.touch_viewer()
+    state = _read_vision_state()
+    return jsonify({"available": state is not None, "state": state})
 
 
 @app.route('/api/vision/status')
@@ -4099,6 +4317,15 @@ def api_vision_health():
 @require_auth
 def api_vision_frame():
     """Serve the last captured frame as JPEG."""
+    if _vision_publisher is not None:
+        _vision_publisher.touch_viewer()
+        state = _vision_publisher.state()
+        if state is not None:
+            version = request.args.get("v", state.get("frame_version"))
+            jpeg = _vision_publisher.frame(version)
+            if jpeg is None:
+                return "Frame unavailable or superseded", 409
+            return send_file(io.BytesIO(jpeg), mimetype="image/jpeg", etag=version, max_age=0)
     frame_path = PROJECT_ROOT / "meta_data" / "vision_frame.jpg"
     if not frame_path.exists():
         return "No frame available", 404
@@ -4108,20 +4335,35 @@ def api_vision_frame():
 @app.route('/api/vision/snap', methods=['POST'])
 @require_auth
 def api_vision_snap():
-    """Trigger a vision snapshot (returns last known state, actual snap via REPL)."""
-    # Vision cortex runs in daemon process, not Web UI process.
-    # The snap button refreshes the page data from the latest state file.
-    state = _read_vision_state()
-    if state is None:
-        return jsonify({"success": False, "error": "Vision not available (daemon not running?)"})
-    percept = state.get("last_percept")
-    if percept is None:
-        return jsonify({"success": False, "error": "No percept available"})
-    return jsonify({
-        "success": True,
-        "summary": percept.get("summary", ""),
-        "quality": percept.get("quality", 0),
-    })
+    """Capture a new manual photo asynchronously; never report cached data as a snap."""
+    if _vision_snapshots is None:
+        return jsonify({"success": False, "error": "Kamera nie jest dostepna w tej instancji Marii."}), 503
+    from agent_core.vision.snapshot_service import SnapshotBusy
+    try:
+        job_id = _vision_snapshots.request()
+    except SnapshotBusy as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"accepted": True, "status": "running", "job_id": job_id}), 202
+
+
+@app.route('/api/vision/snap/<job_id>')
+@require_auth
+def api_vision_snap_result(job_id):
+    result = _vision_snapshots.result(job_id) if _vision_snapshots is not None else None
+    if result is None:
+        return jsonify({"success": False, "error": "Zdjecie wygaslo lub nie istnieje."}), 404
+    if result.get("success"):
+        result["frame_url"] = url_for("api_vision_snap_frame", job_id=job_id)
+    return jsonify(result)
+
+
+@app.route('/api/vision/snap/<job_id>/frame')
+@require_auth
+def api_vision_snap_frame(job_id):
+    jpeg = _vision_snapshots.frame(job_id) if _vision_snapshots is not None else None
+    if jpeg is None:
+        return "Snapshot unavailable", 404
+    return send_file(io.BytesIO(jpeg), mimetype="image/jpeg", etag=job_id, max_age=0)
 
 
 # ====== USER PROFILE ======
@@ -4328,11 +4570,11 @@ def api_projects():
         return jsonify({"error": f"Conductor not available: {e}"}), 503
 
     limit = min(request.args.get('limit', 12, type=int), 50)
-    meta_dir = Path(__file__).resolve().parents[1] / "meta_data"
+    meta_dir = PROJECT_ROOT / "meta_data"
 
     # Fresh instances per request: TaskQueue caches its load, and the daemon
     # appends to these files between requests.
-    status_store = BuildStatusStore()
+    status_store = BuildStatusStore(path=meta_dir / "market_build_status.json")
     projects = {}
     for queue_path in sorted(meta_dir.glob("*_task_queue.jsonl")):
         try:
@@ -4354,9 +4596,7 @@ def api_projects():
                             "assignee": t.assignee.value,
                             "priority": t.priority,
                             "blockers": t.blockers,
-                            "approval_required": bool(
-                                t.artifacts.get("approval_required", False)
-                            ),
+                            "approval_required": t.requires_approval,
                             "drill": bool(t.artifacts.get("drill", False)),
                             "created_at": t.created_at,
                             "updated_at": t.updated_at,

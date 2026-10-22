@@ -20,6 +20,7 @@ from agent_core.vision.modules.motion.detector import (
     MotionOutput,
 )
 from agent_core.vision.modules.scene.analyzer import SceneOutput
+from agent_core.vision.modules.objects.detector import ObjectDetection, ObjectOutput
 from agent_core.vision.percept import VisionPercept
 from agent_core.vision.sensors.health import SensorHealth
 
@@ -32,6 +33,7 @@ def _percept(
     motion_class=MotionClassification.NONE,
     alert_level=AlertLevel.NONE,
     health_overall=None,
+    objects=None,
 ):
     health = SensorHealth() if health_overall is None else SensorHealth(
         connection=health_overall, stream=health_overall,
@@ -48,6 +50,7 @@ def _percept(
         vision_health=health,
         quality=quality,
         motion=motion,
+        objects=objects,
         summary="Test summary",
         sensor_id="test-0",
     )
@@ -109,6 +112,23 @@ class TestAdapterMotionEvents:
         e = motion_events[0]
         assert e.payload["classification"] == "person_movement"
         assert e.payload["alert_level"] == "warning"
+
+    def test_motion_carries_yolo_description_for_fast_advisor_path(self):
+        adapter = VisionPerceptionAdapter()
+        objects = ObjectOutput(
+            module_name="objects",
+            detections=[ObjectDetection(0, "person", 0.91, (1, 2, 30, 40))],
+        )
+        events = adapter.adapt(_percept(
+            motion_detected=True,
+            motion_class=MotionClassification.PERSON_MOVEMENT,
+            alert_level=AlertLevel.ATTENTION,
+            objects=objects,
+        ))
+
+        event = next(e for e in events if e.event_type == "vision_motion")
+        assert event.payload["objects_summary"] == "Rozpoznaje osobe."
+        assert event.payload["objects"][0]["label"] == "person"
 
     def test_ambient_motion_no_event(self):
         adapter = VisionPerceptionAdapter()

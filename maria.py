@@ -287,6 +287,9 @@ def _finalize_exit() -> None:
 def graceful_shutdown(ctx, registry):
     """Cleanup: consciousness checkpoint + module cleanup."""
     logger.info("Graceful shutdown starting...")
+    ui_module = sys.modules.get("maria_ui.app")
+    if ui_module is not None:
+        ui_module.close_vision_snapshots()
 
     # Stop homeostasis
     if ctx.homeostasis_core:
@@ -294,7 +297,9 @@ def graceful_shutdown(ctx, registry):
 
     # Consciousness checkpoint
     summary = "Maria session"
-    if ctx.conversation_memory and ctx.conversation_memory.get_session_turn_count() > 0:
+    from agent_core.runtime_profile import background_reasoning_enabled
+    if (background_reasoning_enabled() and ctx.conversation_memory
+            and ctx.conversation_memory.get_session_turn_count() > 0):
         try:
             condense_brain = getattr(ctx.brain, 'ollama', ctx.brain)
             condensed = ctx.conversation_memory.condense_session(condense_brain)
@@ -425,7 +430,7 @@ def _force_recompile_pyc():
                     str(target),
                     force=True,      # rewrite even if mtime says cache is fresh
                     quiet=2,         # silent on success
-                    workers=0,       # auto worker count
+                    workers=1,       # bounded CPU use; still invalidate stale pyc
                 )
                 recompiled_dirs += 1
             except Exception as e:
@@ -459,8 +464,7 @@ def main():
 
     sys.excepthook = _sys_excepthook
 
-    # Cleanup stale processes from old Claude Code sessions
-    _cleanup_stale_processes()
+    # Startup must not terminate unrelated sessions or test runners.
 
     # C3 hardening: force-recompile .pyc to defeat stale-cache attacks
     # like the 2026-04-24 git-checkout drift incident.
@@ -601,7 +605,7 @@ def main():
     if getattr(ctx, 'vision_cortex', None):
         try:
             from maria_ui.app import set_vision_cortex
-            set_vision_cortex(ctx.vision_cortex)
+            set_vision_cortex(ctx.vision_cortex, ctx.homeostasis_core.get_vision_publisher())
             logger.info("Vision cortex shared with Web UI")
         except Exception as e:
             logger.debug(f"Could not share vision cortex with Web UI: {e}")

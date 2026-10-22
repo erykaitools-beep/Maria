@@ -15,9 +15,11 @@ import math
 import os
 import threading
 import time
+from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 import requests
+from agent_core.runtime_profile import model_keep_alive
 
 from agent_core.llm.local_compute import (
     LocalComputeBlocked,
@@ -109,6 +111,7 @@ def relevance_from_cosine(score: float, model: str = "") -> float:
 MAX_BATCH_SIZE = 8        # ~17s of work for bge-m3, comfortably inside the read budget
 MAX_TEXT_LENGTH = 8192    # context window (nomic and bge-m3 both 8192)
 REQUEST_TIMEOUT = (5, 180)  # (connect, read) seconds; read covers a cold model load
+MAX_CACHE_ENTRIES = 1024  # Disposable reuse cache, separate from persistent memory
 
 
 class EmbeddingModel:
@@ -116,16 +119,22 @@ class EmbeddingModel:
 
     Features:
     - Single and batch embedding
-    - In-memory cache (text hash -> vector)
+    - Bounded LRU cache (text hash -> vector)
     - Cosine similarity helper
     - Health tracking (latency, errors)
     """
 
-    def __init__(self, ollama_url: str = "", model: str = DEFAULT_MODEL):
+    def __init__(self, ollama_url: str = "", model: str = DEFAULT_MODEL,
+                 *, max_cache_entries: int = MAX_CACHE_ENTRIES):
+        if not isinstance(max_cache_entries, int) or max_cache_entries < 1:
+            raise ValueError("max_cache_entries must be a positive integer")
         import os
         self._url = ollama_url or os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL)
         self._model = model
-        self._cache: Dict[str, List[float]] = {}
+        self._cache: OrderedDict[str, List[float]] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._max_cache_entries = max_cache_entries
+        self._cache_evictions = 0
 
         # Health stats
         self._total_requests: int = 0
@@ -140,8 +149,9 @@ class EmbeddingModel:
         text = text[:MAX_TEXT_LENGTH]
         cache_key = self._cache_key(text)
 
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
 
         result = self._call_ollama([text])
         vec = result[0] if result else []
@@ -152,7 +162,7 @@ class EmbeddingModel:
         # cache without ever retrying Ollama, and get_stats() counted it as a
         # cached vector, i.e. as success.
         if self._is_usable(vec):
-            self._cache[cache_key] = vec
+            self._remember_cached(cache_key, vec)
         return vec
 
     def embed_batch(
@@ -179,8 +189,9 @@ class EmbeddingModel:
                 continue
             text = text[:MAX_TEXT_LENGTH]
             key = self._cache_key(text)
-            if key in self._cache:
-                results[i] = self._cache[key]
+            cached = self._get_cached(key)
+            if cached is not None:
+                results[i] = cached
             else:
                 uncached_indices.append(i)
                 uncached_texts.append(text)
@@ -203,7 +214,7 @@ class EmbeddingModel:
                     # cached, or the whole batch's texts stay poisoned for the
                     # lifetime of the process.
                     if self._is_usable(vec):
-                        self._cache[self._cache_key(batch[j])] = vec
+                        self._remember_cached(self._cache_key(batch[j]), vec)
 
         # Fill any remaining None with empty
         return [r if r is not None else [] for r in results]
@@ -224,13 +235,18 @@ class EmbeddingModel:
 
     def get_stats(self) -> Dict:
         """Return health/usage statistics."""
+        with self._cache_lock:
+            cached_vectors = len(self._cache)
+            cache_evictions = self._cache_evictions
         avg_latency = (
             self._total_latency_ms / self._total_requests
             if self._total_requests > 0 else 0
         )
         return {
             "model": self._model,
-            "cached_vectors": len(self._cache),
+            "cached_vectors": cached_vectors,
+            "cache_max_entries": self._max_cache_entries,
+            "cache_evictions": cache_evictions,
             "total_requests": self._total_requests,
             "total_errors": self._total_errors,
             "avg_latency_ms": round(avg_latency, 1),
@@ -238,9 +254,27 @@ class EmbeddingModel:
 
     def clear_cache(self) -> int:
         """Clear embedding cache. Returns number of entries cleared."""
-        count = len(self._cache)
-        self._cache.clear()
-        return count
+        with self._cache_lock:
+            count = len(self._cache)
+            self._cache.clear()
+            return count
+
+    def _get_cached(self, key: str) -> Optional[List[float]]:
+        """Refresh reuse priority without holding a lock during inference."""
+        with self._cache_lock:
+            vec = self._cache.get(key)
+            if vec is not None:
+                self._cache.move_to_end(key)
+            return vec
+
+    def _remember_cached(self, key: str, vec: List[float]) -> None:
+        """Drop only cache references; VectorStore owns durable memory entries."""
+        with self._cache_lock:
+            self._cache[key] = vec
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._max_cache_entries:
+                self._cache.popitem(last=False)
+                self._cache_evictions += 1
 
     # --- Static helpers ---
 
@@ -273,10 +307,12 @@ class EmbeddingModel:
                 model=self._model,
                 timeout_s=REQUEST_TIMEOUT[1],
                 cancel_event=cancel_event,
+                priority=10 if cancel_event is not None else 0,
             ):
                 resp = requests.post(
                     f"{self._url}{EMBED_ENDPOINT}",
-                    json={"model": self._model, "input": texts},
+                    json={"model": self._model, "input": texts,
+                          "keep_alive": model_keep_alive("embedding", "5m")},
                     timeout=REQUEST_TIMEOUT,
                 )
             elapsed_ms = (time.time() - start) * 1000

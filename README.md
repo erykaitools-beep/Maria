@@ -3,13 +3,12 @@
   <h1 align="center">M.A.R.I.A.</h1>
   <p align="center"><b>Meta Analysis Recalibration Intelligence Architecture</b></p>
   <p align="center">
-    A local, autonomous AI agent that lives on your machine.<br>
-    She learns, plans, reflects, and communicates — all offline.
+    A personal assistant with persistent memory, voice conversation, and explicit project delegation.<br>
+    Local components, with optional external model and project services.
   </p>
   <p align="center">
     <a href="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml"><img src="https://github.com/erykaitools-beep/Maria/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
-    <img src="https://img.shields.io/badge/tests-7200%2B-brightgreen" alt="7200+ tests">
     <img src="https://img.shields.io/badge/license-AGPL--3.0-purple" alt="License">
     <img src="https://img.shields.io/badge/LLM-Ollama%20(local)-orange" alt="Ollama">
   </p>
@@ -38,15 +37,26 @@
 
 ## What is Maria?
 
-Maria is a **personal digital companion**, not a chatbot. She runs continuously as a daemon on your machine, learning autonomously from files you provide, building knowledge over time, and reaching out when she has something to say.
+Maria is a **personal digital companion** running as a Python daemon with a browser interface. Conversation memory, operator preferences, task receipts, and reports survive individual model calls. Background learning and autonomous reasoning are configurable, not prerequisites for a conversation.
 
 She remembers who you are, what you care about, and adapts to your preferences.
 
-**Core idea:** clone it, run it, and it keeps running on hardware you own — no cloud account or API key required to start.
+You can use local Ollama chat or configure an optional Codex backend. Local speech recognition uses an externally installed whisper.cpp model. Codex, remote project hosts, Telegram, and other enabled integrations have their own connectivity and account requirements; not every configuration is offline.
 
-> **New here?** The fastest path from clone to a running Maria is **[QUICKSTART.md](QUICKSTART.md)** (~10 minutes, no accounts). Hitting unfamiliar words below — *homeostasis, tick, beliefs, K1–K13*? Keep **[GLOSSARY.md](GLOSSARY.md)** open. Something broke? **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
+### Current interaction guide
 
-### Try it in 5 minutes
+See **[Voice, conversation, and projects](docs/VOICE_AND_PROJECTS.md)** for setup and limitations:
+
+- Foreground conversation: say “Maria” once, finish an utterance with about four seconds of audio silence, and follow up without repeating the name during a three-minute idle-listening window.
+- Bounded spoken introductions, with the complete reply retained in chat and an explicit full readout.
+- Durable chat request receipts and recovery without automatically resending an uncertain request.
+- Optional Kritaqo project selection, task cards, existing reports, recorded checks, and explicit new-work requests across configured hosts.
+
+This repository is a curated source snapshot. Runtime data, credentials, model weights, external project repositories, and device-specific configuration are not included. Registered shared projects are not arbitrary discovered folders, and a completed agent report is not independent verification of its files or a human test.
+
+> **New here?** **[QUICKSTART.md](QUICKSTART.md)** describes the original local Ollama installation path. Downloads and setup time depend on your hardware and connection. Keep **[GLOSSARY.md](GLOSSARY.md)** open for architectural terms, or use **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**.
+
+### Local installation
 
 ```bash
 git clone https://github.com/erykaitools-beep/Maria.git
@@ -56,7 +66,22 @@ source venv/bin/activate
 python maria.py          # answer the name prompt in the terminal, then open http://localhost:5000
 ```
 
-No Telegram, no API key, no cloud — that's the whole minimal local run. Step-by-step, with what you'll see at each stage: **[QUICKSTART.md](QUICKSTART.md)**.
+The local Ollama path does not require a cloud-model account. The installer downloads local models; inspect its configuration before running it on an existing installation. Additional voice and project integrations need separate setup.
+
+For interactive use without autonomous background reasoning, explicitly configure:
+
+```dotenv
+MARIA_RUNTIME_PROFILE=lean
+MARIA_BACKGROUND_REASONING=0
+MARIA_WARMUP=0
+MARIA_TELEGRAM_INTEGRATION=0
+MARIA_CONDUCTOR_INTEGRATION=0
+MARIA_CHAT_BACKEND=ollama
+```
+
+`lean` controls model residency; it does not by itself disable background reasoning. These settings retain stored memory and perception, but do not complete waiting autonomous goals or cancel already authorized external work. Defaults preserve legacy background behavior.
+
+For optional Codex chat, set `MARIA_CHAT_BACKEND=codex`, configure `CODEX_BIN` if needed, and select an available model with `MARIA_CODEX_MODEL`. A compatible authenticated external Codex installation is required. Configured Codex failures are reported without silently switching to Ollama. The selected runtime model is not provider attestation, and changing it does not grant new tools.
 
 ### Key Features
 
@@ -115,7 +140,8 @@ No Telegram, no API key, no cloud — that's the whole minimal local run. Step-b
 
 | Topic | Document |
 |---|---|
-| **Quick start (10-minute local run)** | [QUICKSTART.md](QUICKSTART.md) |
+| **Local installation** | [QUICKSTART.md](QUICKSTART.md) |
+| **Voice, conversation, and project work** | [docs/VOICE_AND_PROJECTS.md](docs/VOICE_AND_PROJECTS.md) |
 | **Glossary of terms** | [GLOSSARY.md](GLOSSARY.md) |
 | **Troubleshooting & FAQ** | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Architecture & data flow | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
@@ -170,12 +196,12 @@ Drop `.txt` files into `input/`. Maria will find them and start learning automat
 
 ```bash
 cp my_notes.txt input/
-# Maria picks it up on the next planner cycle (~60s)
+# Background learning must be enabled for automatic processing.
 ```
 
 ## Configuration
 
-All config is in `.env` (created by `install.sh`). Nothing is required for basic operation.
+Core settings are in `.env` (created by `install.sh`). Optional integrations also require external runtimes and private configuration; see the [current interaction guide](docs/VOICE_AND_PROJECTS.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -241,7 +267,7 @@ Quiet hours (23:00-6:00), daily limits, per-reason cooldowns.
 
 ## Running in Production
 
-Maria has been running continuously on a single mini PC since 2026-02-22. This isn't a demo — it's the same process, same logs, same beliefs carried across every tick.
+Maria has a production deployment history starting in February 2026. Services restart during updates; persistence, rather than one immortal process, carries state between runs. The following deployment details and counters describe the historical August 2026 snapshot, not a fresh installation or a current benchmark.
 
 | | |
 |---|---|
@@ -260,7 +286,7 @@ Live counters as of 2026-08-04 (~24 weeks in):
 | Decision traces (episode-correlated) | 4,194 (rotated; older traces are archived) |
 | Test suite | 7,262 passing · 4 skipped · ~180s runtime |
 
-> The counters above are a dated snapshot. For sourced current figures (tests, code size, models, hardware), see [docs/funding/CURRENT_PROJECT_STATUS.md](docs/funding/CURRENT_PROJECT_STATUS.md).
+> These counters are historical. The [funding status document](docs/funding/CURRENT_PROJECT_STATUS.md) also contains dated observations. Neither is a live counter or a performance guarantee for this revision.
 
 Observed modes: `ACTIVE` most of the day, `REDUCED` briefly during LLM inference spikes, `SLEEP` during low-activity hours, `SURVIVAL` never triggered in production.
 
@@ -327,7 +353,7 @@ maria/
 │   ├── llm/              # LLM routing, model registry
 │   ├── reminders/        # Time-triggered notifications
 │   ├── web_source/       # Wikipedia + RSS content fetcher
-│   └── tests/            # 7200+ tests
+│   └── tests/            # Isolated tests; see CI for this revision
 ├── maria_ui/             # Flask Web UI
 │   ├── templates/        # HTML (Jinja2)
 │   └── static/           # CSS + JS
@@ -354,12 +380,14 @@ python main.py
 | Component | Technology |
 |-----------|-----------|
 | **Runtime** | Python 3.10+, threading |
-| **LLM** | Ollama (llama3.1:8b), optional NVIDIA NIM API |
+| **LLM** | Configurable Ollama chat, optional Codex chat; other subsystem providers are separate |
 | **Web UI** | Flask + Flask-SocketIO, vanilla JS |
-| **Storage** | JSONL files (no database) |
+| **Storage** | JSON, JSONL, and SQLite (including durable chat turn receipts) |
 | **Embeddings** | bge-m3 (1024-dim, via Ollama) — replaced nomic-embed-text 2026-07-25 |
 | **Communication** | Telegram Bot API |
-| **Tests** | pytest, all mocked, zero external deps |
+| **Tests** | pytest and browser JavaScript fixtures; optional dependencies and device acceptance are separate |
+
+The Flutter Android client is maintained separately. Its sources and APK are not part of this repository. A prepared Android release still requires physical-device microphone/TTS acceptance; mocked tests are not that evidence.
 
 ## License
 
@@ -367,6 +395,6 @@ python main.py
 
 ## Credits
 
-M.A.R.I.A. has been running continuously since **February 22, 2026**.
+M.A.R.I.A.'s production deployment history began in **February 2026**.
 
 Built by Eryk with help from Claude, ChatGPT, and Grok.

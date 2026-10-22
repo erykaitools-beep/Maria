@@ -11,8 +11,46 @@ letting LLM hallucinate an answer.
 """
 
 import re
+import unicodedata
 from enum import Enum
 from typing import Optional
+
+
+def _fold_query(message: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", message.lower().replace("ł", "l"))
+                   if not unicodedata.combining(c))
+
+
+def is_explicit_camera_query(message: str) -> bool:
+    """Require a camera/scene referent, not merely an artifact's appearance."""
+    if not isinstance(message, str):
+        return False
+    text = _fold_query(message)
+    if re.search(r"\b(?:bez (?:(?:korzystania|uzywania|uzycia) (?:z )?)?kamer\w*|"
+                 r"nie (?:korzystaj|uzywaj|wlaczaj|opisuj|sprawdzaj) (?:z )?"
+                 r"(?:(?:obrazu|podgladu|widoku) z )?kamer\w*|"
+                 r"nie (?:(?:obraz|podglad|widok) )?z kamery)\b", text):
+        return False
+    scene = re.search(r"\b(?:otoczeni\w*|pokoj\w*|przed toba)\b", text)
+    viewing = re.search(r"\b(?:co (?:widzisz|widac)|jak wyglada|pokaz|opisz|sprawdz|obejrzyj|zobacz|popatrz|patrz|podglad|obraz|what (?:do|can) you see)\b", text)
+    camera_relation = re.search(r"\b(?:w|na|z|przez) (?:twoj\w* )?kamer\w*\b", text)
+    camera_view = re.search(r"\b(?:obraz|podglad|widok)(?:u|em)? (?:z |w )?kamer\w*\b", text)
+    direct_camera = re.search(r"\b(?:pokaz|sprawdz|wlacz|obejrzyj)(?: mi)? kamere\b", text)
+    return bool(viewing and (scene or camera_relation) or camera_view or direct_camera
+                or re.search(r"\b(?:przed kamera|w kadrze)\b", text))
+
+
+def is_task_artifact_query(message: str) -> bool:
+    """Identify work referents without granting project/tool authority."""
+    if not isinstance(message, str):
+        return False
+    text = _fold_query(message)
+    artifact = re.search(r"\b(?:plakat\w*|grafik\w*|baner\w*|ulotk\w*|logo|"
+                         r"projekt\w*|zleceni\w*|pakiet\w*|miniatur\w*)\b", text)
+    output = (re.search(r"\b(?:dokument\w*|plik\w*|zadani\w*)\b", text)
+              and re.search(r"\b(?:wynik\w*|gotow\w*|skoncz\w*|przygotow\w*|"
+                            r"wygenerow\w*|zrobil\w*|wyglad\w*|roblox\w*|kritaqo|msi)\b", text))
+    return bool(artifact or output)
 
 
 class ResponseMode(Enum):
@@ -133,10 +171,18 @@ class OperationalQueryRouter:
             if marker in lower:
                 return ResponseMode.NORMAL
 
+        if is_explicit_camera_query(message):
+            return ResponseMode.GROUNDED_VISION
+
+        # A rendered artifact is not evidence from the USB camera. This guard
+        # also applies after disconnect/expiry, when no project tools are active.
+        if is_task_artifact_query(message):
+            return ResponseMode.NORMAL
+
         # Check each mode's keywords (most specific first)
         for mode, keywords in _MODE_PATTERNS.items():
             for kw in keywords:
-                if kw in lower:
+                if (bool(re.search(r"\bmode\b", lower)) if kw == "mode" else kw in lower):
                     return mode
 
         return ResponseMode.NORMAL

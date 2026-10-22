@@ -12,9 +12,11 @@ Used by:
 Thread-safe (lock on append). File rotated at 50MB.
 """
 
+import gzip
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from dataclasses import dataclass, asdict
@@ -161,10 +163,38 @@ class LLMTape:
                             entries.append(json.loads(line))
                         except json.JSONDecodeError:
                             pass
+
+            # Top up from archives when the live tape is short. Right after a
+            # rotation it holds a handful of lines, and EvidenceCollector /
+            # K12 would silently see almost no history -- the rotation would
+            # look like "the model went quiet" to every consumer.
+            if len(entries) < limit:
+                entries = self._backfill(limit - len(entries)) + entries
             return entries
         except Exception as e:
             logger.debug(f"[LLMTape] get_recent failed: {e}")
             return []
+
+    def _backfill(self, want: int) -> List[Dict[str, Any]]:
+        """Newest `want` entries from the archives, oldest-first in the result."""
+        collected: List[Dict[str, Any]] = []
+        for archive in self.archives():
+            try:
+                with self._open_any(archive) as handle:
+                    rows = [line.strip() for line in handle if line.strip()]
+            except Exception:
+                continue
+            for line in reversed(rows):
+                try:
+                    collected.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+                if len(collected) >= want:
+                    break
+            if len(collected) >= want:
+                break
+        collected.reverse()
+        return collected
 
     def get_stats(self, period_hours: int = 24) -> Dict[str, Any]:
         """Aggregate stats for the last N hours."""
@@ -205,41 +235,132 @@ class LLMTape:
         return errors[-limit:]
 
     def _read_since(self, cutoff_ts: float) -> List[Dict[str, Any]]:
-        """Read entries newer than cutoff timestamp."""
-        if not self._path.exists():
-            return []
+        """Read entries newer than cutoff timestamp, across archives if needed.
 
-        entries = []
-        try:
-            with open(self._path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        d = json.loads(line)
-                        if d.get("ts", 0) >= cutoff_ts:
-                            entries.append(d)
-                    except json.JSONDecodeError:
-                        pass
-        except Exception as e:
-            logger.debug(f"[LLMTape] _read_since failed: {e}")
+        get_stats(period_hours=24) runs through here. If the window reaches back
+        past the start of the live tape -- which it does for a full day after
+        every rotation -- the answer has to come partly from the archive, or a
+        24h stats call would report the few minutes since rotation and call it
+        a day.
+        """
+        entries: List[Dict[str, Any]] = []
 
+        def harvest(opener, path) -> Optional[float]:
+            """Append matching rows; return the oldest ts seen in this file."""
+            oldest: Optional[float] = None
+            try:
+                with opener(path) as handle:
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        ts = row.get("ts", 0)
+                        if oldest is None or ts < oldest:
+                            oldest = ts
+                        if ts >= cutoff_ts:
+                            entries.append(row)
+            except Exception as e:
+                logger.debug(f"[LLMTape] _read_since failed on {path}: {e}")
+            return oldest
+
+        oldest_seen: Optional[float] = None
+        if self._path.exists():
+            oldest_seen = harvest(
+                lambda p: open(p, "r", encoding="utf-8", errors="replace"), self._path
+            )
+
+        # Only reach into archives while the window is still not covered.
+        if oldest_seen is None or oldest_seen > cutoff_ts:
+            for archive in self.archives():
+                oldest_seen = harvest(self._open_any, archive)
+                if oldest_seen is not None and oldest_seen <= cutoff_ts:
+                    break
+
+        entries.sort(key=lambda r: r.get("ts", 0))
         return entries
 
+    @property
+    def archive_dir(self) -> Path:
+        """Where rotated tapes live. Sibling of the tape, not a suffix of it."""
+        return self._path.parent / f"{self._path.stem}_archive"
+
+    def archives(self) -> List[Path]:
+        """Rotated tapes, NEWEST FIRST. Timestamped names sort chronologically."""
+        directory = self.archive_dir
+        if not directory.exists():
+            return []
+        found = list(directory.glob(f"{self._path.stem}-*.jsonl")) + list(
+            directory.glob(f"{self._path.stem}-*.jsonl.gz")
+        )
+        return sorted(found, key=lambda p: p.name, reverse=True)
+
+    @staticmethod
+    def _open_any(path: Path):
+        """Open a plain or gzipped archive transparently."""
+        if path.suffix == ".gz":
+            return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+        return open(path, "r", encoding="utf-8", errors="replace")
+
     def _rotate_if_needed(self) -> None:
-        """Rotate file if it exceeds max size."""
+        """Move the tape into a timestamped archive once it exceeds max size.
+
+        The previous scheme renamed onto a single ``.jsonl.bak`` and deleted
+        whatever the last rotation had left there. With one file holding 139 days
+        of every LLM call this box has made, that meant the first rotation split
+        the history and the second destroyed half of it -- silently, since
+        rotation only ever logged at INFO.
+
+        Archives are never deleted. At the observed ~355 KB/day the tape reaches
+        50 MB about every 140 days, and gzip takes that to a few MB, so a decade
+        of history costs less than the tape does today.
+        """
         if not self._path.exists():
             return
         try:
             size = self._path.stat().st_size
-            if size >= self._max_size:
-                backup = self._path.with_suffix(".jsonl.bak")
-                if backup.exists():
-                    backup.unlink()
-                self._path.rename(backup)
-                logger.info(
-                    f"[LLMTape] Rotated {self._path.name} ({size // 1_000_000}MB)"
-                )
+            if size < self._max_size:
+                return
+
+            directory = self.archive_dir
+            directory.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+            # Never rename onto an existing archive. The stamp has one-second
+            # resolution and production rotations sit ~140 days apart, so a
+            # collision "cannot happen" -- which is precisely the assumption
+            # this whole change exists to remove. Caught by the round-trip test,
+            # which lost entries until this loop went in.
+            target = directory / f"{self._path.stem}-{stamp}.jsonl"
+            suffix = 1
+            while target.exists() or target.with_suffix(".jsonl.gz").exists():
+                target = directory / f"{self._path.stem}-{stamp}-{suffix}.jsonl"
+                suffix += 1
+
+            # Rename BEFORE compressing: the rename is atomic, so the history is
+            # safe the instant it completes. Compressing in place would leave a
+            # window where a crash loses the file to a half-written archive.
+            self._path.rename(target)
+            logger.warning(
+                "[LLMTape] Rotated %s (%.1f MB) -> %s",
+                self._path.name, size / 1_000_000, target.name,
+            )
+            self._compress(target)
         except Exception as e:
-            logger.debug(f"[LLMTape] rotation failed: {e}")
+            logger.warning(f"[LLMTape] rotation failed: {e}")
+
+    @staticmethod
+    def _compress(path: Path) -> None:
+        """Gzip an archive in place. The plain file goes only once the gz is good."""
+        try:
+            packed = path.with_suffix(".jsonl.gz")
+            with open(path, "rb") as src, gzip.open(packed, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            if packed.exists() and packed.stat().st_size > 0:
+                path.unlink()
+        except Exception as e:
+            # A failed compression is not a failed rotation: the plain archive is
+            # already on disk and readable, which is the part that matters.
+            logger.warning(f"[LLMTape] archive compression failed: {e}")

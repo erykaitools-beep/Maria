@@ -42,10 +42,15 @@ class _Scheduler:
 
     def emergency_unload_all(self):
         self.unload_calls += 1
+        # Mirrors the real contract since 2026-08-06: acceptance and release
+        # are separate facts, and two of these three are still resident.
         return {
             "requested": ["llama3.1:8b", "qwen3:8b", "bge-m3:latest"],
-            "unloaded": ["qwen3:8b"],
-            "failed": [],
+            "accepted": ["llama3.1:8b", "qwen3:8b", "bge-m3:latest"],
+            "rejected": [],
+            "still_resident": ["bge-m3:latest", "llama3.1:8b"],
+            "released": ["qwen3:8b"],
+            "verified": True,
         }
 
 

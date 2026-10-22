@@ -11,11 +11,13 @@ import threading
 import time
 from types import SimpleNamespace
 
-from agent_core.vision.vision_advisor import VisionAdvisor, DEFAULT_PROMPT
+from agent_core.vision.vision_advisor import (
+    VisionAdvisor, DEFAULT_PROMPT, _default_cooldown_sec,
+)
 
 
-def _ev(event_type):
-    return SimpleNamespace(event_type=event_type)
+def _ev(event_type, payload=None):
+    return SimpleNamespace(event_type=event_type, payload=payload or {})
 
 
 class _Cortex:
@@ -27,6 +29,7 @@ class _Cortex:
         self.calls = 0
         self.last_prompt = None
         self.last_save_path = None
+        self.fast_saves = 0
 
     def describe_snapshot(self, prompt=None, save_path=None):
         self.calls += 1
@@ -38,6 +41,14 @@ class _Cortex:
             with open(save_path, "wb") as f:
                 f.write(b"\xff\xd8\xff\xe0fake-jpeg")
         return self.desc
+
+    def save_last_frame(self, save_path):
+        self.fast_saves += 1
+        self.last_save_path = save_path
+        if self.writes and save_path:
+            with open(save_path, "wb") as f:
+                f.write(b"\xff\xd8\xff\xe0fake-jpeg")
+        return self.writes
 
 
 def _join(advisor, timeout=2):
@@ -78,6 +89,42 @@ def test_motion_text_only_ping(tmp_path):
     # advisor passed its prompt + snapshot path through to the cortex
     assert cortex.last_prompt == DEFAULT_PROMPT
     assert cortex.last_save_path == _snap(tmp_path)
+
+
+def test_yolo_description_skips_llava_and_saves_bound_frame(tmp_path):
+    pings = []
+    cortex = _Cortex(desc="LLaVA must not be called", writes=True)
+    adv = VisionAdvisor(cortex, notify_fn=pings.append, snapshot_path=_snap(tmp_path))
+    event = _ev("vision_motion", {"objects_summary": "Rozpoznaje osobe."})
+
+    assert adv.maybe_react([event], now=1000.0) is True
+    _join(adv)
+
+    assert cortex.calls == 0
+    assert cortex.fast_saves == 1
+    assert pings == ["Widzę ruch — Rozpoznaje osobe."]
+
+
+def test_yolo_does_not_send_stale_photo_when_bound_frame_save_fails(tmp_path):
+    photos, pings = [], []
+    snapshot = _snap(tmp_path)
+    with open(snapshot, "wb") as handle:  # stale image from an older reaction
+        handle.write(b"old")
+    cortex = _Cortex(writes=False)
+    adv = VisionAdvisor(
+        cortex, notify_fn=pings.append,
+        photo_fn=lambda p, c: photos.append((p, c)) or True,
+        snapshot_path=snapshot,
+    )
+
+    adv.maybe_react([
+        _ev("vision_motion", {"objects_summary": "Rozpoznaje samochod."})
+    ], now=1000.0)
+    _join(adv)
+
+    assert cortex.calls == 0
+    assert photos == []
+    assert pings == ["Widzę ruch — Rozpoznaje samochod."]
 
 
 def test_translate_fn_renders_caption_to_polish(tmp_path):
@@ -429,3 +476,63 @@ def test_quiet_placeholder_distinct_from_present(tmp_path):
     adv.maybe_react([_ev("vision_motion")], now=1000.0)
     _join(adv)
     assert mem.records[0][0] == QUIET_PLACEHOLDER
+
+
+# ─── Cooldown default (env-overridable) ──────────────────────
+
+
+def test_default_cooldown_is_15min_when_unset(monkeypatch):
+    """Raised 180 -> 900s: a window/street camera must not ping every 3 min."""
+    monkeypatch.delenv("VISION_ADVISOR_COOLDOWN_SEC", raising=False)
+    assert _default_cooldown_sec() == 900.0
+
+
+def test_default_cooldown_env_override(monkeypatch):
+    monkeypatch.setenv("VISION_ADVISOR_COOLDOWN_SEC", "1800")
+    assert _default_cooldown_sec() == 1800.0
+
+
+def test_default_cooldown_ignores_garbage_and_nonpositive(monkeypatch):
+    for bad in ("", "abc", "0", "-5"):
+        monkeypatch.setenv("VISION_ADVISOR_COOLDOWN_SEC", bad)
+        assert _default_cooldown_sec() == 900.0
+
+
+def test_public_gate_observe_and_on_remember_real_comparison(monkeypatch,tmp_path):
+    from agent_core.vision.change_gate import GateDecision
+    calls=[]
+    gate=SimpleNamespace(evaluate=lambda path,remember: (calls.append((path,remember)) or GateDecision(False,1.0,0.0,"ta_sama_scena")))
+    adv=VisionAdvisor(_Cortex(),snapshot_path=_snap(tmp_path))
+    adv._change_gate=gate
+    monkeypatch.setenv("VISION_CHANGE_GATE","observe")
+    assert adv._build_frame_gate()("frame.jpg") is True
+    monkeypatch.setenv("VISION_CHANGE_GATE","on")
+    assert adv._build_frame_gate()("frame.jpg") is False
+    assert calls == [("frame.jpg",True),("frame.jpg",True)]
+
+
+def test_public_gate_invalid_config_is_not_a_dummy_filter(monkeypatch,tmp_path):
+    import pytest
+    adv=VisionAdvisor(_Cortex(),snapshot_path=_snap(tmp_path))
+    monkeypatch.setenv("VISION_CHANGE_GATE","on")
+    monkeypatch.setenv("VISION_CHANGE_BACKEND","unsupported")
+    with pytest.raises(ValueError,match="VISION_CHANGE_BACKEND must be opencv"):
+        adv._build_frame_gate()
+
+
+def test_public_detector_probe_respects_gate_without_generative_description(monkeypatch,tmp_path):
+    from agent_core.vision.change_gate import GateDecision
+    monkeypatch.delenv("VISION_CHANGE_BACKEND",raising=False)
+    monkeypatch.setenv("VISION_CHANGE_GATE","on")
+    pings=[]
+    cortex=_Cortex(writes=True)
+    adv=VisionAdvisor(cortex,notify_fn=pings.append,snapshot_path=_snap(tmp_path))
+    adv._change_gate=SimpleNamespace(evaluate=lambda *a,**k: GateDecision(False,1.0,0,"ta_sama_scena"))
+    adv._describe_and_notify(probe=True,fast_description="Wykryto osobe.")
+    assert cortex.fast_saves == 1
+    assert cortex.calls == 0
+    assert pings == []
+    adv._change_gate=SimpleNamespace(evaluate=lambda *a,**k: GateDecision(True,0.5,0,"inna_scena"))
+    adv._describe_and_notify(probe=True,fast_description="Wykryto osobe.")
+    assert cortex.calls == 0
+    assert len(pings) == 1

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from agent_core.planner.planner_model import ActionType, Plan
 from agent_core.planner.decision_filters import creative_cooldown_skip
+from agent_core.llm.work_priority import action_purpose, work_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,11 @@ class ActionExecutor:
     }
 
     def execute(self, plan: Plan) -> Dict[str, Any]:
+        """Run both routing paths with the purpose of the admitted action."""
+        with work_purpose(action_purpose(plan.action_type, plan.action_params)):
+            return self._execute(plan)
+
+    def _execute(self, plan: Plan) -> Dict[str, Any]:
         """
         Execute a plan. Returns result dict.
 
@@ -658,8 +664,11 @@ class ActionExecutor:
                     from agent_core.self_analysis.recommendation_model import (
                         format_report_for_telegram,
                     )
-                    summary, recs = format_report_for_telegram(report)
-                    self._telegram_notifier.notify_self_analysis(summary, recs)
+                    from agent_core.self_analysis.shift import safe_shift_status
+                    summary, recs, issues = format_report_for_telegram(
+                        report, safe_shift_status(self._self_analysis)
+                    )
+                    self._telegram_notifier.notify_self_analysis(summary, recs, issues)
                 except Exception:
                     pass
 

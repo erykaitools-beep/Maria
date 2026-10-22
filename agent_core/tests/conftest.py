@@ -242,6 +242,12 @@ def neutralize_armed_env_flags(monkeypatch):
         "EFFECTOR_UNDO_SUGGEST_ENABLED", "HYDRATION_NUDGE_ENABLED",
         "SELF_CONTEXT_CHAT_ENABLED", "VISION_SUPPRESS_WHEN_PRESENT",
         "PROACTIVE_SITUATIONAL", "SELF_DEV_BRIDGE_ENABLED",
+        # Runtime-profile defaults must not depend on the installed .env.
+        # Tests of lean mode explicitly select it through monkeypatch.
+        "MARIA_RUNTIME_PROFILE", "MARIA_MARKET_INTEGRATION",
+        "MARIA_ROLE_KEEP_ALIVE", "MARIA_EMBEDDING_KEEP_ALIVE",
+        "MARIA_VISION_KEEP_ALIVE", "VISION_CHANGE_BACKEND",
+        "MARIA_CHAT_BACKEND", "MARIA_BACKGROUND_REASONING", "MARIA_CODEX_MODEL",
     ):
         monkeypatch.delenv(_flag, raising=False)
 

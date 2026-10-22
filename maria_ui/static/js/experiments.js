@@ -70,7 +70,7 @@
 
   // --- Load proposals ---
   function loadProposals() {
-    M.apiFetch('/api/experiments/proposals').then(proposals => {
+    return M.apiFetch('/api/experiments/proposals').then(proposals => {
       const el = M.$('proposals-list');
       if (!proposals || !proposals.length) {
         el.innerHTML = '<div class="mo-empty-state">Brak propozycji. System automatycznie wygeneruje propozycje na podstawie obserwacji K4/K9.</div>';
@@ -114,7 +114,7 @@
 
   // --- Load reports ---
   function loadReports() {
-    M.apiFetch('/api/experiments/reports').then(reports => {
+    return M.apiFetch('/api/experiments/reports').then(reports => {
       const el = M.$('reports-list');
       if (!reports || !reports.length) {
         el.innerHTML = '<div class="mo-empty-state">Brak raportow z eksperymentow.</div>';
@@ -154,7 +154,7 @@
 
   // --- Load params ---
   function loadParams() {
-    M.apiFetch('/api/experiments/params').then(params => {
+    return M.apiFetch('/api/experiments/params').then(params => {
       const el = M.$('params-list');
       if (!params || !params.length) {
         el.innerHTML = '<div class="mo-empty-state">Brak parametrow</div>';
@@ -188,10 +188,11 @@
     });
   }
 
-  // Init
-  loadProposals();
-  loadReports();
-  loadParams();
-  setInterval(() => { loadProposals(); loadReports(); }, 30000);
+  let initialParams = true;
+  M.createPoller(() => {
+    const requests = [loadProposals(), loadReports()];
+    if (initialParams) { initialParams = false; requests.push(loadParams()); }
+    return Promise.all(requests);
+  }, 30000);
 
 })();

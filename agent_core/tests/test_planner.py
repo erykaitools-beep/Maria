@@ -4,6 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
@@ -1110,6 +1111,69 @@ class TestStrategicWireA:
         planner._strategic_drives = True
         ranked_ids = [g.id for g in planner._select_ranked_goals({})]
         assert "goal-x" in ranked_ids
+
+
+class TestPantryTieBreak:
+    """Equal effective priority -> the fetch-handoff pantry goes first.
+
+    Aging is clamped at MAX_AGING, so every long-lived priority-1.0 goal lands
+    on exactly 5.000 and the winner was whatever came first in the store. Live
+    2026-08-15: the mission and the pantry tied at 5.000, the mission is ALWAYS
+    feasible (it can always exam/review), and the pantry was served only in the
+    gaps -- 55 minutes without a single plan while 34 fresh files waited.
+    """
+
+    def _stores(self, planner, goals):
+        planner._state.last_evaluation_ts = time.time()
+        planner.set_goal_store(_make_mock_goal_store(goals))
+
+    def _pantry(self, gid="goal-pantry", priority=1.0, age_days=52):
+        return _make_goal(
+            goal_id=gid, goal_type="learning", priority=priority,
+            created_at=time.time() - age_days * 86400,
+            metadata={"source": "fetch_handoff", "file_ids": ["a.txt"]},
+        )
+
+    def test_pantry_wins_an_equal_score(self, planner_env):
+        planner, _ = planner_env
+        mission = _make_goal(goal_id="goal-meta-learn", goal_type="meta",
+                             priority=1.0,
+                             created_at=time.time() - 52 * 86400)
+        self._stores(planner, [mission, self._pantry()])
+
+        ranked = [g.id for g in planner._select_ranked_goals({})]
+
+        assert ranked[0] == "goal-pantry", (
+            "pantry lost a tie to the mission -- the live starvation case"
+        )
+
+    def test_higher_scoring_goal_still_beats_the_pantry(self, planner_env):
+        """Only ties move. A goal that genuinely ranks higher keeps its place --
+        this is the narrow tie-break, not the handoff-wins-outright rule that
+        GoalSelector.select_goal declares (and that the live cycle never runs).
+        """
+        planner, _ = planner_env
+        mission = _make_goal(goal_id="goal-meta-learn", goal_type="meta",
+                             priority=2.0,
+                             created_at=time.time() - 52 * 86400)
+        self._stores(planner, [mission, self._pantry()])
+
+        ranked = [g.id for g in planner._select_ranked_goals({})]
+
+        assert ranked[0] == "goal-meta-learn"
+
+    def test_order_among_non_pantry_goals_unchanged(self, planner_env):
+        """The tie-break must not reshuffle everything else."""
+        planner, _ = planner_env
+        high = _make_goal(goal_id="goal-high", goal_type="meta", priority=1.0,
+                          created_at=time.time() - 52 * 86400)
+        low = _make_goal(goal_id="goal-low", goal_type="meta", priority=0.5,
+                         created_at=time.time() - 52 * 86400)
+        self._stores(planner, [low, high])
+
+        ranked = [g.id for g in planner._select_ranked_goals({})]
+
+        assert ranked == ["goal-high", "goal-low"]
 
 
 class TestStrategicWireB:
@@ -2447,6 +2511,111 @@ class TestStaleGoalCleanup:
         assert g.metadata["stall_cycles"] == 0
         assert g.metadata["progress_peak"] == 0.6
 
+    def test_rolling_pantry_stall_counts_files_not_the_fraction(self, planner_env):
+        """The live 2026-08-15 case: verifying 168 MORE files read as a stall.
+
+        The one fetch_handoff goal owns every fetched file, so its denominator
+        grows ~30/day. Its fraction peaked at 0.90625 (29 of the 32 files it
+        held in June) and could never be beaten again -- at 300 files that peak
+        demands 272 verified, while the pump outruns the examiner. Result: a
+        goal that had gone 29 -> 197 verified files was billed a stall every
+        cycle (and an IMPROVEMENT bulletin every 5). Count FILES for it.
+        """
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=52, progress=0.90625,
+            metadata={"source": "fetch_handoff",
+                      "file_ids": [f"f{i}.txt" for i in range(32)]},
+        )
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Naucz sie pobranych materialow", ActionType.LEARN)
+        no_chunk = {"success": True, "chunks_learned": 0}
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["verified_peak"] == 29
+
+        # Pump dowozi material: 32 -> 300 owned, verified 29 -> 197. The
+        # FRACTION falls (0.906 -> 0.657); the work done went UP.
+        g.metadata["file_ids"] = [f"f{i}.txt" for i in range(300)]
+        g.progress = 197 / 300
+        planner._track_learning_stall(plan, no_chunk)
+
+        assert g.metadata["stall_cycles"] == 0, "verifying 168 files read as a stall"
+        assert g.metadata["verified_peak"] == 197
+        assert g.metadata["progress_peak"] == pytest.approx(197 / 300)
+
+    def test_rolling_pantry_stall_not_reset_by_the_pump_alone(self, planner_env):
+        """The other side: fetching material must NOT pardon a real stall.
+
+        A counter the supply pump can reset would never reap a dead goal --
+        exactly the hole the updated_at-based reapers already have (every merge
+        stamps updated_at, so "wedged" never fires on the pantry). Same verified
+        count + a bigger denominator = still stalled.
+        """
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=52, progress=197 / 300,
+            metadata={"source": "fetch_handoff",
+                      "file_ids": [f"f{i}.txt" for i in range(300)]},
+        )
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Naucz sie pobranych materialow", ActionType.LEARN)
+        no_chunk = {"success": True, "chunks_learned": 0}
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["verified_peak"] == 197
+
+        # 30 new files, not one of them verified: the fraction drops, the work
+        # done is unchanged.
+        g.metadata["file_ids"] = [f"f{i}.txt" for i in range(330)]
+        g.progress = 197 / 330
+        planner._track_learning_stall(plan, no_chunk)
+
+        assert g.metadata["stall_cycles"] == 1, "the pump pardoned a real stall"
+        assert g.metadata["verified_peak"] == 197
+
+    def test_rolling_pantry_peak_seeded_from_a_frozen_record_self_corrects(
+        self, planner_env
+    ):
+        """First cycle after a restart may read the OLD frozen fraction.
+
+        The live record still says 0.90625 until the reconcile pass rewrites it,
+        and 0.90625 x 300 = 272 files that were never verified. Seeding the peak
+        from that would plant a phantom nobody can beat -- the same bug in a new
+        key. A count that falls while the owned set did NOT grow is information,
+        not dilution, so the peak follows it down (without pardoning the stall).
+        """
+        planner, _ = planner_env
+        g = self._make_real_goal(
+            "g1", "learning", "active", age_days=52, progress=0.90625,
+            metadata={"source": "fetch_handoff",
+                      "file_ids": [f"f{i}.txt" for i in range(300)]},
+        )
+        store = _make_mock_goal_store([g])
+        store.get.return_value = g
+        planner.set_goal_store(store)
+
+        plan = create_plan("g1", "Naucz sie pobranych materialow", ActionType.LEARN)
+        no_chunk = {"success": True, "chunks_learned": 0}
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["verified_peak"] == 272  # phantom, from the stale record
+
+        g.progress = 197 / 300  # reconcile writes the measured value
+        planner._track_learning_stall(plan, no_chunk)
+
+        # Cycle 1 seeded the peak (counts as a new high-water, so stall=0);
+        # cycle 2 corrected it downward, which must NOT pardon the stall.
+        assert g.metadata["verified_peak"] == 197, "phantom peak survived"
+        assert g.metadata["stall_cycles"] == 1, "a correction counted as progress"
+
+        g.progress = 198 / 300  # one more file verified -- real progress
+        planner._track_learning_stall(plan, no_chunk)
+        assert g.metadata["stall_cycles"] == 0
+
     def test_meta_goal_threshold_is_5d(self, planner_env):
         planner, _ = planner_env
         # 4d: under meta threshold (5d), kept
@@ -3564,6 +3733,13 @@ class TestK7FallthroughToK12:
         mock_report.goals_created = []
         mock_report.duration_ms = 100
         mock_sa.run_analysis.return_value = mock_report
+        # specced(SelfAnalysis) builds its interface from the class, and `shift`
+        # is created in __init__ -- so the mock must state what the analysis
+        # shift decides. These tests are about K7 fallthrough, not scheduling:
+        # pretend we are inside the evening window.
+        mock_sa.shift = SimpleNamespace(
+            should_run_periodic=lambda: (True, "test_in_shift")
+        )
         planner.set_self_analysis(mock_sa)
         planner._state.last_self_analysis_ts = 0.0  # Never analyzed
 
@@ -3620,6 +3796,13 @@ class TestK7FallthroughToK12:
         mock_report.goals_created = []
         mock_report.duration_ms = 100
         mock_sa.run_analysis.return_value = mock_report
+        # specced(SelfAnalysis) builds its interface from the class, and `shift`
+        # is created in __init__ -- so the mock must state what the analysis
+        # shift decides. These tests are about K7 fallthrough, not scheduling:
+        # pretend we are inside the evening window.
+        mock_sa.shift = SimpleNamespace(
+            should_run_periodic=lambda: (True, "test_in_shift")
+        )
         planner.set_self_analysis(mock_sa)
         planner._state.last_self_analysis_ts = 0.0
 
@@ -3944,65 +4127,29 @@ class TestUpdateLearningGoal:
 class TestGoalPivot:
     """When top goal maps to NOOP, planner should try next goal."""
 
-    def test_pivot_to_second_goal_on_noop(self, planner_env):
-        """First goal -> NOOP (all completed), second goal -> LEARN."""
-        planner, tmp_path = planner_env
-        core = _make_mock_core()
-        planner.set_homeostasis_core(core)
-        planner.set_teacher_agent(_make_mock_teacher())
+    def test_pivot_to_second_goal_on_noop(self, planner_env, monkeypatch):
+        """A feasible NOOP goal yields to the next feasible actionable goal."""
+        planner, _ = planner_env
+        planner.set_homeostasis_core(_make_mock_core())
         planner._state.last_evaluation_ts = time.time()
-
-        # Goal 1: high priority, will NOOP (no files)
-        goal1 = _make_goal(
-            goal_id="goal-high", priority=1.1, goal_type="learning",
-            metadata={"source": "conversation"},
-        )
-        # Goal 2: lower priority, has files to learn
-        goal2 = _make_goal(
-            goal_id="goal-low", priority=0.8, goal_type="learning",
-        )
+        goal1 = _make_goal(goal_id="goal-high", priority=1.0, goal_type="user")
+        goal2 = _make_goal(goal_id="goal-low", priority=0.8, goal_type="user")
         planner.set_goal_store(_make_mock_goal_store([goal1, goal2]))
+        attempts = []
 
-        # Knowledge: no files in learning/new for goal1, but new files exist
-        import json
-        index_path = tmp_path / "ki.jsonl"
-        with open(index_path, "w") as f:
-            f.write(json.dumps({
-                "id": "f1.txt", "file": "f1.txt", "status": "new",
-                "priority": 50, "chunks_learned": 0, "total_chunks": 1,
-            }) + "\n")
-        input_dir = tmp_path / "input"
-        input_dir.mkdir(exist_ok=True)
-        (input_dir / "f1.txt").write_text("test content")
+        def choose(goal, context):
+            attempts.append(goal.id)
+            action = ActionType.NOOP if goal.id == goal1.id else ActionType.LEARN
+            return create_plan(goal.id, goal.description, action)
 
-        from agent_core.teacher.knowledge_analyzer import KnowledgeAnalyzer
-        analyzer = KnowledgeAnalyzer(
-            knowledge_index_path=index_path, input_dir=input_dir,
-        )
-        planner.set_knowledge_analyzer(analyzer)
-
-        # Goal1 has no topic files -> NOOP, goal2 has files -> LEARN
-        # But since both share same analyzer, we need goal1 to NOOP
-        # Force: goal1 already completed (override snapshot for first call)
-        # Simpler: just make goal1 a maintenance goal with progress=1.0 (infeasible)
-        # Actually let's test the real scenario: both feasible but goal1 returns NOOP
-        # The simplest way: goal1 conversation source, all files completed
-        index_path2 = tmp_path / "ki2.jsonl"
-        with open(index_path2, "w") as f:
-            f.write(json.dumps({
-                "id": "f1.txt", "file": "f1.txt", "status": "completed",
-                "priority": 50, "chunks_learned": 1, "total_chunks": 1,
-            }) + "\n")
-        analyzer2 = KnowledgeAnalyzer(
-            knowledge_index_path=index_path2, input_dir=input_dir,
-        )
-        planner.set_knowledge_analyzer(analyzer2)
-
+        # This is a selection test. Do not execute a fetch/LLM action whose
+        # availability depends on the installation's environment and clock.
+        monkeypatch.setattr(planner, "_create_plan_for_goal", choose)
+        monkeypatch.setattr(planner, "_finalize_plan", lambda plan: plan)
         result = planner.run_cycle(60)
-        assert result is not None
-        # Should not be NOOP - should have pivoted or fallen through
-        # (may be evaluate/self_analyze/creative, but NOT stuck NOOP)
-        # The key: it tried beyond goal1
+        assert attempts == [goal1.id, goal2.id]
+        assert result.goal_id == goal2.id
+        assert result.action_type == ActionType.LEARN
 
     def test_select_ranked_goals_returns_ordered_list(self, planner_env):
         """_select_ranked_goals returns goals sorted by effective priority."""
@@ -4892,9 +5039,40 @@ class TestLearningWindowEnforcement:
 
     # -- GoalSelector pattern widening ------------------------------------
 
+    @pytest.fixture(autouse=True)
+    def _no_drain_backlog(self):
+        """Pin the exam_failed backlog to zero for this class (2026-08-12).
+
+        These tests assert the BASE 8b throttle. exam_backlog reads the LIVE
+        production index by default, so with a real backlog the drain bonus
+        would grant extra budget and the assertions would flip depending on
+        which machine ran the suite. The drain behaviour has its own tests in
+        test_exam_drain_night_budget.py, plus the explicit case below.
+        """
+        with patch("agent_core.teacher.exam_backlog.exam_failed_count",
+                   return_value=0):
+            yield
+
     def setup_method(self):
         self.selector = GoalSelector()
         self.now = time.time()
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=False)
+    def test_learn_allowed_offwindow_on_drain_bonus_past_base_budget(self, _mock):
+        """Drain bonus (2026-08-12): with an exam_failed backlog, a learn-family
+        action survives off-window even after the base 8 are spent, and is
+        charged to the drain pool -- leaving the base intact for FETCH."""
+        planner = self._bare_planner(off_window_used=OFF_WINDOW_LEARN_BUDGET)
+        goal = _make_goal(goal_type="learning")
+        with patch("agent_core.teacher.exam_backlog.exam_failed_count",
+                   return_value=163):
+            action, reason = planner._enforce_learning_window(
+                goal, ActionType.LEARN)
+        assert action == ActionType.LEARN
+        assert reason is None
+        assert planner._state.off_window_drain_used == 1
+        assert planner._state.off_window_learn_used == OFF_WINDOW_LEARN_BUDGET
 
     @patch("agent_core.environment.environment_model.is_learning_window",
            return_value=False)
@@ -5546,12 +5724,37 @@ class TestNoGoalsObservability:
         planner._state.off_window_learn_date = time.strftime(
             "%Y-%m-%d", time.localtime())
         planner._state.off_window_learn_used = OFF_WINDOW_LEARN_BUDGET
-        ranked = planner._select_ranked_goals(
-            {"evaluation_metrics": {}, "knowledge_snapshot": None})
+        # No exam_failed backlog -> no drain bonus (2026-08-12). Pinned instead
+        # of inherited: exam_backlog reads the LIVE production index by default,
+        # so without this the outcome depends on the queue on the machine that
+        # happens to run the suite.
+        with patch("agent_core.teacher.exam_backlog.exam_failed_count",
+                   return_value=0):
+            ranked = planner._select_ranked_goals(
+                {"evaluation_metrics": {}, "knowledge_snapshot": None})
         assert ranked == []
         assert len(planner._last_skip_reasons) == 1
         assert planner._last_skip_reasons[0]["reason"] == "outside learning window"
         assert planner._last_skip_reasons[0]["type"] == "learning"
+
+    @patch("agent_core.environment.environment_model.is_learning_window",
+           return_value=False)
+    def test_exhausted_budget_still_feasible_while_draining(self, _mock, tmp_path):
+        """Drain bonus (2026-08-12): with an exam_failed backlog the learning
+        goal stays feasible past the base budget, so the night can run exams.
+        Without this the goal filter would drop it before the budget gate that
+        actually grants the bonus is ever reached."""
+        planner = self._planner(tmp_path, [
+            _make_goal(goal_type="learning", description="Nauka tematu: x"),
+        ])
+        planner._state.off_window_learn_date = time.strftime(
+            "%Y-%m-%d", time.localtime())
+        planner._state.off_window_learn_used = OFF_WINDOW_LEARN_BUDGET
+        with patch("agent_core.teacher.exam_backlog.exam_failed_count",
+                   return_value=163):
+            ranked = planner._select_ranked_goals(
+                {"evaluation_metrics": {}, "knowledge_snapshot": None})
+        assert len(ranked) == 1
 
     @patch("agent_core.environment.environment_model.is_learning_window",
            return_value=False)

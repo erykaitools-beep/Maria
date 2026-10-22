@@ -6,7 +6,9 @@ Adaptacyjna liczba pytań, zapobieganie zapętleniu.
 
 import json
 import logging
+import os
 import re
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -51,7 +53,11 @@ Masz przed sobą CAŁY kontekst nauki z danego pliku (połączone streszczenia i
 
 Twoje zadanie:
 - Przygotuj egzamin składający się z {num_questions} pytań otwartych.
-- Do każdego pytania podaj idealną odpowiedź wzorcową (2-4 zdania).
+- Każde pytanie to JEDNO krótkie zdanie z JEDNYM poleceniem. Nie łącz kilku
+  poleceń w jednym pytaniu (bez "oraz...", "a także...", "uwzględniając...").
+- Do każdego pytania podaj odpowiedź wzorcową: 1-2 zdania z samym sednem
+  (najważniejszy fakt lub mechanizm). NIE wyliczaj we wzorcu wszystkich
+  szczegółów z materiału.
 - Pytania powinny sprawdzać zrozumienie, nie tylko pamięć.
 
 Kontekst:
@@ -131,7 +137,13 @@ Dla każdego pytania oceń:
 - score w skali 0–1 (0 = błędne, 1 = idealnie zgodne)
 - krótkie wyjaśnienie (1–2 zdania)
 
-Bądź sprawiedliwy ale wymagający. Odpowiedź musi być merytorycznie poprawna.
+Zasady oceniania:
+- Oceniasz POPRAWNOŚĆ tego, co uczeń napisał — nie kompletność względem wzorca.
+- Odpowiedź trafiająca w sedno, choć krótsza lub mniej szczegółowa niż
+  wzorzec: 0.6-0.8.
+- Poniżej 0.5 schodź TYLKO za błąd merytoryczny, odpowiedź nie na temat
+  albo brak odpowiedzi.
+- Bądź sprawiedliwy: wymagający wobec błędów, wyrozumiały dla zwięzłości.
 
 Dane wejściowe:
 --------------------
@@ -883,6 +895,142 @@ def _find_exam_candidate(index, target_file_id=None):
     return target, target['id']
 
 
+# --- Staged exam (2026-08-10) --------------------------------------------------
+# The 3-step pipeline (author -> answer -> grade) is ~9 min of back-to-back
+# heavy CPU generation. With the examiner local (post-NIM) that no longer fits
+# the thermal envelope: baseline sits at 75-79C and the cooling latch trips at
+# 80C mid-exam, discarding all work (3/3 exams failed this way on 2026-08-10).
+# Staging runs exactly ONE heavy generation per teacher session and persists
+# the exam state to disk between sessions, so the CPU cools in the natural
+# gaps and a daemon restart resumes instead of restarting. A single stage is
+# the same thermal shape as a learning session, which survives fine.
+
+EXAM_STAGE_MAX_AGE_H = 24.0
+
+
+def load_exam_stage(stage_path) -> Optional[Dict[str, Any]]:
+    """Read the persisted staged-exam state; None when absent/corrupt/stale.
+
+    Corrupt or stale state is deleted on read (with a warning) so one bad
+    file cannot wedge the exam pipeline forever.
+    """
+    if stage_path is None:
+        return None
+    stage_path = Path(stage_path)
+    if not stage_path.exists():
+        return None
+    try:
+        with open(stage_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not state.get("file_id") or state.get("stage") not in (
+                "authored", "answered"):
+            raise ValueError(f"malformed stage: {state.get('stage')!r}")
+        started = state.get("started_ts")
+        if not isinstance(started, (int, float)) or (
+                time.time() - started) > EXAM_STAGE_MAX_AGE_H * 3600:
+            logger.warning(
+                "[EXAM] Staged exam for %s is stale (started %s); discarding",
+                state.get("file_id"), state.get("started_at"),
+            )
+            clear_exam_stage(stage_path)
+            return None
+        return state
+    except Exception as exc:
+        logger.warning("[EXAM] Unreadable staged-exam state (%s); discarding", exc)
+        clear_exam_stage(stage_path)
+        return None
+
+
+def _save_exam_stage(stage_path, state: Dict[str, Any]) -> None:
+    """Atomically persist staged-exam state (tmp + rename)."""
+    stage_path = Path(stage_path)
+    tmp = stage_path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, stage_path)
+
+
+def clear_exam_stage(stage_path) -> None:
+    """Remove staged-exam state; missing file is fine."""
+    try:
+        Path(stage_path).unlink()
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.warning("[EXAM] Could not clear staged-exam state: %s", exc)
+
+
+def _staged_exam_step(state, file_id, memory_path, stage_path,
+                      llm_fn=None, grader_llm_fn=None, generator_llm_fn=None,
+                      author_cell=None):
+    """Run exactly ONE heavy stage of the exam pipeline.
+
+    ``author_cell``: the author's actual-backend cell (see teacher_module).
+    It is filled during THIS call's stage 1, but the exam record is written
+    two calls later with fresh cells -- so stage 1 snapshots the backend into
+    the persisted state, and finalization reads it back from there.
+
+    Returns one of:
+        {"status": "staged", "stage": "authored"|"answered"}  -- progress saved
+        {"status": "failed", "failed_stage": str}             -- state cleared
+        {"status": "complete",
+         "result": (score, exam, answers, grading)}           -- state cleared
+    """
+    memories = get_memories_for_file(file_id, memory_path)
+    if not memories:
+        logger.error(f"Brak pamięci dla {file_id}!")
+        clear_exam_stage(stage_path)
+        return {"status": "failed", "failed_stage": "context"}
+
+    context = build_context_from_memories(memories, max_chars=EXAM_CONTEXT_MAX_CHARS)
+    examiner_fn = grader_llm_fn or llm_fn
+    author_fn = generator_llm_fn or examiner_fn
+
+    if state is None:
+        # Stage 1: examiner authors the questions.
+        num_questions = calculate_num_questions(len(memories))
+        exam = generate_exam(context, num_questions, llm_fn=author_fn)
+        if not exam:
+            logger.error("Nie udalo sie wygenerowac egzaminu")
+            return {"status": "failed", "failed_stage": "author"}
+        _save_exam_stage(stage_path, {
+            "file_id": file_id,
+            "stage": "authored",
+            "questions": exam,
+            "author_model": (author_cell or {}).get("backend"),
+            "started_at": get_timestamp(),
+            "started_ts": time.time(),
+            "updated_at": get_timestamp(),
+        })
+        logger.info("[EXAM] Etap 1/3 (pytania) zapisany dla %s", file_id)
+        return {"status": "staged", "stage": "authored"}
+
+    if state["stage"] == "authored":
+        # Stage 2: student answers (concise -- see _execute_exam).
+        exam = state["questions"]
+        answers = answer_exam(context, exam, llm_fn=llm_fn, concise=True)
+        if not answers:
+            logger.error("Nie udalo sie odpowiedziec na egzamin")
+            clear_exam_stage(stage_path)
+            return {"status": "failed", "failed_stage": "answer"}
+        state.update(stage="answered", answers=answers,
+                     updated_at=get_timestamp())
+        _save_exam_stage(stage_path, state)
+        logger.info("[EXAM] Etap 2/3 (odpowiedzi) zapisany dla %s", file_id)
+        return {"status": "staged", "stage": "answered"}
+
+    # Stage 3: examiner grades; exam completes.
+    exam, answers = state["questions"], state["answers"]
+    grading = grade_exam(exam, answers, llm_fn=examiner_fn)
+    clear_exam_stage(stage_path)
+    if not grading:
+        logger.error("Nie udalo sie ocenic egzaminu")
+        return {"status": "failed", "failed_stage": "grade"}
+    logger.info("[EXAM] Etap 3/3 (ocena) ukonczony dla %s", file_id)
+    return {"status": "complete",
+            "result": (grading['final_score'], exam, answers, grading)}
+
+
 def _execute_exam(file_id, memory_path, llm_fn=None, grader_llm_fn=None,
                   generator_llm_fn=None):
     """
@@ -1118,22 +1266,49 @@ def run_exam_if_ready(
     use_heldout: bool = False,
     heldout_bank_path: Optional[Path] = None,
     semantic_memory=None,
+    stage_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Run exam for a file that is ready (status=learned) or specific file (spaced repetition).
 
     Pipeline: find candidate -> generate/answer/grade -> save result -> update status.
 
+    ``stage_path`` (opt-in) switches the LLM-graded pipeline to STAGED mode:
+    one heavy generation per call, state persisted at ``stage_path`` between
+    calls (thermal envelope fix, 2026-08-10 -- see _staged_exam_step). A call
+    that ran a non-final stage returns ``{"executed": False, "staged": <stage>,
+    ...}``; the exam completes and records on the third call. Held-out exams
+    ignore staging (single student call -- already one stage). A pending staged
+    exam always resumes FIRST, even when ``target_file_id`` names another file
+    (one exam in flight at a time; the target waits a session).
+
     Returns:
-        Dict: executed, passed, score, file_id
+        Dict: executed, passed, score, file_id (+ staged on staged calls)
     """
     logger.info("[EXAM] Sprawdzam czy jest plik gotowy na egzamin...")
     index = load_index(index_path)
+
+    stage_state = None
+    if stage_path is not None and not use_heldout:
+        stage_state = load_exam_stage(stage_path)
+        if stage_state is not None:
+            if target_file_id and target_file_id != stage_state["file_id"]:
+                logger.info(
+                    "[EXAM] Wznawiam egzamin etapowy %s (target %s poczeka)",
+                    stage_state["file_id"], target_file_id,
+                )
+            target_file_id = stage_state["file_id"]
 
     # 1. Find candidate
     target, file_id = _find_exam_candidate(index, target_file_id)
     no_exam = {"executed": False, "passed": False, "score": 0.0, "file_id": file_id}
     if target is None:
+        if stage_state is not None:
+            logger.warning(
+                "[EXAM] Staged exam file %s vanished from index; discarding state",
+                stage_state["file_id"],
+            )
+            clear_exam_stage(stage_path)
         return no_exam
 
     # Spaced repetition = re-examining material ALREADY passed. Captured here,
@@ -1180,6 +1355,20 @@ def run_exam_if_ready(
                 file_id, memory_path, llm_fn, grader_llm_fn=grader_llm_fn,
                 generator_llm_fn=generator_llm_fn,
             )
+    elif stage_path is not None:
+        step = _staged_exam_step(
+            stage_state, file_id, memory_path, stage_path,
+            llm_fn=llm_fn, grader_llm_fn=grader_llm_fn,
+            generator_llm_fn=generator_llm_fn,
+            author_cell=(grader_meta or {}).get("author_cell"),
+        )
+        if step["status"] == "staged":
+            return {"executed": False, "passed": False, "score": 0.0,
+                    "file_id": file_id, "staged": step["stage"]}
+        if step["status"] == "failed":
+            final_score, exam, answers, grading = None, None, None, None
+        else:
+            final_score, exam, answers, grading = step["result"]
     else:
         final_score, exam, answers, grading = _execute_exam(
             file_id, memory_path, llm_fn, grader_llm_fn=grader_llm_fn,
@@ -1201,14 +1390,17 @@ def run_exam_if_ready(
 
     # 3. Save exam result
     _gm = grader_meta or {}
-    # Actual-backend cells (see teacher_module._make_nim_first_examiner_fn):
+    # Actual-backend cells (see teacher_module._make_local_examiner_fn):
     # read AFTER grading, so the record shows which model REALLY authored and
-    # graded ("nim:<model>" / "local:<model>") instead of the constant planned
-    # label -- the NIM-vs-fallback split used to be invisible in trust data.
+    # graded ("local:<model>" / "local:suppressed") instead of the constant
+    # planned label -- the split used to be invisible in trust data.
     _grader_cell = _gm.get("grader_cell") or {}
     _author_cell = _gm.get("author_cell") or {}
     grader_model = _grader_cell.get("backend") or _gm.get("grader")
-    author_model = _author_cell.get("backend")
+    # Staged exams: the author ran two calls earlier with a different cell --
+    # its backend was snapshotted into the persisted state at stage 1.
+    author_model = _author_cell.get("backend") or (
+        (stage_state or {}).get("author_model"))
     if used_heldout:
         _gm = {
             "independent": True,

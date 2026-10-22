@@ -18,6 +18,9 @@ BRAIN_MODEL = "llama3.1:8b"
 
 def _create_router(brain):
     """Create LLM Router wrapping brain. Returns None if NIM unavailable."""
+    from agent_core.runtime_profile import background_reasoning_enabled
+    if not background_reasoning_enabled():
+        return None
     try:
         from maria_core.sys.config import (
             NVIDIA_NIM_API_KEY, NVIDIA_NIM_BASE_URL, NVIDIA_NIM_MODEL,

@@ -17,13 +17,11 @@ document.querySelectorAll('.mo-tab').forEach(tab => {
 // -- Data loading --
 
 function loadTraces() {
-  loadRecent();
-  loadStats();
-  loadFailed();
+  return Promise.all([loadRecent(), loadStats(), loadFailed()]);
 }
 
 function loadRecent() {
-  fetch('/api/traces?limit=30')
+  return fetch('/api/traces?limit=30')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('traces-list');
@@ -79,7 +77,7 @@ function loadRecent() {
 }
 
 function loadStats() {
-  fetch('/api/traces/stats')
+  return fetch('/api/traces/stats')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('traces-stats');
@@ -131,7 +129,7 @@ function loadStats() {
 }
 
 function loadFailed() {
-  fetch('/api/traces/failed?limit=10')
+  return fetch('/api/traces/failed?limit=10')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('traces-failed');
@@ -265,7 +263,4 @@ document.getElementById('trace-detail-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeDetail();
 });
 
-// Initial load
-loadTraces();
-// Auto-refresh every 30s
-setInterval(loadTraces, 30000);
+MariaUI.createPoller(loadTraces, 30000);

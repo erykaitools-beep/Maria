@@ -23,6 +23,9 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+from agent_core.llm.local_compute import THERMAL_STOP_C
+from agent_core.storage.jsonl_reader import iter_jsonl_reverse
+
 from .state_model import Mode
 
 
@@ -163,6 +166,7 @@ class HomeostasisEventLogger:
         alerts: List[str],
         health_score: float,
         tick_count: int,
+        thermal_cooling: bool = False,
     ) -> None:
         """
         Log a mode transition with full context.
@@ -174,12 +178,17 @@ class HomeostasisEventLogger:
             alerts: Active alerts that may have triggered change
             health_score: Current health score
             tick_count: Current tick count
+            thermal_cooling: Whether the regulator's thermal latch was engaged.
+                Cannot be derived from temp_c here -- the latch releases only at
+                THERMAL_RESUME_C, well below the temperature that set it.
         """
         now = time.time()
         duration_in_prev = now - self._last_mode_change_time
 
         # Determine trigger (what caused the change)
-        trigger = self._determine_trigger(from_mode, to_mode, interpreted_state, alerts)
+        trigger = self._determine_trigger(
+            from_mode, to_mode, interpreted_state, alerts, thermal_cooling
+        )
 
         # Extract key metrics for quick analysis
         metrics = {
@@ -222,6 +231,7 @@ class HomeostasisEventLogger:
         to_mode: Mode,
         state: Dict[str, Any],
         alerts: List[str],
+        thermal_cooling: bool = False,
     ) -> Dict[str, Any]:
         """
         Determine what triggered the mode change.
@@ -272,6 +282,22 @@ class HomeostasisEventLogger:
             cpu = state.get("cpu_load", 0)
             temp = state.get("temp_c", 50)
 
+            # Thermal first, because that is the regulator's own precedence:
+            # decide_mode() returns REDUCED from the thermal branch BEFORE it
+            # ever looks at RAM or CPU. Checking it last would credit the
+            # demotion to whatever else happened to be high at the time.
+            #
+            # The old check here was `temp > 85`, inherited from temp_orange_c
+            # while the regulator demotes at THERMAL_STOP_C (80.0 since
+            # 2026-08-05). Every demotion in the 80-85 band therefore fell
+            # through to "unknown": 154 of 155 REDUCED transitions in the live
+            # log carried no reason at all.
+            if thermal_cooling:
+                return {
+                    "constraint": "thermal_cooling",
+                    "value": temp,
+                    "threshold": THERMAL_STOP_C,
+                }
             if ram < 20:
                 return {"constraint": "ram_low", "value": ram, "threshold": 20}
             if cpu > 90:
@@ -501,24 +527,15 @@ class HomeostasisEventLogger:
             if not self.log_path.exists():
                 return []
 
-            # Use deque to keep only last N matching events (bounded memory)
-            tail = deque(maxlen=limit)
-            with open(self.log_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                        evt = event.get("event") or event.get("event_type")
-                        if event_type is None or evt == event_type:
-                            tail.append(event)
-                    except json.JSONDecodeError:
-                        continue
-
-            # Return newest first
-            result = list(tail)
-            result.reverse()
+            if limit <= 0:
+                return []
+            result = []
+            for event in iter_jsonl_reverse(self.log_path):
+                evt = event.get("event") or event.get("event_type")
+                if event_type is None or evt == event_type:
+                    result.append(event)
+                    if len(result) >= limit:
+                        break
             return result
 
         except Exception as e:

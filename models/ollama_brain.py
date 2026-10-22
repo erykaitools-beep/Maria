@@ -111,6 +111,10 @@ class BrainTimeout(Exception):
     """
 
 
+class BrainBackendError(RuntimeError):
+    """The configured remote chat backend failed; no local fallback was run."""
+
+
 def _is_timeout_error(e: Exception) -> bool:
     """True if the exception is a read/connect timeout (httpx OR builtin).
 
@@ -136,8 +140,12 @@ class OllamaBrain:
         log_fn: Optional[Callable[[str], None]] = None,
         identity_store=None,
         http_timeout: Optional[int] = None,
+        chat_backend=None,
+        request_context_provider: Optional[Callable[[str], Optional[str]]] = None,
     ):
         self.model = model
+        self._chat_backend = chat_backend
+        self._request_context_provider = request_context_provider
         self.log_fn = log_fn or print
         self._identity_store = identity_store
         # Per-instance HTTP read-timeout. Defaults to the shared OLLAMA_HTTP_TIMEOUT
@@ -198,7 +206,7 @@ class OllamaBrain:
         self.history.append({"role": "system", "content": self.system_prompt})
         self.call_count = 0
 
-        if verify_model:
+        if verify_model and chat_backend is None:
             self._verify_model_exists()
 
     def _get_time_context(self) -> str:
@@ -313,6 +321,28 @@ class OllamaBrain:
         except Exception:
             pass
 
+    def runtime_chat_context(self) -> str:
+        """Selected transport instance, not environment or provider attestation.
+
+        This is request-only operational evidence; Maria's identity and persisted
+        conversation are unchanged. Unknown adapters must identify themselves.
+        """
+        backend = getattr(self, "_chat_backend", None)
+        provider = getattr(backend, "provider", None) if backend is not None else "ollama"
+        model = getattr(backend, "model", None) if backend is not None else getattr(self, "model", None)
+        def label(value):
+            return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", value) else "unknown"
+        descriptor = {"provider": label(provider), "selected_model": label(model),
+                      "source": "current_chat_instance", "provider_confirmed_model": "unknown"}
+        return (
+            "Bieżący silnik tej rozmowy (dane runtime): "
+            + json.dumps(descriptor, ensure_ascii=False, sort_keys=True)
+            + ". To wybrany identyfikator modelu, nie niezależne potwierdzenie modelu "
+            "po stronie dostawcy ani dowód dostępności. Maria pozostaje Marią; "
+            "silnik generowania nie zastępuje jej tożsamości ani pamięci. "
+            "Poprzednie odpowiedzi o silniku nie są aktualnym odczytem."
+        )
+
     def set_grounding_pipeline(self, query_router, evidence_collector, response_builder):
         """
         Wire the state-grounded operator response pipeline.
@@ -326,6 +356,9 @@ class OllamaBrain:
         self._query_router = query_router
         self._evidence_collector = evidence_collector
         self._response_builder = response_builder
+        setter = getattr(evidence_collector, "set_chat_runtime_reader", None)
+        if callable(setter):
+            setter(self.runtime_chat_context)
 
     def set_honesty_protocol(self, honesty) -> None:
         """Wire HonestyProtocol (K15.2) so the chat tail can carry a short, honest
@@ -655,6 +688,16 @@ class OllamaBrain:
         (measured on qwen3:8b with the production learning prompt: 208s -> 64s,
         JSON still valid); leave it None for models that have no thinking mode.
         """
+        backend = getattr(self, "_chat_backend", None)
+        interaction_id = kwargs.pop("interaction_id", None)
+        tool_context = kwargs.pop("tool_context", None)
+        if backend is not None:
+            tool_kwargs = ({"interaction_id": interaction_id}
+                           if interaction_id and not force_json else {})
+            if tool_kwargs and tool_context is not None:
+                tool_kwargs["tool_context"] = tool_context
+            return backend.chat(list(messages), force_json=force_json, **tool_kwargs)
+
         options = {"temperature": temperature, "num_ctx": 4096}
         options.update(kwargs)
 
@@ -717,6 +760,8 @@ class OllamaBrain:
              "content": self.system_prompt if system is None else system},
             {"role": "user", "content": prompt},
         ]
+        kwargs.pop("interaction_id", None)
+        kwargs.pop("tool_context", None)
         result = self._chat(messages, temperature=temperature,
                             force_json=force_json, think=think, model=model,
                             **kwargs)
@@ -748,8 +793,55 @@ class OllamaBrain:
         # Refresh time context before each interaction
         self.refresh_time_context()
 
+        # Request-scoped external evidence. None means this question is outside
+        # the provider's scope; a string includes either evidence or an explicit
+        # unavailable result. Resolve ONCE before routing: "status in Kritaqo"
+        # must not accidentally become Maria's own operational status.
+        request_context = None
+        from agent_core.llm.chat_backend import interactive_tools_match
+        tool_request = interactive_tools_match(
+            getattr(self, "_chat_backend", None), prompt, kwargs.get("interaction_id"),
+            tool_context=kwargs.get("tool_context"))
+        from agent_core.llm.kritaqo_portfolio import suppress_legacy_tool_actions
+        project_tool_request = suppress_legacy_tool_actions(tool_request, kwargs.get("tool_context"))
+        provider = getattr(self, "_request_context_provider", None)
+        if provider is not None and not tool_request:
+            try:
+                request_context = provider(prompt)
+                if request_context is not None and (
+                    not isinstance(request_context, str)
+                    or not request_context.strip()
+                    or len(request_context) > 4000
+                ):
+                    raise ValueError("invalid request context")
+            except Exception:
+                # Do not log exception text: an external adapter may carry
+                # credentials or response bodies in it. Never use old evidence.
+                request_context = (
+                    "Dodatkowe dane dla tego pytania sa niedostepne. "
+                    "Powiedz o braku odczytu; nie zgaduj aktualnego stanu ani "
+                    "nie przedstawiaj poprzedniej odpowiedzi jako nowego odczytu."
+                )
+
+        # Missing project scope cannot turn a work artifact into camera evidence
+        # or make an old conversation answer a fresh result read.
+        if request_context is None and not project_tool_request:
+            from agent_core.introspection.query_router import (
+                is_task_artifact_query, is_explicit_camera_query,
+            )
+            if is_task_artifact_query(prompt) and not is_explicit_camera_query(prompt):
+                request_context = (
+                    "Pytanie dotyczy projektu, zadania lub jego materiałów. "
+                    "Nie masz świeżego odczytu wyniku Kritaqo dla tej wypowiedzi. "
+                    "Nie zastępuj go opisem kamery ani wcześniejszą odpowiedzią. "
+                    "Jeśli operator pyta o stan lub wynik zlecenia, poproś o wskazanie "
+                    "projektu (np. Roblox na MSI), żeby można było sprawdzić wynik. "
+                    "Nie twierdź, że zadania nie przyjęto lub że obejrzałaś pliki."
+                )
+
         # State-grounded pipeline: check if this is an operational query
-        if self._query_router and self._evidence_collector and self._response_builder:
+        if (request_context is None and not project_tool_request and self._query_router
+                and self._evidence_collector and self._response_builder):
             try:
                 mode = self._query_router.classify(prompt)
                 if self._query_router.is_grounded(mode):
@@ -763,13 +855,25 @@ class OllamaBrain:
         # reuses the KV cache instead of re-prefilling the whole history every
         # turn (~260s -> read-timeout on this CPU box). Compose BEFORE storing
         # the new turn so the cached prefix matches a turn back; legacy path
-        # (flag off) sends the full mutable history object unchanged.
+        # (flag off) retains full history content; runtime facts are inserted
+        # into a copy so they never persist as stale system messages.
         fast = _fast_context_enabled()
         if fast:
             messages = self._compose_send_messages(prompt)
         self.history.append({"role": "user", "content": prompt})
         if not fast:
             messages = self.history
+        messages = list(messages)
+        messages.insert(len(messages) - 1, {
+            "role": "system", "content": self.runtime_chat_context(),
+        })
+        if request_context is not None:
+            # A separate bounded context is sent only this turn. Copy the legacy
+            # deque too: inserting into it would persist stale external evidence.
+            messages = list(messages)
+            messages.insert(len(messages) - 1, {
+                "role": "system", "content": request_context,
+            })
         if self._conversation_memory:
             self._conversation_memory.save_turn("user", prompt)
         if self._user_profile:
@@ -798,6 +902,8 @@ class OllamaBrain:
                     raise BrainTimeout(str(e) or "read-timeout") from e
                 return ""
             self.log_fn(f"[OllamaBrain] [ERROR] Blad krytyczny API: {e}")
+            if getattr(self, "_chat_backend", None) is not None and raise_on_timeout:
+                raise BrainBackendError(str(e)) from e
             return ""
 
     def _grounded_think(self, prompt: str, mode, temperature: float,
@@ -842,6 +948,7 @@ class OllamaBrain:
             # Use a fresh message list (not history) for grounded formatting
             messages = [
                 {"role": "system", "content": self.system_prompt},
+                {"role": "system", "content": self.runtime_chat_context()},
                 {"role": "user", "content": format_prompt},
             ]
             formatted = self._chat(messages, temperature=0.2, **kwargs)

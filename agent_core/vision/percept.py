@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from agent_core.vision.models import VisionMode
 from agent_core.vision.modules.base import ModuleOutput
 from agent_core.vision.modules.motion.detector import MotionOutput
+from agent_core.vision.modules.objects.detector import (
+    ObjectOutput,
+    describe_objects_polish,
+)
 from agent_core.vision.modules.scene.analyzer import SceneOutput
 from agent_core.vision.preprocessing.preprocessor import ProcessedFrame
 from agent_core.vision.sensors.health import SensorHealth
@@ -36,6 +40,7 @@ class VisionPercept:
 
     # Module outputs (None = module didn't run or quality too low)
     motion: Optional[MotionOutput] = None
+    objects: Optional[ObjectOutput] = None
     scene: Optional[SceneOutput] = None
 
     # Summary
@@ -55,6 +60,7 @@ class VisionPercept:
                 "mode": self.vision_mode.value,
                 "health": self.vision_health.to_dict(),
                 "motion": self.motion.to_dict() if self.motion else None,
+                "objects": self.objects.to_dict() if self.objects else None,
                 "scene": self.scene.to_dict() if self.scene else None,
                 "modules_run": self.modules_run,
                 "processing_ms": round(self.total_processing_time_ms, 1),
@@ -69,6 +75,7 @@ class VisionPercept:
             "health_overall": round(self.vision_health.overall, 3),
             "summary": self.summary,
             "motion": self.motion.to_dict() if self.motion else None,
+            "objects": self.objects.to_dict() if self.objects else None,
             "scene": self.scene.to_dict() if self.scene else None,
             "modules_run": self.modules_run,
             "total_processing_time_ms": round(self.total_processing_time_ms, 1),
@@ -81,6 +88,7 @@ def generate_summary(
     quality: float,
     motion: Optional[MotionOutput],
     scene: Optional[SceneOutput],
+    objects: Optional[ObjectOutput] = None,
 ) -> str:
     """Generate natural language summary of what Maria sees (Polish).
 
@@ -96,8 +104,16 @@ def generate_summary(
     if health.overall < 0.6:
         parts.append("Widze niewyraznie, ale")
 
-    # Scene description (from LLaVA or statistics)
-    if scene and scene.description:
+    # Fast semantic layer (YOLO26) is more useful than generic statistics.
+    object_description = describe_objects_polish(objects)
+    if object_description:
+        parts.append(object_description)
+
+    # Scene description (from LLaVA or statistics). Avoid adding the generic
+    # statistics sentence when YOLO already produced a concrete description.
+    if scene and scene.description and not (
+        object_description and scene.backend_used == "statistics"
+    ):
         if parts:
             parts.append(scene.description[0].lower() + scene.description[1:])
         else:

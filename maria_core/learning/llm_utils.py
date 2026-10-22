@@ -20,10 +20,12 @@ from maria_core.sys.config import (
     OLLAMA_KEEP_ALIVE,
 )
 from agent_core.llm.local_compute import get_local_compute_coordinator
+from agent_core.llm.work_priority import WorkPurpose, work_purpose
 
 logger = logging.getLogger(__name__)
 
 
+@work_purpose(WorkPurpose.BACKGROUND)
 def call_ollama(prompt: str, model: str = OLLAMA_MODEL, temperature: float = OLLAMA_TEMPERATURE,
                 num_predict: int = 2048, num_ctx: int = 4096,
                 keep_alive: str = OLLAMA_KEEP_ALIVE,

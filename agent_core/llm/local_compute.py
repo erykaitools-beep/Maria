@@ -20,6 +20,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, Optional
 
+from agent_core.llm.work_priority import compute_priority, current_work_purpose
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +61,8 @@ class LocalComputeCoordinator:
         self.resume_temp_c = float(resume_temp_c)
         self._state_lock = threading.RLock()
         self._slot = threading.Lock()
+        self._slot_changed = threading.Condition(self._state_lock)
+        self._waiters: Dict[str, int] = {}
         self._local = threading.local()
         self._cooling = False
         self._last_temp_c: Optional[float] = None
@@ -66,8 +70,11 @@ class LocalComputeCoordinator:
         self._active_kind: Optional[str] = None
         self._active_model: Optional[str] = None
         self._active_since: Optional[float] = None
+        self._active_purpose: Optional[str] = None
+        self._active_priority: Optional[int] = None
         self._background_tasks: Dict[str, _BackgroundTask] = {}
         self._nim_resource_exhausted_until = 0.0
+        self._last_cooling_transition: Optional[Dict[str, object]] = None
 
     @property
     def cooling(self) -> bool:
@@ -98,7 +105,12 @@ class LocalComputeCoordinator:
         return "unchanged"
 
     def enter_cooling(self, temp_c: Optional[float] = None) -> Dict[str, object]:
-        """Latch cooling and cooperatively cancel every background compute job."""
+        """Latch cooling and report the effective transition for this episode.
+
+        Temperature observation can close the latch before the corrective-action
+        handler arrives.  Replaying the last transition on that second call keeps
+        the audit record truthful without running cancellation twice.
+        """
         with self._state_lock:
             if temp_c is not None:
                 self._last_temp_c = float(temp_c)
@@ -106,6 +118,10 @@ class LocalComputeCoordinator:
             transitioned = not self._cooling
             self._cooling = True
             tasks = list(self._background_tasks.values()) if transitioned else []
+            previous = (
+                dict(self._last_cooling_transition)
+                if self._last_cooling_transition is not None else None
+            )
 
         cancelled = []
         for task in tasks:
@@ -121,10 +137,23 @@ class LocalComputeCoordinator:
                 self._last_temp_c if self._last_temp_c is not None else -1.0,
                 cancelled,
             )
+            result = {
+                "transitioned": True,
+                "cooling": True,
+                "cancelled_tasks": cancelled,
+                "transition_replayed": False,
+            }
+            with self._state_lock:
+                self._last_cooling_transition = dict(result)
+            return result
+
         return {
-            "transitioned": transitioned,
+            "transitioned": False,
             "cooling": True,
-            "cancelled_tasks": cancelled,
+            "cancelled_tasks": list(
+                (previous or {}).get("cancelled_tasks", [])
+            ),
+            "transition_replayed": previous is not None,
         }
 
     def exit_cooling(self, temp_c: Optional[float] = None) -> Dict[str, object]:
@@ -142,6 +171,8 @@ class LocalComputeCoordinator:
                 }
             transitioned = self._cooling
             self._cooling = False
+            if transitioned:
+                self._last_cooling_transition = None
 
         if transitioned:
             logger.info("[LOCAL-COMPUTE] Cooling exited at %.1fC", current)
@@ -176,7 +207,7 @@ class LocalComputeCoordinator:
         self,
         backoff_s: float = NIM_RESOURCE_EXHAUSTED_BACKOFF_S,
     ) -> Dict[str, object]:
-        """Suppress a local-fallback stampede after NIM HTTP 503."""
+        """Suppress a background-compute stampede after NIM HTTP 503."""
         with self._state_lock:
             self._nim_resource_exhausted_until = max(
                 self._nim_resource_exhausted_until,
@@ -195,23 +226,38 @@ class LocalComputeCoordinator:
             except Exception as exc:
                 logger.warning("[LOCAL-COMPUTE] Failed to cancel %s: %s", task.name, exc)
         logger.warning(
-            "[LOCAL-COMPUTE] NIM ResourceExhausted; local fallback backed off for %.0fs",
+            "[LOCAL-COMPUTE] NIM ResourceExhausted; background compute backed off for %.0fs",
             backoff_s,
         )
         return {"local_fallback_blocked": True, "cancelled_tasks": cancelled}
 
     def local_fallback_allowed(self) -> bool:
+        """Foreground local-fallback gate: thermal cooling only.
+
+        The NIM ResourceExhausted backoff deliberately does NOT gate this
+        path.  Every caller is a single foreground call (learning, chat,
+        exam, planner) already serialized on the heavy mutex; the stampede
+        the backoff exists for is background warm-up/indexing, gated via
+        startup_background_allowed().  Letting the backoff reach this gate
+        meant a chronically saturated shared NIM endpoint (503 storms,
+        2026-08-06..09) starved learning of its local fallback entirely.
+        """
         with self._state_lock:
-            return (
-                not self._cooling
-                and time.monotonic() >= self._nim_resource_exhausted_until
-            )
+            return not self._cooling
+
+    def nim_backoff_active(self) -> bool:
+        with self._state_lock:
+            return time.monotonic() < self._nim_resource_exhausted_until
 
     def startup_background_allowed(self) -> bool:
         """Whether startup warm-up may run before checking live CPU load."""
         with self._state_lock:
             sensor_failed = self._temperature_available is False
-        return self.local_fallback_allowed() and not sensor_failed
+        return (
+            self.local_fallback_allowed()
+            and not self.nim_backoff_active()
+            and not sensor_failed
+        )
 
     def verify_startup_temperature(self) -> str:
         """Read a real sensor once before autonomous startup compute.
@@ -257,8 +303,17 @@ class LocalComputeCoordinator:
         model: str = "",
         timeout_s: Optional[float] = None,
         cancel_event: Optional[threading.Event] = None,
+        priority: Optional[int] = None,
     ) -> Iterator[None]:
         """Acquire the single local-compute slot without a fail-open path."""
+        from agent_core.runtime_profile import background_reasoning_enabled
+        from agent_core.llm.work_priority import WorkPurpose
+        if not background_reasoning_enabled():
+            # The operator-first startup uses a remote conversational model.
+            # Keep stored vectors; permit their explicit interactive lookup,
+            # but do not silently start a local text/VLM fallback or indexing.
+            if kind != "embedding" or current_work_purpose() != WorkPurpose.INTERACTION:
+                raise LocalComputeBlocked("local model work paused by operator-first runtime")
         reason = self._blocked_reason(cancel_event)
         if reason:
             raise LocalComputeBlocked(reason)
@@ -273,21 +328,37 @@ class LocalComputeCoordinator:
             return
 
         deadline = None if timeout_s is None else time.monotonic() + max(0.0, timeout_s)
+        # A real event/task precedes background reasoning regardless of model.
+        # In-flight HTTP remains non-preemptible; there is no parallel fallback.
+        rank = compute_priority(kind, priority)
+        ticket = uuid.uuid4().hex
         acquired = False
-        while not acquired:
-            reason = self._blocked_reason(cancel_event)
-            if reason:
-                raise LocalComputeBlocked(reason)
-            if deadline is not None and time.monotonic() >= deadline:
-                raise LocalComputeBlocked("local compute slot timeout")
-            wait_s = LEASE_POLL_S
-            if deadline is not None:
-                wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
-            acquired = self._slot.acquire(timeout=wait_s)
+        with self._slot_changed:
+            self._waiters[ticket] = rank
+            try:
+                while not acquired:
+                    reason = self._blocked_reason(cancel_event)
+                    if reason:
+                        raise LocalComputeBlocked(reason)
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise LocalComputeBlocked("local compute slot timeout")
+                    first = min(self._waiters, key=self._waiters.get)
+                    if first == ticket:
+                        acquired = self._slot.acquire(blocking=False)
+                    if not acquired:
+                        wait_s = LEASE_POLL_S
+                        if deadline is not None:
+                            wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
+                        self._slot_changed.wait(wait_s)
+            finally:
+                self._waiters.pop(ticket, None)
+                self._slot_changed.notify_all()
 
         reason = self._blocked_reason(cancel_event)
         if reason:
-            self._slot.release()
+            with self._slot_changed:
+                self._slot.release()
+                self._slot_changed.notify_all()
             raise LocalComputeBlocked(reason)
 
         self._local.depth = 1
@@ -295,6 +366,9 @@ class LocalComputeCoordinator:
             self._active_kind = kind
             self._active_model = model or None
             self._active_since = time.monotonic()
+            purpose = current_work_purpose()
+            self._active_purpose = purpose.value if purpose is not None else None
+            self._active_priority = rank
         try:
             yield
         finally:
@@ -302,8 +376,12 @@ class LocalComputeCoordinator:
                 self._active_kind = None
                 self._active_model = None
                 self._active_since = None
+                self._active_purpose = None
+                self._active_priority = None
             self._local.depth = 0
-            self._slot.release()
+            with self._slot_changed:
+                self._slot.release()
+                self._slot_changed.notify_all()
 
     def snapshot(self) -> Dict[str, object]:
         with self._state_lock:
@@ -319,6 +397,13 @@ class LocalComputeCoordinator:
                 "resume_temp_c": self.resume_temp_c,
                 "active_kind": self._active_kind,
                 "active_model": self._active_model,
+                "active_purpose": self._active_purpose,
+                "active_priority": self._active_priority,
+                "waiting_requests": len(self._waiters),
+                "waiting_foreground": sum(rank <= 0 for rank in self._waiters.values()),
+                "waiting_world_events": sum(rank == -20 for rank in self._waiters.values()),
+                "waiting_actions": sum(rank == -10 for rank in self._waiters.values()),
+                "waiting_background": sum(rank > 0 for rank in self._waiters.values()),
                 "active_for_s": round(active_for, 3),
                 "background_tasks": [
                     task.name for task in self._background_tasks.values()
@@ -338,6 +423,7 @@ class LocalComputeCoordinator:
             self._temperature_available = None
             self._background_tasks.clear()
             self._nim_resource_exhausted_until = 0.0
+            self._last_cooling_transition = None
 
 
 _COORDINATOR = LocalComputeCoordinator()

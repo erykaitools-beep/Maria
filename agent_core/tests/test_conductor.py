@@ -101,6 +101,24 @@ class TestTaskModel:
         d["status"] = "done"
         assert Task.from_dict(d).is_terminal is True
 
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            (TaskStatus.PENDING, True),
+            (TaskStatus.BLOCKED, True),
+            (TaskStatus.DONE, False),
+            (TaskStatus.CANCELLED, False),
+        ],
+    )
+    def test_requires_approval_is_a_live_state(self, status, expected):
+        task = create_task(
+            project="maria", phase="self_repair", title="t", description="d"
+        )
+        task.artifacts["approval_required"] = True
+        task.status = status
+
+        assert task.requires_approval is expected
+
 
 # ============================================================
 # TaskQueue

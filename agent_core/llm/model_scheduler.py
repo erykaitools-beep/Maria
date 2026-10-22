@@ -19,10 +19,11 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import psutil
 import requests
+from agent_core.runtime_profile import lean_runtime
 
 try:
     import ollama as ollama_lib
@@ -136,6 +137,10 @@ class ModelScheduler:
         self._tick_count = 0
         self._ram_pressure_events = 0
         self._incidents: List[Dict] = []
+        self._maintenance_lock = threading.Lock()
+        self._maintenance_thread: Optional[threading.Thread] = None
+        self._resident_models: Optional[List[Dict]] = None
+        self._residency_checked_at: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Core API
@@ -354,15 +359,22 @@ class ModelScheduler:
         Returns:
             True if unloaded successfully
         """
+        lean = lean_runtime()
         with self._lock:
-            loaded = self._loaded.pop(role, None)
+            # An accepted control request is not evidence that RAM was freed.
+            # In lean mode the /api/ps reconciliation removes confirmed absences.
+            loaded = self._loaded.get(role) if lean else self._loaded.pop(role, None)
 
         if loaded is None:
             return False
 
         success = self._ollama_unload(loaded.ollama_tag)
+        if not success:
+            with self._lock:
+                self._loaded.setdefault(role, loaded)
         if success:
-            logger.info(f"[ModelScheduler] Unloaded {role.value} ({loaded.ollama_tag})")
+            action = "Unload accepted for" if lean else "Unloaded"
+            logger.info(f"[ModelScheduler] {action} {role.value} ({loaded.ollama_tag})")
 
         # Release heavy mutex if needed. force_unload() is called from the TICK
         # thread's idle sweep, so this is the main place the lock used to be
@@ -380,6 +392,21 @@ class ModelScheduler:
         normal 240-second Ollama read timeout.  Short, parallel control calls
         bound the whole action to roughly six seconds even when Ollama is busy.
         The coordinator has already rejected new inference before this runs.
+
+        The returned keys say what was MEASURED, not what was hoped for.  Until
+        2026-08-06 this returned ``unloaded`` for every tag whose control call
+        got HTTP 200 -- but a 200 only means Ollama accepted the request.  The
+        2026-08-06 5-second probe timed the gap between that log line and the
+        model actually leaving ``/api/ps``: 190.9 s, 222.9 s and 29.7 s across
+        three cooling episodes (docs/audits/thermal_hysteresis_2026-08-06.md).
+        Reporting acceptance as completion is why the ceiling looked enforced
+        while the CPU still reached 85.0 C under an 80 C stop threshold.
+
+        Keys: ``requested`` asked, ``accepted`` returned 200, ``rejected`` did
+        not, ``still_resident`` is still in ``/api/ps`` at the end of the short
+        verification window, ``released`` verified gone.  The old ``unloaded``
+        key is deliberately absent so any stale reader fails loudly instead of
+        silently reading acceptance as release.
         """
         with self._lock:
             tags = {loaded.ollama_tag for loaded in self._loaded.values()}
@@ -394,19 +421,9 @@ class ModelScheduler:
         # Include other models that are genuinely resident. Never issue unload
         # calls for every registry tag: Ollama may load a cold model in order to
         # honour such a request, which is the opposite of an emergency stop.
-        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-        try:
-            response = requests.get(
-                f"{base_url.rstrip('/')}/api/ps",
-                timeout=(1.0, 2.0),
-            )
-            if response.status_code == 200:
-                for item in response.json().get("models", []):
-                    tag = item.get("name") or item.get("model")
-                    if tag:
-                        tags.add(str(tag))
-        except Exception as exc:
-            logger.warning("[ModelScheduler] Emergency /api/ps failed: %s", exc)
+        resident = self._resident_tags_via_ps()
+        if resident:
+            tags.update(resident)
 
         tags = {tag for tag in tags if tag}
 
@@ -434,13 +451,66 @@ class ModelScheduler:
             thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
         requested = sorted(tags)
-        unloaded = sorted(tag for tag, ok in results.items() if ok)
-        failed = sorted(tag for tag in tags if not results.get(tag, False))
+        accepted = sorted(tag for tag, ok in results.items() if ok)
+        rejected = sorted(tag for tag in tags if not results.get(tag, False))
+
+        # Acceptance is not release. Re-probe so the record carries what is
+        # still resident rather than what we asked for.
+        after = self._resident_tags_via_ps()
+        if after is None:
+            still_resident: List[str] = []
+            released: List[str] = []
+            verified = False
+        else:
+            still_resident = sorted(tag for tag in requested if tag in after)
+            released = sorted(tag for tag in requested if tag not in after)
+            verified = True
+
         logger.warning(
-            "[ModelScheduler] Thermal unload requested=%s unloaded=%s failed=%s",
-            requested, unloaded, failed,
+            "[ModelScheduler] Thermal unload requested=%s accepted=%s rejected=%s "
+            "still_resident=%s verified=%s",
+            requested, accepted, rejected, still_resident, verified,
         )
-        return {"requested": requested, "unloaded": unloaded, "failed": failed}
+        return {
+            "requested": requested,
+            "accepted": accepted,
+            "rejected": rejected,
+            "still_resident": still_resident,
+            "released": released,
+            "verified": verified,
+        }
+
+    def _resident_tags_via_ps(self) -> Optional[Set[str]]:
+        """Tags Ollama reports as resident, or None when the probe failed.
+
+        None and the empty set are different answers: "could not look" must
+        never be recorded as "nothing is loaded".
+        """
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        try:
+            response = requests.get(
+                f"{base_url.rstrip('/')}/api/ps",
+                timeout=(1.0, 2.0),
+            )
+        except Exception as exc:
+            logger.warning("[ModelScheduler] Emergency /api/ps failed: %s", exc)
+            return None
+        if response.status_code != 200:
+            logger.warning(
+                "[ModelScheduler] Emergency /api/ps HTTP %s", response.status_code,
+            )
+            return None
+        try:
+            models = response.json().get("models", [])
+        except Exception as exc:
+            logger.warning("[ModelScheduler] Emergency /api/ps unparseable: %s", exc)
+            return None
+        tags = set()
+        for item in models:
+            tag = item.get("name") or item.get("model")
+            if tag:
+                tags.add(str(tag))
+        return tags
 
     def record_request(self, role: ModelRole, latency_s: float) -> None:
         """
@@ -483,11 +553,64 @@ class ModelScheduler:
         """
         self._tick_count += 1
 
+        if lean_runtime():
+            # HTTP control/probes must not stall homeostasis. One worker only,
+            # and it yields to inference before checking/unloading idle models.
+            if (self._tick_count == 1 or self._tick_count % 10 == 0):
+                self._start_maintenance()
+            return
+
         self._check_idle_timeouts()
         self._check_ram_pressure()
 
         if self._tick_count % _HEALTH_SAVE_INTERVAL == 0:
             self.save_health()
+
+    def _start_maintenance(self) -> None:
+        if not self._maintenance_lock.acquire(blocking=False):
+            return
+
+        def maintain():
+            try:
+                with get_local_compute_coordinator().lease(
+                    "model_maintenance", timeout_s=0.1, priority=20,
+                ):
+                    self._check_idle_timeouts()
+                    self._check_ram_pressure()
+                    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+                    response = requests.get(
+                        f"{base_url.rstrip('/')}/api/ps", timeout=(1.0, 2.0),
+                    )
+                    response.raise_for_status()
+                    models = response.json()["models"]
+                    if not isinstance(models, list):
+                        raise ValueError("invalid Ollama residency response")
+                    with self._lock:
+                        self._resident_models = models
+                        self._residency_checked_at = time.time()
+                        def canonical(tag):
+                            return tag if ":" in tag.rsplit("/", 1)[-1] else tag + ":latest"
+                        resident_tags = {canonical(m.get("name") or m.get("model") or "")
+                                         for m in models}
+                        for role, loaded in list(self._loaded.items()):
+                            if canonical(loaded.ollama_tag) not in resident_tags:
+                                self._loaded.pop(role, None)
+                    self.save_health()
+            except LocalComputeBlocked:
+                pass  # retry on a later tick, never compete with foreground
+            except Exception as exc:
+                logger.warning("[ModelScheduler] Maintenance deferred: %s", exc)
+            finally:
+                self._maintenance_lock.release()
+
+        self._maintenance_thread = threading.Thread(
+            target=maintain, name="model-maintenance", daemon=True,
+        )
+        try:
+            self._maintenance_thread.start()
+        except Exception:
+            self._maintenance_lock.release()
+            raise
 
     def _check_idle_timeouts(self) -> None:
         """Unload models that have been idle longer than their timeout."""
@@ -661,7 +784,7 @@ class ModelScheduler:
         Returns:
             True if unloaded successfully
         """
-        if emergency:
+        if emergency or lean_runtime():
             base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
             try:
                 response = requests.post(
@@ -813,6 +936,8 @@ class ModelScheduler:
 
         return {
             "loaded_models": loaded_info,
+            "resident_models": self._resident_models,
+            "residency_checked_at": self._residency_checked_at,
             "loaded_count": len(loaded_info),
             "total_loaded_ram_gb": self._get_total_loaded_ram_gb(),
             "free_ram_gb": round(self._get_free_ram_gb(), 1),

@@ -399,6 +399,8 @@ def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
                                delay_sec: float = STARTUP_DELAY_SEC,
                                startup_cpu_limit_pct: float = STARTUP_CPU_LIMIT_PCT,
                                cpu_percent_fn: Optional[Callable[[], float]] = None,
+                               retry_sec: Optional[float] = None,
+                               max_deferral_sec: float = 1800.0,
                                ) -> threading.Thread:
     """Start initial indexing in a background thread after a delay.
 
@@ -406,6 +408,11 @@ def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
     Returns the thread (for join/monitoring).
     """
     from agent_core.llm.local_compute import get_local_compute_coordinator
+    from agent_core.runtime_profile import lean_runtime
+
+    retry_sec = (30.0 if lean_runtime() else 0.0) if retry_sec is None else retry_sec
+    if retry_sec < 0 or max_deferral_sec < 0:
+        raise ValueError("indexer delays must be nonnegative")
 
     coordinator = get_local_compute_coordinator()
     cancel_event = threading.Event()
@@ -426,13 +433,22 @@ def start_background_indexing(semantic_memory, data_dir: str, memory_dir: str,
                 logger.info("[INDEXER] Skipped: thermal/NIM backoff active")
                 return
             read_cpu = cpu_percent_fn or (lambda: psutil.cpu_percent(interval=0.1))
-            cpu_load = float(read_cpu())
-            if cpu_load >= startup_cpu_limit_pct:
-                logger.warning(
-                    "[INDEXER] Skipped: CPU already busy (%.1f%% >= %.1f%%)",
-                    cpu_load, startup_cpu_limit_pct,
+            deadline = time.monotonic() + max_deferral_sec
+            while True:
+                cpu_load = float(read_cpu())
+                state = coordinator.snapshot()
+                busy = cpu_load >= startup_cpu_limit_pct or bool(
+                    state["active_kind"] or state["waiting_foreground"]
                 )
-                return
+                if not busy:
+                    break
+                if retry_sec <= 0 or time.monotonic() >= deadline:
+                    logger.info("[INDEXER] Deferred indexing expired; CPU/compute still busy")
+                    return
+                if cancel_event.wait(min(retry_sec, max(0, deadline - time.monotonic()))):
+                    return
+                if not coordinator.startup_background_allowed():
+                    return
             run_initial_indexing(
                 semantic_memory, data_dir, memory_dir, input_dir,
                 cancel_event=cancel_event,

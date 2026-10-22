@@ -15,12 +15,11 @@ document.querySelectorAll('.mo-tab').forEach(tab => {
 });
 
 function loadLearning() {
-  loadOverview();
-  loadGoals();
+  return Promise.all([loadOverview(), loadGoals()]);
 }
 
 function loadOverview() {
-  fetch('/api/learning/stats')
+  return fetch('/api/learning/stats')
     .then(r => r.json())
     .then(data => {
       const el = document.getElementById('learning-overview');
@@ -79,7 +78,7 @@ function loadOverview() {
 }
 
 function loadGoals() {
-  fetch('/api/learning/goals')
+  return fetch('/api/learning/goals')
     .then(r => r.json())
     .then(data => {
       renderGoalList('learning-active', data.active, 'Brak aktywnych celow nauki');
@@ -162,7 +161,4 @@ function timeAgo(ts) {
   return Math.floor(diff / 86400) + 'd temu';
 }
 
-// Initial load
-loadLearning();
-// Auto-refresh every 30s
-setInterval(loadLearning, 30000);
+MariaUI.createPoller(loadLearning, 30000);

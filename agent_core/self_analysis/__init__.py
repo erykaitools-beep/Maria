@@ -33,6 +33,7 @@ from .recommendation_model import (
 from .state_collector import StateCollector
 from .external_analyzer import ExternalAnalyzer
 from .recommendation_applier import RecommendationApplier
+from .shift import AnalysisShift
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,11 @@ class SelfAnalysis:
         self._collector = StateCollector(project_root)
         self._analyzer = ExternalAnalyzer()
         self._applier = RecommendationApplier(project_root=project_root)
+
+        # Always constructed, never optional. A caller that had to probe for it
+        # with hasattr() would get a silent permanent "no" the day the attribute
+        # was renamed -- the failure mode that kept the exam gate shut in July.
+        self.shift = AnalysisShift(project_root=project_root)
 
         self._last_analysis_ts: float = 0.0
         self._consciousness = None
@@ -155,6 +161,16 @@ class SelfAnalysis:
             pass
 
         report.duration_ms = (time.time() - start) * 1000
+
+        # Charge the shift ledger. Every run counts, including alarm-triggered
+        # and operator-triggered ones: the budget gates only the scheduled
+        # trigger, but a ledger that omitted the other paths would understate
+        # how much heavy inference the day actually carried.
+        try:
+            self.shift.record_run(report.duration_ms / 1000.0)
+        except Exception as e:
+            logger.warning(f"[K12] shift ledger not updated: {e}")
+
         logger.info(f"[K12] Self-analysis complete in {report.duration_ms:.0f}ms")
 
         return report

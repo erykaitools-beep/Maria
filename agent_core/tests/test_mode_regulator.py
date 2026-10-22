@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from agent_core.homeostasis.mode_regulator import ModeRegulator, TransitionResult
 from agent_core.homeostasis.state_model import Mode
+from agent_core.llm.local_compute import THERMAL_RESUME_C, THERMAL_STOP_C
 
 
 class TestModeRegulator:
@@ -385,3 +386,57 @@ class TestMultipleAlerts:
             mode = regulator.decide_mode(high, [])
         assert mode == Mode.REDUCED
 
+
+
+class TestThermalLatchAccessor:
+    """is_thermal_cooling must report the real latch, not a constant.
+
+    The event logger cannot derive a thermal demotion from temp_c: the latch
+    engages at THERMAL_STOP_C but releases only at THERMAL_RESUME_C, so it stays
+    on well below the temperature that set it.
+    """
+
+    @pytest.fixture
+    def regulator(self):
+        return ModeRegulator()
+
+    def test_starts_disengaged(self, regulator):
+        assert regulator.is_thermal_cooling is False
+
+    def test_engages_at_stop_temp(self, regulator):
+        regulator.decide_mode(
+            {"ram_available_pct": 80, "cpu_load": 20,
+             "temp_c": THERMAL_STOP_C + 0.5, "temp_available": True}, [],
+        )
+        assert regulator.is_thermal_cooling is True
+
+    def test_stays_engaged_between_resume_and_stop(self, regulator):
+        """The hysteresis band: hot enough to stay cooling, too cool to re-trip."""
+        hot = {"ram_available_pct": 80, "cpu_load": 20,
+               "temp_c": THERMAL_STOP_C + 1.0, "temp_available": True}
+        regulator.decide_mode(hot, [])
+        mid = dict(hot, temp_c=(THERMAL_STOP_C + THERMAL_RESUME_C) / 2)
+        regulator.decide_mode(mid, [])
+        assert regulator.is_thermal_cooling is True
+
+    def test_releases_at_resume_temp(self, regulator):
+        hot = {"ram_available_pct": 80, "cpu_load": 20,
+               "temp_c": THERMAL_STOP_C + 1.0, "temp_available": True}
+        regulator.decide_mode(hot, [])
+        cool = dict(hot, temp_c=THERMAL_RESUME_C - 0.5)
+        regulator.decide_mode(cool, [])
+        assert regulator.is_thermal_cooling is False
+
+    def test_thermal_demotion_raises_no_alert(self, regulator):
+        """The root of the Telegram flood: this path demotes silently.
+
+        The regulator returns REDUCED without anything appending to the alert
+        list, so the notifier saw a bare transition with no reason.
+        """
+        alerts = []
+        mode = regulator.decide_mode(
+            {"ram_available_pct": 80, "cpu_load": 20,
+             "temp_c": THERMAL_STOP_C + 1.0, "temp_available": True}, alerts,
+        )
+        assert mode == Mode.REDUCED
+        assert alerts == []

@@ -548,12 +548,34 @@ class NIMClient:
         same day). For an authoritative answer use health_check(), which
         issues a real request.
 
+        Nor does the catalogue test CREDENTIALS. Measured 2026-08-15 while
+        rehearsing the 08-18 key expiry: `GET /models` answers 200 with the
+        full catalogue for a deliberately invalid key, so an expired key reads
+        exactly like a healthy one here while every generation returns 403.
+        The catalogue is therefore evidence about the model, never about our
+        access to it -- which is why observed call outcomes get the last word
+        below.
+
         Returns:
-            True if the API key is set, the catalogue answers, and our model
-            is in it.
+            False when recent real calls say the endpoint is unusable;
+            otherwise True if the key is set, the catalogue answers and our
+            model is in it.
         """
         if not self.api_key:
             return False
+
+        # Observed outcomes outrank the catalogue: they are the only signal
+        # here that has actually exercised the credentials. An empty window is
+        # ignorance ("unknown"), not health, so only an explicit unavailable
+        # verdict may veto.
+        try:
+            from agent_core.llm.nim_health import STATUS_UNAVAILABLE, get_nim_health
+
+            if get_nim_health().snapshot().status == STATUS_UNAVAILABLE:
+                return False
+        except Exception:  # tracker must never break the cheap check
+            logger.debug("[NIM] health tracker unreadable in is_available")
+
         try:
             url = f"{self.base_url}/models"
             headers = {"Authorization": f"Bearer {self.api_key}"}

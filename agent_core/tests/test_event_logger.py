@@ -23,6 +23,7 @@ from agent_core.homeostasis.event_logger import (
     StateSnapshotEvent,
 )
 from agent_core.homeostasis.state_model import Mode
+from agent_core.llm.local_compute import THERMAL_STOP_C
 
 
 class TestHomeostasisEventLogger:
@@ -111,6 +112,92 @@ class TestHomeostasisEventLogger:
 
         assert event["trigger"]["constraint"] == "ram_critical"
         assert event["trigger"]["value"] == 4.0
+
+    def test_thermal_cooling_demotion_is_named_not_unknown(self, logger):
+        """Regression (2026-08-16): the 80-85C band logged trigger='unknown'.
+
+        The regulator demotes at THERMAL_STOP_C (80.0 since 2026-08-05) while
+        this function still asked `temp > 85`, inherited from temp_orange_c.
+        Every demotion in between fell through to the default branch: 154 of 155
+        REDUCED transitions in the live log carried no reason at all.
+        """
+        state = {"ram_available_pct": 80.0, "cpu_load": 40.0, "temp_c": 81.3}
+
+        logger.log_mode_change(
+            from_mode=Mode.ACTIVE,
+            to_mode=Mode.REDUCED,
+            interpreted_state=state,
+            alerts=[],
+            health_score=0.85,
+            tick_count=400,
+            thermal_cooling=True,
+        )
+        logger.flush()
+
+        trigger = logger.get_mode_transitions(limit=1)[0]["trigger"]
+        assert trigger["constraint"] == "thermal_cooling"
+        assert trigger["value"] == 81.3
+        assert trigger["threshold"] == THERMAL_STOP_C
+
+    def test_thermal_latch_below_stop_temp_still_named(self, logger):
+        """The latch releases at THERMAL_RESUME_C, so temperature alone lies.
+
+        A demotion can be thermal at 78C -- below the threshold that set the
+        latch. Deriving the reason from temp_c here would call this 'unknown'.
+        """
+        state = {"ram_available_pct": 80.0, "cpu_load": 40.0, "temp_c": 78.0}
+
+        logger.log_mode_change(
+            from_mode=Mode.ACTIVE,
+            to_mode=Mode.REDUCED,
+            interpreted_state=state,
+            alerts=[],
+            health_score=0.85,
+            tick_count=401,
+            thermal_cooling=True,
+        )
+        logger.flush()
+
+        assert logger.get_mode_transitions(limit=1)[0]["trigger"]["constraint"] == (
+            "thermal_cooling"
+        )
+
+    def test_thermal_wins_over_cpu_matching_regulator_precedence(self, logger):
+        """decide_mode() returns REDUCED from the thermal branch BEFORE it looks
+        at CPU, so a hot box under load is a thermal demotion, not a CPU one."""
+        state = {"ram_available_pct": 80.0, "cpu_load": 97.0, "temp_c": 82.0}
+
+        logger.log_mode_change(
+            from_mode=Mode.ACTIVE,
+            to_mode=Mode.REDUCED,
+            interpreted_state=state,
+            alerts=["ALERT: CPU saturated (97.0%)"],
+            health_score=0.7,
+            tick_count=402,
+            thermal_cooling=True,
+        )
+        logger.flush()
+
+        assert logger.get_mode_transitions(limit=1)[0]["trigger"]["constraint"] == (
+            "thermal_cooling"
+        )
+
+    def test_non_thermal_demotion_unaffected(self, logger):
+        """Without the latch the existing RAM/CPU mapping must be untouched."""
+        state = {"ram_available_pct": 15.0, "cpu_load": 40.0, "temp_c": 60.0}
+
+        logger.log_mode_change(
+            from_mode=Mode.ACTIVE,
+            to_mode=Mode.REDUCED,
+            interpreted_state=state,
+            alerts=["ALERT: RAM pressure"],
+            health_score=0.6,
+            tick_count=403,
+            thermal_cooling=False,
+        )
+        logger.flush()
+
+        assert logger.get_mode_transitions(limit=1)[0]["trigger"]["constraint"] == "ram_low"
 
     def test_sleep_to_reduced_trigger_is_cpu_high_not_unknown(self, logger):
         """Regression (2026-06-15): SLEEP->REDUCED (a CPU spike from a long

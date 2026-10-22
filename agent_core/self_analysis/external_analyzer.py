@@ -23,6 +23,9 @@ from .recommendation_model import (
     AnalyzerBackend,
     MAX_RECOMMENDATIONS_PER_REPORT,
     _gen_id,
+    MAX_SYSTEMIC_ISSUES,
+    SYSTEMIC_ISSUE_MAX_CHARS,
+    SUMMARY_STORED_MAX_CHARS,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +76,7 @@ class ExternalAnalyzer:
         self._nim_fn = nim_fn
         self._backend = backend
         self._claude_cli = None
+        self._analyst_fn = None
 
     def set_llm_fn(self, fn: Callable[[str], str]):
         """Set local LLM function (dependency injection from homeostasis wiring)."""
@@ -85,6 +89,10 @@ class ExternalAnalyzer:
     def set_claude_cli(self, client):
         """Set Claude CLI client for stronger analysis (K12 Phase 2)."""
         self._claude_cli = client
+
+    def set_analyst_fn(self, fn: Callable[[str], str]):
+        """Set the local ANALYST-role function (MODEL-08, evening shift head)."""
+        self._analyst_fn = fn
 
     def analyze(self, state_summary: Dict[str, Any]) -> AnalysisReport:
         """
@@ -122,6 +130,18 @@ class ExternalAnalyzer:
                 logger.info("[K12] Claude CLI returned error, falling back to local")
             except Exception as e:
                 logger.info(f"[K12] Claude CLI failed, falling back to local: {e}")
+
+        # Local analyst (MODEL-08). Sits below the cloud tiers while the NIM key
+        # lives and becomes the head when it expires on 2026-08-18 -- above the
+        # planner model, which is a tick-latency seat, not an analyst's.
+        try:
+            analyst_report = self._analyze_with_analyst(state_summary)
+            if analyst_report and not analyst_report.error:
+                return analyst_report
+            if analyst_report:
+                logger.info("[K12] local analyst returned error, falling back to planner")
+        except Exception as e:
+            logger.info(f"[K12] local analyst failed, falling back to planner: {e}")
 
         # Fallback: local planner
         from agent_core.llm.local_compute import get_local_compute_coordinator
@@ -183,10 +203,54 @@ class ExternalAnalyzer:
 
             recommendations = self._parse_response(raw_response)
             report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+            report.systemic_issues, report.summary = self._parse_narrative(raw_response)
 
         except Exception as e:
             report.error = f"NIM analysis failed: {str(e)[:200]}"
             logger.error(f"[K12] NIM error: {e}")
+
+        report.duration_ms = time.time() * 1000 - start_ms
+        return report
+
+    def _analyze_with_analyst(self, state_summary: Dict[str, Any]) -> Optional[AnalysisReport]:
+        """Analyze using the local ANALYST model -- the evening shift's own head.
+
+        Separate from _analyze_with_local because it is a different seat, not a
+        different setting: the planner model answers in seconds inside a tick,
+        while this one is allowed minutes under the shift's daily budget. Sharing
+        the planner's entry point would have meant sharing its latency budget.
+
+        Returns None when no analyst tag is configured, so the cascade falls
+        through to today's behaviour rather than reporting a failure.
+        """
+        tag = os.getenv("K12_ANALYST_MODEL", "").strip()
+        if not tag or self._analyst_fn is None:
+            return None
+
+        report = AnalysisReport(
+            analyzer="local_analyst",
+            model=tag,
+            input_summary_hash=state_summary.get("input_hash", ""),
+        )
+
+        start_ms = time.time() * 1000
+        prompt = self._build_prompt(state_summary)
+
+        try:
+            raw_response = self._analyst_fn(prompt)
+            report.raw_response = (raw_response or "")[:4000]
+
+            if not raw_response:
+                report.error = "Empty response from local analyst"
+                return report
+
+            recommendations = self._parse_response(raw_response)
+            report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+            report.systemic_issues, report.summary = self._parse_narrative(raw_response)
+
+        except Exception as e:
+            report.error = f"Local analyst failed: {str(e)[:200]}"
+            logger.error(f"[K12] local analyst error: {e}")
 
         report.duration_ms = time.time() * 1000 - start_ms
         return report
@@ -221,6 +285,7 @@ class ExternalAnalyzer:
             # Parse recommendations from response
             recommendations = self._parse_response(raw_response)
             report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+            report.systemic_issues, report.summary = self._parse_narrative(raw_response)
 
         except Exception as e:
             report.error = f"Analysis failed: {str(e)[:200]}"
@@ -257,6 +322,7 @@ class ExternalAnalyzer:
 
             recommendations = self._parse_response(raw_response)
             report.recommendations = recommendations[:MAX_RECOMMENDATIONS_PER_REPORT]
+            report.systemic_issues, report.summary = self._parse_narrative(raw_response)
 
         except Exception as e:
             report.error = f"Claude CLI analysis failed: {str(e)[:200]}"
@@ -316,6 +382,34 @@ class ExternalAnalyzer:
 
         # Fallback: try to extract structured data from free text
         return self._parse_freetext(response)
+
+    def _parse_narrative(self, response: str) -> tuple:
+        """Pull "systemic_issues" and "summary" out of the response.
+
+        The prompt asks for three sections; before this only "recommendations"
+        was read, so the analyst's cross-cutting diagnosis was parsed and
+        discarded. Freetext responses have no narrative to recover -- an empty
+        result here means "the model did not return JSON", not "the model found
+        nothing systemically wrong", and the caller must not conflate the two.
+
+        Returns (systemic_issues, summary).
+        """
+        parsed = self._try_parse_json(response)
+        if not parsed:
+            return [], ""
+
+        issues = []
+        for item in (parsed.get("systemic_issues") or [])[:MAX_SYSTEMIC_ISSUES]:
+            text = str(item).strip()
+            if text:
+                issues.append(text[:SYSTEMIC_ISSUE_MAX_CHARS])
+
+        # Stored generously, trimmed for display. Cutting to the Telegram budget
+        # here made the crude slice win: the formatter's word-boundary trim then
+        # saw a string already at the limit and passed it through, so the card
+        # ended mid-word with no ellipsis ("...without being acted upon. The sta").
+        summary = str(parsed.get("summary") or "").strip()[:SUMMARY_STORED_MAX_CHARS]
+        return issues, summary
 
     def _try_parse_json(self, text: str) -> Optional[Dict[str, Any]]:
         """Try to extract JSON from response (handles markdown wrapping)."""

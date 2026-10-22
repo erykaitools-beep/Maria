@@ -79,12 +79,15 @@ class TestModelRegistry:
 
     def test_list_models_returns_all(self):
         models = list_models()
-        assert len(models) == 7
+        assert len(models) == 8
         roles = {m.role for m in models}
         assert roles == {
             ModelRole.PLANNER, ModelRole.EXECUTOR, ModelRole.CODER,
             ModelRole.TRIAGE, ModelRole.MEMORY, ModelRole.EXTERNAL,
             ModelRole.ENCYCLOPEDIA,
+            # MODEL-08: K12 evening-shift analyst, added 2026-08-16 for the
+            # seat NIM vacates when its key expires on 2026-08-18.
+            ModelRole.ANALYST,
         }
 
     def test_get_warm_models(self):
@@ -96,7 +99,9 @@ class TestModelRegistry:
     def test_get_heavy_models(self):
         heavy = get_heavy_models()
         roles = {m.role for m in heavy}
-        assert roles == {ModelRole.PLANNER, ModelRole.CODER}
+        # ANALYST is heavy on purpose: ~18GB of weights in 26GB of RAM must not
+        # coexist with another heavy model.
+        assert roles == {ModelRole.PLANNER, ModelRole.CODER, ModelRole.ANALYST}
 
     def test_get_local_models(self):
         local = get_local_models()
@@ -398,6 +403,55 @@ class TestModelSchedulerEmergencyUnload:
         requested = {call.kwargs["json"]["model"] for call in mock_post.call_args_list}
         assert requested == {"bge-m3:latest", "llama3.1:8b"}
         assert "qwen3:8b" not in requested
+
+    @patch("agent_core.llm.model_scheduler.requests.post")
+    @patch("agent_core.llm.model_scheduler.requests.get")
+    def test_accepted_is_not_reported_as_released(
+        self, mock_get, mock_post, scheduler, mock_psutil, mock_ollama,
+        isolated_local_compute_coordinator,
+    ):
+        """HTTP 200 means Ollama took the request, not that the model left.
+
+        Measured 2026-08-06: the gap between the unload log line and the model
+        actually leaving /api/ps was 190.9s, 222.9s and 29.7s. Reporting
+        acceptance as release is why an 80C ceiling still saw 85.0C.
+        """
+        scheduler.register_running_model(ModelRole.EXECUTOR, "llama3.1:8b")
+        # Both probes see llama3.1:8b resident; the post is accepted anyway.
+        mock_get.return_value = SimpleNamespace(
+            status_code=200,
+            json=lambda: {"models": [{"name": "llama3.1:8b"}]},
+        )
+        mock_post.return_value = SimpleNamespace(status_code=200)
+
+        result = scheduler.emergency_unload_all()
+
+        assert result["accepted"] == ["llama3.1:8b"]
+        assert result["still_resident"] == ["llama3.1:8b"]
+        assert result["released"] == []
+        assert result["verified"] is True
+        # The old key promised more than it measured; it must be gone so a
+        # stale reader breaks loudly instead of believing acceptance.
+        assert "unloaded" not in result
+
+    @patch("agent_core.llm.model_scheduler.requests.post")
+    @patch("agent_core.llm.model_scheduler.requests.get")
+    def test_release_is_only_claimed_when_verified(
+        self, mock_get, mock_post, scheduler, mock_psutil, mock_ollama,
+        isolated_local_compute_coordinator,
+    ):
+        """A probe that cannot look must not answer "nothing is loaded"."""
+        scheduler.register_running_model(ModelRole.EXECUTOR, "llama3.1:8b")
+        mock_get.side_effect = OSError("ollama nieosiagalna")
+        mock_post.return_value = SimpleNamespace(status_code=200)
+
+        result = scheduler.emergency_unload_all()
+
+        assert result["requested"] == ["llama3.1:8b"]
+        assert result["accepted"] == ["llama3.1:8b"]
+        assert result["verified"] is False
+        assert result["released"] == []
+        assert result["still_resident"] == []
 
 
 class TestModelSchedulerRecordRequest:

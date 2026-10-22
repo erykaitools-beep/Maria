@@ -42,7 +42,7 @@ if not UI_PIN:
 SECRET_KEY = os.environ.get("MARIA_SECRET_KEY", secrets.token_hex(32))
 
 # Rate limiting
-RATE_LIMIT_MESSAGES = 2          # Max messages per window
+RATE_LIMIT_MESSAGES = max(1, min(60, int(os.environ.get("MARIA_CHAT_RATE_LIMIT", "2"))))
 RATE_LIMIT_WINDOW_SEC = 60       # Time window in seconds
 
 # Input validation
@@ -104,6 +104,7 @@ def _tailscale_origins(port):
                     .get("Self", {}).get("DNSName", "")).rstrip(".")
         if dns_name:
             origins.append(f"http://{dns_name}:{port}")
+            origins.append(f"https://{dns_name}")
     except Exception:
         pass
     return origins

@@ -260,6 +260,7 @@ class TelegramNotifier:
         self,
         summary: str,
         recommendations: List[str],
+        systemic_issues: Optional[List[str]] = None,
     ) -> bool:
         """Send K12 self-analysis report."""
         if not self._can_send("self_analysis"):
@@ -268,6 +269,14 @@ class TelegramNotifier:
         lines = ["*Raport K12 Self-Analysis:*\n"]
         if summary:
             lines.append(summary[:500])
+            lines.append("")
+        # Above the recommendations on purpose: a cross-cutting finding ("the
+        # recommendation loop itself is broken") outranks the individual topics
+        # it explains, and the operator reads top-down on a phone.
+        if systemic_issues:
+            lines.append("*Problemy ukladowe:*")
+            for issue in systemic_issues[:4]:
+                lines.append(f"- {issue[:280]}")
             lines.append("")
         if recommendations:
             lines.append("*Rekomendacje:*")

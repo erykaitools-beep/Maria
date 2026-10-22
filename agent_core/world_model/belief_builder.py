@@ -93,8 +93,8 @@ _SYNTHESIS_BELIEF_CEIL = 0.6
 # stops there. See _confidence_after_exam for why this is an average rather
 # than a tally.
 #
-# The rate was chosen against the real thresholds, not by taste -- a dry-run
-# replay over the full real exam history, not a guess. At
+# The rate was chosen against the real thresholds, not by taste
+# (scripts/dryrun_confidence_policy.py replays every true exam history). At
 # 0.5 a single pass lands at 0.75, clearing the 0.70 promotion line, and a
 # single fail lands at 0.25, low enough that a belief which fails its only
 # exam is visibly weak. Slower rates left nothing below the 0.50 weak-topic

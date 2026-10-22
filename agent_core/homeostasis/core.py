@@ -29,6 +29,8 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, Any, Deque, List, Optional, TYPE_CHECKING
 
+from agent_core.runtime_profile import background_reasoning_enabled
+
 from .state_model import Mode, SystemState, ResourceMetrics, CognitiveMetrics
 from .sensors.resource_sensor import ResourceSensor
 from .sensors.cognitive_sensor import CognitiveSensor
@@ -198,6 +200,7 @@ class HomeostasisCore:
 
         # Vision cortex (visual perception pipeline)
         self._vision_cortex = None
+        self._vision_publisher = None
         self._vision_adapter = None
         self._vision_interval = 1  # perceive every N ticks
         self._vision_last_tick = 0
@@ -271,7 +274,6 @@ class HomeostasisCore:
         self._telegram_notifier: Optional[Any] = None
         # Undo-suggest (Phase 19 sibling - autonomous "propose undo", flag-gated)
         self._undo_suggestion_monitor: Optional[Any] = None
-
         # Outbox (TIER 2 hands, Rung 2): autonomous status-note PROPOSER callback
         # (only proposes; the write is operator-gated). Set via set_outbox_proposer.
         self._outbox_proposer: Optional[Any] = None
@@ -497,7 +499,13 @@ class HomeostasisCore:
         Events flow through VisionPerceptionAdapter into PerceptionBuffer.
         Called from HomeostasisModule after init.
         """
+        if self._vision_publisher is not None:
+            self._vision_publisher.close()
         self._vision_cortex = cortex
+        from agent_core.vision.preview import VisionPreviewPublisher
+        self._vision_publisher = VisionPreviewPublisher(
+            cortex, Path(__file__).resolve().parents[2] / "meta_data",
+        ) if cortex is not None else None
         try:
             from agent_core.vision.adapter import VisionPerceptionAdapter
             self._vision_adapter = VisionPerceptionAdapter()
@@ -856,7 +864,8 @@ class HomeostasisCore:
         # SYNTH_ENABLED nieuzbrojony -- zero zapisow do produkcji.
         # ──────────────────────────────────────
         if (
-            self._synthesis_trigger is not None
+            background_reasoning_enabled()
+            and self._synthesis_trigger is not None
             and self.state.mode == Mode.ACTIVE
             and self._tick_count % 600 == 30
         ):
@@ -920,8 +929,8 @@ class HomeostasisCore:
         # ──────────────────────────────────────
         # PHASE 17: CONDUCTOR (delegated build orchestration)
         # ──────────────────────────────────────
-        # Refreshes BuildStatus snapshots so the Web UI sees fresh
-        # numbers without scanning the whole task queue.
+        # Refreshes BuildStatus snapshots so /market_status and the Web
+        # UI see fresh numbers without scanning the whole task queue.
         # Read-only — never writes to TaskQueue, never invokes LLMs.
         if self._conductor and self._tick_count % 180 == 0:
             try:
@@ -1097,7 +1106,8 @@ class HomeostasisCore:
         # cadence.
         # ──────────────────────────────────────
         if (
-            self._conversation_memory
+            background_reasoning_enabled()
+            and self._conversation_memory
             and self._tick_count % CONVERSATION_CONDENSE_INTERVAL == 0
             and not (self._condense_thread and self._condense_thread.is_alive())
         ):
@@ -1272,7 +1282,7 @@ class HomeostasisCore:
                     # background LLaVA describe + proactive ping. maybe_react is
                     # cheap (cooldown/guard check) and threads the slow LLaVA,
                     # so Phase 8.5 stays fast.
-                    if self._vision_advisor is not None:
+                    if background_reasoning_enabled() and self._vision_advisor is not None:
                         self._vision_advisor.maybe_react(events)
                 # Write state for Web UI (every perception, not every tick)
                 self._write_vision_state(percept)
@@ -1280,69 +1290,12 @@ class HomeostasisCore:
             self._log_phase_error("8.5 vision", e)
 
     def _write_vision_state(self, percept) -> None:
-        """Write vision state to JSON for Web UI consumption."""
-        import json
-        try:
-            status = self._vision_cortex.get_status()
-            state = {
-                "status": status,
-                "last_percept": {
-                    "timestamp": percept.timestamp,
-                    "summary": percept.summary,
-                    "quality": round(percept.quality, 3),
-                    "health": round(percept.vision_health.overall, 3),
-                    "modules_run": percept.modules_run,
-                    "sensor_id": percept.sensor_id,
-                    "processing_time_ms": percept.total_processing_time_ms,
-                },
-            }
-            # Motion data
-            if percept.motion:
-                state["last_percept"]["motion"] = {
-                    "motion_detected": percept.motion.motion_detected,
-                    "motion_level": round(percept.motion.motion_level, 3),
-                    "classification": percept.motion.classification.value,
-                    "alert_level": percept.motion.alert_level.value,
-                    "regions_count": len(percept.motion.regions),
-                }
-            # Scene data
-            if percept.scene:
-                state["last_percept"]["scene"] = {
-                    "description": percept.scene.description,
-                    "lighting": percept.scene.lighting,
-                    "dominant_colors": list(percept.scene.dominant_colors),
-                    "complexity": round(percept.scene.complexity, 3),
-                    "backend_used": percept.scene.backend_used,
-                }
-            # Sensor health
-            sensor = self._vision_cortex.active_sensor
-            if sensor:
-                h = sensor.health
-                state["health"] = {
-                    "sensor_id": sensor.sensor_id,
-                    "health": h.to_dict(),
-                    "description": h.to_human_description(),
-                }
+        """Notify the bounded publisher; encoding and IO stay outside the tick."""
+        if self._vision_publisher is not None:
+            self._vision_publisher.notify()
 
-            meta_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                "meta_data",
-            )
-            state_path = os.path.join(meta_dir, "vision_state.json")
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False)
-
-            # Save last frame as JPEG for Web UI preview
-            frame_image = getattr(self._vision_cortex, '_last_frame_image', None)
-            if frame_image is not None:
-                try:
-                    import cv2
-                    frame_path = os.path.join(meta_dir, "vision_frame.jpg")
-                    cv2.imwrite(frame_path, frame_image, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.debug(f"Vision state write error: {e}")
+    def get_vision_publisher(self):
+        return self._vision_publisher
 
     def _transition_mode(self, old_mode: Mode, new_mode: Mode) -> None:
         """
@@ -1394,6 +1347,7 @@ class HomeostasisCore:
             alerts=self.state.alerts,
             health_score=self.state.health_score,
             tick_count=self._tick_count,
+            thermal_cooling=getattr(self.regulator, "is_thermal_cooling", False),
         )
 
         # In-memory audit log (backward compatibility)
@@ -1925,7 +1879,7 @@ class HomeostasisCore:
         5. Cooldown period has passed
         6. Within learning window (EnvironmentManager LEARNING mode or time-based)
         """
-        if self._teacher_agent is None:
+        if not background_reasoning_enabled() or self._teacher_agent is None:
             return
 
         if self.state.mode != Mode.ACTIVE:
@@ -2354,6 +2308,8 @@ class HomeostasisCore:
         """Stop the main loop."""
         self._running = False
         self._watchdog_stop.set()
+        if reason == "shutdown" and self._vision_publisher is not None:
+            self._vision_publisher.close()
         self.event_logger.log_shutdown(reason=reason)
         self.event_logger.flush()
 

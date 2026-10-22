@@ -7,6 +7,7 @@ Covers: model, store, engine, delegation, templates, progress reporter.
 import json
 import os
 import tempfile
+import threading
 import time
 import pytest
 
@@ -360,6 +361,18 @@ class TestWorkflowStore:
         store = WorkflowStore(path=path)
         assert store.count() == 1
 
+    def test_save_surfaces_persistence_failure(self, tmp_path, monkeypatch):
+        store = _make_store(str(tmp_path))
+        wf = create_workflow("persist", "Persist", _make_steps(1))
+
+        def fail_append(_workflow):
+            raise OSError("disk unavailable")
+
+        monkeypatch.setattr(store, "_append", fail_append)
+        with pytest.raises(OSError, match="disk unavailable"):
+            store.save(wf)
+        assert store.get(wf.workflow_id) is None
+
 
 # ========== ENGINE TESTS ==========
 
@@ -581,6 +594,52 @@ class TestWorkflowEngine:
         assert engine.approve_step(wf.workflow_id, 0) is True
         loaded = store.get(wf.workflow_id)
         assert loaded.status == WorkflowStatus.RUNNING
+
+    def test_step_cannot_be_preapproved_or_approved_for_the_wrong_order(self, tmp_path):
+        engine, _store = self._make_engine(tmp_path)
+        steps = [
+            WorkflowStep(
+                order=0,
+                action="effector",
+                params={"target": "exact"},
+                description="Needs approval",
+                requires_approval=True,
+            )
+        ]
+        wf = engine.create("test", "Test", steps)
+
+        assert engine.approve_step(wf.workflow_id, 0) is False
+        engine.start(wf.workflow_id)
+        assert engine.approve_step(wf.workflow_id, 0) is False
+        engine.advance(wf.workflow_id)
+        assert engine.approve_step(wf.workflow_id, 1) is False
+        assert engine.approve_step(wf.workflow_id, 0) is True
+
+    def test_cancel_during_delegate_cannot_be_overwritten_by_late_success(self, tmp_path):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingDelegation(DelegationManager):
+            def delegate(self, step, goal_id=None, attempt=0):
+                entered.set()
+                assert release.wait(timeout=3)
+                return StepResult(order=step.order, action=step.action, success=True)
+
+        engine, store = self._make_engine(tmp_path, BlockingDelegation())
+        wf = engine.create("race", "Race", _make_steps(1))
+        engine.start(wf.workflow_id)
+        worker = threading.Thread(target=engine.advance, args=(wf.workflow_id,))
+        worker.start()
+        assert entered.wait(timeout=3)
+
+        assert engine.cancel(wf.workflow_id, "operator stop") is True
+        release.set()
+        worker.join(timeout=3)
+
+        loaded = store.get(wf.workflow_id)
+        assert loaded.status == WorkflowStatus.CANCELLED
+        assert loaded.current_step == 0
+        assert loaded.results == []
 
     def test_get_progress(self, tmp_path):
         deleg = FakeDelegation(success=True)
@@ -977,6 +1036,22 @@ class TestDelegationK7Gate:
                                  description="x"))
         assert seen == {"health": 0.42, "mode": "sleep"}
 
+    def test_exploding_state_provider_is_a_closed_door(self, tmp_path):
+        dm = DelegationManager()
+        dm.set_autonomy_policy(_real_policy(tmp_path))
+        dm.set_state_provider(lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+        router = RecordingRouter()
+        dm.set_capability_router(router)
+        dm.set_plan_factory(lambda a, p, g: object())
+
+        result = dm.delegate(
+            WorkflowStep(order=0, action="fetch", params={}, description="x")
+        )
+
+        assert result.success is False
+        assert result.result["blocked_by"] == "state_unavailable"
+        assert router.dispatched == []
+
     def test_exploding_gate_is_a_closed_door(self, tmp_path):
         """If the gate itself raises, refuse -- never fall through."""
         class ExplodingPolicy:
@@ -1047,6 +1122,26 @@ class TestProgressReporter:
 
         assert len(messages) == 1
         assert "completed" in messages[0].lower()
+
+    def test_release_blocker_is_not_reported_as_success(self):
+        messages = []
+        reporter = ProgressReporter()
+        reporter.set_telegram_notifier(messages.append)
+        wf = create_workflow("model_release_audit", "Audit", _make_steps(1))
+        wf.results.append(
+            StepResult(
+                order=0,
+                action="publishable_release_gate",
+                success=True,
+                result={"results": [{"release_ready": False}]},
+            )
+        )
+        wf.completed_at = time.time()
+
+        reporter.on_workflow_completed(wf)
+
+        assert "RELEASE BLOCKED" in messages[0]
+        assert "Success rate" not in messages[0]
 
     def test_failure_notification(self):
         messages = []

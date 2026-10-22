@@ -141,6 +141,14 @@ class GoalSelector:
 
         Returns:
             Selected Goal or None
+
+        NOT ON THE LIVE PATH (verified 2026-08-15): the daemon ranks goals in
+        PlannerCore._select_ranked_goals, which re-implements scoring from
+        _compute_effective_priority + _check_feasibility and never calls this
+        method -- so the handoff-wins-outright branch below has never run in
+        production. The live path gives the pantry EQUAL-score ties only. Same
+        trap as GOAL_DEADLINE_ENABLED, which was wired here and fixed on
+        2026-07-06: change behaviour THERE, or it does not happen.
         """
         if not active_goals:
             return None

@@ -5,6 +5,10 @@ import os
 import threading
 import time
 from datetime import datetime
+from agent_core.runtime_profile import (
+    background_reasoning_enabled, conductor_integration_enabled, model_keep_alive,
+    telegram_integration_enabled,
+)
 
 from agent_core.registry import MariaModule, CommandInfo
 from agent_core.homeostasis.core import HomeostasisCore
@@ -154,14 +158,22 @@ def _wire_executor_modules(
         compute_coordinator = get_local_compute_coordinator()
 
     def _emergency_unload():
+        # Keys mirror emergency_unload_all: acceptance and release are separate
+        # facts, and "no scheduler" must not look like a successful release.
         scheduler = getattr(core, "_model_scheduler", None)
         if scheduler is None or not hasattr(scheduler, "emergency_unload_all"):
-            return {"requested": [], "unloaded": [], "failed": []}
+            return {
+                "requested": [], "accepted": [], "rejected": [],
+                "still_resident": [], "released": [], "verified": False,
+            }
         try:
             return scheduler.emergency_unload_all()
         except Exception as exc:
             logger.warning("[Homeostasis] Emergency model unload failed: %s", exc)
-            return {"requested": [], "unloaded": [], "failed": [str(exc)]}
+            return {
+                "requested": [], "accepted": [], "rejected": [str(exc)],
+                "still_resident": [], "released": [], "verified": False,
+            }
 
     def _llm_reduce_batch_size(factor=0.5, temp_c=None, **_):
         if hasattr(llm_manager, "reduce_batch_size"):
@@ -271,9 +283,11 @@ class HomeostasisModule(MariaModule):
                 scheduler = ModelScheduler()
                 scheduler.load_health()
 
-                # Register MODEL-02 (EXECUTOR) which is already loaded by OllamaBrain
-                brain_model = getattr(ctx, 'brain_model', 'llama3.1:8b')
-                scheduler.register_running_model(ModelRole.EXECUTOR, brain_model)
+                # The operator-first pause never warms the local executor.
+                # Do not claim residency for a model that was not loaded.
+                if background_reasoning_enabled():
+                    brain_model = getattr(ctx, 'brain_model', 'llama3.1:8b')
+                    scheduler.register_running_model(ModelRole.EXECUTOR, brain_model)
 
                 ctx.model_scheduler = scheduler
                 core.set_model_scheduler(scheduler)
@@ -298,14 +312,15 @@ class HomeostasisModule(MariaModule):
                     ctx.semantic_search = sem
                     logger.info("[Homeostasis] SemanticMemory initialized (bge-m3)")
 
-                    # Start background indexing (knowledge, beliefs, hints)
-                    from agent_core.semantic.indexer import start_background_indexing
-                    start_background_indexing(
-                        sem,
-                        data_dir=_data_dir,
-                        memory_dir=str(_BASE / "memory"),
-                        input_dir=str(_BASE / "input"),
-                    )
+                    if background_reasoning_enabled():
+                        # Start background indexing (knowledge, beliefs, hints)
+                        from agent_core.semantic.indexer import start_background_indexing
+                        start_background_indexing(
+                            sem,
+                            data_dir=_data_dir,
+                            memory_dir=str(_BASE / "memory"),
+                            input_dir=str(_BASE / "input"),
+                        )
                 else:
                     ctx.semantic_search = sem  # Still usable, will try on-demand
                     logger.info("[Homeostasis] SemanticMemory loaded (model not warm yet)")
@@ -315,7 +330,7 @@ class HomeostasisModule(MariaModule):
         # Warm at most one 8B model (llama3.1) after temperature + CPU gates.
         # qwen3 remains on-demand so startup cannot overlap two 8B warm-ups
         # with bge-m3 indexing. ENV-gated (MARIA_WARMUP=0 to disable).
-        if core:
+        if core and background_reasoning_enabled():
             try:
                 from agent_core.llm.warmup import start_background_warmup
                 start_background_warmup()
@@ -807,6 +822,17 @@ class HomeostasisModule(MariaModule):
                         sa._analyzer.set_nim_fn(_sa_nim_fn)
                         print("[Homeostasis] [OK] K12 NIM analyzer wired")
 
+                    # Wire the local ANALYST seat (MODEL-08). Only "planner" is
+                    # a NIM-primary role, so ask_as_role("analyst") goes straight
+                    # to the local scheduler -- no second trip through NIM, which
+                    # the cascade already tried on its own tier above.
+                    _analyst_tag = os.getenv("K12_ANALYST_MODEL", "").strip()
+                    if _analyst_tag and hasattr(_sa_brain, "ask_as_role"):
+                        def _sa_analyst_fn(prompt, _b=_sa_brain):
+                            return _b.ask_as_role("analyst", prompt)
+                        sa._analyzer.set_analyst_fn(_sa_analyst_fn)
+                        print(f"[Homeostasis] [OK] K12 local analyst wired: {_analyst_tag}")
+
                     if ctx.goal_store:
                         sa.set_goal_store(ctx.goal_store)
                     if ctx.world_model:
@@ -820,7 +846,6 @@ class HomeostasisModule(MariaModule):
                     # Anthropic account ban from autonomous subscription CLI usage.
                     # Default: disabled. Operator-triggered paths (Telegram /claude)
                     # are unaffected and keep working regardless.
-                    import os
                     autonomous_claude = os.environ.get(
                         "CLAUDE_CLI_AUTONOMOUS", ""
                     ).lower() in ("true", "1", "yes")
@@ -1412,8 +1437,8 @@ class HomeostasisModule(MariaModule):
             except Exception as e:
                 logger.warning(f"PlannerCore not wired: {e}")
 
-        # Initialize Telegram bridge (operator notifications)
-        if core:
+        # Initialize Telegram bridge only when outbound integration is admitted.
+        if core and telegram_integration_enabled():
             try:
                 from agent_core.telegram import TelegramBridge
                 telegram = TelegramBridge()
@@ -1508,6 +1533,7 @@ class HomeostasisModule(MariaModule):
                                     "prompt": prompt,
                                     "images": [image_b64],
                                     "stream": False,
+                                    "keep_alive": model_keep_alive("vision", "5m"),
                                 },
                                 # Measured 2026-07-25 on this CPU (num_predict=200):
                                 #   llava      image 75s + gen 40s (5.0 tok/s)
@@ -1528,6 +1554,28 @@ class HomeostasisModule(MariaModule):
                 # Add modules (LLaVA NOT in tick loop - too slow, 30s/call)
                 # SceneModule uses stats fallback in tick, LLaVA only via /vision snap
                 vision_cortex.add_module(MotionModule())
+                # Optional fast semantic layer: OpenCV prepares the frame and
+                # ONNX Runtime executes the official end-to-end YOLO26n graph.
+                # It handles common objects cheaply, leaving open-ended scene
+                # understanding to the on-demand VLM fallback.
+                if os.environ.get("VISION_OBJECT_DETECTOR", "").strip().lower() == "yolo26":
+                    from agent_core.vision.modules.objects.detector import YOLO26ObjectModule
+                    _yolo_model = os.environ.get(
+                        "VISION_YOLO_MODEL", "models/vision/yolo26n.onnx"
+                    )
+                    try:
+                        _yolo_conf = float(os.environ.get("VISION_YOLO_CONFIDENCE", "0.50"))
+                    except (TypeError, ValueError):
+                        _yolo_conf = 0.50
+                    try:
+                        _yolo_threads = int(os.environ.get("VISION_YOLO_THREADS", "2"))
+                    except (TypeError, ValueError):
+                        _yolo_threads = 2
+                    vision_cortex.add_module(YOLO26ObjectModule(
+                        model_path=_yolo_model,
+                        confidence_threshold=_yolo_conf,
+                        intra_op_threads=_yolo_threads,
+                    ))
                 scene = SceneModule(use_polish=True)
                 scene._llava_describe = _llava_describe  # store for on-demand use
                 vision_cortex.add_module(scene)
@@ -1549,59 +1597,61 @@ class HomeostasisModule(MariaModule):
                 ctx.vision_cortex = vision_cortex
                 core.set_vision_cortex(vision_cortex)
 
-                # VisionAdvisor: Maria reacts to what she sees. On salient motion
-                # it runs LLaVA in a background thread and proactively pings the
-                # operator. Advisory-only (R1/K7-safe); inert without a notifier.
-                # parse_mode=None: LLaVA descriptions can contain Markdown-breaking
-                # chars that would 400 the send.
+                # Vision history remains available while heavy reactions are paused.
                 try:
-                    from agent_core.vision.vision_advisor import VisionAdvisor
-                    _v_notify = None
-                    _v_notifier = getattr(ctx, "telegram_notifier", None)
-                    if _v_notifier is not None and hasattr(_v_notifier, "send_raw"):
-                        _v_notify = lambda t, _n=_v_notifier: _n.send_raw(t, parse_mode=None)
-                    # Preferred delivery: send the frame as a photo so the operator
-                    # sees what Maria sees (falls back to the text notifier).
-                    _v_photo = None
-                    _v_bridge = getattr(ctx, "telegram_bridge", None)
-                    if _v_bridge is not None and getattr(_v_bridge, "bot", None) is not None:
-                        _v_photo = lambda p, c, _b=_v_bridge: _b.bot.send_photo(p, caption=c)
-                    # LLaVA describes in English; render the caption to fluent
-                    # Polish via the router (NIM-first, local fallback).
-                    _v_translate = None
-                    _v_brain = getattr(ctx, "brain", None)
-                    if _v_brain is not None and hasattr(_v_brain, "translate_to_polish"):
-                        _v_translate = _v_brain.translate_to_polish
-                    # VisionMemory (Super-META E1): so what Maria sees is remembered,
-                    # not just sent-and-forgotten. Read by SelfContext + /lastseen.
-                    try:
-                        from agent_core.vision.vision_memory import VisionMemory
-                        ctx.vision_memory = VisionMemory()
-                    except Exception as _e:
-                        logger.warning(f"VisionMemory not initialized: {_e}")
-                    vision_advisor = VisionAdvisor(
-                        vision_cortex, notify_fn=_v_notify, photo_fn=_v_photo,
-                        translate_fn=_v_translate,
-                        memory=getattr(ctx, "vision_memory", None),
-                        # E3: vision HEARS the chat organ -- consult SelfContext for
-                        # operator presence so a redundant "I saw motion" ping is
-                        # skipped while the operator is active in chat. Lazy over ctx
-                        # because SelfContext is wired later (below) than the advisor.
-                        operator_present_fn=lambda: bool(
-                            getattr(ctx, "self_context", None)
-                            and ctx.self_context.operator_active_recently()
-                        ),
-                        # Quiet hours: at night, record the motion but neither
-                        # ping nor run LLaVA (same predicate the notifier uses).
-                        # Vision was 19 of the ~19 send_raw night messages/week.
-                        quiet_hours_fn=_operator_quiet_now,
-                    )
-                    ctx.vision_advisor = vision_advisor
-                    core.set_vision_advisor(vision_advisor)
-                    _v_mode = "photo+text" if _v_photo else ("text" if _v_notify else "inert: no notifier")
-                    print(f"[Homeostasis] [OK] VisionAdvisor wired ({_v_mode})")
+                    from agent_core.vision.vision_memory import VisionMemory
+                    ctx.vision_memory = VisionMemory()
                 except Exception as e:
-                    logger.warning(f"VisionAdvisor not initialized: {e}")
+                    logger.warning("VisionMemory not initialized: %s", e)
+                if background_reasoning_enabled():
+                    # VisionAdvisor: Maria reacts to what she sees. On salient motion
+                    # it runs LLaVA in a background thread and proactively pings the
+                    # operator. Advisory-only (R1/K7-safe); inert without a notifier.
+                    # parse_mode=None: LLaVA descriptions can contain Markdown-breaking
+                    # chars that would 400 the send.
+                    try:
+                        from agent_core.vision.vision_advisor import VisionAdvisor
+                        _v_notify = None
+                        _v_notifier = getattr(ctx, "telegram_notifier", None)
+                        if _v_notifier is not None and hasattr(_v_notifier, "send_raw"):
+                            _v_notify = lambda t, _n=_v_notifier: _n.send_raw(t, parse_mode=None)
+                        # Preferred delivery: send the frame as a photo so the operator
+                        # sees what Maria sees (falls back to the text notifier).
+                        _v_photo = None
+                        _v_bridge = getattr(ctx, "telegram_bridge", None)
+                        if _v_bridge is not None and getattr(_v_bridge, "bot", None) is not None:
+                            _v_photo = lambda p, c, _b=_v_bridge: _b.bot.send_photo(p, caption=c)
+                        # LLaVA describes in English; render the caption to fluent
+                        # Polish via the router (NIM-first, local fallback).
+                        _v_translate = None
+                        _v_brain = getattr(ctx, "brain", None)
+                        if _v_brain is not None and hasattr(_v_brain, "translate_to_polish"):
+                            _v_translate = _v_brain.translate_to_polish
+                        # VisionMemory (Super-META E1): so what Maria sees is remembered,
+                        # not just sent-and-forgotten. Read by SelfContext + /lastseen.
+                        vision_advisor = VisionAdvisor(
+                            vision_cortex, notify_fn=_v_notify, photo_fn=_v_photo,
+                            translate_fn=_v_translate,
+                            memory=getattr(ctx, "vision_memory", None),
+                            # E3: vision HEARS the chat organ -- consult SelfContext for
+                            # operator presence so a redundant "I saw motion" ping is
+                            # skipped while the operator is active in chat. Lazy over ctx
+                            # because SelfContext is wired later (below) than the advisor.
+                            operator_present_fn=lambda: bool(
+                                getattr(ctx, "self_context", None)
+                                and ctx.self_context.operator_active_recently()
+                            ),
+                            # Quiet hours: at night, record the motion but neither
+                            # ping nor run LLaVA (same predicate the notifier uses).
+                            # Vision was 19 of the ~19 send_raw night messages/week.
+                            quiet_hours_fn=_operator_quiet_now,
+                        )
+                        ctx.vision_advisor = vision_advisor
+                        core.set_vision_advisor(vision_advisor)
+                        _v_mode = "photo+text" if _v_photo else ("text" if _v_notify else "inert: no notifier")
+                        print(f"[Homeostasis] [OK] VisionAdvisor wired ({_v_mode})")
+                    except Exception as e:
+                        logger.warning(f"VisionAdvisor not initialized: {e}")
             except Exception as e:
                 logger.warning(f"VisionCortex not initialized: {e}")
 
@@ -2143,11 +2193,11 @@ class HomeostasisModule(MariaModule):
         # Conductor (Phase 17 — delegated build orchestration, e.g. market_agent)
         try:
             from agent_core.conductor import Conductor
-            conductor = Conductor()
+            conductor = Conductor() if conductor_integration_enabled() else None
             ctx.conductor = conductor
-            if core:
+            if core and conductor is not None:
                 core.set_conductor(conductor)
-            print("[Homeostasis] [OK] Conductor wired (Phase 17)")
+            print("[Homeostasis] Conductor integration: " + ("enabled" if conductor else "disabled"))
 
         except Exception as e:
             logger.warning(f"Conductor not initialized: {e}")
@@ -2289,7 +2339,7 @@ class HomeostasisModule(MariaModule):
                     # Last wall behind approval_required + the self_repair-phase
                     # exclusion (audit 2026-06-16): even a maria task can only
                     # ever run Codex inside the maria repo, nowhere else.
-                    allowed_workspace_roots=[_Path("/home/maria/maria")],
+                    allowed_workspace_roots=[_Path(__file__).resolve().parents[2]],
                 )
                 core.add_conductor_dispatcher(maria_dispatcher)
                 print(

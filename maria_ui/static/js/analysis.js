@@ -49,7 +49,7 @@
     var el = document.getElementById('latest-report');
     if (!el) return;
 
-    fetch('/api/analysis/latest')
+    return fetch('/api/analysis/latest')
       .then(function(r) { return r.json(); })
       .then(function(report) {
         if (report.error) {
@@ -98,7 +98,7 @@
     var el = document.getElementById('recommendations-list');
     if (!el) return;
 
-    fetch('/api/analysis/recommendations')
+    return fetch('/api/analysis/recommendations')
       .then(function(r) { return r.json(); })
       .then(function(recs) {
         if (!recs || !recs.length || recs.error) {
@@ -132,7 +132,7 @@
     var el = document.getElementById('history-list');
     if (!el) return;
 
-    fetch('/api/analysis/history')
+    return fetch('/api/analysis/history')
       .then(function(r) { return r.json(); })
       .then(function(reports) {
         if (!reports || !reports.length) {
@@ -168,7 +168,7 @@
     var el = document.getElementById('analysis-status');
     if (!el) return;
 
-    fetch('/api/analysis/status')
+    return fetch('/api/analysis/status')
       .then(function(r) { return r.json(); })
       .then(function(s) {
         if (s.available) {
@@ -196,17 +196,7 @@
     });
   });
 
-  // Init
-  loadStatus();
-  loadLatest();
-  loadRecommendations();
-  loadHistory();
-
-  // Auto-refresh every 30s
-  setInterval(function() {
-    loadStatus();
-    loadLatest();
-    loadRecommendations();
-    loadHistory();
-  }, 30000);
+  MariaUI.createPoller(() => Promise.all([
+    loadStatus(), loadLatest(), loadRecommendations(), loadHistory()
+  ]), 30000);
 })();

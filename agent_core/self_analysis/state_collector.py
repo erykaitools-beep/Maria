@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 _DEFAULT_META = "meta_data"
 _DEFAULT_MEMORY = "memory"
 
+# How far back K12 looks to see whether it is repeating itself. ~400 reports is
+# roughly six weeks at the current cadence -- long enough for a stuck topic to
+# show up several times, short enough that the tail read stays cheap.
+_PRIOR_REPORTS_WINDOW = 400
+# Kept deliberately small. At 12 topics this block was 62% of the whole state
+# summary -- the analyst would have read more about its own past than about
+# Maria's present. The tail of the distribution is thin anyway (235 hits for
+# the top topic vs 39 for the 9th), so 8 loses no real repeat offender.
+_PRIOR_TOPICS_MAX = 8
+_PRIOR_MIN_REPEATS = 2
+_PRIOR_TOPIC_MAX_CHARS = 48
+
 
 class StateCollector:
     """Collect and compress Maria's cognitive state from JSONL logs."""
@@ -57,6 +69,7 @@ class StateCollector:
             "stale_goals": self._collect_stale_goals(now),
             "learning_progress": self._collect_learning_progress(),
             "system_health": self._collect_system_health(cutoff),
+            "prior_recommendations": self._collect_prior_recommendations(now),
         }
 
         # Generate hash for dedup
@@ -81,7 +94,17 @@ class StateCollector:
             '  suggested_action: "learn" | "fetch" | "review" | "experiment"\n'
             '- "systemic_issues": array of strings\n'
             '- "summary": one paragraph summary\n'
-            "Max 5 recommendations. Be specific and actionable."
+            "Max 5 recommendations. Be specific and actionable.\n\n"
+            "IMPORTANT -- read 'prior_recommendations' first. Those topics are "
+            "your own earlier advice, with how many times you already gave it "
+            "and how long ago. A topic recurring many times over many days "
+            "means that advice did NOT work or was never acted on. Repeating "
+            "it verbatim is worthless. For such a topic either:\n"
+            "  (a) propose a different, more concrete action than "
+            "'last_suggested_action', or\n"
+            "  (b) drop it from recommendations and name it under "
+            "'systemic_issues', stating why it appears stuck.\n"
+            "Prefer a genuinely new finding over restating a known one."
         )
         return summary
 
@@ -403,7 +426,133 @@ class StateCollector:
             "mode_distribution": dict(mode_counts),
         }
 
+    def _collect_prior_recommendations(self, now: float) -> Dict[str, Any]:
+        """Summarise what K12 already recommended, so it can stop repeating itself.
+
+        K12 has persisted every report since 2026-03-24 but never read one back:
+        7263 recommendations across 1336 topics (5.4x repetition), with
+        'system_stability' recommended continuously from March to July. The
+        analyst saw the same unchanged metrics every cycle and re-derived the
+        same advice, having no way to know the earlier one was ignored or had
+        failed. Feeding its own history back is what closes that loop.
+
+        Counts are window-scoped, never all-time -- the field names say so, so a
+        later reader cannot mistake "twice in six weeks" for "twice ever".
+        """
+        reports = self._tail_jsonl(
+            self._meta / "self_analysis_reports.jsonl", _PRIOR_REPORTS_WINDOW
+        )
+        if not reports:
+            return {"window_reports": 0, "recurring": []}
+
+        # topic -> [count, first_ts, last_ts, last_action]
+        agg: Dict[str, List[Any]] = {}
+        total = 0
+        oldest = now
+        for rep in reports:
+            ts = rep.get("timestamp", 0) or 0
+            if ts and ts < oldest:
+                oldest = ts
+            for rec in rep.get("recommendations", []) or []:
+                if not isinstance(rec, dict):
+                    continue
+                # Models emit the same topic as 'learning_velocity' and
+                # 'learning velocity' interchangeably (158 vs 20 live hits for
+                # that pair alone). Counting them apart understates exactly the
+                # repetition this field exists to expose.
+                topic = (rec.get("topic") or "").strip().lower().replace("_", " ")
+                topic = " ".join(topic.split())
+                if not topic:
+                    continue
+                total += 1
+                action = (rec.get("suggested_action") or "").strip()
+                slot = agg.get(topic)
+                if slot is None:
+                    agg[topic] = [1, ts, ts, action]
+                else:
+                    slot[0] += 1
+                    if ts and ts < slot[1]:
+                        slot[1] = ts
+                    if ts >= slot[2]:
+                        slot[2] = ts
+                        slot[3] = action or slot[3]
+
+        def _days_ago(ts: float) -> float:
+            if not ts:
+                return -1.0
+            return round(max(0.0, now - ts) / 86400.0, 1)
+
+        recurring = []
+        for topic, (count, first_ts, last_ts, action) in sorted(
+            agg.items(), key=lambda kv: -kv[1][0]
+        ):
+            if count < _PRIOR_MIN_REPEATS:
+                continue
+            recurring.append({
+                "topic": topic[:_PRIOR_TOPIC_MAX_CHARS],
+                "times_in_window": count,
+                "first_seen_days_ago": _days_ago(first_ts),
+                "last_seen_days_ago": _days_ago(last_ts),
+                "last_suggested_action": action,
+            })
+            if len(recurring) >= _PRIOR_TOPICS_MAX:
+                break
+
+        return {
+            "window_reports": len(reports),
+            "window_days": round(max(0.0, now - oldest) / 86400.0, 1),
+            "total_recommendations_in_window": total,
+            "distinct_topics_in_window": len(agg),
+            "recurring": recurring,
+        }
+
     # --- JSONL helpers ---
+
+    def _tail_jsonl(self, path: Path, max_lines: int) -> List[Dict[str, Any]]:
+        """Read the last `max_lines` records of a JSONL file without parsing it all.
+
+        self_analysis_reports.jsonl is append-only and already ~6MB (half of it
+        raw model responses). K12 reads it every cycle, so a full parse would
+        grow without bound. Seeks backwards in 64KB chunks until enough newlines
+        are buffered.
+        """
+        if not path.exists() or max_lines <= 0:
+            return []
+        chunk = 65536
+        pos = 0
+        buf = b""
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                pos = f.tell()
+                # +1 covers the partial leading line dropped below; the loop
+                # must buffer max_lines COMPLETE records, not max_lines newlines.
+                while pos > 0 and buf.count(b"\n") <= max_lines + 1:
+                    step = min(chunk, pos)
+                    pos -= step
+                    f.seek(pos)
+                    buf = f.read(step) + buf
+        except (IOError, OSError):
+            return []
+
+        lines = buf.split(b"\n")
+        # Unless we walked back to byte 0, the first line is a partial record.
+        if pos > 0 and lines:
+            lines = lines[1:]
+
+        # Parse first, slice second. A JSONL file ends with a newline, so the
+        # split leaves a trailing empty segment; slicing before dropping it
+        # silently cost one real record off the end of every window.
+        records = []
+        for raw in lines:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                records.append(json.loads(raw.decode("utf-8")))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+        return records[-max_lines:]
 
     def _read_jsonl_all(self, path: Path) -> List[Dict[str, Any]]:
         """Read all records from JSONL file."""

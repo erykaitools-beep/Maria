@@ -6,7 +6,7 @@ Respects notification cooldowns and SalienceFilter conventions.
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from agent_core.workflow.workflow_model import StepResult, WorkflowState, WorkflowStep
 
@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 # Cooldowns per event type (seconds)
 COOLDOWN_STEP_COMPLETE = 60       # Max 1 step notification per minute
 COOLDOWN_WORKFLOW_EVENT = 30      # Start/pause/resume/cancel
+
+
+def _contains_release_blocker(value: Any) -> bool:
+    if isinstance(value, dict):
+        if any(
+            value.get(key) is False
+            for key in ("release_ready", "release_ready_dataset", "remote_ready")
+        ):
+            return True
+        return any(_contains_release_blocker(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_release_blocker(item) for item in value)
+    return False
 
 
 class ProgressReporter:
@@ -47,17 +60,26 @@ class ProgressReporter:
     def on_workflow_completed(self, wf: WorkflowState) -> None:
         duration = (wf.completed_at or time.time()) - wf.created_at
         mins = duration / 60
-        msg = (
-            f"Workflow completed: {wf.name}\n"
-            f"Steps: {len(wf.results)}/{len(wf.steps)}\n"
-            f"Duration: {mins:.1f}min\n"
-            f"Success rate: {wf.progress_pct:.0f}%"
-        )
+        release_blocked = any(_contains_release_blocker(result.result) for result in wf.results)
+        if release_blocked:
+            msg = (
+                f"Audit complete - RELEASE BLOCKED: {wf.name}\n"
+                f"Steps checked: {len(wf.results)}/{len(wf.steps)}\n"
+                f"Duration: {mins:.1f}min"
+            )
+        else:
+            msg = (
+                f"Workflow completed: {wf.name}\n"
+                f"Steps: {len(wf.results)}/{len(wf.steps)}\n"
+                f"Duration: {mins:.1f}min\n"
+                f"Success rate: {wf.progress_pct:.0f}%"
+            )
         self._notify("wf_complete", msg, force=True)
         self._emit_event("workflow_completed", wf.workflow_id, {
             "name": wf.name,
             "duration_min": round(mins, 1),
             "success_pct": wf.progress_pct,
+            "release_blocked": release_blocked,
         })
 
     def on_workflow_failed(

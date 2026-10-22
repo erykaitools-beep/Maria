@@ -1,0 +1,3 @@
+# Continuous person/object detection without PyTorch or Ultralytics runtime.
+-r requirements-vision.txt
+onnxruntime>=1.18.0

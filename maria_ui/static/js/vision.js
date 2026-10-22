@@ -1,7 +1,10 @@
-/* Vision page - visual perception pipeline */
+/* Vision page: visibility-aware live preview and an isolated manual photo. */
+var visionPoller = null;
+var snapshotPoller = null;
+var snapshotPending = false;
+var displayedFrameVersion = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-  // Tab switching
   document.querySelectorAll('.mo-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
       document.querySelectorAll('.mo-tab').forEach(function(t) { t.classList.remove('mo-tab--active'); });
@@ -9,58 +12,71 @@ document.addEventListener('DOMContentLoaded', function() {
       tab.classList.add('mo-tab--active');
       var target = document.getElementById(tab.dataset.tab);
       if (target) target.classList.add('mo-tab-content--active');
+      if (visionPoller) visionPoller.refresh();
     });
   });
-
-  loadFrame();
-  loadStatus();
-  loadPercept();
-  loadHealth();
-
-  // Live preview: refresh frame every 1s
-  setInterval(loadFrame, 1000);
-  // Status/analysis refresh every 10s
-  setInterval(loadStatus, 10000);
+  visionPoller = MariaUI.createPoller(refreshVision, 1000);
 });
 
-
-function loadFrame() {
-  var img = document.getElementById('camera-img');
-  var noFrame = document.getElementById('no-frame');
-  var summary = document.getElementById('vision-summary');
-  if (!img) return;
-
-  // Reload image (cache bust)
-  var newImg = new Image();
-  newImg.onload = function() {
-    img.src = newImg.src;
-    img.style.display = 'block';
-    noFrame.style.display = 'none';
-  };
-  newImg.onerror = function() {
-    img.style.display = 'none';
-    noFrame.style.display = 'block';
-  };
-  newImg.src = '/api/vision/frame?t=' + Date.now();
-
-  // Load summary text under image
-  fetch('/api/vision/last')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data && data.percept && data.percept.summary) {
-        summary.textContent = data.percept.summary + ' [' + formatTs(data.percept.timestamp) + ']';
-      } else {
-        summary.textContent = '';
-      }
-    })
-    .catch(function() { summary.textContent = ''; });
+function cameraVisible() {
+  return document.getElementById('tab-camera').classList.contains('mo-tab-content--active');
 }
 
+async function refreshVision() {
+  var data = await MariaUI.apiFetch('/api/vision/state');
+  if (!data || !data.available) {
+    renderStatus({ available: false });
+    document.getElementById('camera-img').style.display = 'none';
+    document.getElementById('no-frame').style.display = 'block';
+    return;
+  }
+  var state = data.state;
+  renderStatus({ available: true, status: state.status || {} });
+  renderPercept({ percept: state.last_percept });
+  renderHealth(state.health || {});
+  var percept = state.last_percept || {};
+  var framePercept = state.frame_percept || percept;
+  document.getElementById('vision-summary').textContent =
+    (framePercept.summary || '') + (framePercept.timestamp ? ' [' + formatTs(framePercept.timestamp) + ']' : '');
+  if (!cameraVisible()) return;
+  if (state.frame_available === false) {
+    displayedFrameVersion = null;
+    document.getElementById('camera-img').style.display = 'none';
+    document.getElementById('no-frame').style.display = 'block';
+    return;
+  }
+  await loadFrame(state.frame_version || String(percept.timestamp || 'saved'));
+}
 
-function loadStatus() {
-  fetch('/api/vision/status')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+function loadFrame(version) {
+  if (version === displayedFrameVersion) return Promise.resolve();
+  return new Promise(function(resolve) {
+    var img = document.getElementById('camera-img');
+    var noFrame = document.getElementById('no-frame');
+    var fresh = new Image();
+    fresh.id = img.id;
+    fresh.alt = img.alt;
+    fresh.className = img.className;
+    fresh.style.cssText = img.style.cssText;
+    fresh.onload = function() {
+      displayedFrameVersion = version;
+      fresh.style.display = 'block';
+      img.replaceWith(fresh);
+      noFrame.style.display = 'none';
+      fresh.onload = fresh.onerror = null;
+      resolve();
+    };
+    fresh.onerror = function() {
+      img.style.display = 'none';
+      noFrame.style.display = 'block';
+      fresh.onload = fresh.onerror = null;
+      resolve();
+    };
+    fresh.src = '/api/vision/frame?v=' + encodeURIComponent(version);
+  });
+}
+
+function renderStatus(data) {
       var el = document.getElementById('vision-status');
       if (!data || !data.available) {
         el.innerHTML = '<div class="mo-empty-state">VisionCortex nie zainicjalizowany</div>';
@@ -77,18 +93,9 @@ function loadStatus() {
       html += '<tr><td>Ostatnia jakosc</td><td>' + formatPct(s.last_quality) + '</td></tr>';
       html += '</table></div>';
       el.innerHTML = html;
-    })
-    .catch(function(e) {
-      document.getElementById('vision-status').innerHTML =
-        '<div class="mo-empty-state">Blad ladowania: ' + e.message + '</div>';
-    });
 }
 
-
-function loadPercept() {
-  fetch('/api/vision/last')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+function renderPercept(data) {
       var el = document.getElementById('vision-percept');
       if (!data || !data.percept) {
         el.innerHTML = '<div class="mo-empty-state">Brak danych. Czekam na pierwszy obraz z kamery.</div>';
@@ -130,18 +137,9 @@ function loadPercept() {
 
       html += '</div>';
       el.innerHTML = html;
-    })
-    .catch(function(e) {
-      document.getElementById('vision-percept').innerHTML =
-        '<div class="mo-empty-state">Blad: ' + e.message + '</div>';
-    });
 }
 
-
-function loadHealth() {
-  fetch('/api/vision/health')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+function renderHealth(data) {
       var el = document.getElementById('vision-health');
       if (!data || !data.health) {
         el.innerHTML = '<div class="mo-empty-state">Brak danych o zdrowiu sensora</div>';
@@ -169,37 +167,53 @@ function loadHealth() {
       }
       html += '</table></div>';
       el.innerHTML = html;
-    })
-    .catch(function(e) {
-      document.getElementById('vision-health').innerHTML =
-        '<div class="mo-empty-state">Blad: ' + e.message + '</div>';
-    });
 }
 
-
-function takeSnap() {
-  var btn = document.querySelector('.mo-btn--sm');
-  if (btn) { btn.disabled = true; btn.textContent = 'Robie...'; }
-
-  fetch('/api/vision/snap', { method: 'POST' })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Snap'; }
-      if (data.success) {
-        loadFrame();
-        loadPercept();
-        loadHealth();
-        loadStatus();
-      } else {
-        alert('Blad: ' + (data.error || 'nieznany'));
-      }
-    })
-    .catch(function(e) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Snap'; }
-      alert('Blad: ' + e.message);
-    });
+function finishSnapshot(message) {
+  if (snapshotPoller) snapshotPoller.stop();
+  snapshotPoller = null;
+  snapshotPending = false;
+  var button = document.getElementById('vision-snap-button');
+  button.disabled = false;
+  button.textContent = 'Zrob zdjecie';
+  document.getElementById('snapshot-status').textContent = message;
 }
 
+async function takeSnap() {
+  if (snapshotPending) return;
+  snapshotPending = true;
+  var button = document.getElementById('vision-snap-button');
+  button.disabled = true;
+  button.textContent = 'Robie zdjecie...';
+  document.getElementById('snapshot-status').textContent = 'Przygotowuje nowe zdjecie i opis...';
+  document.getElementById('snapshot-result').style.display = 'none';
+  var accepted = await MariaUI.apiFetch('/api/vision/snap', { method: 'POST', errorBody: true });
+  if (!accepted || !accepted.accepted) {
+    finishSnapshot(accepted && accepted.error || 'Nie mozna zrobic zdjecia. Sprawdz stan kamery.');
+    return;
+  }
+  var started = Date.now();
+  snapshotPoller = MariaUI.createPoller(async function() {
+    if (Date.now() - started > 610000) {
+      finishSnapshot('Opis trwa zbyt dlugo. Sprawdz stan kamery i sprobuj pozniej.');
+      return;
+    }
+    var result = await MariaUI.apiFetch('/api/vision/snap/' + encodeURIComponent(accepted.job_id));
+    if (!result) {
+      finishSnapshot('Zdjecie jest niedostepne lub wygaslo.');
+      return;
+    }
+    if (result.status === 'running') return;
+    if (!result.success) {
+      finishSnapshot(result.error || 'Nie udalo sie zrobic zdjecia.');
+      return;
+    }
+    document.getElementById('snapshot-img').src = result.frame_url;
+    document.getElementById('snapshot-description').textContent = result.summary || '';
+    document.getElementById('snapshot-result').style.display = 'block';
+    finishSnapshot('Zdjecie z ' + formatTs(result.percept.timestamp) + '.');
+  }, 1000);
+}
 
 function formatPct(val) {
   if (val === null || val === undefined) return '--';

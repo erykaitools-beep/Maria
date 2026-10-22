@@ -6,6 +6,7 @@ the incremental wiring: corrective actions are now (a) RECORDED to the event
 log whether or not anything acts on them, (b) dispatched to a ModuleExecutor
 with real/honest handlers, and (c) consolidate_episodic no longer fakes success.
 """
+import threading
 from types import SimpleNamespace
 
 from agent_core.executor.module_executor import ModuleExecutor
@@ -33,12 +34,12 @@ def test_consolidate_episodic_reports_not_implemented_honestly():
 
 # -- executor wiring ----------------------------------------------------------
 
-def _wire(teacher=None):
+def _wire(teacher=None, coordinator=None):
     ex = ModuleExecutor()
     core = SimpleNamespace(_teacher_agent=teacher)
     _wire_executor_modules(
         ex, core, MemoryManager(), LLMManager(),
-        compute_coordinator=LocalComputeCoordinator(),
+        compute_coordinator=coordinator or LocalComputeCoordinator(),
     )
     return ex, core
 
@@ -90,6 +91,27 @@ def test_thermal_llm_action_is_real_and_metacontroller_remains_record_only():
     assert llm["cooling"]["cooling"] is True
     assert llm["effect"] != "recorded_only"
     assert meta["effect"] == "recorded_only"
+
+
+def test_thermal_action_reports_work_done_by_temperature_observer():
+    """The second enter_cooling call must not erase the first call's evidence."""
+    coordinator = LocalComputeCoordinator()
+    cancelled = threading.Event()
+    token = coordinator.register_background_task("semantic-indexer", cancelled.set)
+    try:
+        assert coordinator.observe_temperature(80.0) == "entered"
+        assert cancelled.is_set()
+
+        ex, _ = _wire(coordinator=coordinator)
+        response = ex.signal_module(
+            "llm", "reduce_batch_size", factor=0.5, temp_c=80.0
+        )
+
+        assert response["cooling"]["transitioned"] is False
+        assert response["cooling"]["transition_replayed"] is True
+        assert response["cooling"]["cancelled_tasks"] == ["semantic-indexer"]
+    finally:
+        coordinator.unregister_background_task(token)
 
 
 def test_signals_are_recorded_in_history():
