@@ -1,6 +1,6 @@
 # Maria: from context to action
 
-[Download full demo (MP4, 77 seconds)](maria-context-to-action-en.mp4?raw=1) ·
+[Download full demo (MP4, 77 seconds)](https://raw.githubusercontent.com/erykaitools-beep/Maria/main/docs/demo/2026-10-22/maria-context-to-action-en.mp4) ·
 [Animated preview](maria-demo-preview.gif) · [Still preview](maria-demo-poster.png)
 
 Recorded on **22 October 2026**. The film combines a brief overview with one

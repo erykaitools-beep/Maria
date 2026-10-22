@@ -22,9 +22,9 @@
 In this 77-second demo, Maria delegates a three-player game playtest plan through
 Kritaqo, then reads the completed report without starting another job.
 
-[![Short animated preview: Maria delegates a task and opens the saved checklist](docs/demo/2026-10-22/maria-demo-preview.gif)](docs/demo/2026-10-22/maria-context-to-action-en.mp4?raw=1)
+[![Short animated preview: Maria delegates a task and opens the saved checklist](docs/demo/2026-10-22/maria-demo-preview.gif)](https://raw.githubusercontent.com/erykaitools-beep/Maria/main/docs/demo/2026-10-22/maria-context-to-action-en.mp4)
 
-**[Download full demo — MP4, 77 seconds](docs/demo/2026-10-22/maria-context-to-action-en.mp4?raw=1)**
+**[Download full demo — MP4, 77 seconds](https://raw.githubusercontent.com/erykaitools-beep/Maria/main/docs/demo/2026-10-22/maria-context-to-action-en.mp4)**
 · [Still preview](docs/demo/2026-10-22/maria-demo-poster.png)
 · [Generated files and recording notes](docs/demo/2026-10-22/README.md)
 
