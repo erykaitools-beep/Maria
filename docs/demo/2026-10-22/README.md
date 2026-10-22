@@ -1,6 +1,6 @@
 # Maria: from context to action
 
-[Full demo (MP4, 77 seconds)](maria-context-to-action-en.mp4) ·
+[Download full demo (MP4, 77 seconds)](maria-context-to-action-en.mp4?raw=1) ·
 [Animated preview](maria-demo-preview.gif) · [Still preview](maria-demo-poster.png)
 
 Recorded on **22 October 2026**. The film combines a brief overview with one
