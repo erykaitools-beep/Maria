@@ -1,4 +1,12 @@
-# M.A.R.I.A. — System Status (source of truth)
+# M.A.R.I.A. — Historical system-status observations
+
+> **Portfolio review, 26 October 2026:** the entries below retain earlier
+> observations and are not a current deployment inventory. Use the
+> [runtime guide](runtime-guide.md) and [evidence audit](evidence/portfolio-audit-2026-10-26.md).
+> In particular, current self-repair acknowledgement closes an alert/task; it
+> does not dispatch an autonomous production-code fix.
+
+---
 
 > **Why this file exists:** a single place that tells the truth about **what is
 > actually live** in production versus what is only a library/experiment. It was

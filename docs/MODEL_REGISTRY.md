@@ -5,6 +5,13 @@
 # Status: HARDENED v1.1 | 2026-03-21
 # M.A.R.I.A. Project
 # Purpose: production-oriented registry for local model orchestration
+
+> **Historical model design.** Current model tags and defaults are defined in
+> [model_registry.py](../agent_core/llm/model_registry.py). See the
+> [local-model overview](../README.md#local-model-operation) and
+> [runtime guide](runtime-guide.md) for the October 2026 review. Earlier model,
+> memory and provider assumptions below are not current measurements.
+
 ---
 ## OPERATING PRINCIPLE
 M.A.R.I.A. is **not** a one-model system.
