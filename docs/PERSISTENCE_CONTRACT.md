@@ -1,5 +1,12 @@
 # M.A.R.I.A. - Persistence Contract v1.0
 
+> **Historical inventory, April 2026.** Later chat request receipts use SQLite;
+> not every current state writer is atomic. See the [runtime guide](runtime-guide.md#configuration-and-persistence)
+> and [chat receipt implementation](../maria_ui/chat_turns.py). Retained design
+> rules below should not be read as verified guarantees for every store.
+
+---
+
 > One file of truth: how we persist data, in what format, under what paths, who reads and writes what.
 > Date: 2026-04-14. Author: Eryk (decision) + Claude (audit).
 

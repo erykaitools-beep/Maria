@@ -1,32 +1,51 @@
 # M.A.R.I.A. Documentation
 
-The map for this folder. New to the project? Start with the root
-**[QUICKSTART.md](../QUICKSTART.md)** and **[GLOSSARY.md](../GLOSSARY.md)** first,
-then come back here for the deeper material.
+Start with the **[portfolio overview](../README.md)** for the current technical
+story, **[German summary](portfolio-summary-de.md)** for recruitment material,
+or **[Quickstart](../QUICKSTART.md)** to run local chat. This map separates the
+October 2026 source review from historical designs and future work.
+
+## Portfolio and current runtime
+
+| Document | What it covers |
+|---|---|
+| [Portfolio overview](../README.md) | Implemented behavior, architecture, evidence and limits |
+| [Reliability case study](production-reliability-case-study.md) | Four supported incidents with code, tests and remaining limitations |
+| [German portfolio summary](portfolio-summary-de.md) | Competencies, results and reusable CV/LinkedIn text |
+| [Evidence audit](evidence/portfolio-audit-2026-10-26.md) | Dated CI and host observations, methods and excluded claims |
+| [Runtime guide](runtime-guide.md) | Profiles, configuration, implementation status and retained screenshots |
+| [Voice and project work](VOICE_AND_PROJECTS.md) | Configured integration requirements and known limits |
+| [Existing demo](demo/2026-10-22/README.md) | Recording, generated artifacts, provenance and setup boundaries |
 
 ## Start here
 
 | Document | What it covers |
 |---|---|
-| [../QUICKSTART.md](../QUICKSTART.md) | Clone to a running Maria in ~10 minutes |
+| [../QUICKSTART.md](../QUICKSTART.md) | Local text chat; setup time depends on dependencies and model preparation |
 | [../GLOSSARY.md](../GLOSSARY.md) | Plain-language definitions of the vocabulary |
 | [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md) | First-run FAQ and fixes |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to contribute |
 | [../DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md) | Entry points, structure, conventions, model registry |
 
-## Architecture & cognitive design
+## Architecture and design references
+
+These documents retain design detail and earlier observations. Dates matter:
+use the [runtime guide](runtime-guide.md) and linked implementation for the
+reviewed public behavior, rather than assuming every historic status is current.
 
 | Document | What it covers |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layered architecture and data flow |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Historical architecture and data-flow reference |
 | [CONTRACTS.md](CONTRACTS.md) | The K1–K13 cognitive contracts in full |
-| [SYSTEM_STATUS.md](SYSTEM_STATUS.md) | Per-subsystem maturity and current status |
-| [MODEL_REGISTRY.md](MODEL_REGISTRY.md) | The multi-model local stack (roles, RAM tiers) |
+| [SYSTEM_STATUS.md](SYSTEM_STATUS.md) | Historical per-subsystem observations, primarily May/June 2026 |
+| [MODEL_REGISTRY.md](MODEL_REGISTRY.md) | Historical model-role design; code registry defines current tags |
 | [DECISIONS.md](DECISIONS.md) | Architectural decision records (ADRs) |
-| [PERSISTENCE_CONTRACT.md](PERSISTENCE_CONTRACT.md) | JSONL storage and durability rules |
+| [PERSISTENCE_CONTRACT.md](PERSISTENCE_CONTRACT.md) | April storage inventory; later SQLite receipts are documented separately |
 | [STORE_API_REFERENCE.md](STORE_API_REFERENCE.md) | Store API reference |
 
-## Roadmap & vision
+## Roadmap and research directions
+
+Plans and hypotheses are not delivered runtime capabilities.
 
 | Document | What it covers |
 |---|---|
@@ -40,7 +59,7 @@ then come back here for the deeper material.
 |---|---|
 | [CONSCIOUSNESS_SPEC.md](CONSCIOUSNESS_SPEC.md) | Personality, memory, identity |
 | [VISION_SPEC.md](VISION_SPEC.md) | Camera / vision (optional hardware) |
-| [VOICE_SPEC.md](VOICE_SPEC.md) | Speech I/O (planned) |
+| [VOICE_SPEC.md](VOICE_SPEC.md) | Earlier speech design; current configured voice path is in VOICE_AND_PROJECTS.md |
 | [WEB_UI_SPEC.md](WEB_UI_SPEC.md) | The Flask Web UI |
 | [SMART_HOME_SPEC.md](SMART_HOME_SPEC.md) | IoT integration (planned) |
 | [MOBILE_APP_SPEC.md](MOBILE_APP_SPEC.md) | Companion mobile app |
@@ -52,7 +71,7 @@ then come back here for the deeper material.
 
 | Document | What it covers |
 |---|---|
-| [funding/CURRENT_PROJECT_STATUS.md](funding/CURRENT_PROJECT_STATUS.md) | Sourced, reproducible project metrics |
+| [funding/CURRENT_PROJECT_STATUS.md](funding/CURRENT_PROJECT_STATUS.md) | Historical funding snapshot; current portfolio evidence is in the audit above |
 | [funding/FUNDING_BRIEF.md](funding/FUNDING_BRIEF.md) | Funding brief |
 | [funding/HARDWARE_BENCHMARK_PLAN.md](funding/HARDWARE_BENCHMARK_PLAN.md) | Hardware benchmark plan |
 | [funding/PUBLIC_DELIVERABLES.md](funding/PUBLIC_DELIVERABLES.md) | Public deliverables |

@@ -3,11 +3,11 @@
 **Meta Analysis Recalibration Intelligence Architecture**
 Version: 2026-04-07 | 383 Python files | 113,552 lines of code | 3,352 tests
 
-> **[HISTORICAL — 2026-04-07]** This document describes the state as of April 2026 and is
-> NOT current: the code now runs **21 tick phases** (April 2026 had 11; historical) and the
-> test suite has grown to **7,267 collected** (up from 3,352). For current module and phase
-> status see **`docs/SYSTEM_STATUS.md`**. Do not treat this file as runtime truth until it is
-> regenerated.
+> **Historical design reference with later annotations.** The counts and
+> subsystem descriptions below have different observation dates. For the
+> October 2026 public-source review, use the [portfolio architecture](../README.md#system-architecture),
+> [runtime guide](runtime-guide.md) and [evidence audit](evidence/portfolio-audit-2026-10-26.md).
+> This document is retained for design history, not current deployment claims.
 
 ---
 

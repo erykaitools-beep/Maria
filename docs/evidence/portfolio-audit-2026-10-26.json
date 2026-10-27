@@ -1,0 +1,154 @@
+{
+  "schema": "maria-portfolio-evidence-v1",
+  "review_date": "2026-10-26",
+  "public_source_commit": "47eaec0bed17ec18b431ea4eb769aa6b91676a9e",
+  "evidence_limits": [
+    "Code, CI, selected demo and operator-host observation are distinct evidence types.",
+    "Host snapshot is operator-reported and not a remotely reproducible benchmark.",
+    "No model generation, live restart, full local test suite rerun or new endurance run was performed."
+  ],
+  "ci": {
+    "url": "https://github.com/erykaitools-beep/Maria/actions/runs/39823011497",
+    "created_at": "2026-10-22T17:28:35Z",
+    "completed_at": "2026-10-22T17:34:26Z",
+    "conclusion": "success",
+    "job_ids": {
+      "local-chat": 119978914427,
+      "test (3.12)": 119978914792,
+      "test (3.10)": 119978914872,
+      "test (3.11)": 119978914942
+    },
+    "per_python_job": {
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12"
+      ],
+      "passed": 8164,
+      "skipped": 4,
+      "xpassed": 1,
+      "subtests_passed": 140,
+      "warnings": {
+        "3.10": 1,
+        "3.11": 1,
+        "3.12": 123
+      }
+    },
+    "local_chat": {
+      "passed": 24,
+      "subtests_passed": 16
+    },
+    "per_node_step": {
+      "passed": 3,
+      "failed": 0
+    },
+    "method": "GitHub workflow/job API status and each job log summary, checked 2026-10-26",
+    "commands_source": ".github/workflows/test.yml"
+  },
+  "local_tests": {
+    "python_version": "3.10.12",
+    "pytest_version": "9.1.1",
+    "selections": [
+      {
+        "passed": 254,
+        "skipped": 1,
+        "subtests_passed": 16
+      },
+      {
+        "passed": 32,
+        "skipped": 0
+      }
+    ],
+    "skip_reason": "gitignored CLAUDE.md absent; private module-tree check not applicable",
+    "additional_check": "Watchdog child: exact diagnostic + exit 1 + explicit public PYTHONPATH + no import error",
+    "isolation": "Separate public clone, temporary state and HOME, cleared environment, parent sockets denied; local-chat child uses its own loopback stub and guards.",
+    "interpretation": "Selected regression checks; public CI provides separate full-suite evidence."
+  },
+  "host_observation": {
+    "observed_at": "2026-10-26T17:27:11.808922+00:00",
+    "kind": "operator-host read-only observation; not bundled deployment defaults",
+    "cpu_model": "AMD Ryzen 5 7430U with Radeon Graphics",
+    "os_visible_memory_bytes": 33039904768,
+    "display_controllers": [
+      "VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Barcelo (rev c2)"
+    ],
+    "service": {
+      "Restart": "on-failure",
+      "OOMPolicy": "kill",
+      "MemoryHigh": "17179869184",
+      "MemoryMax": "21474836480",
+      "ActiveState": "active",
+      "SubState": "running",
+      "process_witness": "python",
+      "cgroup_memory_high_bytes": "17179869184",
+      "cgroup_memory_max_bytes": "21474836480"
+    }
+  },
+  "source_constraints": {
+    "current_beliefs": {
+      "value": 2000,
+      "symbol": "MAX_CURRENT_BELIEFS",
+      "source": "agent_core/world_model/belief_store.py"
+    },
+    "vectors": {
+      "value": 10000,
+      "symbol": "MAX_VECTORS",
+      "source": "agent_core/semantic/vector_store.py"
+    },
+    "numbered_top_level_phases": {
+      "value": 21,
+      "method": "Distinct integer PHASE markers; scripts/doc_lint.py canonical_phase_count",
+      "source": "agent_core/homeostasis/core.py"
+    },
+    "public_commits": {
+      "value": 226,
+      "methods": [
+        "git rev-list --count 47eaec0bed17ec18b431ea4eb769aa6b91676a9e",
+        "git log --format=%H 47eaec0bed17ec18b431ea4eb769aa6b91676a9e | wc -l"
+      ]
+    }
+  },
+  "demo": {
+    "provenance_source": "docs/demo/2026-10-22/EVIDENCE.json",
+    "checksum_source": "docs/demo/2026-10-22/SHA256SUMS.txt",
+    "checksum_entries_verified": 8,
+    "media_changed": false,
+    "duration_seconds_rounded_to_centiseconds": 76.73,
+    "resolution": [
+      1280,
+      900
+    ],
+    "fps": 30,
+    "audio_stream_listed": false,
+    "csv_data_rows": 0,
+    "csv_header_columns": 14,
+    "recorded_completed_jobs": 1,
+    "recorded_output_files": 2,
+    "follow_up_new_job": false,
+    "method": "Existing manifest verification, FFmpeg metadata, CSV parser, selected video frame inspection; job behavior attributed to published recording provenance."
+  },
+  "documentation_verification": {
+    "doc_lint": "pass",
+    "git_diff_check": "pass",
+    "markdownlint": {
+      "authored_or_reorganized_documents": 6,
+      "issues": 0,
+      "disabled_rules": [
+        "MD013",
+        "MD060",
+        "MD026"
+      ],
+      "historical_documents_compared_to_baseline": 4,
+      "introduced_historical_issues": 0
+    },
+    "links": {
+      "checked_documents": 6,
+      "occurrences": 144,
+      "unique_external_urls": 9,
+      "broken_local_or_fragment": 0,
+      "unresolved_external": 0,
+      "method": "Relative path/fragment validation and external HTTP HEAD; GitHub evidence independently read through connector"
+    },
+    "mermaid": "Parsed and rendered in Chromium; existing demo GIF loaded; title plus nine section headings checked"
+  }
+}
